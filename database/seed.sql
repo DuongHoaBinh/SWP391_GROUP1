@@ -1,0 +1,2 @@
+-- Development seed placeholder.
+-- Seed roles and non-sensitive sample data only.

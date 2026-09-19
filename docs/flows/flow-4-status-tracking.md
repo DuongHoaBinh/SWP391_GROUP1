@@ -1,0 +1,28 @@
+# Flow 4: Status Updates and Route Log (Required)
+
+## Actors
+
+Vehicle Driver / Escort, Fleet & Route Coordinator, Logistics Manager, Customer
+
+## Main path
+
+1. Driver/escort or coordinator records a route milestone: departed, arrived at stop, customs cleared, or delivered.
+2. The system records the trip, leg/stop, author, timestamp, location, and optional note/photo.
+3. The current trip status is derived from the latest valid event and remains visible to authorized users.
+4. Driver/escort records horse health observations, including stable, not eating, stressed, or climate change, with text and images when needed.
+5. The system notifies customers and internal staff when important milestones or delays are recorded.
+
+## Key rules
+
+- Tracking events are append-only; a correction creates a new event with a reason.
+- Drivers/escorts can update only assigned trips; coordinators can update trips they coordinate.
+- A milestone cannot move backward without an explicitly recorded correction or incident.
+- Health logs are associated with an individual horse, trip, author, time, and optional attachment.
+- Customer tracking exposes operational status and approved location information, not private staff notes.
+
+## Outputs
+
+Current trip status, chronological route log, horse health log, delay alerts, and customer notifications.
+
+**Owner:** `backend/src/modules/tracking`  
+**Primary UI:** `frontend/src/app/driver`, `frontend/src/app/coordinator`, `frontend/src/app/customer`, `frontend/src/app/manager`
