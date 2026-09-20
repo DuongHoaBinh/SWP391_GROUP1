@@ -30,6 +30,13 @@ Backend code belongs under `backend/src`. Organize controllers, services, DTOs, 
 - **File storage:** local storage for development, replaceable provider for production
 - **External integrations:** adapter interfaces with mock providers during development
 
+### Development ports
+
+- **Backend API:** `http://localhost:3000`
+- **Frontend:** `http://localhost:3001`
+
+The frontend and backend are two separate processes. The frontend runs on port `3001` and sends API requests to the backend on port `3000`; they should not use the same port on the same computer.
+
 ## Repository layout
 
 - `frontend/src/app`: route surfaces grouped by actor.
@@ -45,6 +52,8 @@ Backend code belongs under `backend/src`. Organize controllers, services, DTOs, 
 3. Read `docs/requirements.md` and `docs/actors-and-roles.md` before implementing a flow.
 4. Keep each flow's business rules in its owning backend module and update the matching file under `docs/flows/`.
 5. Use PostgreSQL migrations for schema changes.
+
+For local development, start the backend on port `3000` and the Next.js frontend on port `3001` (for example, `next dev -p 3001`).
 
 ## Suggested ownership
 
