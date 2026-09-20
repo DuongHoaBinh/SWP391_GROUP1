@@ -32,10 +32,10 @@ Backend code belongs under `backend/src`. Organize controllers, services, DTOs, 
 
 ### Development ports
 
-- **Backend API:** `http://localhost:3000`
+- **Backend API:** `http://localhost:5000`
 - **Frontend:** `http://localhost:3001`
 
-The frontend and backend are two separate processes. The frontend runs on port `3001` and sends API requests to the backend on port `3000`; they should not use the same port on the same computer.
+The frontend and backend are two separate processes. The frontend runs on port `3001` and sends API requests to the backend on port `5000`; they should not use the same port on the same computer.
 
 ## Repository layout
 
@@ -53,7 +53,7 @@ The frontend and backend are two separate processes. The frontend runs on port `
 4. Keep each flow's business rules in its owning backend module and update the matching file under `docs/flows/`.
 5. Use PostgreSQL migrations for schema changes.
 
-For local development, start the backend on port `3000` and the Next.js frontend on port `3001` (for example, `next dev -p 3001`).
+For local development, start the backend on port `5000` and the Next.js frontend on port `3001` (for example, `next dev -p 3001`).
 
 ## Suggested ownership
 
