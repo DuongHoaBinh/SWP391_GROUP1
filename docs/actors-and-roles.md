@@ -10,6 +10,8 @@
 
 ## Permission boundaries
 
+- Public registration is available only for the `CUSTOMER` role.
+- `ADMIN`, `LOGISTICS_MANAGER`, `TRANSPORT_SPECIALIST`, `FLEET_ROUTE_COORDINATOR`, and `DRIVER_ESCORT` accounts are provisioned by an administrator or deployment seed; they cannot register through the public API.
 - Only the Logistics Manager can approve/reject a transport request and approve emergency cost changes.
 - Only the Transport Specialist can mark legal/document requirements as reviewed or incomplete.
 - Only the Fleet & Route Coordinator can publish route legs, capacity assignments, and planned schedules.

@@ -1,19 +1,17 @@
 # Entity Relationship Design
 
+The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with InnoDB and utf8mb4.
+
 ## Core entities
 
-- `users`, `roles`, `user_roles`
-- `customers`, `horses`
-- `transport_orders`, `transport_order_horses`
-- `transport_plans`, `assignments`
-- `documents`, `document_requirements`, `document_reviews`
-- `countries`, `border_gates`, `compliance_rules`, `authority_approvals`
-- `vehicles`, `air_transport_capacity`, `stalls`
-- `routes`, `route_legs`, `trip_stops`, `trips`
-- `tracking_events`, `horse_health_logs`, `attachments`
-- `incidents`, `route_change_requests`, `additional_cost_approvals`
-- `handover_records`, `handover_items`
-- `notifications`, `audit_logs`
+- `role`, `user`, `otp_verification`
+- `horse`
+- `regulation`, `transport_document`, `document_approval`
+- `shipment`, `shipment_horse`
+- `vehicle`, `shipment_vehicle`, `route`, `route_stop`, `shipment_assignment`
+- `route_stop_update`, `horse_condition_log`, `attachment`
+- `incident_report`, `shipment_change_request`, `delivery_handover`
+- `notification`
 
 ## Important relationships
 
