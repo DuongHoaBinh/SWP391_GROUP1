@@ -3,11 +3,12 @@
 import React, { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Mail, Lock, Eye, EyeOff, Globe, Star, AlertCircle, Check, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { AuthShowcasePanel } from '@/components/layout/AuthShowcasePanel';
 import { setAuthSession } from '@/lib/auth';
 import { mockCurrentUser } from '@/lib/mock-data';
 
-function LoginForm() {
+function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTarget = searchParams.get('redirect') || '/customer';
@@ -37,7 +38,7 @@ function LoginForm() {
       const response = await fetch(`${apiUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
 
       if (response.ok) {
@@ -49,575 +50,517 @@ function LoginForm() {
         };
       } else if (response.status === 401 || response.status === 400) {
         const errData = await response.json().catch(() => null);
-        setError(errData?.message || 'Invalid email or password. Please check your credentials and try again.');
+        setError(errData?.message || 'Invalid email or password. Please verify your credentials.');
         setIsLoading(false);
         return;
       }
     } catch {
-      // Backend not running: proceed with demo session
+      // Backend offline fallback for preview
     }
 
-    // Set auth session
     setAuthSession(authToken, authUser);
-
-    // Show smooth Success state animation before redirecting
     setIsLoading(false);
     setIsSuccess(true);
 
     setTimeout(() => {
       router.push(redirectTarget);
-    }, 1800);
+    }, 1200);
   };
 
   return (
     <div
       style={{
-        minHeight: '100vh',
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#F8FAFC',
-        padding: '16px',
-        fontFamily: "'Inter', sans-serif",
+        minHeight: '100vh',
+        width: '100%',
+        backgroundColor: '#0c0e12',
+        color: '#f8fafc',
+        fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif",
       }}
     >
-      {/* Top subtle progress line when loading */}
-      {isLoading && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '3px',
-            backgroundColor: '#2563EB',
-            zIndex: 1000,
-            animation: 'pulseGlow 1.2s infinite ease-in-out',
-          }}
-        />
-      )}
+      {/* LEFT: Brand & Live Trip Showcase */}
+      <AuthShowcasePanel />
 
-      {/* Main Centered Login Card */}
+      {/* RIGHT: Login Card Panel */}
       <div
         style={{
-          backgroundColor: '#ffffff',
-          width: '100%',
-          maxWidth: '1024px',
-          borderRadius: '16px',
-          boxShadow: '0 20px 30px -10px rgba(15, 23, 42, 0.08), 0 10px 15px -3px rgba(15, 23, 42, 0.05)',
-          border: '1px solid #E2E8F0',
+          flex: '1 1 50%',
           display: 'flex',
-          overflow: 'hidden',
-          minHeight: '620px',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '40px 24px',
+          minHeight: '100vh',
+          backgroundColor: '#0d0f12',
+          overflowY: 'auto',
         }}
       >
-        {/* LEFT SIDE: Visual Branding */}
+        {/* Mobile Header (Shown on small screens) */}
         <div
           style={{
-            width: '50%',
-            position: 'relative',
-            backgroundColor: '#0F172A',
+            width: '100%',
+            maxWidth: '430px',
+            marginBottom: '20px',
             display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            overflow: 'hidden',
+            alignItems: 'center',
+            gap: '10px',
           }}
-          className="brand-showcase-panel"
+          className="md:hidden"
         >
-          {/* Background image with overlay */}
-          <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="https://images.unsplash.com/photo-1553531580-65239a2d8a0c?q=80&w=2000&auto=format&fit=crop"
-              alt="Racehorse Transportation"
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                opacity: 0.3,
-                mixBlendMode: 'overlay',
-              }}
-            />
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                background: 'linear-gradient(to top, #0F172A 0%, rgba(15, 23, 42, 0.8) 60%, transparent 100%)',
-              }}
-            />
-          </div>
-
-          {/* Visual Content */}
           <div
             style={{
-              position: 'relative',
-              zIndex: 10,
-              padding: '48px',
+              width: '32px',
+              height: '32px',
+              borderRadius: '8px',
+              background: 'linear-gradient(135deg, #1e3a8a, #2563eb)',
               display: 'flex',
-              flexDirection: 'column',
-              height: '100%',
-              justifyContent: 'space-between',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            <div>
-              <div style={{ color: 'rgba(37, 99, 235, 0.45)', marginBottom: '24px' }}>
-                <Globe size={56} strokeWidth={1.5} />
-              </div>
-              <h2
-                style={{
-                  fontSize: '30px',
-                  fontWeight: 700,
-                  color: '#ffffff',
-                  marginBottom: '16px',
-                  lineHeight: 1.25,
-                }}
-              >
-                Global Equine
-                <br />
-                Logistics Network
-              </h2>
-              <p
-                style={{
-                  color: '#94A3B8',
-                  fontSize: '14px',
-                  lineHeight: 1.6,
-                  maxWidth: '320px',
-                  margin: 0,
-                }}
-              >
-                Seamless cross-border racehorse transportation. Connecting owners, veterinary experts, and logistics coordinators worldwide.
-              </p>
-            </div>
-
-            {/* Testimonial Badge */}
-            <div
-              style={{
-                backgroundColor: 'rgba(30, 41, 59, 0.55)',
-                backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(51, 65, 85, 0.5)',
-                borderRadius: '12px',
-                padding: '18px 20px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                <div style={{ display: 'flex', gap: '3px', color: '#FBBF24' }}>
-                  <Star size={13} fill="#FBBF24" stroke="none" />
-                  <Star size={13} fill="#FBBF24" stroke="none" />
-                  <Star size={13} fill="#FBBF24" stroke="none" />
-                  <Star size={13} fill="#FBBF24" stroke="none" />
-                  <Star size={13} fill="#FBBF24" stroke="none" />
-                </div>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: '#CBD5E1' }}>
-                  Enterprise Grade
-                </span>
-              </div>
-              <p
-                style={{
-                  fontSize: '12px',
-                  color: '#94A3B8',
-                  lineHeight: 1.5,
-                  margin: 0,
-                }}
-              >
-                &ldquo;The most secure and transparent management system for high-value equine assets.&rdquo;
-              </p>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5">
+              <circle cx="5" cy="19" r="2" fill="#fff" />
+              <path d="M5 17c0-5 4-9 9-9h5" />
+              <polyline points="15 4 19 8 15 12" />
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff' }}>EquiRoute</div>
+            <div style={{ fontSize: '9px', fontWeight: 600, color: '#94a3b8', letterSpacing: '0.12em' }}>
+              TRANSPORT MANAGEMENT
             </div>
           </div>
         </div>
 
-        {/* RIGHT SIDE: Form / Success States */}
+        {/* Center Card */}
         <div
           style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            padding: '48px 48px',
-            backgroundColor: '#ffffff',
-            position: 'relative',
+            width: '100%',
+            maxWidth: '430px',
+            margin: 'auto 0',
+            backgroundColor: '#16171a',
+            border: '1px solid #26282d',
+            borderRadius: '24px',
+            padding: '38px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
           }}
         >
-          {/* Logo Header (Consistent) */}
+          {/* Card Title */}
+          <h2
+            style={{
+              fontSize: '30px',
+              fontWeight: 800,
+              color: '#ffffff',
+              letterSpacing: '-0.02em',
+              lineHeight: 1.2,
+              marginBottom: '6px',
+            }}
+          >
+            Welcome back
+          </h2>
+          <p
+            style={{
+              fontSize: '13.5px',
+              color: '#94a3b8',
+              marginBottom: '28px',
+            }}
+          >
+            Sign in to continue to EquiRoute.
+          </p>
+
+          {/* Error Banner */}
+          {error && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                marginBottom: '20px',
+                color: '#f87171',
+                fontSize: '13px',
+              }}
+            >
+              <AlertCircle size={17} style={{ flexShrink: 0 }} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* Success Banner */}
+          {isSuccess && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                border: '1px solid rgba(16, 185, 129, 0.35)',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                marginBottom: '20px',
+                color: '#34d399',
+                fontSize: '13px',
+              }}
+            >
+              <CheckCircle2 size={17} style={{ flexShrink: 0 }} />
+              <span>Authenticated successfully! Redirecting...</span>
+            </div>
+          )}
+
+          {/* Login Form */}
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Email Field */}
+            <div>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: '#cbd5e1',
+                  marginBottom: '8px',
+                }}
+              >
+                Email address
+              </label>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                style={{
+                  width: '100%',
+                  backgroundColor: '#111215',
+                  border: '1px solid #272a30',
+                  borderRadius: '10px',
+                  padding: '12px 14px',
+                  color: '#f8fafc',
+                  fontSize: '14px',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                }}
+                onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
+                onBlur={(e) => (e.target.style.borderColor = '#272a30')}
+              />
+            </div>
+
+            {/* Password Field */}
+            <div>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '8px',
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#cbd5e1',
+                  }}
+                >
+                  Password
+                </label>
+                <Link
+                  href="/forgot-password"
+                  style={{
+                    fontSize: '12.5px',
+                    color: '#94a3b8',
+                    textDecoration: 'none',
+                    fontWeight: 500,
+                    transition: 'color 0.2s',
+                  }}
+                  onMouseEnter={(e) => ((e.target as HTMLElement).style.color = '#ffffff')}
+                  onMouseLeave={(e) => ((e.target as HTMLElement).style.color = '#94a3b8')}
+                >
+                  Forgot password?
+                </Link>
+              </div>
+
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  style={{
+                    width: '100%',
+                    backgroundColor: '#111215',
+                    border: '1px solid #272a30',
+                    borderRadius: '10px',
+                    padding: '12px 42px 12px 14px',
+                    color: '#f8fafc',
+                    fontSize: '14px',
+                    outline: 'none',
+                    transition: 'border-color 0.2s',
+                  }}
+                  onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
+                  onBlur={(e) => (e.target.style.borderColor = '#272a30')}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: '12px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: '#64748b',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Remember Me Checkbox */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="checkbox"
+                id="rememberMe"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                style={{
+                  width: '16px',
+                  height: '16px',
+                  borderRadius: '4px',
+                  accentColor: '#2563eb',
+                  cursor: 'pointer',
+                }}
+              />
+              <label
+                htmlFor="rememberMe"
+                style={{
+                  fontSize: '13px',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                }}
+              >
+                Remember me for 30 days
+              </label>
+            </div>
+
+            {/* Sign In Button */}
+            <button
+              type="submit"
+              disabled={isLoading || isSuccess}
+              style={{
+                width: '100%',
+                padding: '13px',
+                borderRadius: '11px',
+                background: 'linear-gradient(135deg, #172554 0%, #1e3a8a 50%, #1e40af 100%)',
+                border: '1px solid rgba(59, 130, 246, 0.35)',
+                color: '#ffffff',
+                fontSize: '14.5px',
+                fontWeight: 700,
+                cursor: isLoading || isSuccess ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 16px rgba(30, 58, 138, 0.45)',
+                transition: 'all 0.2s',
+                marginTop: '4px',
+              }}
+              onMouseEnter={(e) => {
+                if (!isLoading && !isSuccess) {
+                  (e.currentTarget as HTMLElement).style.background =
+                    'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 50%, #2563eb 100%)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isLoading && !isSuccess) {
+                  (e.currentTarget as HTMLElement).style.background =
+                    'linear-gradient(135deg, #172554 0%, #1e3a8a 50%, #1e40af 100%)';
+                }
+              }}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 size={17} style={{ animation: 'spin 1s linear infinite' }} />
+                  Signing In...
+                </>
+              ) : isSuccess ? (
+                <>
+                  <CheckCircle2 size={17} />
+                  Signed In
+                </>
+              ) : (
+                'Sign In'
+              )}
+            </button>
+          </form>
+
+          {/* OR CONTINUE WITH Divider */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '10px',
-              marginBottom: isSuccess ? 'auto' : '32px',
-              justifyContent: 'flex-start',
+              margin: '26px 0 20px 0',
+              gap: '12px',
             }}
           >
-            <div
+            <div style={{ flex: 1, height: '1px', backgroundColor: '#26282d' }} />
+            <span
               style={{
-                width: '34px',
-                height: '34px',
-                borderRadius: '8px',
-                backgroundColor: '#2563EB',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                fontSize: '11px',
                 fontWeight: 700,
+                letterSpacing: '0.08em',
+                color: '#64748b',
+                textTransform: 'uppercase',
               }}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3">
-                <path d="M21 16v-1c0-4-3-6-7-6H9l-2-3H3l1 5-2 3v3h10" />
-                <circle cx="8" cy="7" r="1" />
-              </svg>
-            </div>
-            <span style={{ fontSize: '18px', fontWeight: 700, color: '#0F172A', letterSpacing: '-0.02em' }}>
-              EquiTransit
+              Or continue with
             </span>
+            <div style={{ flex: 1, height: '1px', backgroundColor: '#26282d' }} />
           </div>
 
-          {/* STATE 1: SUCCESS STATE (Matching template 1) */}
-          {isSuccess ? (
-            <div
+          {/* Social Logins */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            {/* Google */}
+            <button
+              type="button"
+              onClick={() => {
+                setEmail('google.user@equitransit.com');
+                setPassword('Password@123');
+              }}
               style={{
                 display: 'flex',
-                flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                textAlign: 'center',
-                margin: 'auto 0',
-                width: '100%',
-                maxWidth: '380px',
-                alignSelf: 'center',
+                gap: '9px',
+                backgroundColor: '#121316',
+                border: '1px solid #272a30',
+                borderRadius: '10px',
+                padding: '11px',
+                color: '#e2e8f0',
+                fontSize: '13.5px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.backgroundColor = '#18191e';
+                (e.currentTarget as HTMLElement).style.borderColor = '#383b42';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.backgroundColor = '#121316';
+                (e.currentTarget as HTMLElement).style.borderColor = '#272a30';
               }}
             >
-              {/* Pop-in Success Badge */}
-              <div
-                style={{
-                  width: '80px',
-                  height: '80px',
-                  borderRadius: '50%',
-                  backgroundColor: '#F0FDF4',
-                  border: '6px solid #DCFCE7',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: '24px',
-                  animation: 'popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
-                }}
-              >
-                <div
-                  style={{
-                    width: '56px',
-                    height: '56px',
-                    borderRadius: '50%',
-                    backgroundColor: '#16A34A',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#ffffff',
-                    boxShadow: '0 10px 15px -3px rgba(22, 163, 74, 0.3)',
-                  }}
-                >
-                  <Check size={32} strokeWidth={3} />
-                </div>
-              </div>
-
-              {/* Text */}
-              <div style={{ animation: 'fadeUp 0.5s ease-out 0.15s forwards' }}>
-                <h2 style={{ fontSize: '24px', fontWeight: 700, color: '#1E293B', marginBottom: '8px' }}>
-                  Login Successful
-                </h2>
-                <p style={{ fontSize: '14px', color: '#64748B', marginBottom: '32px' }}>
-                  Redirecting to your dashboard...
-                </p>
-              </div>
-
-              {/* Progress Bar */}
-              <div
-                style={{
-                  width: '192px',
-                  height: '6px',
-                  backgroundColor: '#F1F5F9',
-                  borderRadius: '999px',
-                  overflow: 'hidden',
-                  animation: 'fadeUp 0.5s ease-out 0.2s forwards',
-                }}
-              >
-                <div
-                  style={{
-                    height: '100%',
-                    backgroundColor: '#16A34A',
-                    borderRadius: '999px',
-                    animation: 'progressFill 1.8s ease-in-out forwards',
-                  }}
+              <svg width="17" height="17" viewBox="0 0 24 24">
+                <path
+                  fill="#EA4335"
+                  d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.4 1 3.5 3.6 1.6 7.4l3.7 2.9C6.2 7.5 8.9 5 12 5z"
                 />
-              </div>
-            </div>
-          ) : (
-            /* STATE 2: ACTIVE / LOADING / ERROR FORM */
-            <div style={{ width: '100%', maxWidth: '380px', margin: '0 auto' }}>
-              <div style={{ marginBottom: '28px' }}>
-                <h1 style={{ fontSize: '26px', fontWeight: 700, color: '#1E293B', margin: '0 0 6px 0' }}>
-                  Welcome Back
-                </h1>
-                <p style={{ fontSize: '14px', color: '#64748B', margin: 0 }}>
-                  Sign in to manage your racehorse transportation activities.
-                </p>
-              </div>
+                <path
+                  fill="#4285F4"
+                  d="M23.5 12.3c0-.8-.1-1.7-.2-2.3H12v4.6h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.9z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.3 14.7c-.2-.7-.4-1.5-.4-2.4 0-.8.1-1.6.4-2.4L1.6 7c-.8 1.6-1.3 3.4-1.3 5.3s.5 3.7 1.3 5.3l3.7-2.9z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.1-6.7-5.1L1.6 16.1C3.5 19.9 7.4 23 12 23z"
+                />
+              </svg>
+              Google
+            </button>
 
-              {/* Authentication Error Banner */}
-              {error && (
-                <div
-                  style={{
-                    marginBottom: '20px',
-                    backgroundColor: '#FEF2F2',
-                    border: '1px solid #FECACA',
-                    borderRadius: '12px',
-                    padding: '14px 16px',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '12px',
-                  }}
-                >
-                  <AlertCircle size={18} color="#DC2626" style={{ marginTop: '2px', flexShrink: 0 }} />
-                  <div>
-                    <h4 style={{ fontSize: '13.5px', fontWeight: 700, color: '#DC2626', margin: 0 }}>
-                      Sign in failed
-                    </h4>
-                    <p style={{ fontSize: '12.5px', color: '#B91C1C', marginTop: '3px', margin: 0, fontWeight: 500 }}>
-                      {error}
-                    </p>
-                  </div>
-                </div>
-              )}
+            {/* Facebook */}
+            <button
+              type="button"
+              onClick={() => {
+                setEmail('facebook.user@equitransit.com');
+                setPassword('Password@123');
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '9px',
+                backgroundColor: '#121316',
+                border: '1px solid #272a30',
+                borderRadius: '10px',
+                padding: '11px',
+                color: '#e2e8f0',
+                fontSize: '13.5px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.backgroundColor = '#18191e';
+                (e.currentTarget as HTMLElement).style.borderColor = '#383b42';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.backgroundColor = '#121316';
+                (e.currentTarget as HTMLElement).style.borderColor = '#272a30';
+              }}
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="#1877F2">
+                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+              </svg>
+              Facebook
+            </button>
+          </div>
 
-              <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-                {/* Email Field */}
-                <div>
-                  <label
-                    style={{
-                      fontSize: '13.5px',
-                      fontWeight: 500,
-                      color: '#334155',
-                      display: 'block',
-                      marginBottom: '6px',
-                    }}
-                  >
-                    Email Address <span style={{ color: '#DC2626' }}>*</span>
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <Mail
-                      size={16}
-                      color="#94A3B8"
-                      style={{ position: 'absolute', top: '13px', left: '13px' }}
-                    />
-                    <input
-                      type="email"
-                      value={email}
-                      disabled={isLoading}
-                      onChange={(e) => {
-                        setEmail(e.target.value);
-                        if (error) setError(null);
-                      }}
-                      required
-                      placeholder="name@company.com"
-                      style={{
-                        width: '100%',
-                        height: '42px',
-                        padding: '0 14px 0 38px',
-                        backgroundColor: isLoading ? '#F1F5F9' : '#F8FAFC',
-                        borderRadius: '10px',
-                        border: error ? '1px solid #DC2626' : '1px solid #CBD5E1',
-                        fontSize: '14px',
-                        color: '#1E293B',
-                        outline: 'none',
-                        transition: 'all 0.15s ease',
-                      }}
-                    />
-                  </div>
-                </div>
+          {/* Switch to Register */}
+          <div
+            style={{
+              textAlign: 'center',
+              marginTop: '26px',
+              fontSize: '13.5px',
+              color: '#94a3b8',
+            }}
+          >
+            Don&apos;t have an account?{' '}
+            <Link
+              href="/register"
+              style={{
+                color: '#ffffff',
+                fontWeight: 700,
+                textDecoration: 'none',
+              }}
+            >
+              Create account
+            </Link>
+          </div>
+        </div>
 
-                {/* Password Field */}
-                <div>
-                  <label
-                    style={{
-                      fontSize: '13.5px',
-                      fontWeight: 500,
-                      color: '#334155',
-                      display: 'block',
-                      marginBottom: '6px',
-                    }}
-                  >
-                    Password <span style={{ color: '#DC2626' }}>*</span>
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <Lock
-                      size={16}
-                      color="#94A3B8"
-                      style={{ position: 'absolute', top: '13px', left: '13px' }}
-                    />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      disabled={isLoading}
-                      onChange={(e) => {
-                        setPassword(e.target.value);
-                        if (error) setError(null);
-                      }}
-                      required
-                      placeholder="••••••••"
-                      style={{
-                        width: '100%',
-                        height: '42px',
-                        padding: '0 38px 0 38px',
-                        backgroundColor: isLoading ? '#F1F5F9' : '#F8FAFC',
-                        borderRadius: '10px',
-                        border: error ? '1px solid #DC2626' : '1px solid #CBD5E1',
-                        fontSize: '14px',
-                        color: '#1E293B',
-                        outline: 'none',
-                        letterSpacing: showPassword ? 'normal' : '2px',
-                        transition: 'all 0.15s ease',
-                      }}
-                    />
-                    <button
-                      type="button"
-                      disabled={isLoading}
-                      onClick={() => setShowPassword(!showPassword)}
-                      style={{
-                        position: 'absolute',
-                        top: '12px',
-                        right: '12px',
-                        background: 'none',
-                        border: 'none',
-                        cursor: isLoading ? 'default' : 'pointer',
-                        color: '#94A3B8',
-                        padding: 0,
-                      }}
-                    >
-                      {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Remember Me & Forgot Password */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '13.5px',
-                    paddingTop: '2px',
-                  }}
-                >
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      color: '#475569',
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                      fontWeight: 500,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      disabled={isLoading}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      style={{
-                        width: '16px',
-                        height: '16px',
-                        borderRadius: '4px',
-                        accentColor: '#2563EB',
-                        cursor: 'pointer',
-                      }}
-                    />
-                    Remember me
-                  </label>
-
-                  <Link
-                    href="/login"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      alert('Password recovery dispatched to your registered address.');
-                    }}
-                    style={{
-                      color: '#2563EB',
-                      fontWeight: 600,
-                      textDecoration: 'none',
-                    }}
-                  >
-                    Forgot password?
-                  </Link>
-                </div>
-
-                {/* Submit Button */}
-                <div style={{ paddingTop: '10px' }}>
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    style={{
-                      width: '100%',
-                      height: '44px',
-                      borderRadius: '10px',
-                      backgroundColor: '#2563EB',
-                      color: '#ffffff',
-                      border: 'none',
-                      fontSize: '14.5px',
-                      fontWeight: 600,
-                      cursor: isLoading ? 'wait' : 'pointer',
-                      opacity: isLoading ? 0.85 : 1,
-                      boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      transition: 'background-color 0.15s ease',
-                    }}
-                  >
-                    {isLoading ? (
-                      <>
-                        <span>Signing in...</span>
-                        <Loader2 size={16} className="animate-spin" />
-                      </>
-                    ) : (
-                      <span>Sign In</span>
-                    )}
-                  </button>
-                </div>
-              </form>
-
-              {/* Footer Links */}
-              <p
-                style={{
-                  textAlign: 'center',
-                  fontSize: '13.5px',
-                  color: '#64748B',
-                  marginTop: '28px',
-                  marginBottom: 0,
-                }}
-              >
-                Don&apos;t have an account?{' '}
-                <Link
-                  href="/register"
-                  style={{
-                    color: '#2563EB',
-                    fontWeight: 600,
-                    textDecoration: 'none',
-                  }}
-                >
-                  Register
-                </Link>
-                {' '}&bull;{' '}
-                <a
-                  href="mailto:support@equitransit.com"
-                  style={{
-                    color: '#64748B',
-                    textDecoration: 'none',
-                  }}
-                >
-                  Contact IT Support
-                </a>
-              </p>
-            </div>
-          )}
+        {/* Footer info */}
+        <div
+          style={{
+            width: '100%',
+            maxWidth: '430px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '12px',
+            color: '#64748b',
+            marginTop: '24px',
+          }}
+        >
+          <div>© 2026 EquiRoute Logistics Ltd.</div>
+          <div style={{ display: 'flex', gap: '16px' }}>
+            <span style={{ cursor: 'pointer' }}>Privacy</span>
+            <span style={{ cursor: 'pointer' }}>Terms</span>
+            <span style={{ cursor: 'pointer' }}>Support</span>
+          </div>
         </div>
       </div>
     </div>
@@ -634,16 +577,15 @@ export default function LoginPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: '#F8FAFC',
-            color: '#64748B',
-            fontSize: '14px',
+            backgroundColor: '#0d0f12',
+            color: '#94a3b8',
           }}
         >
-          Loading portal...
+          Loading EquiRoute...
         </div>
       }
     >
-      <LoginForm />
+      <LoginFormContent />
     </Suspense>
   );
 }
