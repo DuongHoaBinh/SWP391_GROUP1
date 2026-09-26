@@ -15,6 +15,14 @@ export interface ShipmentAttachment {
   uploadedAt: string;
 }
 
+export interface OrderHorse {
+  horseId: number;
+  name: string;
+  breed: string | null;
+  gender: 'male' | 'female' | 'gelding' | null;
+  age: number | null;
+}
+
 export interface TransportOrder {
   id: number;
   customerId: number;
@@ -38,6 +46,7 @@ export interface TransportOrder {
   createdAt: string;
   updatedAt: string;
   attachments?: ShipmentAttachment[];
+  horses?: OrderHorse[];
   customerEmail?: string;
   approverName?: string;
 }

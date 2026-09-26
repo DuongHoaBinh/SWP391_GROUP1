@@ -1,12 +1,43 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsEmail,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   Min,
+  ValidateNested,
 } from 'class-validator';
+
+export class HorseInfoDto {
+  @ApiProperty({ example: 'Xích Thố', description: 'Tên con ngựa' })
+  @IsNotEmpty({ message: 'Tên con ngựa là bắt buộc' })
+  @IsString()
+  name: string;
+
+  @ApiPropertyOptional({ example: 'Thoroughbred', description: 'Giống ngựa' })
+  @IsOptional()
+  @IsString()
+  breed?: string;
+
+  @ApiPropertyOptional({
+    example: 'male',
+    enum: ['male', 'female', 'gelding'],
+    description: 'Giới tính (male: đực, female: cái, gelding: thiến)',
+  })
+  @IsOptional()
+  @IsIn(['male', 'female', 'gelding'], { message: 'Giới tính phải là male, female hoặc gelding' })
+  gender?: 'male' | 'female' | 'gelding';
+
+  @ApiPropertyOptional({ example: 4, minimum: 0, description: 'Tuổi của con ngựa (năm)' })
+  @IsOptional()
+  @IsInt({ message: 'Tuổi phải là số nguyên' })
+  @Min(0, { message: 'Tuổi không được âm' })
+  age?: number;
+}
 
 export class CreateOrderDto {
   @ApiPropertyOptional({ example: 'Nguyễn Văn A', description: 'Contact person name' })
@@ -29,7 +60,7 @@ export class CreateOrderDto {
   @IsEmail({}, { message: 'Email không hợp lệ' })
   contactEmail: string;
 
-  @ApiProperty({ example: 2, minimum: 1, default: 1, description: 'Number of horses to transport' })
+  @ApiProperty({ example: 1, minimum: 1, default: 1, description: 'Number of horses to transport' })
   @IsInt({ message: 'Số lượng ngựa phải là số nguyên' })
   @Min(1, { message: 'Số lượng ngựa tối thiểu là 1' })
   requestedHorseCount: number;
@@ -61,4 +92,48 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   medicalDocumentUrl?: string;
+
+  // --- Thông tin chi tiết con ngựa (đơn lẻ hoặc danh sách) ---
+  @ApiPropertyOptional({ example: 'Xích Thố', description: 'Tên con ngựa (khi gửi 1 con)' })
+  @IsOptional()
+  @IsString()
+  horseName?: string;
+
+  @ApiPropertyOptional({ example: 'Thoroughbred', description: 'Giống ngựa (khi gửi 1 con)' })
+  @IsOptional()
+  @IsString()
+  horseBreed?: string;
+
+  @ApiPropertyOptional({
+    example: 'male',
+    enum: ['male', 'female', 'gelding'],
+    description: 'Giới tính con ngựa (male, female, gelding)',
+  })
+  @IsOptional()
+  @IsIn(['male', 'female', 'gelding'])
+  horseGender?: 'male' | 'female' | 'gelding';
+
+  @ApiPropertyOptional({ example: 4, minimum: 0, description: 'Tuổi của con ngựa (khi gửi 1 con)' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  horseAge?: number;
+
+  @ApiPropertyOptional({
+    type: [HorseInfoDto],
+    description: 'Danh sách nhiều con ngựa (nếu gửi nhiều con cùng lúc)',
+    example: [
+      {
+        name: 'Xích Thố',
+        breed: 'Thoroughbred',
+        gender: 'male',
+        age: 4,
+      },
+    ],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => HorseInfoDto)
+  horses?: HorseInfoDto[];
 }

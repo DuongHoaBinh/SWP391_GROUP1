@@ -64,6 +64,7 @@ CREATE TABLE horse (
   breed VARCHAR(100),
   gender ENUM('male','female','gelding'),
   date_of_birth DATE,
+  age INT,
   microchip_no VARCHAR(50) UNIQUE,
   passport_no VARCHAR(50) UNIQUE,
   status ENUM('active','in_transit','retired','deceased') NOT NULL DEFAULT 'active',
