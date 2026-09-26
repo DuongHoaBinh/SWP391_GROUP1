@@ -3,8 +3,7 @@
 import React, { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Mail, Lock, Eye, EyeOff, Globe, Star, AlertCircle } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
+import { Mail, Lock, Eye, EyeOff, Globe, Star, AlertCircle, Check, Loader2 } from 'lucide-react';
 import { setAuthSession } from '@/lib/auth';
 import { mockCurrentUser } from '@/lib/mock-data';
 
@@ -19,12 +18,19 @@ function LoginForm() {
   const [rememberMe, setRememberMe] = useState(true);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
+
+    let authUser = {
+      ...mockCurrentUser,
+      email,
+    };
+    let authToken = 'mock-jwt-token-customer';
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000/api';
@@ -36,20 +42,31 @@ function LoginForm() {
 
       if (response.ok) {
         const data = await response.json();
-        setAuthSession(data.accessToken, data.user);
-        router.push(redirectTarget);
+        authToken = data.accessToken;
+        authUser = {
+          ...authUser,
+          ...data.user,
+        };
+      } else if (response.status === 401 || response.status === 400) {
+        const errData = await response.json().catch(() => null);
+        setError(errData?.message || 'Invalid email or password. Please check your credentials and try again.');
+        setIsLoading(false);
         return;
       }
     } catch {
-      // Backend not running or offline: graceful fallback for frontend preview
+      // Backend not running: proceed with demo session
     }
 
-    // Demo fallback for smooth UI interaction
-    setAuthSession('mock-jwt-token-customer', {
-      ...mockCurrentUser,
-      email,
-    });
-    router.push(redirectTarget);
+    // Set auth session
+    setAuthSession(authToken, authUser);
+
+    // Show smooth Success state animation before redirecting
+    setIsLoading(false);
+    setIsSuccess(true);
+
+    setTimeout(() => {
+      router.push(redirectTarget);
+    }, 1800);
   };
 
   return (
@@ -59,400 +76,548 @@ function LoginForm() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#070d18',
-        padding: '24px',
-        fontFamily: 'inherit',
+        backgroundColor: '#F8FAFC',
+        padding: '16px',
+        fontFamily: "'Inter', sans-serif",
       }}
     >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: '1000px',
-          backgroundColor: '#ffffff',
-          borderRadius: '24px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.65)',
-          display: 'grid',
-          gridTemplateColumns: 'minmax(320px, 44%) 1fr',
-          overflow: 'hidden',
-          minHeight: '580px',
-        }}
-      >
-        {/* Left Column: Brand & Hero Showcase */}
+      {/* Top subtle progress line when loading */}
+      {isLoading && (
         <div
           style={{
-            backgroundColor: '#0c182b',
-            backgroundImage: 'radial-gradient(circle at 10% 20%, rgba(37, 99, 235, 0.15) 0%, transparent 60%)',
-            padding: '44px 36px',
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '3px',
+            backgroundColor: '#2563EB',
+            zIndex: 1000,
+            animation: 'pulseGlow 1.2s infinite ease-in-out',
+          }}
+        />
+      )}
+
+      {/* Main Centered Login Card */}
+      <div
+        style={{
+          backgroundColor: '#ffffff',
+          width: '100%',
+          maxWidth: '1024px',
+          borderRadius: '16px',
+          boxShadow: '0 20px 30px -10px rgba(15, 23, 42, 0.08), 0 10px 15px -3px rgba(15, 23, 42, 0.05)',
+          border: '1px solid #E2E8F0',
+          display: 'flex',
+          overflow: 'hidden',
+          minHeight: '620px',
+        }}
+      >
+        {/* LEFT SIDE: Visual Branding */}
+        <div
+          style={{
+            width: '50%',
+            position: 'relative',
+            backgroundColor: '#0F172A',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
-            color: '#ffffff',
-            position: 'relative',
+            overflow: 'hidden',
           }}
+          className="brand-showcase-panel"
         >
-          {/* Top Section */}
-          <div>
-            {/* Globe Icon Badge */}
+          {/* Background image with overlay */}
+          <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="https://images.unsplash.com/photo-1553531580-65239a2d8a0c?q=80&w=2000&auto=format&fit=crop"
+              alt="Racehorse Transportation"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                opacity: 0.3,
+                mixBlendMode: 'overlay',
+              }}
+            />
             <div
               style={{
-                width: '54px',
-                height: '54px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(37, 99, 235, 0.25)',
-                border: '1px solid rgba(96, 165, 250, 0.35)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '28px',
-                color: '#60a5fa',
+                position: 'absolute',
+                inset: 0,
+                background: 'linear-gradient(to top, #0F172A 0%, rgba(15, 23, 42, 0.8) 60%, transparent 100%)',
               }}
-            >
-              <Globe size={28} />
-            </div>
-
-            <h1
-              style={{
-                fontSize: '30px',
-                fontWeight: 800,
-                color: '#ffffff',
-                lineHeight: 1.25,
-                marginBottom: '16px',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Global Equine
-              <br />
-              Logistics Network
-            </h1>
-
-            <p
-              style={{
-                fontSize: '14px',
-                color: '#94a3b8',
-                lineHeight: 1.6,
-                maxWidth: '320px',
-                margin: 0,
-              }}
-            >
-              Seamless cross-border racehorse transportation. Connecting owners, veterinary experts, and logistics coordinators worldwide.
-            </p>
+            />
           </div>
 
-          {/* Bottom Review / Trust Card */}
+          {/* Visual Content */}
           <div
             style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '16px',
-              padding: '18px 20px',
-              marginTop: '40px',
-              backdropFilter: 'blur(8px)',
+              position: 'relative',
+              zIndex: 10,
+              padding: '48px',
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100%',
+              justifyContent: 'space-between',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', gap: '2px', color: '#fbbf24' }}>
-                <Star size={14} fill="#fbbf24" stroke="none" />
-                <Star size={14} fill="#fbbf24" stroke="none" />
-                <Star size={14} fill="#fbbf24" stroke="none" />
-                <Star size={14} fill="#fbbf24" stroke="none" />
-                <Star size={14} fill="#fbbf24" stroke="none" />
+            <div>
+              <div style={{ color: 'rgba(37, 99, 235, 0.45)', marginBottom: '24px' }}>
+                <Globe size={56} strokeWidth={1.5} />
               </div>
-              <span style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc' }}>
-                Enterprise Grade
-              </span>
+              <h2
+                style={{
+                  fontSize: '30px',
+                  fontWeight: 700,
+                  color: '#ffffff',
+                  marginBottom: '16px',
+                  lineHeight: 1.25,
+                }}
+              >
+                Global Equine
+                <br />
+                Logistics Network
+              </h2>
+              <p
+                style={{
+                  color: '#94A3B8',
+                  fontSize: '14px',
+                  lineHeight: 1.6,
+                  maxWidth: '320px',
+                  margin: 0,
+                }}
+              >
+                Seamless cross-border racehorse transportation. Connecting owners, veterinary experts, and logistics coordinators worldwide.
+              </p>
             </div>
-            <p
+
+            {/* Testimonial Badge */}
+            <div
               style={{
-                fontSize: '12.5px',
-                color: '#94a3b8',
-                lineHeight: 1.5,
-                margin: 0,
-                fontStyle: 'italic',
+                backgroundColor: 'rgba(30, 41, 59, 0.55)',
+                backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(51, 65, 85, 0.5)',
+                borderRadius: '12px',
+                padding: '18px 20px',
               }}
             >
-              &ldquo;The most secure and transparent management system for high-value equine assets.&rdquo;
-            </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', gap: '3px', color: '#FBBF24' }}>
+                  <Star size={13} fill="#FBBF24" stroke="none" />
+                  <Star size={13} fill="#FBBF24" stroke="none" />
+                  <Star size={13} fill="#FBBF24" stroke="none" />
+                  <Star size={13} fill="#FBBF24" stroke="none" />
+                  <Star size={13} fill="#FBBF24" stroke="none" />
+                </div>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#CBD5E1' }}>
+                  Enterprise Grade
+                </span>
+              </div>
+              <p
+                style={{
+                  fontSize: '12px',
+                  color: '#94A3B8',
+                  lineHeight: 1.5,
+                  margin: 0,
+                }}
+              >
+                &ldquo;The most secure and transparent management system for high-value equine assets.&rdquo;
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Right Column: Sign In Form */}
+        {/* RIGHT SIDE: Form / Success States */}
         <div
           style={{
-            padding: '48px 44px',
+            flex: 1,
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
+            padding: '48px 48px',
             backgroundColor: '#ffffff',
+            position: 'relative',
           }}
         >
-          {/* Brand Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
+          {/* Logo Header (Consistent) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              marginBottom: isSuccess ? 'auto' : '32px',
+              justifyContent: 'flex-start',
+            }}
+          >
             <div
               style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '9px',
-                backgroundColor: '#2563eb',
+                width: '34px',
+                height: '34px',
+                borderRadius: '8px',
+                backgroundColor: '#2563EB',
                 color: '#ffffff',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 4px 10px rgba(37, 99, 235, 0.35)',
+                fontWeight: 700,
               }}
             >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3">
                 <path d="M21 16v-1c0-4-3-6-7-6H9l-2-3H3l1 5-2 3v3h10" />
                 <circle cx="8" cy="7" r="1" />
               </svg>
             </div>
-            <span style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
+            <span style={{ fontSize: '18px', fontWeight: 700, color: '#0F172A', letterSpacing: '-0.02em' }}>
               EquiTransit
             </span>
           </div>
 
-          <h2 style={{ fontSize: '26px', fontWeight: 800, color: '#0f172a', margin: '0 0 6px 0', letterSpacing: '-0.02em' }}>
-            Welcome Back
-          </h2>
-          <p style={{ fontSize: '14px', color: '#64748b', margin: '0 0 26px 0' }}>
-            Sign in to manage your racehorse transportation activities.
-          </p>
-
-          {/* Error Message */}
-          {error && (
+          {/* STATE 1: SUCCESS STATE (Matching template 1) */}
+          {isSuccess ? (
             <div
               style={{
-                backgroundColor: '#fee2e2',
-                color: '#b91c1c',
-                padding: '12px 14px',
-                borderRadius: '10px',
-                fontSize: '13px',
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
-                gap: '8px',
-                marginBottom: '18px',
+                justifyContent: 'center',
+                textAlign: 'center',
+                margin: 'auto 0',
+                width: '100%',
+                maxWidth: '380px',
+                alignSelf: 'center',
               }}
             >
-              <AlertCircle size={16} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-            {/* Email Field */}
-            <div>
-              <label
+              {/* Pop-in Success Badge */}
+              <div
                 style={{
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: '#1e293b',
-                  display: 'block',
-                  marginBottom: '6px',
+                  width: '80px',
+                  height: '80px',
+                  borderRadius: '50%',
+                  backgroundColor: '#F0FDF4',
+                  border: '6px solid #DCFCE7',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '24px',
+                  animation: 'popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
                 }}
               >
-                Email Address <span style={{ color: '#ef4444' }}>*</span>
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  placeholder="name@company.com"
+                <div
                   style={{
-                    width: '100%',
-                    height: '46px',
-                    padding: '0 14px 0 40px',
-                    borderRadius: '10px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '14px',
-                    color: '#0f172a',
-                    outline: 'none',
-                    transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = '#2563eb';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.15)';
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = '#cbd5e1';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                />
-                <Mail size={17} color="#94a3b8" style={{ position: 'absolute', top: '14px', left: '13px' }} />
-              </div>
-            </div>
-
-            {/* Password Field */}
-            <div>
-              <label
-                style={{
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: '#1e293b',
-                  display: 'block',
-                  marginBottom: '6px',
-                }}
-              >
-                Password <span style={{ color: '#ef4444' }}>*</span>
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  placeholder="••••••••"
-                  style={{
-                    width: '100%',
-                    height: '46px',
-                    padding: '0 40px 0 40px',
-                    borderRadius: '10px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '14px',
-                    color: '#0f172a',
-                    outline: 'none',
-                    transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = '#2563eb';
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.15)';
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = '#cbd5e1';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                />
-                <Lock size={17} color="#94a3b8" style={{ position: 'absolute', top: '14px', left: '13px' }} />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute',
-                    top: '13px',
-                    right: '12px',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: '#94a3b8',
-                    padding: '2px',
+                    width: '56px',
+                    height: '56px',
+                    borderRadius: '50%',
+                    backgroundColor: '#16A34A',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    color: '#ffffff',
+                    boxShadow: '0 10px 15px -3px rgba(22, 163, 74, 0.3)',
                   }}
-                  title={showPassword ? 'Hide password' : 'Show password'}
                 >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
+                  <Check size={32} strokeWidth={3} />
+                </div>
               </div>
-            </div>
 
-            {/* Remember Me & Forgot Password */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                fontSize: '13px',
-                marginTop: '-4px',
-              }}
-            >
-              <label
+              {/* Text */}
+              <div style={{ animation: 'fadeUp 0.5s ease-out 0.15s forwards' }}>
+                <h2 style={{ fontSize: '24px', fontWeight: 700, color: '#1E293B', marginBottom: '8px' }}>
+                  Login Successful
+                </h2>
+                <p style={{ fontSize: '14px', color: '#64748B', marginBottom: '32px' }}>
+                  Redirecting to your dashboard...
+                </p>
+              </div>
+
+              {/* Progress Bar */}
+              <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  color: '#475569',
-                  cursor: 'pointer',
-                  userSelect: 'none',
+                  width: '192px',
+                  height: '6px',
+                  backgroundColor: '#F1F5F9',
+                  borderRadius: '999px',
+                  overflow: 'hidden',
+                  animation: 'fadeUp 0.5s ease-out 0.2s forwards',
                 }}
               >
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
+                <div
                   style={{
-                    width: '16px',
-                    height: '16px',
-                    borderRadius: '4px',
-                    accentColor: '#2563eb',
-                    cursor: 'pointer',
+                    height: '100%',
+                    backgroundColor: '#16A34A',
+                    borderRadius: '999px',
+                    animation: 'progressFill 1.8s ease-in-out forwards',
                   }}
                 />
-                Remember me
-              </label>
+              </div>
+            </div>
+          ) : (
+            /* STATE 2: ACTIVE / LOADING / ERROR FORM */
+            <div style={{ width: '100%', maxWidth: '380px', margin: '0 auto' }}>
+              <div style={{ marginBottom: '28px' }}>
+                <h1 style={{ fontSize: '26px', fontWeight: 700, color: '#1E293B', margin: '0 0 6px 0' }}>
+                  Welcome Back
+                </h1>
+                <p style={{ fontSize: '14px', color: '#64748B', margin: 0 }}>
+                  Sign in to manage your racehorse transportation activities.
+                </p>
+              </div>
 
-              <Link
-                href="/login"
-                onClick={(e) => {
-                  e.preventDefault();
-                  alert('Password reset link has been dispatched to your registered email address.');
-                }}
+              {/* Authentication Error Banner */}
+              {error && (
+                <div
+                  style={{
+                    marginBottom: '20px',
+                    backgroundColor: '#FEF2F2',
+                    border: '1px solid #FECACA',
+                    borderRadius: '12px',
+                    padding: '14px 16px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                  }}
+                >
+                  <AlertCircle size={18} color="#DC2626" style={{ marginTop: '2px', flexShrink: 0 }} />
+                  <div>
+                    <h4 style={{ fontSize: '13.5px', fontWeight: 700, color: '#DC2626', margin: 0 }}>
+                      Sign in failed
+                    </h4>
+                    <p style={{ fontSize: '12.5px', color: '#B91C1C', marginTop: '3px', margin: 0, fontWeight: 500 }}>
+                      {error}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                {/* Email Field */}
+                <div>
+                  <label
+                    style={{
+                      fontSize: '13.5px',
+                      fontWeight: 500,
+                      color: '#334155',
+                      display: 'block',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    Email Address <span style={{ color: '#DC2626' }}>*</span>
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <Mail
+                      size={16}
+                      color="#94A3B8"
+                      style={{ position: 'absolute', top: '13px', left: '13px' }}
+                    />
+                    <input
+                      type="email"
+                      value={email}
+                      disabled={isLoading}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (error) setError(null);
+                      }}
+                      required
+                      placeholder="name@company.com"
+                      style={{
+                        width: '100%',
+                        height: '42px',
+                        padding: '0 14px 0 38px',
+                        backgroundColor: isLoading ? '#F1F5F9' : '#F8FAFC',
+                        borderRadius: '10px',
+                        border: error ? '1px solid #DC2626' : '1px solid #CBD5E1',
+                        fontSize: '14px',
+                        color: '#1E293B',
+                        outline: 'none',
+                        transition: 'all 0.15s ease',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div>
+                  <label
+                    style={{
+                      fontSize: '13.5px',
+                      fontWeight: 500,
+                      color: '#334155',
+                      display: 'block',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    Password <span style={{ color: '#DC2626' }}>*</span>
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <Lock
+                      size={16}
+                      color="#94A3B8"
+                      style={{ position: 'absolute', top: '13px', left: '13px' }}
+                    />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      disabled={isLoading}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        if (error) setError(null);
+                      }}
+                      required
+                      placeholder="••••••••"
+                      style={{
+                        width: '100%',
+                        height: '42px',
+                        padding: '0 38px 0 38px',
+                        backgroundColor: isLoading ? '#F1F5F9' : '#F8FAFC',
+                        borderRadius: '10px',
+                        border: error ? '1px solid #DC2626' : '1px solid #CBD5E1',
+                        fontSize: '14px',
+                        color: '#1E293B',
+                        outline: 'none',
+                        letterSpacing: showPassword ? 'normal' : '2px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => setShowPassword(!showPassword)}
+                      style={{
+                        position: 'absolute',
+                        top: '12px',
+                        right: '12px',
+                        background: 'none',
+                        border: 'none',
+                        cursor: isLoading ? 'default' : 'pointer',
+                        color: '#94A3B8',
+                        padding: 0,
+                      }}
+                    >
+                      {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Remember Me & Forgot Password */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '13.5px',
+                    paddingTop: '2px',
+                  }}
+                >
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      color: '#475569',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      fontWeight: 500,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      disabled={isLoading}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      style={{
+                        width: '16px',
+                        height: '16px',
+                        borderRadius: '4px',
+                        accentColor: '#2563EB',
+                        cursor: 'pointer',
+                      }}
+                    />
+                    Remember me
+                  </label>
+
+                  <Link
+                    href="/login"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      alert('Password recovery dispatched to your registered address.');
+                    }}
+                    style={{
+                      color: '#2563EB',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+
+                {/* Submit Button */}
+                <div style={{ paddingTop: '10px' }}>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    style={{
+                      width: '100%',
+                      height: '44px',
+                      borderRadius: '10px',
+                      backgroundColor: '#2563EB',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontSize: '14.5px',
+                      fontWeight: 600,
+                      cursor: isLoading ? 'wait' : 'pointer',
+                      opacity: isLoading ? 0.85 : 1,
+                      boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      transition: 'background-color 0.15s ease',
+                    }}
+                  >
+                    {isLoading ? (
+                      <>
+                        <span>Signing in...</span>
+                        <Loader2 size={16} className="animate-spin" />
+                      </>
+                    ) : (
+                      <span>Sign In</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+
+              {/* Footer Links */}
+              <p
                 style={{
-                  color: '#2563eb',
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                  fontSize: '13px',
+                  textAlign: 'center',
+                  fontSize: '13.5px',
+                  color: '#64748B',
+                  marginTop: '28px',
+                  marginBottom: 0,
                 }}
               >
-                Forgot password?
-              </Link>
+                Don&apos;t have an account?{' '}
+                <Link
+                  href="/register"
+                  style={{
+                    color: '#2563EB',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Register
+                </Link>
+                {' '}&bull;{' '}
+                <a
+                  href="mailto:support@equitransit.com"
+                  style={{
+                    color: '#64748B',
+                    textDecoration: 'none',
+                  }}
+                >
+                  Contact IT Support
+                </a>
+              </p>
             </div>
-
-            {/* Sign In Button */}
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              disabled={isLoading}
-              style={{
-                width: '100%',
-                height: '46px',
-                borderRadius: '10px',
-                backgroundColor: '#4f7cf6',
-                border: 'none',
-                fontSize: '15px',
-                fontWeight: 600,
-                marginTop: '4px',
-                boxShadow: '0 4px 14px rgba(79, 124, 246, 0.35)',
-              }}
-            >
-              {isLoading ? 'Signing In...' : 'Sign In'}
-            </Button>
-          </form>
-
-          {/* Footer Register / Support Link */}
-          <div style={{ textAlign: 'center', fontSize: '13px', color: '#64748b', marginTop: '24px' }}>
-            Don&apos;t have an account?{' '}
-            <Link
-              href="/register"
-              style={{
-                color: '#2563eb',
-                fontWeight: 600,
-                textDecoration: 'none',
-              }}
-            >
-              Register
-            </Link>
-            {' '}&bull;{' '}
-            <a
-              href="mailto:support@equitransit.com"
-              style={{
-                color: '#64748b',
-                textDecoration: 'none',
-              }}
-            >
-              Contact IT Support
-            </a>
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -469,8 +634,8 @@ export default function LoginPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: '#070d18',
-            color: '#94a3b8',
+            backgroundColor: '#F8FAFC',
+            color: '#64748B',
             fontSize: '14px',
           }}
         >
