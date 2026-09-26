@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bell, ChevronDown, Check, ExternalLink } from 'lucide-react';
-import { getCurrentUser } from '@/lib/auth';
+import { useRouter } from 'next/navigation';
+import { Bell, ChevronDown, Check, ExternalLink, LogOut } from 'lucide-react';
+import { getCurrentUser, clearAuthSession } from '@/lib/auth';
 import { mockNotifications } from '@/lib/mock-data';
 import Link from 'next/link';
 
@@ -15,6 +16,7 @@ export const Header: React.FC<HeaderProps> = ({
   title = 'Dashboard',
   subtitle = "Welcome back. Here's an overview of your transportation activities.",
 }) => {
+  const router = useRouter();
   const user = getCurrentUser();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -24,6 +26,12 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleMarkAllRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+  };
+
+  const handleLogout = () => {
+    setShowUserMenu(false);
+    clearAuthSession();
+    router.push('/login');
   };
 
   return (
@@ -290,6 +298,29 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 Document Sets
               </Link>
+              <div style={{ borderTop: '1px solid var(--border-light)', marginTop: '4px', paddingTop: '4px' }}>
+                <button
+                  onClick={handleLogout}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    width: '100%',
+                    padding: '8px 12px',
+                    fontSize: '13px',
+                    color: '#ef4444',
+                    borderRadius: '6px',
+                    textAlign: 'left',
+                    fontWeight: 500,
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <LogOut size={14} />
+                  Sign Out
+                </button>
+              </div>
             </div>
           )}
         </div>
