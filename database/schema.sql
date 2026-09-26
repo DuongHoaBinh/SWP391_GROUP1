@@ -1,21 +1,4 @@
--- Initial relational design checklist.
--- Implement the selected database dialect through reviewed migrations.
-
--- Identity and ownership: users, roles, user_roles, customers, horses
--- Requests and planning: transport_orders, transport_order_horses,
---   transport_plans, assignments
--- Compliance: countries, border_gates, compliance_rules,
---   document_requirements, documents, document_reviews, authority_approvals
--- Capacity and routes: vehicles, air_transport_capacity, stalls, routes,
---   route_legs, trip_stops, trips
--- Execution: tracking_events, horse_health_logs, attachments
--- Optional operations: incidents, route_change_requests,
---   additional_cost_approvals, handover_records, handover_items
--- Communication and audit: notifications, audit_logs
-
--- Required constraints to preserve in migrations:
--- 1. Every horse document belongs to one horse and its review history is append-only.
--- 2. Every trip leg has an ordered position and belongs to one route/trip.
--- 3. Tracking and health events store author and timestamp.
--- 4. Customers can access only records owned by their customer account.
--- 5. A published trip requires approved order, route, capacity, staff, and compliance readiness.
+-- Canonical database schema: database/schema.mysql.sql
+--
+-- The project uses MySQL 8.0+ / InnoDB / utf8mb4. Keep this entry point as a
+-- pointer for contributors; execute schema.mysql.sql with the MySQL client.

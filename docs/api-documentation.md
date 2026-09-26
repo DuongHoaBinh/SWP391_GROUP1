@@ -2,7 +2,51 @@
 
 ## API technology
 
-The backend is implemented with **NestJS and TypeScript**. It exposes a **REST API** consumed by the **React/Next.js frontend**. Request and response DTOs should be documented with OpenAPI/Swagger.
+The backend is implemented with **NestJS and TypeScript**. It exposes a **REST API** consumed by the **React/Next.js frontend**. The target database is **MySQL 8.0+**; authentication stores users and registration OTP records in MySQL. OpenAPI/Swagger UI is available at `http://localhost:5000/api/docs` while the backend is running.
+
+## Authentication endpoints
+
+Base URL: `http://localhost:5000/api`
+
+### `POST /auth/register`
+
+Creates a pending **customer** registration and sends a six-digit OTP. Required body:
+
+```json
+{
+	"email": "owner@example.com",
+	"password": "Password123",
+	"confirmPassword": "Password123"
+}
+```
+
+The password must contain at least eight characters, one letter, and one number. The OTP is sent through the configured SMTP provider. It must not be exposed in production; `AUTH_EXPOSE_DEV_OTP=true` may be used only for local development.
+
+### `POST /auth/verify-otp`
+
+Completes the customer registration after a valid OTP. OTPs expire after ten minutes.
+
+```json
+{
+	"email": "owner@example.com",
+	"otp": "123456"
+}
+```
+
+### `POST /auth/login`
+
+Authenticates verified customers and pre-provisioned internal accounts. Returns a JWT access token and the user's role.
+
+```json
+{
+	"email": "owner@example.com",
+	"password": "Password123"
+}
+```
+
+## Local MySQL and SMTP configuration
+
+The backend reads database and SMTP settings from `backend/.env`. `SMTP_USER` and `SMTP_PASSWORD` belong to a dedicated system sender account, not to the customer. The customer email from `POST /auth/register` is passed as the recipient of the OTP email. Required values for the real registration flow are `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASSWORD`. For Gmail, use an App Password with two-step verification enabled. Never commit `backend/.env` or expose `SMTP_PASSWORD`.
 
 API contracts are organized by backend module:
 
@@ -17,6 +61,66 @@ API contracts are organized by backend module:
 - `/api/handover` - delivery checklist and acceptance (optional)
 - `/api/notifications` - customer and internal alerts
 - `/api/reports` - revenue, operating cost, and on-time delivery
+
+## Orders endpoints (Flow 1: Transport Request & Approval)
+
+Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)
+
+### `POST /orders` (Customer)
+Creates and submits a new transport request.
+- **Role:** `CUSTOMER`
+- **Body:**
+```json
+{
+  "contactName": "Nguyễn Văn A",
+  "contactAddress": "123 Trần Phú, Q.5, TP.HCM",
+  "contactPhone": "0901234567",
+  "contactEmail": "owner@example.com",
+  "requestedHorseCount": 1,
+  "originLocation": "Trang trại Củ Chi, TP.HCM",
+  "destinationLocation": "Singapore Turf Club, Singapore",
+  "requestedDate": "2026-10-15T08:00:00.000Z",
+  "specialRequirements": "Cần xe điều hòa đặc biệt",
+  "medicalDocumentUrl": "https://example.com/docs/medical-rules.pdf",
+  "horseName": "Xích Thố",
+  "horseBreed": "Thoroughbred",
+  "horseGender": "male",
+  "horseAge": 4,
+  "horses": [
+    {
+      "name": "Xích Thố",
+      "breed": "Thoroughbred",
+      "gender": "male",
+      "age": 4
+    }
+  ]
+}
+```
+
+### `GET /orders/my-orders` (Customer)
+Lists all transport requests submitted by the authenticated customer.
+
+### `GET /orders` (Logistics Manager / Admin)
+Lists all transport requests across the system. Supports optional query parameter `?status=requested`.
+
+### `GET /orders/:id`
+Retrieves detailed information for a specific order. Customers can only view their own orders.
+
+### `PATCH /orders/:id/approve` (Logistics Manager / Admin)
+Approves a pending `requested` order and notifies the customer.
+- **Body:** `{ "totalCost": 15000000, "note": "Phê duyệt kế hoạch" }`
+
+### `PATCH /orders/:id/reject` (Logistics Manager / Admin)
+Rejects a pending `requested` order with a mandatory reason and notifies the customer.
+- **Body:** `{ "reason": "Lý do từ chối đơn hàng" }`
+
+## Notifications endpoints
+
+### `GET /notifications`
+Retrieves all notifications for the authenticated user (sorted newest first).
+
+### `PATCH /notifications/:id/read`
+Marks a notification as read.
 
 ## Contract rules
 

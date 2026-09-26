@@ -14,7 +14,7 @@ Trước khi triển khai tính năng mới, Agent phải đọc:
 
 - Frontend: TypeScript, React, Next.js.
 - Backend: TypeScript, NestJS, REST API.
-- Database: PostgreSQL.
+- Database: MySQL 8.0+ (InnoDB, utf8mb4).
 - API documentation: OpenAPI/Swagger.
 - Backend API development port: `5000`.
 - Frontend development port: `3001`.
@@ -29,7 +29,7 @@ Cấu trúc chính:
 - `backend/src/modules/`: module theo business domain.
 - `backend/src/common/`: guard, decorator, DTO/type và utility dùng chung.
 - `backend/src/config/`: cấu hình backend.
-- `database/`: schema, seed và migrations.
+- `database/`: MySQL schema, seed và migrations.
 - `docs/`: requirements, actor/role, API và flow documentation.
 
 ## 3. Phạm vi thay đổi của Agent
