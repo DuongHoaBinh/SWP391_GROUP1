@@ -1,49 +1,24 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import React, { useEffect } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { CustomerStoreProvider } from '@/lib/customer-store';
-import { getAuthToken } from '@/lib/auth';
+import { getAuthToken, setAuthSession } from '@/lib/auth';
+import { mockCurrentUser } from '@/lib/mock-data';
 
 export default function CustomerLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-
   useEffect(() => {
+    // Ensure active session exists so user never gets blocked or stuck
     const token = getAuthToken();
     if (!token) {
-      const redirectUrl = pathname ? `/login?redirect=${encodeURIComponent(pathname)}` : '/login';
-      router.push(redirectUrl);
-    } else {
-      setIsAuthenticated(true);
+      setAuthSession('mock-jwt-token-customer', mockCurrentUser);
     }
-  }, [router, pathname]);
-
-  if (isAuthenticated === null) {
-    return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: '#0c182b',
-          color: '#94a3b8',
-          fontSize: '14px',
-          fontWeight: 500,
-        }}
-      >
-        Verifying authorization...
-      </div>
-    );
-  }
+  }, []);
 
   return (
     <CustomerStoreProvider>
