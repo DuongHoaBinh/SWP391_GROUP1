@@ -17,8 +17,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // 2. Authentication routes ('/login'): if already logged in, redirect to dashboard
-  if (pathname === '/login') {
+  // 2. Authentication routes ('/login', '/register'): if already logged in, redirect to dashboard
+  if (pathname === '/login' || pathname === '/register') {
     if (token) {
       return NextResponse.redirect(new URL('/customer', request.url));
     }

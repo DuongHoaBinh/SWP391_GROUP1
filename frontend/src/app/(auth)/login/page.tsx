@@ -183,30 +183,15 @@ function LoginForm() {
             disabled={isLoading}
             style={{ width: '100%', marginTop: '6px' }}
           >
-            {isLoading ? 'Signing In...' : 'Sign In to Dashboard'}
+            {isLoading ? 'Signing In...' : 'Sign In'}
           </Button>
         </form>
 
-        <div style={{ textAlign: 'center', fontSize: '12.5px', color: '#64748b' }}>
-          Customer preview demo?{' '}
-          <button
-            type="button"
-            onClick={() => {
-              setAuthSession('mock-jwt-token-customer', mockCurrentUser);
-              router.push('/customer');
-            }}
-            style={{
-              color: 'var(--primary)',
-              fontWeight: 600,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: 0,
-              textDecoration: 'underline',
-            }}
-          >
-            Enter Customer Dashboard directly →
-          </button>
+        <div style={{ textAlign: 'center', fontSize: '13px', color: '#64748b' }}>
+          Don&apos;t have an account?{' '}
+          <Link href="/register" style={{ color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+            Register
+          </Link>
         </div>
       </div>
     </div>
