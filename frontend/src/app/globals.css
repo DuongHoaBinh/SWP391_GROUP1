@@ -148,3 +148,10 @@ input, select, textarea {
   50% { transform: translateX(5px); }
   75% { transform: translateX(-5px); }
 }
+
+/* Auth Pages Responsive Layout */
+@media (max-width: 768px) {
+  .brand-showcase-panel {
+    display: none !important;
+  }
+}
