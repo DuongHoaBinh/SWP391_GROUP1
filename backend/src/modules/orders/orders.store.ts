@@ -1,6 +1,6 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
-import { ShipmentAttachment, ShipmentStatus, TransportOrder } from './orders.types';
+import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
 import { CreateOrderDto } from './dto/create-order.dto';
 
 interface ShipmentRow extends RowDataPacket {
@@ -36,6 +36,14 @@ interface AttachmentRow extends RowDataPacket {
   uploaded_at: Date;
 }
 
+interface HorseRow extends RowDataPacket {
+  horse_id: number;
+  name: string;
+  breed: string | null;
+  gender: 'male' | 'female' | 'gelding' | null;
+  age: number | null;
+}
+
 @Injectable()
 export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   private pool!: Pool;
@@ -60,6 +68,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   async createShipment(customerId: number, dto: CreateOrderDto): Promise<number> {
     const requestedDate = dto.requestedDate ? new Date(dto.requestedDate) : new Date();
 
+    // 1. Tạo đơn vận chuyển trong bảng shipment
     const [result] = await this.pool.execute(
       `INSERT INTO shipment (
         customer_id, requested_by, contact_name, contact_address, contact_phone, contact_email,
@@ -83,8 +92,47 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
     const shipmentId = (result as { insertId: number }).insertId;
 
+    // 2. Lưu file tài liệu y tế nếu có
     if (dto.medicalDocumentUrl) {
       await this.createAttachment(shipmentId, dto.medicalDocumentUrl, customerId);
+    }
+
+    // 3. Lưu thông tin con ngựa vào bảng horse và liên kết qua shipment_horse
+    const horsesToInsert: Array<{
+      name: string;
+      breed: string | null;
+      gender: 'male' | 'female' | 'gelding' | null;
+      age: number | null;
+    }> = [];
+
+    if (dto.horses && dto.horses.length > 0) {
+      for (const h of dto.horses) {
+        horsesToInsert.push({
+          name: h.name,
+          breed: h.breed ?? null,
+          gender: h.gender ?? null,
+          age: h.age ?? null,
+        });
+      }
+    } else if (dto.horseName) {
+      horsesToInsert.push({
+        name: dto.horseName,
+        breed: dto.horseBreed ?? null,
+        gender: dto.horseGender ?? null,
+        age: dto.horseAge ?? null,
+      });
+    }
+
+    for (const h of horsesToInsert) {
+      const [hResult] = await this.pool.execute(
+        'INSERT INTO horse (owner_id, name, breed, gender, age, status) VALUES (?, ?, ?, ?, ?, ?)',
+        [customerId, h.name, h.breed, h.gender, h.age, 'active'],
+      );
+      const horseId = (hResult as { insertId: number }).insertId;
+      await this.pool.execute(
+        'INSERT INTO shipment_horse (shipment_id, horse_id) VALUES (?, ?)',
+        [shipmentId, horseId],
+      );
     }
 
     return shipmentId;
@@ -179,6 +227,14 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       ['shipment', row.shipment_id],
     );
 
+    const [horses] = await this.pool.execute<HorseRow[]>(
+      `SELECT h.horse_id, h.name, h.breed, h.gender, h.age
+       FROM shipment_horse sh
+       JOIN horse h ON h.horse_id = sh.horse_id
+       WHERE sh.shipment_id = ?`,
+      [row.shipment_id],
+    );
+
     return {
       id: row.shipment_id,
       customerId: row.customer_id,
@@ -208,6 +264,13 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         fileUrl: att.file_url,
         fileType: att.file_type,
         uploadedAt: new Date(att.uploaded_at).toISOString(),
+      })),
+      horses: horses.map((h) => ({
+        horseId: h.horse_id,
+        name: h.name,
+        breed: h.breed,
+        gender: h.gender,
+        age: h.age !== null ? Number(h.age) : null,
       })),
     };
   }

@@ -76,12 +76,24 @@ Creates and submits a new transport request.
   "contactAddress": "123 Trần Phú, Q.5, TP.HCM",
   "contactPhone": "0901234567",
   "contactEmail": "owner@example.com",
-  "requestedHorseCount": 2,
+  "requestedHorseCount": 1,
   "originLocation": "Trang trại Củ Chi, TP.HCM",
   "destinationLocation": "Singapore Turf Club, Singapore",
   "requestedDate": "2026-10-15T08:00:00.000Z",
   "specialRequirements": "Cần xe điều hòa đặc biệt",
-  "medicalDocumentUrl": "https://example.com/docs/medical-rules.pdf"
+  "medicalDocumentUrl": "https://example.com/docs/medical-rules.pdf",
+  "horseName": "Xích Thố",
+  "horseBreed": "Thoroughbred",
+  "horseGender": "male",
+  "horseAge": 4,
+  "horses": [
+    {
+      "name": "Xích Thố",
+      "breed": "Thoroughbred",
+      "gender": "male",
+      "age": 4
+    }
+  ]
 }
 ```
 
