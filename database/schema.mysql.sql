@@ -126,6 +126,7 @@ CREATE TABLE shipment (
   expected_arrival_date DATETIME,
   actual_arrival_date DATETIME,
   special_requirements TEXT,
+  rejection_reason VARCHAR(500),
   status ENUM('requested','approved','rejected','planning','in_transit','completed','cancelled') NOT NULL DEFAULT 'requested',
   total_cost DECIMAL(15,2) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
