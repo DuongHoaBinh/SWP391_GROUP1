@@ -11,7 +11,8 @@ import {
   Bell,
   HelpCircle,
   LogOut,
-  Sparkles,
+  BarChart3,
+  Settings,
 } from 'lucide-react';
 import { clearAuthSession, getCurrentUser } from '@/lib/auth';
 
@@ -20,7 +21,6 @@ interface NavItem {
   href: string;
   icon: React.ReactNode;
   badge?: number;
-  badgeColor?: 'red' | 'blue';
 }
 
 export const Sidebar: React.FC = () => {
@@ -32,20 +32,20 @@ export const Sidebar: React.FC = () => {
     {
       label: 'Dashboard',
       href: '/customer',
-      icon: <LayoutDashboard size={20} />,
+      icon: <LayoutDashboard size={18} />,
     },
     {
       label: 'Transport Requests',
       href: '/customer/requests',
-      icon: <Truck size={20} />,
+      icon: <Truck size={18} />,
     },
     {
       label: 'My Horses',
       href: '/customer/horses',
       icon: (
         <svg
-          width="20"
-          height="20"
+          width="18"
+          height="18"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -63,21 +63,32 @@ export const Sidebar: React.FC = () => {
     {
       label: 'Documents',
       href: '/customer/documents',
-      icon: <FolderClosed size={20} />,
+      icon: <FolderClosed size={18} />,
       badge: 2,
-      badgeColor: 'red',
     },
     {
       label: 'Trip Tracking',
       href: '/customer/tracking',
-      icon: <Navigation size={20} />,
+      icon: <Navigation size={18} />,
     },
     {
       label: 'Notifications',
       href: '/customer/notifications',
-      icon: <Bell size={20} />,
-      badge: 4,
-      badgeColor: 'blue',
+      icon: <Bell size={18} />,
+      badge: 3,
+    },
+  ];
+
+  const managementItems: NavItem[] = [
+    {
+      label: 'Reports',
+      href: '/customer/reports',
+      icon: <BarChart3 size={18} />,
+    },
+    {
+      label: 'Settings',
+      href: '/customer/settings',
+      icon: <Settings size={18} />,
     },
   ];
 
@@ -92,16 +103,16 @@ export const Sidebar: React.FC = () => {
     <aside
       style={{
         width: '260px',
-        backgroundColor: 'var(--sidebar-bg)',
-        color: 'var(--sidebar-text)',
+        backgroundColor: '#0c121e',
+        color: '#94a3b8',
         display: 'flex',
         flexDirection: 'column',
         height: '100vh',
         position: 'sticky',
         top: 0,
+        zIndex: 40,
+        borderRight: '1px solid #192233',
         flexShrink: 0,
-        zIndex: 100,
-        borderRight: '1px solid var(--sidebar-border)',
       }}
     >
       {/* Brand Header */}
@@ -111,137 +122,193 @@ export const Sidebar: React.FC = () => {
           display: 'flex',
           alignItems: 'center',
           gap: '12px',
+          borderBottom: '1px solid #162030',
         }}
       >
         <div
           style={{
-            width: '40px',
-            height: '40px',
+            width: '36px',
+            height: '36px',
             borderRadius: '10px',
-            backgroundColor: '#2563eb',
+            background: 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#ffffff',
-            boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
-            flexShrink: 0,
+            boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
           }}
         >
-          {/* Horse Silhouette Logo */}
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 16v-1c0-4-3-6-7-6H9l-2-3H3l1 5-2 3v3h10" />
-            <circle cx="8" cy="7" r="1" />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="5" cy="19" r="2" fill="#fff" />
+            <path d="M5 17c0-5 4-9 9-9h5" />
+            <polyline points="15 4 19 8 15 12" />
           </svg>
         </div>
         <div>
-          <h1
-            style={{
-              fontSize: '16px',
-              fontWeight: 700,
-              color: '#ffffff',
-              lineHeight: 1.2,
-              letterSpacing: '-0.02em',
-              margin: 0,
-            }}
-          >
-            EquiTransit
-          </h1>
-          <span
-            style={{
-              fontSize: '13px',
-              fontWeight: 500,
-              color: '#94a3b8',
-              letterSpacing: '0.01em',
-            }}
-          >
+          <div style={{ fontSize: '16px', fontWeight: 800, color: '#ffffff', lineHeight: 1.1 }}>
+            RaceHorse
+          </div>
+          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, letterSpacing: '0.06em', marginTop: '2px' }}>
             Logistics
-          </span>
+          </div>
         </div>
       </div>
 
-      {/* Main Nav Items */}
-      <nav
+      {/* Navigation Groups */}
+      <div
         style={{
           flex: 1,
-          padding: '16px 12px',
+          padding: '20px 14px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '6px',
+          gap: '24px',
           overflowY: 'auto',
         }}
       >
-        {navItems.map((item) => {
-          const isActive =
-            item.href === '/customer'
-              ? pathname === '/customer'
-              : pathname.startsWith(item.href);
+        {/* Section: NAVIGATION */}
+        <div>
+          <div
+            style={{
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: '#475569',
+              textTransform: 'uppercase',
+              padding: '0 10px',
+              marginBottom: '8px',
+            }}
+          >
+            Navigation
+          </div>
+          <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            {navItems.map((item) => {
+              const isActive =
+                item.href === '/customer'
+                  ? pathname === '/customer'
+                  : pathname?.startsWith(item.href);
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '10px 14px',
-                borderRadius: '10px',
-                fontSize: '14px',
-                fontWeight: isActive ? 600 : 500,
-                color: isActive ? '#ffffff' : 'var(--sidebar-text)',
-                backgroundColor: isActive ? 'var(--primary)' : 'transparent',
-                transition: 'all 0.15s ease-in-out',
-                boxShadow: isActive ? '0 4px 12px rgba(37, 99, 235, 0.35)' : 'none',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ display: 'flex', alignItems: 'center', opacity: isActive ? 1 : 0.85 }}>
-                  {item.icon}
-                </span>
-                <span>{item.label}</span>
-              </div>
-
-              {item.badge !== undefined && (
-                <span
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
                   style={{
-                    backgroundColor: item.badgeColor === 'red' ? '#ef4444' : '#2563eb',
-                    color: '#ffffff',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    borderRadius: '999px',
-                    minWidth: '20px',
-                    height: '20px',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '0 5px',
+                    justifyContent: 'space-between',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    fontSize: '13.5px',
+                    fontWeight: isActive ? 600 : 500,
+                    color: isActive ? '#ffffff' : '#94a3b8',
+                    backgroundColor: isActive ? '#1c283c' : 'transparent',
+                    textDecoration: 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                      (e.currentTarget as HTMLElement).style.color = '#f1f5f9';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                      (e.currentTarget as HTMLElement).style.color = '#94a3b8';
+                    }
                   }}
                 >
-                  {item.badge}
-                </span>
-              )}
-            </Link>
-          );
-        })}
-      </nav>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ color: isActive ? '#60a5fa' : '#64748b' }}>{item.icon}</span>
+                    <span>{item.label}</span>
+                  </div>
 
-      {/* Sidebar Footer */}
+                  {item.badge !== undefined && (
+                    <span
+                      style={{
+                        padding: '2px 7px',
+                        borderRadius: '999px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        backgroundColor: '#2563eb',
+                        color: '#ffffff',
+                      }}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Section: MANAGEMENT */}
+        <div>
+          <div
+            style={{
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: '#475569',
+              textTransform: 'uppercase',
+              padding: '0 10px',
+              marginBottom: '8px',
+            }}
+          >
+            Management
+          </div>
+          <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            {managementItems.map((item) => {
+              const isActive = pathname?.startsWith(item.href);
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    fontSize: '13.5px',
+                    fontWeight: isActive ? 600 : 500,
+                    color: isActive ? '#ffffff' : '#94a3b8',
+                    backgroundColor: isActive ? '#1c283c' : 'transparent',
+                    textDecoration: 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                      (e.currentTarget as HTMLElement).style.color = '#f1f5f9';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                      (e.currentTarget as HTMLElement).style.color = '#94a3b8';
+                    }
+                  }}
+                >
+                  <span style={{ color: isActive ? '#60a5fa' : '#64748b' }}>{item.icon}</span>
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      </div>
+
+      {/* Bottom Footer Section */}
       <div
         style={{
           padding: '16px 14px',
-          borderTop: '1px solid var(--sidebar-border)',
+          borderTop: '1px solid #162030',
           display: 'flex',
           flexDirection: 'column',
-          gap: '12px',
+          gap: '10px',
         }}
       >
         {/* Help & Support */}
@@ -251,15 +318,16 @@ export const Sidebar: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: '12px',
-            padding: '8px 10px',
+            padding: '9px 12px',
             borderRadius: '8px',
             fontSize: '13px',
-            fontWeight: 500,
-            color: 'var(--sidebar-text)',
-            transition: 'background-color 0.15s ease',
+            color: '#94a3b8',
+            textDecoration: 'none',
           }}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = '#ffffff')}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
         >
-          <HelpCircle size={18} />
+          <HelpCircle size={17} color="#64748b" />
           <span>Help & Support</span>
         </Link>
 
@@ -269,64 +337,71 @@ export const Sidebar: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '10px 10px',
+            padding: '10px',
             borderRadius: '10px',
-            backgroundColor: 'rgba(255, 255, 255, 0.04)',
+            backgroundColor: '#121a29',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
             <div
               style={{
-                width: '36px',
-                height: '36px',
+                width: '34px',
+                height: '34px',
                 borderRadius: '50%',
-                backgroundColor: '#ffffff',
-                color: '#0f172a',
+                backgroundColor: '#2563eb',
+                color: '#ffffff',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontWeight: 700,
-                fontSize: '13px',
+                fontSize: '12px',
+                flexShrink: 0,
               }}
             >
-              {user.initials}
+              AM
             </div>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div
                 style={{
                   fontSize: '13px',
                   fontWeight: 600,
                   color: '#ffffff',
-                  lineHeight: 1.2,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                 }}
               >
-                {user.name}
+                Alex Morgan
               </div>
               <div
                 style={{
                   fontSize: '11px',
-                  fontWeight: 600,
                   color: '#64748b',
-                  letterSpacing: '0.04em',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                 }}
               >
-                {user.role}
+                alex@stablesco.com
               </div>
             </div>
           </div>
 
           <button
             onClick={handleLogout}
-            title="Log Out"
+            title="Log out"
             style={{
               padding: '6px',
-              color: '#94a3b8',
-              borderRadius: '6px',
+              color: '#64748b',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'color 0.15s ease',
+              borderRadius: '6px',
             }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = '#f87171')}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
           >
             <LogOut size={16} />
           </button>

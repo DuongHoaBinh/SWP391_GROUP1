@@ -27,12 +27,12 @@ export default function CustomerLayout({
         <Sidebar />
 
         {/* Main Content Area */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, backgroundColor: '#f8fafc' }}>
           <Header />
           <main
             style={{
               flex: 1,
-              padding: '32px',
+              padding: '28px 32px 48px 32px',
               maxWidth: '1600px',
               width: '100%',
               margin: '0 auto',
