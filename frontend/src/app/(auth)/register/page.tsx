@@ -32,6 +32,10 @@ function RegisterForm() {
       setError('Password must be at least 8 characters long');
       return;
     }
+    if (!/^(?=.*[A-Za-z])(?=.*\d).+$/.test(password)) {
+      setError('Password must contain at least one letter and one number');
+      return;
+    }
     if (password !== confirmPassword) {
       setError('Password confirmation does not match');
       return;
@@ -148,6 +152,7 @@ function RegisterForm() {
       >
         {/* Left Column: Brand & Hero Showcase */}
         <div
+          className="brand-showcase-panel"
           style={{
             backgroundColor: '#0c182b',
             backgroundImage: 'radial-gradient(circle at 10% 20%, rgba(37, 99, 235, 0.15) 0%, transparent 60%)',
