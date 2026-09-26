@@ -59,7 +59,10 @@ export interface Horse {
   dob?: string;
   color?: string;
   weight?: string;
-  medicalStatus?: 'Healthy' | 'Requires Review' | 'Treatment';
+  location?: string;
+  availabilityStatus?: 'In Transit' | 'Scheduled' | 'Available' | 'Not Cleared';
+  medicalStatus?: 'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention' | 'Treatment';
+  documentStatus?: 'Valid' | 'Expiring Soon' | 'Missing';
   vaccinationStatus?: string;
   quarantineStatus?: 'Approved' | 'Pending' | 'In Progress';
   lastExamDate?: string;
