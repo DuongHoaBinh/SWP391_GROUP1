@@ -1,15 +1,18 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { LogIn, Lock, Mail, AlertCircle, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { setAuthSession } from '@/lib/auth';
 import { mockCurrentUser } from '@/lib/mock-data';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTarget = searchParams.get('redirect') || '/customer';
+
   const [email, setEmail] = useState('customer@equitransit.com');
   const [password, setPassword] = useState('Password@123');
   const [isLoading, setIsLoading] = useState(false);
@@ -31,7 +34,7 @@ export default function LoginPage() {
       if (response.ok) {
         const data = await response.json();
         setAuthSession(data.accessToken, data.user);
-        router.push('/customer');
+        router.push(redirectTarget);
         return;
       }
     } catch {
@@ -43,7 +46,7 @@ export default function LoginPage() {
       ...mockCurrentUser,
       email,
     });
-    router.push('/customer');
+    router.push(redirectTarget);
   };
 
   return (
@@ -185,12 +188,51 @@ export default function LoginPage() {
         </form>
 
         <div style={{ textAlign: 'center', fontSize: '12.5px', color: '#64748b' }}>
-          Internal staff account or customer registration?{' '}
-          <Link href="/customer" style={{ color: 'var(--primary)', fontWeight: 600 }}>
+          Customer preview demo?{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setAuthSession('mock-jwt-token-customer', mockCurrentUser);
+              router.push('/customer');
+            }}
+            style={{
+              color: 'var(--primary)',
+              fontWeight: 600,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+              textDecoration: 'underline',
+            }}
+          >
             Enter Customer Dashboard directly →
-          </Link>
+          </button>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div
+          style={{
+            minHeight: '100vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: '#0c182b',
+            color: '#94a3b8',
+            fontSize: '14px',
+          }}
+        >
+          Loading portal...
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }
