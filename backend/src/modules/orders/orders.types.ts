@@ -1,5 +1,6 @@
 export enum ShipmentStatus {
   REQUESTED = 'requested',
+  CHANGE_REQUESTED = 'change_requested',
   APPROVED = 'approved',
   REJECTED = 'rejected',
   PLANNING = 'planning',
@@ -41,6 +42,7 @@ export interface TransportOrder {
   actualArrivalDate: string | null;
   specialRequirements: string | null;
   rejectionReason: string | null;
+  changeRequestNotes: string | null;
   status: ShipmentStatus;
   totalCost: number;
   createdAt: string;

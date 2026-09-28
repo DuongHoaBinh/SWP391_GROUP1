@@ -114,6 +114,14 @@ Approves a pending `requested` order and notifies the customer.
 Rejects a pending `requested` order with a mandatory reason and notifies the customer.
 - **Body:** `{ "reason": "Lý do từ chối đơn hàng" }`
 
+### `PATCH /orders/:id/request-changes` (Logistics Manager / Admin)
+Requests modifications on a pending `requested` order with a mandatory explanation note. Updates status to `change_requested` and sends a notification to the customer.
+- **Body:** `{ "reason": "Vui lòng dời ngày xuất phát sang 16/10 và cập nhật địa chỉ đón chi tiết" }`
+
+### `PUT /orders/:id` (Customer)
+Customer updates editable order details (dates, route locations, horse info, special requirements) and resubmits the request. Resets status back to `requested` for manager review.
+- **Body:** Partial or full fields from `CreateOrderDto`.
+
 ## Notifications endpoints
 
 ### `GET /notifications`
