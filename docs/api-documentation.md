@@ -122,6 +122,82 @@ Requests modifications on a pending `requested` order with a mandatory explanati
 Customer updates editable order details (dates, route locations, horse info, special requirements) and resubmits the request. Resets status back to `requested` for manager review.
 - **Body:** Partial or full fields from `CreateOrderDto`.
 
+## Documents endpoints (Flow 2: Legal, Quarantine, and Customs Documents)
+
+Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)
+
+### `GET /documents/regulations`
+Lists active quarantine and legal regulations by destination country. Supports optional query `?country=Singapore`.
+
+### `POST /documents/regulations` (Transport Specialist / Admin)
+Creates a new document requirement for a destination country.
+- **Role:** `TRANSPORT_SPECIALIST`, `ADMIN`
+- **Body:**
+```json
+{
+  "country": "Singapore",
+  "documentType": "horse_passport",
+  "description": "Hộ chiếu FEI hoặc liên đoàn quốc gia cấp có gắn mã microchip",
+  "effectiveDate": "2026-01-01"
+}
+```
+
+### `POST /documents/upload` (Customer / Transport Specialist / Admin)
+Uploads an official scan/PDF document for a specific horse.
+- **Body:**
+```json
+{
+  "horseId": 1,
+  "regulationId": 1,
+  "docType": "horse_passport",
+  "docNumber": "FEI-VN-2026-12",
+  "fileUrl": "https://storage.example.com/docs/passport.pdf",
+  "issueDate": "2026-01-10",
+  "expiryDate": "2027-01-10"
+}
+```
+
+### `GET /documents/:id`
+Retrieves detailed information for a specific document, including reviewer notes and official authority approval history.
+
+### `GET /documents/horse/:horseId`
+Lists all uploaded documents for a specific horse.
+
+### `GET /documents/order/:orderId/checklist`
+Returns the complete legal and quarantine compliance checklist for all horses in a transport order. Evaluates missing regulations, accepted documents, and the overall `isFullyCompliant` status.
+
+### `PATCH /documents/:id/review` (Transport Specialist / Admin)
+Specialist reviews and approves (`approved`), rejects (`rejected` with required reason), or marks a document as expired (`expired`). Notifies the customer automatically.
+- **Body:**
+```json
+{
+  "status": "approved",
+  "notes": "Hồ sơ hợp lệ và còn thời hạn",
+  "expiryDate": "2027-01-10"
+}
+```
+
+### `POST /documents/:id/authority-approval` (Transport Specialist / Admin)
+Records official submission and approval progress with agricultural, veterinary, and customs agencies.
+- **Body:**
+```json
+{
+  "authorityName": "Cơ quan Thú y Singapore (AVS)",
+  "status": "approved",
+  "approvalDate": "2026-10-10T08:00:00.000Z",
+  "notes": "Đã cấp giấy phép nhập khẩu số AVS-2026/099"
+}
+```
+
+### `POST /documents/order/:orderId/notify-missing` (Transport Specialist / Admin)
+Evaluates compliance for the order and automatically sends a high-priority notification to the customer listing all missing and rejected documents per horse.
+- **Body:**
+```json
+{
+  "customMessage": "Vui lòng hoàn tất nộp giấy tờ trước ngày 10/10 để kịp trình Cục Thú Y."
+}
+```
+
 ## Notifications endpoints
 
 ### `GET /notifications`

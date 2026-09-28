@@ -92,6 +92,7 @@ CREATE TABLE transport_document (
   issue_date DATE,
   expiry_date DATE,
   status ENUM('draft','submitted','approved','rejected','expired') NOT NULL DEFAULT 'draft',
+  reviewer_notes VARCHAR(500),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_doc_horse FOREIGN KEY (horse_id) REFERENCES horse(horse_id),
   CONSTRAINT fk_doc_regulation FOREIGN KEY (regulation_id) REFERENCES regulation(regulation_id),

@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { AuthModule } from './modules/auth/auth.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { DocumentsModule } from './modules/documents/documents.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     AuthModule,
     OrdersModule,
     NotificationsModule,
+    DocumentsModule,
   ],
 })
 export class AppModule {}
