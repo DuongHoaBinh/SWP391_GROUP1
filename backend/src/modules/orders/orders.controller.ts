@@ -6,6 +6,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -14,6 +15,8 @@ import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ApproveOrderDto } from './dto/approve-order.dto';
 import { RejectOrderDto } from './dto/reject-order.dto';
+import { RequestChangesDto } from './dto/request-changes.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
 import { ShipmentStatus } from './orders.types';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -83,5 +86,27 @@ export class OrdersController {
     @Body() dto: RejectOrderDto,
   ) {
     return this.ordersService.rejectOrder(user, id, dto);
+  }
+
+  @Patch(':id/request-changes')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Logistics Manager requests changes on a transport request' })
+  requestChanges(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RequestChangesDto,
+  ) {
+    return this.ordersService.requestChanges(user, id, dto);
+  }
+
+  @Put(':id')
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({ summary: 'Customer updates and resubmits a transport request after changes requested' })
+  updateOrder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateOrderDto,
+  ) {
+    return this.ordersService.updateOrder(user, id, dto);
   }
 }

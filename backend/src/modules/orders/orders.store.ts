@@ -2,6 +2,7 @@ import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
 
 interface ShipmentRow extends RowDataPacket {
   shipment_id: number;
@@ -21,6 +22,7 @@ interface ShipmentRow extends RowDataPacket {
   actual_arrival_date: Date | null;
   special_requirements: string | null;
   rejection_reason: string | null;
+  change_request_notes: string | null;
   status: ShipmentStatus;
   total_cost: number | string;
   created_at: Date;
@@ -221,6 +223,108 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
+  async updateShipmentChangeRequest(
+    shipmentId: number,
+    notes: string,
+  ): Promise<boolean> {
+    const [result] = await this.pool.execute(
+      `UPDATE shipment
+       SET status = ?, change_request_notes = ?
+       WHERE shipment_id = ?`,
+      [ShipmentStatus.CHANGE_REQUESTED, notes, shipmentId],
+    );
+
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async updateAndResubmitShipment(
+    customerId: number,
+    shipmentId: number,
+    dto: UpdateOrderDto,
+  ): Promise<boolean> {
+    const requestedDate = dto.requestedDate ? new Date(dto.requestedDate) : null;
+
+    // 1. Cập nhật các thông tin của đơn vận chuyển và chuyển status về requested
+    const [result] = await this.pool.execute(
+      `UPDATE shipment
+       SET
+         contact_name = COALESCE(?, contact_name),
+         contact_address = COALESCE(?, contact_address),
+         contact_phone = COALESCE(?, contact_phone),
+         contact_email = COALESCE(?, contact_email),
+         requested_horse_count = COALESCE(?, requested_horse_count),
+         origin_location = COALESCE(?, origin_location),
+         destination_location = COALESCE(?, destination_location),
+         requested_date = COALESCE(?, requested_date),
+         special_requirements = COALESCE(?, special_requirements),
+         change_request_notes = NULL,
+         status = ?
+       WHERE shipment_id = ?`,
+      [
+        dto.contactName ?? null,
+        dto.contactAddress ?? null,
+        dto.contactPhone ?? null,
+        dto.contactEmail ?? null,
+        dto.requestedHorseCount ?? null,
+        dto.originLocation ?? null,
+        dto.destinationLocation ?? null,
+        requestedDate,
+        dto.specialRequirements ?? null,
+        ShipmentStatus.REQUESTED,
+        shipmentId,
+      ],
+    );
+
+    // 2. Lưu file tài liệu y tế mới nếu có
+    if (dto.medicalDocumentUrl) {
+      await this.createAttachment(shipmentId, dto.medicalDocumentUrl, customerId);
+    }
+
+    // 3. Cập nhật thông tin ngựa nếu có gửi mới
+    const horsesToInsert: Array<{
+      name: string;
+      breed: string | null;
+      gender: 'male' | 'female' | 'gelding' | null;
+      age: number | null;
+    }> = [];
+
+    if (dto.horses && dto.horses.length > 0) {
+      for (const h of dto.horses) {
+        horsesToInsert.push({
+          name: h.name,
+          breed: h.breed ?? null,
+          gender: h.gender ?? null,
+          age: h.age ?? null,
+        });
+      }
+    } else if (dto.horseName) {
+      horsesToInsert.push({
+        name: dto.horseName,
+        breed: dto.horseBreed ?? null,
+        gender: dto.horseGender ?? null,
+        age: dto.horseAge ?? null,
+      });
+    }
+
+    if (horsesToInsert.length > 0) {
+      await this.pool.execute('DELETE FROM shipment_horse WHERE shipment_id = ?', [shipmentId]);
+
+      for (const h of horsesToInsert) {
+        const [hResult] = await this.pool.execute(
+          'INSERT INTO horse (owner_id, name, breed, gender, age, status) VALUES (?, ?, ?, ?, ?, ?)',
+          [customerId, h.name, h.breed, h.gender, h.age, 'active'],
+        );
+        const horseId = (hResult as { insertId: number }).insertId;
+        await this.pool.execute(
+          'INSERT INTO shipment_horse (shipment_id, horse_id) VALUES (?, ?)',
+          [shipmentId, horseId],
+        );
+      }
+    }
+
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
   private async mapShipmentWithAttachments(row: ShipmentRow): Promise<TransportOrder> {
     const [attachments] = await this.pool.execute<AttachmentRow[]>(
       'SELECT attachment_id, file_url, file_type, uploaded_at FROM attachment WHERE related_type = ? AND related_id = ?',
@@ -253,6 +357,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       actualArrivalDate: row.actual_arrival_date ? new Date(row.actual_arrival_date).toISOString() : null,
       specialRequirements: row.special_requirements,
       rejectionReason: row.rejection_reason,
+      changeRequestNotes: row.change_request_notes ?? null,
       status: row.status,
       totalCost: Number(row.total_cost ?? 0),
       createdAt: new Date(row.created_at).toISOString(),
