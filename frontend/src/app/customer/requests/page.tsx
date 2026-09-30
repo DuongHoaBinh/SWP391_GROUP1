@@ -1,27 +1,51 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Search, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useCustomerStore } from '@/lib/customer-store';
+import { apiClient } from '@/lib/api-client';
 
 export default function RequestsPage() {
   const router = useRouter();
-  const { requests } = useCustomerStore();
+  const { requests: mockRequests } = useCustomerStore();
+  const [requests, setRequests] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchRequests = async () => {
+      try {
+        const data = await apiClient<any[]>('/orders/my-orders');
+        // Map backend `TransportOrder` to frontend `TransportRequest` properties used in this view
+        const mappedData = data.map((item) => ({
+          ...item,
+          requestCode: item.id.toString(), // or real request code if backend adds it
+          horse: item.horses?.[0] || { name: 'Multiple Horses' },
+          origin: item.originLocation,
+          destination: item.destinationLocation,
+          departureDate: new Date(item.requestedDate).toLocaleDateString('en-GB'),
+        }));
+        setRequests(mappedData);
+      } catch (err) {
+        console.error('Failed to fetch requests, falling back to mock:', err);
+        setRequests(mockRequests);
+      }
+    };
+    fetchRequests();
+  }, [mockRequests]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
 
   const filtered = requests.filter((r) => {
     const matchesSearch =
-      r.requestCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.horse.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.destination.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'ALL' || r.status === filterStatus;
+      r.requestCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.horse?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.origin?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.destination?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesFilter = filterStatus === 'ALL' || r.status === filterStatus || r.status.toUpperCase() === filterStatus;
     return matchesSearch && matchesFilter;
   });
 

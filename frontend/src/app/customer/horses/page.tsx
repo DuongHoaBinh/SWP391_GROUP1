@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, Calendar, MapPin, MoreHorizontal, X, ChevronDown } from 'lucide-react';
+import { Plus, Search, Calendar, MapPin, MoreHorizontal, X, ChevronDown, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useCustomerStore } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';

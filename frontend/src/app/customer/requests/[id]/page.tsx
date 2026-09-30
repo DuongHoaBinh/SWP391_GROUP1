@@ -23,6 +23,22 @@ import {
 import { useCustomerStore } from '@/lib/customer-store';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { TripTrackingModal } from '@/features/tracking/components/TripTrackingModal';
+import { apiClient } from '@/lib/api-client';
+import { Modal } from '@/components/ui/Modal';
+import useSWR from 'swr';
+import toast from 'react-hot-toast';
+
+const fetcher = async (url: string) => {
+  const data = await apiClient<any>(url);
+  return {
+    ...data,
+    requestCode: data.id.toString(),
+    horse: data.horses?.[0] || { name: 'Unknown' },
+    origin: data.originLocation,
+    destination: data.destinationLocation,
+    departureDate: new Date(data.requestedDate).toLocaleDateString('en-GB'),
+  };
+};
 
 export default function RequestDetailPage() {
   const params = useParams();
@@ -30,43 +46,35 @@ export default function RequestDetailPage() {
   const requestId = params?.id as string;
 
   const { getRequestById, uploadDocumentForRequest, cancelRequest } = useCustomerStore();
+  const { data: request, error, isLoading: loading, mutate } = useSWR(`/orders/${requestId}`, fetcher, {
+    revalidateOnFocus: true,
+  });
 
-  const request = getRequestById(requestId) || getRequestById('tr-001') || {
-    id: 'tr-001',
-    requestCode: 'TR-2026-001',
-    title: 'Championship Transport to Singapore',
-    transportationType: 'International',
-    createdDate: '23 Sep 2026, 09:42',
-    horseId: 'hrs-001',
-    horse: {
-      id: 'hrs-001',
-      name: 'Thunder',
-      breed: 'Thoroughbred',
-      age: 6,
-      gender: 'Male',
-      microchipNumber: '985141000123456',
-      passportNumber: 'HP-2026-001',
-      ownerName: 'John Doe',
-    },
-    origin: 'Ho Chi Minh City',
-    originCode: 'SGN, VN',
-    transitPoint: 'BKK, TH',
-    transitName: 'Border / Transit Checkpoint',
-    destination: 'Singapore',
-    destinationCode: 'SIN, SG',
-    departureDate: '28 Sep 2026',
-    estimatedArrivalDate: '29 Sep 2026',
-    status: 'IN_REVIEW',
-    statusLabel: 'Under Review',
-    activeStepIndex: 2,
-    totalSteps: 7,
-    pendingDocumentsCount: 1,
-  };
+  if (loading || !request) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div style={{ height: '40px', width: '30%', backgroundColor: '#e5e7eb', borderRadius: '8px', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
+        <div style={{ height: '200px', width: '100%', backgroundColor: '#e5e7eb', borderRadius: '16px', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+          }
+        `}</style>
+      </div>
+    );
+  }
 
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isTrackingOpen, setIsTrackingOpen] = useState(false);
+  
+  // Resubmit Modal States
+  const [isResubmitOpen, setIsResubmitOpen] = useState(false);
+  const [resubmitNotes, setResubmitNotes] = useState('');
+  const [isResubmitting, setIsResubmitting] = useState(false);
+  const [resubmitError, setResubmitError] = useState('');
 
-  const hasMissingDocs = request.documents?.some((d) => d.status === 'Missing');
+  const hasMissingDocs = request.documents?.some((d: any) => d.status === 'Missing');
 
   const handleUploadSuccess = (uploadedDoc: any) => {
     uploadDocumentForRequest(request.requestCode, uploadedDoc.title);
@@ -76,6 +84,28 @@ export default function RequestDetailPage() {
   const handleCancel = () => {
     if (confirm(`Are you sure you want to cancel transport request ${request.requestCode}?`)) {
       cancelRequest(request.id);
+    }
+  };
+
+  const submitResubmit = async () => {
+    if (!resubmitNotes.trim()) {
+      setResubmitError('Please describe the changes you made.');
+      return;
+    }
+    setIsResubmitting(true);
+    setResubmitError('');
+    try {
+      await apiClient(`/orders/${request.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ specialRequirements: `[Updated] ${resubmitNotes}` }) // For now, updating specialReqs as a placeholder edit
+      });
+      await mutate();
+      setIsResubmitOpen(false);
+      toast.success('Request resubmitted successfully!');
+    } catch (err) {
+      setResubmitError('Failed to resubmit request. Please try again.');
+    } finally {
+      setIsResubmitting(false);
     }
   };
 
@@ -191,6 +221,49 @@ export default function RequestDetailPage() {
         </div>
       </div>
 
+      {/* Change Requested Alert Banner */}
+      {request.status === 'change_requested' && (
+        <div
+          style={{
+            backgroundColor: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: '12px',
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '16px',
+          }}
+        >
+          <div style={{ padding: '4px', backgroundColor: '#fee2e2', borderRadius: '50%', color: '#ef4444' }}>
+            <AlertTriangle size={20} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700, color: '#991b1b' }}>
+              Action Required: Manager Requested Changes
+            </h4>
+            <p style={{ margin: 0, fontSize: '13px', color: '#b91c1c', lineHeight: 1.5 }}>
+              <strong>Manager Notes:</strong> {request.changeRequestNotes || 'Please update your request details and resubmit.'}
+            </p>
+          </div>
+          <button
+            onClick={() => { setResubmitNotes(''); setResubmitError(''); setIsResubmitOpen(true); }}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#ef4444',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 600,
+              fontSize: '13px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Edit & Resubmit
+          </button>
+        </div>
+      )}
+
       {/* Main 3-Column Layout (Left 2, Right 1) */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px', alignItems: 'start' }}>
         {/* LEFT COLUMN */}
@@ -236,7 +309,7 @@ export default function RequestDetailPage() {
 
               {/* 7 Stages */}
               <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-                {request.timeline?.map((stage) => {
+                {request.timeline?.map((stage: any) => {
                   const isCompleted = stage.status === 'completed';
                   const isActive = stage.status === 'active';
 
@@ -458,7 +531,7 @@ export default function RequestDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {request.horses?.map((item) => (
+                {request.horses?.map((item: any) => (
                   <tr
                     key={item.horse.id}
                     style={{
@@ -540,7 +613,7 @@ export default function RequestDetailPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {request.documents?.map((doc) => {
+              {request.documents?.map((doc: any) => {
                 const isApproved = doc.status === 'Approved';
                 const isReview = doc.status === 'Under Review';
                 const isMissing = doc.status === 'Missing';
@@ -752,7 +825,7 @@ export default function RequestDetailPage() {
               {/* Vertical line */}
               <div style={{ position: 'absolute', top: '8px', bottom: '8px', left: '7px', width: '2px', backgroundColor: '#e2e8f0' }} />
 
-              {request.activities?.map((act, index) => (
+              {request.activities?.map((act: any, index: number) => (
                 <div key={act.id} style={{ position: 'relative' }}>
                   <div
                     style={{
@@ -791,6 +864,84 @@ export default function RequestDetailPage() {
         onClose={() => setIsTrackingOpen(false)}
         request={request}
       />
+
+      {/* Resubmit Modal */}
+      <Modal
+        isOpen={isResubmitOpen}
+        onClose={() => setIsResubmitOpen(false)}
+        title="Edit & Resubmit Request"
+        subtitle={`Request ID: ${request.requestCode}`}
+        maxWidth="500px"
+      >
+        <div style={{ padding: '24px' }}>
+          {resubmitError && (
+            <div style={{ marginBottom: '16px', padding: '12px', borderRadius: '8px', backgroundColor: '#fef2f2', color: '#b91c1c', fontSize: '13px', border: '1px solid #fecaca' }}>
+              <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px' }} />
+              {resubmitError}
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>What changes have you made?</label>
+            <textarea
+              value={resubmitNotes}
+              onChange={(e) => setResubmitNotes(e.target.value)}
+              placeholder="e.g. I have updated the pickup date and attached new health certificates..."
+              style={{
+                padding: '12px',
+                borderRadius: '8px',
+                border: '1px solid #d1d5db',
+                fontSize: '14px',
+                minHeight: '100px',
+                resize: 'vertical',
+                outline: 'none',
+                boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
+                width: '100%',
+                boxSizing: 'border-box'
+              }}
+              autoFocus
+            />
+            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+              The manager will review these notes along with your updated request.
+            </p>
+          </div>
+          
+          <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => setIsResubmitOpen(false)}
+              disabled={isResubmitting}
+              style={{
+                padding: '10px 16px',
+                borderRadius: '8px',
+                border: '1px solid #d1d5db',
+                backgroundColor: '#ffffff',
+                color: '#374151',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: isResubmitting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submitResubmit}
+              disabled={isResubmitting}
+              style={{
+                padding: '10px 20px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: '#2563eb',
+                color: '#ffffff',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: isResubmitting ? 'not-allowed' : 'pointer',
+                opacity: isResubmitting ? 0.7 : 1,
+              }}
+            >
+              {isResubmitting ? 'Resubmitting...' : 'Submit Now'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

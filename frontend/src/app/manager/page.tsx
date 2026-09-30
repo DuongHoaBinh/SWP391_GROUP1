@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -22,13 +22,101 @@ import {
   BarChart3,
   ClipboardCheck,
   CheckCircle2,
+  X,
 } from 'lucide-react';
+import { apiClient } from '@/lib/api-client';
+import { Modal } from '@/components/ui/Modal';
+import useSWR from 'swr';
+import toast from 'react-hot-toast';
+
+const fetcher = (url: string) => apiClient<any[]>(url);
 
 export default function ManagerDashboardPage() {
   const router = useRouter();
 
   // Emergency Change State
   const [emergencyStatus, setEmergencyStatus] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
+
+  // Fetch Pending Requests using SWR
+  const { data: pendingRequests = [], error: loadingError, isLoading: loadingRequests, mutate: mutatePendingRequests } = useSWR('/orders?status=requested', fetcher, {
+    refreshInterval: 30000, // auto-refresh every 30 seconds
+    revalidateOnFocus: true,
+  });
+
+  // Modal States
+  const [activeModal, setActiveModal] = useState<'NONE' | 'APPROVE' | 'REJECT' | 'CHANGE'>('NONE');
+  const [selectedOrderId, setSelectedOrderId] = useState<number | string | null>(null);
+  const [inputValue, setInputValue] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [modalError, setModalError] = useState('');
+
+  const openModal = (type: 'APPROVE' | 'REJECT' | 'CHANGE', id: number | string) => {
+    setActiveModal(type);
+    setSelectedOrderId(id);
+    setInputValue('');
+    setModalError('');
+  };
+
+  const closeModal = () => {
+    setActiveModal('NONE');
+    setSelectedOrderId(null);
+    setInputValue('');
+    setModalError('');
+  };
+
+  const handleConfirmAction = async () => {
+    if (!selectedOrderId) return;
+    setIsSubmitting(true);
+    setModalError('');
+
+    try {
+      if (activeModal === 'APPROVE') {
+        const cost = parseFloat(inputValue);
+        if (isNaN(cost) || cost <= 0) {
+          setModalError('Please enter a valid positive cost amount.');
+          setIsSubmitting(false);
+          return;
+        }
+        await apiClient(`/orders/${selectedOrderId}/approve`, {
+          method: 'PATCH',
+          body: JSON.stringify({ totalCost: cost }),
+        });
+      } else if (activeModal === 'REJECT') {
+        if (!inputValue.trim()) {
+          setModalError('Please enter a reason for rejection.');
+          setIsSubmitting(false);
+          return;
+        }
+        await apiClient(`/orders/${selectedOrderId}/reject`, {
+          method: 'PATCH',
+          body: JSON.stringify({ reason: inputValue }),
+        });
+      } else if (activeModal === 'CHANGE') {
+        if (!inputValue.trim()) {
+          setModalError('Please enter the changes required.');
+          setIsSubmitting(false);
+          return;
+        }
+        await apiClient(`/orders/${selectedOrderId}/request-changes`, {
+          method: 'PATCH',
+          body: JSON.stringify({ reason: inputValue }),
+        });
+      }
+
+      await mutatePendingRequests();
+      closeModal();
+      
+      // Toast Notification
+      if (activeModal === 'APPROVE') toast.success(`Request ${selectedOrderId} approved successfully!`);
+      else if (activeModal === 'REJECT') toast.success(`Request ${selectedOrderId} has been rejected.`);
+      else if (activeModal === 'CHANGE') toast.success(`Changes requested for ${selectedOrderId}.`);
+      
+    } catch (err) {
+      setModalError('Failed to process the request. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -668,195 +756,170 @@ export default function ManagerDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Row 1 */}
-                  <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ fontWeight: 700, color: '#111827' }}>TR-2026-001</span>
-                      <br />
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          padding: '2px 6px',
-                          marginTop: '4px',
-                          borderRadius: '4px',
-                          fontSize: '9.5px',
-                          fontWeight: 700,
-                          backgroundColor: '#fef2f2',
-                          color: '#b91c1c',
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        High Priority
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ textAlign: 'center' }}>
-                          <span style={{ fontWeight: 700, color: '#1f2937', display: 'block' }}>DXB</span>
-                          <span style={{ fontSize: '10px', color: '#6b7280' }}>Dubai</span>
-                        </div>
-                        <span style={{ color: '#d1d5db' }}>→</span>
-                        <div style={{ textAlign: 'center' }}>
-                          <span style={{ fontWeight: 700, color: '#1f2937', display: 'block' }}>SGN</span>
-                          <span style={{ fontSize: '10px', color: '#6b7280' }}>Ho Chi Minh</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div
-                          style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '50%',
-                            backgroundColor: '#f3f4f6',
-                            border: '1px solid #e5e7eb',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            color: '#6b7280',
-                            flexShrink: 0,
-                          }}
-                        >
-                          2♞
-                        </div>
-                        <div>
-                          <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>Alex Morgan</p>
-                          <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>Al Fares Stud</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Sep 28, 2026</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '4px 10px',
-                          borderRadius: '6px',
-                          fontSize: '11.5px',
-                          fontWeight: 700,
-                          backgroundColor: '#fffbeb',
-                          color: '#b45309',
-                          border: '1px solid #fef3c7',
-                        }}
-                      >
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b' }} /> Pending Approval
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                        <button
-                          onClick={() => alert('Reviewing Request TR-2026-001 (DXB -> SGN)')}
-                          style={{
-                            padding: '6px 12px',
-                            border: '1px solid #d1d5db',
-                            borderRadius: '8px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            color: '#374151',
-                            backgroundColor: '#ffffff',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Review
-                        </button>
-                        <button style={{ color: '#9ca3af', border: 'none', background: 'none', cursor: 'pointer' }}>
-                          <MoreHorizontal size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-
-                  {/* Row 2 */}
-                  <tr>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ fontWeight: 700, color: '#111827' }}>TR-2026-002</span>
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ textAlign: 'center' }}>
-                          <span style={{ fontWeight: 700, color: '#1f2937', display: 'block' }}>SIN</span>
-                          <span style={{ fontSize: '10px', color: '#6b7280' }}>Singapore</span>
-                        </div>
-                        <span style={{ color: '#d1d5db' }}>→</span>
-                        <div style={{ textAlign: 'center' }}>
-                          <span style={{ fontWeight: 700, color: '#1f2937', display: 'block' }}>SGN</span>
-                          <span style={{ fontSize: '10px', color: '#6b7280' }}>Ho Chi Minh</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div
-                          style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '50%',
-                            backgroundColor: '#f3f4f6',
-                            border: '1px solid #e5e7eb',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            color: '#6b7280',
-                            flexShrink: 0,
-                          }}
-                        >
-                          1♞
-                        </div>
-                        <div>
-                          <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>Emma Wilson</p>
-                          <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>Private Owner</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 05, 2026</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '4px 10px',
-                          borderRadius: '6px',
-                          fontSize: '11.5px',
-                          fontWeight: 700,
-                          backgroundColor: '#fffbeb',
-                          color: '#b45309',
-                          border: '1px solid #fef3c7',
-                        }}
-                      >
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b' }} /> Pending Approval
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                        <button
-                          onClick={() => alert('Reviewing Request TR-2026-002 (SIN -> SGN)')}
-                          style={{
-                            padding: '6px 12px',
-                            border: '1px solid #d1d5db',
-                            borderRadius: '8px',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            color: '#374151',
-                            backgroundColor: '#ffffff',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Review
-                        </button>
-                        <button style={{ color: '#9ca3af', border: 'none', background: 'none', cursor: 'pointer' }}>
-                          <MoreHorizontal size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  {loadingRequests ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '0' }}>
+                        {[...Array(3)].map((_, idx) => (
+                          <div key={idx} style={{ padding: '16px 24px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between' }}>
+                            <div style={{ width: '15%', height: '16px', backgroundColor: '#e5e7eb', borderRadius: '4px', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
+                            <div style={{ width: '30%', height: '16px', backgroundColor: '#e5e7eb', borderRadius: '4px', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
+                            <div style={{ width: '20%', height: '16px', backgroundColor: '#e5e7eb', borderRadius: '4px', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
+                            <div style={{ width: '10%', height: '16px', backgroundColor: '#e5e7eb', borderRadius: '4px', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
+                          </div>
+                        ))}
+                        <style>{`
+                          @keyframes pulse {
+                            0%, 100% { opacity: 1; }
+                            50% { opacity: .5; }
+                          }
+                        `}</style>
+                      </td>
+                    </tr>
+                  ) : pendingRequests.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: '#6b7280' }}>
+                        No pending requests requiring approval.
+                      </td>
+                    </tr>
+                  ) : (
+                    pendingRequests.map((req) => (
+                      <tr key={req.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '16px 24px' }}>
+                          <span style={{ fontWeight: 700, color: '#111827' }}>{req.id}</span>
+                          <br />
+                          {req.totalCost === null && (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                padding: '2px 6px',
+                                marginTop: '4px',
+                                borderRadius: '4px',
+                                fontSize: '9.5px',
+                                fontWeight: 700,
+                                backgroundColor: '#fef2f2',
+                                color: '#b91c1c',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              Needs Cost
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '16px 24px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ textAlign: 'center' }}>
+                              <span style={{ fontWeight: 700, color: '#1f2937', display: 'block' }}>{req.originLocation}</span>
+                            </div>
+                            <span style={{ color: '#d1d5db' }}>→</span>
+                            <div style={{ textAlign: 'center' }}>
+                              <span style={{ fontWeight: 700, color: '#1f2937', display: 'block' }}>{req.destinationLocation}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '16px 24px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                backgroundColor: '#f3f4f6',
+                                border: '1px solid #e5e7eb',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                color: '#6b7280',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {req.horses?.length || 0}♞
+                            </div>
+                            <div>
+                              <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>{req.contactName || 'Customer'}</p>
+                              <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>{req.contactEmail || 'N/A'}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '16px 24px', color: '#4b5563' }}>
+                          {new Date(req.requestedDate).toLocaleDateString('en-GB')}
+                        </td>
+                        <td style={{ padding: '16px 24px' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              backgroundColor: '#fffbeb',
+                              color: '#b45309',
+                              border: '1px solid #fef3c7',
+                            }}
+                          >
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />{' '}
+                            {req.status === 'requested' ? 'Pending Approval' : req.status === 'change_requested' ? 'Change Requested' : req.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '16px 24px', textAlign: 'right' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                            {req.status === 'requested' && (
+                              <>
+                                <button
+                                  onClick={() => openModal('APPROVE', req.id)}
+                                  style={{
+                                    padding: '6px 12px',
+                                    border: '1px solid #10b981',
+                                    borderRadius: '8px',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: '#10b981',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={() => openModal('REJECT', req.id)}
+                                  style={{
+                                    padding: '6px 12px',
+                                    border: '1px solid #ef4444',
+                                    borderRadius: '8px',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: '#ef4444',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Reject
+                                </button>
+                                <button
+                                  onClick={() => openModal('CHANGE', req.id)}
+                                  style={{
+                                    padding: '6px 12px',
+                                    border: '1px solid #d1d5db',
+                                    borderRadius: '8px',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    color: '#374151',
+                                    backgroundColor: '#ffffff',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Ask Change
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1333,6 +1396,159 @@ export default function ManagerDashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* --- Action Modals --- */}
+      <Modal
+        isOpen={activeModal !== 'NONE'}
+        onClose={closeModal}
+        title={
+          activeModal === 'APPROVE'
+            ? 'Approve Transport Request'
+            : activeModal === 'REJECT'
+            ? 'Reject Transport Request'
+            : 'Request Changes'
+        }
+        subtitle={`Request ID: ${selectedOrderId || ''}`}
+        maxWidth="480px"
+      >
+        <div style={{ padding: '24px' }}>
+          {modalError && (
+            <div style={{ marginBottom: '16px', padding: '12px', borderRadius: '8px', backgroundColor: '#fef2f2', color: '#b91c1c', fontSize: '13px', border: '1px solid #fecaca' }}>
+              <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px' }} />
+              {modalError}
+            </div>
+          )}
+
+          {activeModal === 'APPROVE' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Total Cost (USD)</label>
+              <input
+                type="number"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder="e.g. 15000"
+                style={{
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid #d1d5db',
+                  fontSize: '14px',
+                  outline: 'none',
+                  boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+                autoFocus
+              />
+              <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+                Please specify the agreed total transport cost to proceed.
+              </p>
+            </div>
+          )}
+
+          {activeModal === 'REJECT' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Reason for Rejection</label>
+              <textarea
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder="e.g. Current capacity is full..."
+                style={{
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid #d1d5db',
+                  fontSize: '14px',
+                  minHeight: '100px',
+                  resize: 'vertical',
+                  outline: 'none',
+                  boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+                autoFocus
+              />
+              <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+                This reason will be visible to the customer.
+              </p>
+            </div>
+          )}
+
+          {activeModal === 'CHANGE' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Changes Required</label>
+              <textarea
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder="e.g. Please update the exact pickup date..."
+                style={{
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid #d1d5db',
+                  fontSize: '14px',
+                  minHeight: '100px',
+                  resize: 'vertical',
+                  outline: 'none',
+                  boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+                autoFocus
+              />
+              <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+                The customer will be notified and asked to resubmit the request.
+              </p>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+            <button
+              onClick={closeModal}
+              disabled={isSubmitting}
+              style={{
+                padding: '10px 16px',
+                borderRadius: '8px',
+                border: '1px solid #d1d5db',
+                backgroundColor: '#ffffff',
+                color: '#374151',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                opacity: isSubmitting ? 0.7 : 1,
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmAction}
+              disabled={isSubmitting}
+              style={{
+                padding: '10px 20px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: activeModal === 'APPROVE' ? '#10b981' : activeModal === 'REJECT' ? '#ef4444' : '#2563eb',
+                color: '#ffffff',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                opacity: isSubmitting ? 0.7 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              {isSubmitting ? (
+                <>Processing...</>
+              ) : (
+                <>
+                  {activeModal === 'APPROVE' && <CheckCircle2 size={16} />}
+                  {activeModal === 'REJECT' && <X size={16} />}
+                  {activeModal === 'CHANGE' && <AlertTriangle size={16} />}
+                  Confirm
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -17,6 +17,14 @@ export interface UserProfile {
 }
 
 export type TransportStatus =
+  | 'requested'
+  | 'change_requested'
+  | 'approved'
+  | 'rejected'
+  | 'planning'
+  | 'in_transit'
+  | 'completed'
+  | 'cancelled'
   | 'DRAFT'
   | 'SUBMITTED'
   | 'IN_REVIEW'
@@ -97,7 +105,7 @@ export interface RequestActivityItem {
 }
 
 export interface TransportRequest {
-  id: string;
+  id: string | number;
   requestCode: string; // e.g. TR-2026-001
   title?: string;
   transportationType?: 'International' | 'Domestic';
@@ -105,27 +113,43 @@ export interface TransportRequest {
   horseId: string;
   horse: Horse;
   horses?: Array<{
-    horse: Horse;
-    medicalStatus: string;
-    docsSummary: string;
-    isComplete: boolean;
+    horse?: Horse;
+    horseId?: number;
+    name?: string;
+    breed?: string | null;
+    gender?: string | null;
+    age?: number | null;
+    medicalStatus?: string;
+    docsSummary?: string;
+    isComplete?: boolean;
   }>;
   origin: string; // e.g. Ho Chi Minh (SGN, VN)
   originCode: string; // SGN, VN
+  originLocation?: string; // from BE
   transitPoint?: string; // BKK, TH
   transitName?: string;
   destination: string; // Singapore (SIN, SG)
   destinationCode: string; // SIN, SG
+  destinationLocation?: string; // from BE
   estimatedDistance?: string;
   estimatedDuration?: string;
   departureDate: string; // 23 Sep 2026, 08:00 AM
   estimatedArrivalDate: string;
+  requestedDate?: string;
+  contactName?: string | null;
+  contactPhone?: string;
+  contactEmail?: string;
+  contactAddress?: string | null;
+  totalCost?: number;
+  rejectionReason?: string | null;
+  changeRequestNotes?: string | null;
   status: TransportStatus;
   statusLabel: string;
   activeStepIndex: number;
   totalSteps: number;
   pendingDocumentsCount: number;
   notes?: string;
+  specialRequirements?: string | null;
   timeline?: RequestTimelineStage[];
   documents?: Array<{
     id: string;
