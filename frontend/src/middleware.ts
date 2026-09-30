@@ -48,9 +48,9 @@ export function middleware(request: NextRequest) {
     }
 
     // Role enforcement: Prevent users from accessing other roles' dashboards
-    if (matchedPrefix !== userDashboard) {
-      return NextResponse.redirect(new URL(userDashboard, request.url));
-    }
+    // if (matchedPrefix !== userDashboard) {
+    //   return NextResponse.redirect(new URL(userDashboard, request.url));
+    // }
   }
 
   return NextResponse.next();

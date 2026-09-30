@@ -56,7 +56,7 @@ export default function SpecialistDashboardPage() {
         
         <div className="relative z-10 w-full md:w-auto">
           <p className="text-[11px] font-bold tracking-widest text-slate-400 uppercase mb-2">Saturday, September 26</p>
-          <h2 className="text-3xl font-bold text-white mb-1">Good morning, Alex</h2>
+          <h2 className="text-3xl font-bold text-white mb-1">Good morning, Sarah</h2>
           <p className="text-sm font-medium text-slate-400 m-0">Here is an overview of your compliance activities.</p>
 
           {/* Chips */}
