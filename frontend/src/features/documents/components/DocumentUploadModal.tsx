@@ -1,11 +1,27 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { UploadCloud, FileText, CheckCircle } from 'lucide-react';
+import { UploadCloud, FileText, CheckCircle, AlertCircle, X } from 'lucide-react';
 import { DocumentItem } from '@/lib/types';
 import { mockDocuments } from '@/lib/mock-data';
+
+const uploadSchema = z.object({
+  documentId: z.string().min(1, 'Please select a document requirement'),
+  file: z.any()
+    .refine((files) => files?.length === 1, 'File is required')
+    .refine((files) => files?.[0]?.size <= 15000000, 'Max file size is 15MB')
+    .refine(
+      (files) => ['application/pdf', 'image/jpeg', 'image/png'].includes(files?.[0]?.type),
+      'Only .pdf, .jpg, .png formats are supported'
+    ),
+});
+
+type UploadFormData = z.infer<typeof uploadSchema>;
 
 interface DocumentUploadModalProps {
   isOpen: boolean;
@@ -18,38 +34,49 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const [selectedDocId, setSelectedDocId] = useState(mockDocuments[0].id);
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDone, setIsDone] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedFileName(e.target.files[0].name);
-    }
-  };
+  // Filter only documents that need upload
+  const pendingDocs = mockDocuments.filter(d => d.status === 'PENDING' || d.status === 'REJECTED');
 
-  const handleUpload = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedFileName) return;
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useForm<UploadFormData>({
+    resolver: zodResolver(uploadSchema),
+    defaultValues: {
+      documentId: pendingDocs[0]?.id || '',
+    },
+  });
 
+  const selectedFile = watch('file');
+  const fileName = selectedFile?.[0]?.name;
+
+  const onSubmit = (data: UploadFormData) => {
     setIsUploading(true);
+    // Mock API upload delay
     setTimeout(() => {
       setIsUploading(false);
       setIsDone(true);
-      const targetDoc = mockDocuments.find((d) => d.id === selectedDocId) || mockDocuments[0];
+      
+      const targetDoc = mockDocuments.find((d) => d.id === data.documentId) || mockDocuments[0];
       const updated: DocumentItem = {
         ...targetDoc,
         status: 'SUBMITTED',
-        fileUrl: `/uploads/${selectedFileName}`,
+        fileUrl: `/uploads/${data.file[0].name}`,
       };
+      
       onSuccess(updated);
+      
       setTimeout(() => {
         setIsDone(false);
-        setSelectedFileName(null);
         onClose();
       }, 700);
-    }, 600);
+    }, 1200);
   };
 
   return (
@@ -60,118 +87,91 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       subtitle="Provide mandatory veterinary, quarantine, or customs certificates."
       maxWidth="540px"
     >
-      <form onSubmit={handleUpload} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
         <div>
-          <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-            Select Pending Document Request
+          <label className="text-sm font-semibold text-slate-800 block mb-1.5">
+            Select Pending Document Request <span className="text-red-500">*</span>
           </label>
           <select
-            value={selectedDocId}
-            onChange={(e) => setSelectedDocId(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              fontSize: '14px',
-              backgroundColor: '#ffffff',
-            }}
+            {...register('documentId')}
+            className={`w-full px-3 py-2.5 rounded-lg border text-sm bg-white outline-none transition-colors ${errors.documentId ? 'border-red-500' : 'border-slate-300 focus:border-blue-500'}`}
           >
-            {mockDocuments.map((doc) => (
+            {pendingDocs.length === 0 && <option value="">No pending documents</option>}
+            {pendingDocs.map((doc) => (
               <option key={doc.id} value={doc.id}>
                 [{doc.requestCode}] {doc.title} - {doc.horseName} ({doc.status})
               </option>
             ))}
           </select>
+          {errors.documentId && (
+            <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
+              <AlertCircle size={12} /> {errors.documentId.message as string}
+            </span>
+          )}
         </div>
 
         {/* Drag & Drop Area */}
-        <label
-          style={{
-            border: '2px dashed #93c5fd',
-            borderRadius: '12px',
-            backgroundColor: '#f8fafc',
-            padding: '28px 20px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            textAlign: 'center',
-            transition: 'border-color 0.15s ease',
-          }}
-        >
-          <input
-            type="file"
-            accept=".pdf,.jpg,.jpeg,.png"
-            onChange={handleFileChange}
-            style={{ display: 'none' }}
-          />
+        <div>
+          <label
+            className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-colors ${
+              errors.file ? 'border-red-400 bg-red-50/50' : 'border-blue-300 bg-slate-50 hover:bg-blue-50/50'
+            }`}
+          >
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              {...register('file')}
+              className="hidden"
+            />
 
-          {selectedFileName ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <FileText size={32} color="#2563eb" />
-              <div style={{ textAlign: 'left' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)' }}>
-                  {selectedFileName}
+            {fileName ? (
+              <div className="flex items-center gap-3">
+                <FileText size={32} className="text-blue-600 shrink-0" />
+                <div className="text-left">
+                  <div className="text-sm font-semibold text-slate-900 break-all">{fileName}</div>
+                  <div className="text-xs text-green-600 font-medium">Ready to upload</div>
                 </div>
-                <div style={{ fontSize: '12px', color: '#16a34a' }}>Ready to upload</div>
               </div>
-            </div>
-          ) : (
-            <>
-              <div
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '50%',
-                  backgroundColor: '#eff6ff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--primary)',
-                  marginBottom: '10px',
-                }}
-              >
-                <UploadCloud size={24} />
-              </div>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)' }}>
-                Click to browse or drag file here
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Supports PDF, JPG, PNG up to 15MB (Official government or vet seal required)
-              </div>
-            </>
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-3">
+                  <UploadCloud size={24} />
+                </div>
+                <div className="text-sm font-semibold text-slate-900">
+                  Click to browse or drag file here
+                </div>
+                <div className="text-xs text-slate-500 mt-1 max-w-[280px]">
+                  Supports PDF, JPG, PNG up to 15MB (Official government or vet seal required)
+                </div>
+              </>
+            )}
+          </label>
+          {errors.file && (
+            <span className="text-xs text-red-600 mt-1.5 flex items-center gap-1">
+              <AlertCircle size={12} /> {errors.file.message as string}
+            </span>
           )}
-        </label>
+        </div>
 
         {/* Notice on Legal Compliance */}
-        <div
-          style={{
-            padding: '12px 14px',
-            borderRadius: '8px',
-            backgroundColor: '#eff6ff',
-            fontSize: '12.5px',
-            color: '#1e40af',
-            lineHeight: 1.4,
-          }}
-        >
-          <strong>Compliance note:</strong> Export permits must be issued within 14 days of departure.
+        <div className="p-3.5 rounded-lg bg-blue-50 text-[13px] text-blue-900 leading-relaxed border border-blue-100">
+          <strong className="font-semibold text-blue-950">Compliance note:</strong> Export permits must be issued within 14 days of departure.
           Uploaded documents are verified by our Transport Specialists before quarantine departure gates.
         </div>
 
         {/* Actions */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '6px' }}>
+        <div className="flex justify-end gap-3 mt-2">
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button
             type="submit"
             variant="primary"
-            disabled={!selectedFileName || isUploading || isDone}
+            disabled={isUploading || isDone}
+            className="min-w-[140px]"
           >
             {isDone ? (
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span className="flex items-center gap-1.5">
                 <CheckCircle size={16} /> Uploaded!
               </span>
             ) : isUploading ? (
@@ -184,4 +184,4 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       </form>
     </Modal>
   );
-};
+}
