@@ -75,7 +75,19 @@ export class AuthService {
     };
     const userId = await this.authStore.addUserFromRecord(user);
     await this.authStore.completePending(email, userId);
-    return { message: 'Registration completed. You can now log in.', email };
+
+    const accessToken = await this.jwtService.signAsync({
+      sub: userId,
+      email,
+      role: user.role,
+    });
+
+    return {
+      message: 'Registration completed. You can now log in.',
+      email,
+      accessToken,
+      user: { id: userId, email, role: user.role },
+    };
   }
 
   async login(dto: LoginDto) {

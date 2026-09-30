@@ -62,6 +62,74 @@ API contracts are organized by backend module:
 - `/api/notifications` - customer and internal alerts
 - `/api/reports` - revenue, operating cost, and on-time delivery
 
+## Orders endpoints (Flow 1: Transport Request & Approval)
+
+Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)
+
+### `POST /orders` (Customer)
+Creates and submits a new transport request.
+- **Role:** `CUSTOMER`
+- **Body:**
+```json
+{
+  "contactName": "Nguyễn Văn A",
+  "contactAddress": "123 Trần Phú, Q.5, TP.HCM",
+  "contactPhone": "0901234567",
+  "contactEmail": "owner@example.com",
+  "requestedHorseCount": 1,
+  "originLocation": "Trang trại Củ Chi, TP.HCM",
+  "destinationLocation": "Singapore Turf Club, Singapore",
+  "requestedDate": "2026-10-15T08:00:00.000Z",
+  "specialRequirements": "Cần xe điều hòa đặc biệt",
+  "medicalDocumentUrl": "https://example.com/docs/medical-rules.pdf",
+  "horseName": "Xích Thố",
+  "horseBreed": "Thoroughbred",
+  "horseGender": "male",
+  "horseAge": 4,
+  "horses": [
+    {
+      "name": "Xích Thố",
+      "breed": "Thoroughbred",
+      "gender": "male",
+      "age": 4
+    }
+  ]
+}
+```
+
+### `GET /orders/my-orders` (Customer)
+Lists all transport requests submitted by the authenticated customer.
+
+### `GET /orders` (Logistics Manager / Admin)
+Lists all transport requests across the system. Supports optional query parameter `?status=requested`.
+
+### `GET /orders/:id`
+Retrieves detailed information for a specific order. Customers can only view their own orders.
+
+### `PATCH /orders/:id/approve` (Logistics Manager / Admin)
+Approves a pending `requested` order and notifies the customer.
+- **Body:** `{ "totalCost": 15000000, "note": "Phê duyệt kế hoạch" }`
+
+### `PATCH /orders/:id/reject` (Logistics Manager / Admin)
+Rejects a pending `requested` order with a mandatory reason and notifies the customer.
+- **Body:** `{ "reason": "Lý do từ chối đơn hàng" }`
+
+### `PATCH /orders/:id/request-changes` (Logistics Manager / Admin)
+Requests modifications on a pending `requested` order with a mandatory explanation note. Updates status to `change_requested` and sends a notification to the customer.
+- **Body:** `{ "reason": "Vui lòng dời ngày xuất phát sang 16/10 và cập nhật địa chỉ đón chi tiết" }`
+
+### `PUT /orders/:id` (Customer)
+Customer updates editable order details (dates, route locations, horse info, special requirements) and resubmits the request. Resets status back to `requested` for manager review.
+- **Body:** Partial or full fields from `CreateOrderDto`.
+
+## Notifications endpoints
+
+### `GET /notifications`
+Retrieves all notifications for the authenticated user (sorted newest first).
+
+### `PATCH /notifications/:id/read`
+Marks a notification as read.
+
 ## Contract rules
 
 - Every mutation returns the updated resource status and an audit identifier.
