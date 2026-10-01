@@ -22,7 +22,9 @@ import {
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { TripTrackingModal } from '@/features/tracking/components/TripTrackingModal';
 import { useCustomerStore } from '@/lib/customer-store';
-import { TransportRequest } from '@/lib/types';
+import { TransportRequest, UserProfile } from '@/lib/types';
+import { getCurrentUser } from '@/lib/auth';
+import { mockCurrentUser } from '@/lib/mock-data';
 
 export default function CustomerDashboardPage() {
   const router = useRouter();
@@ -34,6 +36,19 @@ export default function CustomerDashboardPage() {
     uploadDocumentForRequest,
     markAllNotificationsRead,
   } = useCustomerStore();
+
+  const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
+
+  React.useEffect(() => {
+    setCurrentUser(getCurrentUser());
+    const handleUserUpdate = () => {
+      setCurrentUser(getCurrentUser());
+    };
+    window.addEventListener('auth-user-updated', handleUserUpdate);
+    return () => {
+      window.removeEventListener('auth-user-updated', handleUserUpdate);
+    };
+  }, []);
 
   // Modals state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -87,6 +102,7 @@ export default function CustomerDashboardPage() {
             Saturday, September 26
           </div>
           <h2
+            suppressHydrationWarning
             style={{
               fontSize: '28px',
               fontWeight: 800,
@@ -96,7 +112,7 @@ export default function CustomerDashboardPage() {
               margin: 0,
             }}
           >
-            Good morning, Alex
+            Good morning, {currentUser.fullName || currentUser.name || 'Customer'}
           </h2>
           <p
             style={{

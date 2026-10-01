@@ -29,6 +29,7 @@ interface ShipmentRow extends RowDataPacket {
   updated_at: Date;
   customer_email?: string;
   approver_name?: string;
+  request_code?: string;
 }
 
 interface AttachmentRow extends RowDataPacket {
@@ -155,7 +156,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findShipmentsByCustomer(customerId: number): Promise<TransportOrder[]> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.email as customer_email, a.full_name as approver_name
+      `SELECT s.*, u.email as customer_email, a.full_name as approver_name,
+              CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
@@ -169,7 +171,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findAllShipments(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
     let query = `
-      SELECT s.*, u.email as customer_email, a.full_name as approver_name
+      SELECT s.*, u.email as customer_email, a.full_name as approver_name,
+             CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (PARTITION BY s.customer_id ORDER BY s.shipment_id ASC), 3, '0')) as request_code
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
@@ -189,7 +192,11 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findShipmentById(shipmentId: number): Promise<TransportOrder | undefined> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.email as customer_email, a.full_name as approver_name
+      `SELECT s.*, u.email as customer_email, a.full_name as approver_name,
+              CONCAT('REQ-', LPAD(
+                (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+                3, '0'
+              )) as request_code
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
@@ -339,8 +346,11 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       [row.shipment_id],
     );
 
+    const requestCode = row.request_code || `REQ-${String(row.shipment_id).padStart(3, '0')}`;
+
     return {
       id: row.shipment_id,
+      requestCode,
       customerId: row.customer_id,
       requestedBy: row.requested_by,
       approvedBy: row.approved_by,

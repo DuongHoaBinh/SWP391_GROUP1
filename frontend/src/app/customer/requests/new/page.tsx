@@ -15,9 +15,13 @@ import {
   Save,
   AlertCircle,
   FileText,
+  Loader2,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
+import { Horse } from '@/lib/types';
+import { AddHorseModal } from '@/components/horses/AddHorseModal';
 import { apiClient } from '@/lib/api-client';
+import { getCurrentUser } from '@/lib/auth';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -43,6 +47,8 @@ function CreateTransportRequestForm() {
 
   // Step state (1 to 4)
   const [currentStep, setCurrentStep] = useState(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
 
   // Form states using react-hook-form
   const {
@@ -95,6 +101,8 @@ function CreateTransportRequestForm() {
   };
 
   const onSubmitForm = async (data: FormData) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const selectedHorsesData = horses.filter(h => selectedHorseIds.includes(h.id)).map(h => ({
         name: h.name,
@@ -103,10 +111,11 @@ function CreateTransportRequestForm() {
         age: h.age,
       }));
 
+      const currentUser = getCurrentUser();
       const payload = {
-        contactName: 'Current Customer', // Replace with real auth user data in a real app
-        contactPhone: '0901234567',
-        contactEmail: 'customer@example.com',
+        contactName: currentUser.fullName || currentUser.name || 'Current Customer',
+        contactPhone: currentUser.phone || '0901234567',
+        contactEmail: currentUser.email || 'customer@example.com',
         requestedHorseCount: selectedHorseIds.length,
         originLocation: data.origin,
         destinationLocation: data.destination,
@@ -129,6 +138,7 @@ function CreateTransportRequestForm() {
     } catch (error) {
       console.error('Failed to create request:', error);
       alert('Failed to submit request. Please try again.');
+      setIsSubmitting(false);
     }
   };
 
@@ -509,7 +519,7 @@ function CreateTransportRequestForm() {
                 </p>
               </div>
               <button
-                onClick={() => alert('Add new horse form')}
+                onClick={() => setIsAddHorseModalOpen(true)}
                 style={{
                   padding: '8px 16px',
                   borderRadius: '8px',
@@ -521,6 +531,7 @@ function CreateTransportRequestForm() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
+                  cursor: 'pointer',
                 }}
               >
                 <Plus size={14} /> Add New Horse
@@ -820,10 +831,11 @@ function CreateTransportRequestForm() {
           ) : (
             <button
               onClick={handleSubmit(onSubmitForm)}
+              disabled={isSubmitting}
               style={{
                 padding: '9px 26px',
                 borderRadius: '8px',
-                backgroundColor: '#16a34a',
+                backgroundColor: isSubmitting ? '#94a3b8' : '#16a34a',
                 color: '#ffffff',
                 fontSize: '13.5px',
                 fontWeight: 600,
@@ -831,14 +843,31 @@ function CreateTransportRequestForm() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)',
+                boxShadow: isSubmitting ? 'none' : '0 2px 8px rgba(22, 163, 74, 0.3)',
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
               }}
             >
-              Submit Request <Check size={16} strokeWidth={2.5} />
+              {isSubmitting ? (
+                <>
+                  Submitting... <Loader2 size={16} className="animate-spin" />
+                </>
+              ) : (
+                <>
+                  Submit Request <Check size={16} strokeWidth={2.5} />
+                </>
+              )}
             </button>
           )}
         </div>
       </div>
+
+      <AddHorseModal
+        isOpen={isAddHorseModalOpen}
+        onClose={() => setIsAddHorseModalOpen(false)}
+        onHorseAdded={(newHorse) => {
+          setSelectedHorseIds((prev) => [...prev, newHorse.id]);
+        }}
+      />
     </div>
   );
 }
