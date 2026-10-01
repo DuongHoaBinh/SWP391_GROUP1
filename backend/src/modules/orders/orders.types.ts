@@ -26,6 +26,7 @@ export interface OrderHorse {
 
 export interface TransportOrder {
   id: number;
+  requestCode?: string;
   customerId: number;
   requestedBy: number;
   approvedBy: number | null;

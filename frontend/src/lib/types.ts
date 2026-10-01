@@ -9,6 +9,9 @@ export type UserRole =
 export interface UserProfile {
   id: string;
   name: string;
+  fullName?: string;
+  phone?: string;
+  address?: string;
   email: string;
   role: UserRole;
   organization?: string;
@@ -55,6 +58,7 @@ export interface HorseDocument {
 
 export interface Horse {
   id: string;
+  backendId?: number;
   code?: string; // e.g. HOR-2026-001
   name: string;
   breed: string;
@@ -64,6 +68,7 @@ export interface Horse {
   passportNumber: string;
   ownerName: string;
   photoUrl?: string;
+  avatarUrl?: string;
   dob?: string;
   color?: string;
   weight?: string;

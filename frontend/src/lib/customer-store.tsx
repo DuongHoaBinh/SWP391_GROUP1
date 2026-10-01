@@ -16,6 +16,8 @@ import {
   mockMetrics as initialMetrics,
 } from './mock-data';
 
+import { apiClient } from './api-client';
+
 interface CustomerStoreContextType {
   requests: TransportRequest[];
   horses: Horse[];
@@ -39,6 +41,10 @@ interface CustomerStoreContextType {
   markNotificationRead: (id: string) => void;
   getHorseById: (id: string) => Horse | undefined;
   getRequestById: (id: string) => TransportRequest | undefined;
+  addHorse: (horseData: Partial<Horse>) => Horse;
+  updateHorse: (horseId: string, data: Partial<Horse>) => void;
+  deleteHorse: (horseId: string) => void;
+  refreshHorses: () => Promise<void>;
 }
 
 const CustomerStoreContext = createContext<CustomerStoreContextType | null>(null);
@@ -68,7 +74,61 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
       // Ignore parse errors, fallback to initial
     }
     setIsLoaded(true);
+    refreshHorses();
   }, []);
+
+  const refreshHorses = async () => {
+    try {
+      const data = await apiClient<any[]>('/horses');
+      if (Array.isArray(data) && data.length > 0) {
+        setHorses((prev) => {
+          const backendMapped: Horse[] = data.map((item) => {
+            const existing = prev.find(
+              (p) =>
+                p.id === String(item.id) ||
+                p.backendId === item.id ||
+                p.name.toLowerCase() === item.name.toLowerCase()
+            );
+            return {
+              id: existing?.id || String(item.id),
+              backendId: item.id,
+              code: existing?.code || `HR-${String(item.id).padStart(5, '0')}`,
+              name: item.name,
+              breed: item.breed || existing?.breed || 'Thoroughbred',
+              age: item.age || existing?.age || 4,
+              gender:
+                item.gender === 'female'
+                  ? 'Mare'
+                  : item.gender === 'gelding'
+                  ? 'Gelding'
+                  : 'Stallion',
+              dob: item.dateOfBirth
+                ? new Date(item.dateOfBirth).toISOString().split('T')[0]
+                : existing?.dob || '2022-01-15',
+              microchipNumber: item.microchipNo || existing?.microchipNumber || '',
+              passportNumber: item.passportNo || existing?.passportNumber || '',
+              ownerName: existing?.ownerName || 'Nguyễn Bình',
+              availabilityStatus: item.status === 'active' ? 'Available' : 'Not Cleared',
+              medicalStatus: existing?.medicalStatus || 'Healthy',
+              documentStatus: existing?.documentStatus || 'Valid',
+              color: existing?.color || 'Bay',
+              weight: existing?.weight || '480 kg',
+              location: existing?.location || 'Ho Chi Minh City, Vietnam',
+              documents: existing?.documents || [],
+              medicalHistory: existing?.medicalHistory || [],
+            };
+          });
+
+          const extras = prev.filter(
+            (p) => !backendMapped.some((b) => b.id === p.id || (p.backendId && b.backendId === p.backendId))
+          );
+          return [...backendMapped, ...extras];
+        });
+      }
+    } catch {
+      // Unauthenticated or network issue
+    }
+  };
 
   // Save to localStorage whenever state changes
   useEffect(() => {
@@ -102,6 +162,7 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     return horses.find(
       (h) =>
         h.id === id ||
+        (h.backendId && String(h.backendId) === id) ||
         h.code?.toLowerCase() === id.toLowerCase() ||
         h.name.toLowerCase() === id.toLowerCase()
     );
@@ -313,6 +374,53 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
   };
 
+  const addHorse = (horseData: Partial<Horse>): Horse => {
+    const nextId = horseData.id ? String(horseData.id) : `hrs-${String(Date.now()).slice(-4)}`;
+    const backendId = horseData.backendId || (Number(horseData.id) > 0 ? Number(horseData.id) : undefined);
+    const nextCode = horseData.code || `HR-${String(backendId || Math.floor(100 + Math.random() * 900)).padStart(5, '0')}`;
+    const newHorse: Horse = {
+      id: nextId,
+      backendId,
+      code: nextCode,
+      name: horseData.name || 'New Horse',
+      breed: horseData.breed || 'Thoroughbred',
+      age: horseData.age || 4,
+      gender: horseData.gender || 'Stallion',
+      dob: horseData.dob || '2022-01-15',
+      location: horseData.location || 'Ho Chi Minh City, Vietnam',
+      availabilityStatus: 'Available',
+      medicalStatus: horseData.medicalStatus || 'Healthy',
+      documentStatus: 'Valid',
+      color: horseData.color || 'Bay',
+      weight: horseData.weight || '480 kg',
+      microchipNumber: horseData.microchipNumber || `985141001248${Math.floor(100 + Math.random() * 900)}`,
+      passportNumber: horseData.passportNumber || `FEI-VN-2026-${Math.floor(100 + Math.random() * 900)}`,
+      ownerName: horseData.ownerName || 'Nguyễn Bình',
+      photoUrl: horseData.photoUrl || horseData.avatarUrl,
+      avatarUrl: horseData.avatarUrl || horseData.photoUrl,
+    };
+
+    setHorses((prev) => [newHorse, ...prev]);
+    return newHorse;
+  };
+
+  const updateHorse = (horseId: string, updatedFields: Partial<Horse>) => {
+    setHorses((prev) =>
+      prev.map((h) => {
+        if (h.id === horseId || (h.backendId && String(h.backendId) === horseId)) {
+          return { ...h, ...updatedFields };
+        }
+        return h;
+      })
+    );
+  };
+
+  const deleteHorse = (horseId: string) => {
+    setHorses((prev) =>
+      prev.filter((h) => h.id !== horseId && (!h.backendId || String(h.backendId) !== horseId))
+    );
+  };
+
   return (
     <CustomerStoreContext.Provider
       value={{
@@ -329,6 +437,10 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
         markNotificationRead,
         getHorseById,
         getRequestById,
+        addHorse,
+        updateHorse,
+        deleteHorse,
+        refreshHorses,
       }}
     >
       {children}

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -15,6 +15,10 @@ import {
   Settings,
 } from 'lucide-react';
 import { clearAuthSession, getCurrentUser } from '@/lib/auth';
+import { apiClient } from '@/lib/api-client';
+import { mockCurrentUser } from '@/lib/mock-data';
+import { UserProfile } from '@/lib/types';
+import { LogoutConfirmModal } from './LogoutConfirmModal';
 
 interface NavItem {
   label: string;
@@ -26,7 +30,34 @@ interface NavItem {
 export const Sidebar: React.FC = () => {
   const pathname = usePathname();
   const router = useRouter();
-  const user = getCurrentUser();
+  const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+
+  useEffect(() => {
+    setCurrentUser(getCurrentUser());
+
+    const fetchUnread = async () => {
+      try {
+        const notifs = await apiClient<any[]>('/notifications');
+        if (Array.isArray(notifs)) {
+          setUnreadNotifs(notifs.filter((n) => !n.isRead).length);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    fetchUnread();
+
+    const handleUserUpdate = () => {
+      setCurrentUser(getCurrentUser());
+      fetchUnread();
+    };
+    window.addEventListener('auth-user-updated', handleUserUpdate);
+    return () => {
+      window.removeEventListener('auth-user-updated', handleUserUpdate);
+    };
+  }, []);
 
   const navItems: NavItem[] = [
     {
@@ -75,7 +106,7 @@ export const Sidebar: React.FC = () => {
       label: 'Notifications',
       href: '/customer/notifications',
       icon: <Bell size={18} />,
-      badge: 3,
+      badge: unreadNotifs > 0 ? unreadNotifs : undefined,
     },
   ];
 
@@ -92,15 +123,24 @@ export const Sidebar: React.FC = () => {
     },
   ];
 
-  const handleLogout = () => {
-    if (confirm('Are you sure you want to log out?')) {
-      clearAuthSession();
-      router.push('/login');
-    }
+  const handleLogoutClick = () => {
+    setShowLogoutModal(true);
+  };
+
+  const handleConfirmLogout = () => {
+    setShowLogoutModal(false);
+    clearAuthSession();
+    router.push('/login');
   };
 
   return (
-    <aside
+    <>
+      <LogoutConfirmModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleConfirmLogout}
+      />
+      <aside
       style={{
         width: '260px',
         backgroundColor: '#0c121e',
@@ -344,6 +384,7 @@ export const Sidebar: React.FC = () => {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
             <div
+              suppressHydrationWarning
               style={{
                 width: '34px',
                 height: '34px',
@@ -358,10 +399,11 @@ export const Sidebar: React.FC = () => {
                 flexShrink: 0,
               }}
             >
-              AM
+              {currentUser.initials || 'CU'}
             </div>
             <div style={{ minWidth: 0 }}>
               <div
+                suppressHydrationWarning
                 style={{
                   fontSize: '13px',
                   fontWeight: 600,
@@ -371,9 +413,10 @@ export const Sidebar: React.FC = () => {
                   textOverflow: 'ellipsis',
                 }}
               >
-                Alex Morgan
+                {currentUser.name || currentUser.email}
               </div>
               <div
+                suppressHydrationWarning
                 style={{
                   fontSize: '11px',
                   color: '#64748b',
@@ -382,13 +425,13 @@ export const Sidebar: React.FC = () => {
                   textOverflow: 'ellipsis',
                 }}
               >
-                alex@stablesco.com
+                {currentUser.email}
               </div>
             </div>
           </div>
 
           <button
-            onClick={handleLogout}
+            onClick={handleLogoutClick}
             title="Log out"
             style={{
               padding: '6px',
@@ -408,5 +451,6 @@ export const Sidebar: React.FC = () => {
         </div>
       </div>
     </aside>
+    </>
   );
 };
