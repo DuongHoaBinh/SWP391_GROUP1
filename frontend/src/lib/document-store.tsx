@@ -305,15 +305,20 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
                   }
                   return d;
                 });
+                const remainingPending = Math.max(0, (req.pendingDocumentsCount || 1) - 1);
+                const isCleared = remainingPending === 0 || (updatedDocuments && updatedDocuments.every((d: any) => d.status === 'Approved'));
                 return {
                   ...req,
                   documents: updatedDocuments,
-                  pendingDocumentsCount: Math.max(0, (req.pendingDocumentsCount || 1) - 1),
+                  pendingDocumentsCount: remainingPending,
+                  status: isCleared ? 'DOCUMENTS_VERIFIED' : req.status,
+                  statusLabel: isCleared ? 'Documents Verified • Ready for Dispatch' : req.statusLabel,
+                  activeStepIndex: isCleared ? Math.max(req.activeStepIndex || 2, 3) : req.activeStepIndex,
                   activities: [
                     {
                       id: `act-${Date.now()}`,
                       timestamp: 'Just now',
-                      description: `${doc.type} approved by Transport Specialist (Valid until ${expiryDate || 'N/A'}).`,
+                      description: `${doc.type} approved by Transport Specialist (Valid until ${expiryDate || 'N/A'}).${isCleared ? ' All mandatory quarantine documents verified.' : ''}`,
                       actor: 'Specialist Sarah Jenkins',
                       type: 'system',
                     },
