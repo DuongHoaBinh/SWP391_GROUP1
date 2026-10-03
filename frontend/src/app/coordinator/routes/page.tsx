@@ -8,59 +8,10 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
-
-interface Stop {
-  seq: number;
-  name: string;
-  type: 'Rest' | 'Quarantine' | 'Border Gate' | 'Refuel';
-  country: string;
-}
-
-interface RouteItem {
-  id: string;
-  name: string;
-  orderCode: string;
-  origin: string;
-  destination: string;
-  distanceKm: number;
-  stops: Stop[];
-  status: 'planned' | 'active' | 'completed';
-}
-
-const INITIAL_ROUTES: RouteItem[] = [
-  {
-    id: 'rt-101',
-    name: 'Saigon to Singapore Turf Club (Express)',
-    orderCode: 'REQ-001',
-    origin: 'Cu Chi Horse Farm, HCMC',
-    destination: 'Singapore Turf Club, Kranji',
-    distanceKm: 1450,
-    status: 'planned',
-    stops: [
-      { seq: 1, name: 'Tan Son Nhat Airport Hub', type: 'Rest', country: 'Vietnam' },
-      { seq: 2, name: 'Tan Son Nhat Cargo Quarantine', type: 'Quarantine', country: 'Vietnam' },
-      { seq: 3, name: 'Changi Airport Air Cargo Gate', type: 'Border Gate', country: 'Singapore' },
-      { seq: 4, name: 'Kranji Post-Arrival Isolation', type: 'Quarantine', country: 'Singapore' },
-    ],
-  },
-  {
-    id: 'rt-102',
-    name: 'Hanoi to Bangkok Overland Transit',
-    orderCode: 'REQ-002',
-    origin: 'Soc Son Equestrian Center, Hanoi',
-    destination: 'Bangkok Royal Stables, Thailand',
-    distanceKm: 980,
-    status: 'active',
-    stops: [
-      { seq: 1, name: 'Cau Treo International Border', type: 'Border Gate', country: 'Vietnam - Laos' },
-      { seq: 2, name: 'Vientiane Resting Station', type: 'Rest', country: 'Laos' },
-      { seq: 3, name: 'Nong Khai Quarantine Gate', type: 'Border Gate', country: 'Thailand' },
-    ],
-  },
-];
+import { useFleetRouteStore, RouteItem } from '@/lib/fleet-route-store';
 
 export default function RoutePlanningPage() {
-  const [routes, setRoutes] = useState<RouteItem[]>(INITIAL_ROUTES);
+  const { routes, addRoute, updateRoute, deleteRoute } = useFleetRouteStore();
   const [searchTerm, setSearchTerm] = useState('');
   
   // Modals
@@ -85,21 +36,19 @@ export default function RoutePlanningPage() {
       toast.error('Please enter route name, origin, and destination.');
       return;
     }
-    const newRoute: RouteItem = {
-      id: `rt-${Date.now()}`,
-      name: formData.name,
-      orderCode: formData.orderCode || `REQ-${Math.floor(100 + Math.random() * 900)}`,
-      origin: formData.origin,
-      destination: formData.destination,
+    const newRoute = addRoute({
+      name: formData.name.trim(),
+      orderCode: formData.orderCode?.trim() || `TR-2026-${Math.floor(100 + Math.random() * 900)}`,
+      origin: formData.origin.trim(),
+      destination: formData.destination.trim(),
       distanceKm: Number(formData.distanceKm) || 500,
-      status: formData.status as any || 'planned',
+      status: (formData.status as any) || 'planned',
       stops: [
         { seq: 1, name: `${formData.origin} Staging`, type: 'Rest', country: 'Origin' },
         { seq: 2, name: 'Border Quarantine Inspection', type: 'Quarantine', country: 'Transit' },
         { seq: 3, name: `${formData.destination} Terminal`, type: 'Border Gate', country: 'Destination' },
       ],
-    };
-    setRoutes([newRoute, ...routes]);
+    });
     toast.success(`Route "${newRoute.name}" created!`);
     setIsAddOpen(false);
     setFormData({ name: '', orderCode: '', origin: '', destination: '', distanceKm: 500, status: 'planned' });
@@ -108,7 +57,10 @@ export default function RoutePlanningPage() {
   const handleEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRoute) return;
-    setRoutes(routes.map(r => r.id === selectedRoute.id ? { ...r, ...formData } as RouteItem : r));
+    updateRoute(selectedRoute.id, {
+      ...formData,
+      distanceKm: Number(formData.distanceKm) || 500,
+    });
     toast.success('Route updated successfully!');
     setIsEditOpen(false);
     setSelectedRoute(null);
@@ -116,7 +68,7 @@ export default function RoutePlanningPage() {
 
   const handleDelete = () => {
     if (!selectedRoute) return;
-    setRoutes(routes.filter(r => r.id !== selectedRoute.id));
+    deleteRoute(selectedRoute.id);
     toast.success('Route removed.');
     setIsDeleteOpen(false);
     setSelectedRoute(null);
