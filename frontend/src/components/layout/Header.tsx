@@ -1,11 +1,25 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, ChevronDown, Search, LogOut, Check, ExternalLink } from 'lucide-react';
+import { Bell, ChevronDown, Search, LogOut, Check, ExternalLink, Settings } from 'lucide-react';
 import { getCurrentUser, clearAuthSession } from '@/lib/auth';
-import { mockNotifications } from '@/lib/mock-data';
+import { apiClient } from '@/lib/api-client';
+import { mockCurrentUser, mockNotifications } from '@/lib/mock-data';
+import { UserProfile, NotificationItem } from '@/lib/types';
 import Link from 'next/link';
+import { LogoutConfirmModal } from './LogoutConfirmModal';
+
+function formatHeaderTimeAgo(dateStr: string) {
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
 
 interface HeaderProps {
   title?: string;
@@ -17,19 +31,69 @@ export const Header: React.FC<HeaderProps> = ({
   subtitle = 'Overview of your racehorse transportation activities.',
 }) => {
   const router = useRouter();
-  const user = getCurrentUser();
+  const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+
+  const fetchNotifications = async () => {
+    try {
+      const data = await apiClient<any[]>('/notifications');
+      if (Array.isArray(data) && data.length > 0) {
+        const mapped: NotificationItem[] = data.map((item) => ({
+          id: String(item.id),
+          type: item.notifType === 'health_alert' ? 'CRITICAL' : 'INFO',
+          title: item.title,
+          message: item.message,
+          timeAgo: item.createdAt ? formatHeaderTimeAgo(item.createdAt) : 'Recently',
+          isRead: Boolean(item.isRead),
+          relatedRequestCode: item.shipmentId ? `REQ-${String(item.shipmentId).padStart(3, '0')}` : undefined,
+          actionUrl: item.shipmentId ? `/customer/requests/${item.shipmentId}` : undefined,
+        }));
+        setNotifications(mapped);
+      } else {
+        setNotifications(mockNotifications);
+      }
+    } catch {
+      setNotifications(mockNotifications);
+    }
+  };
+
+  useEffect(() => {
+    setCurrentUser(getCurrentUser());
+    fetchNotifications();
+
+    const handleUserUpdate = () => {
+      setCurrentUser(getCurrentUser());
+      fetchNotifications();
+    };
+    window.addEventListener('auth-user-updated', handleUserUpdate);
+    return () => {
+      window.removeEventListener('auth-user-updated', handleUserUpdate);
+    };
+  }, []);
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
-  const handleMarkAllRead = () => {
+  const handleMarkAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    for (const notif of notifications.filter((n) => !n.isRead)) {
+      try {
+        await apiClient(`/notifications/${notif.id}/read`, { method: 'PATCH' });
+      } catch {
+        // ignore
+      }
+    }
   };
 
-  const handleLogout = () => {
+  const handleLogoutClick = () => {
     setShowUserMenu(false);
+    setShowLogoutModal(true);
+  };
+
+  const handleConfirmLogout = () => {
+    setShowLogoutModal(false);
     clearAuthSession();
     router.push('/login');
   };
@@ -252,6 +316,7 @@ export const Header: React.FC<HeaderProps> = ({
             }}
           >
             <div
+              suppressHydrationWarning
               style={{
                 width: '32px',
                 height: '32px',
@@ -265,11 +330,21 @@ export const Header: React.FC<HeaderProps> = ({
                 fontSize: '12px',
               }}
             >
-              AM
+              {currentUser.initials || 'CU'}
             </div>
-            <div style={{ textAlign: 'left', lineHeight: 1.2 }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Alex Morgan</div>
-              <div style={{ fontSize: '11px', color: '#64748b' }}>Customer</div>
+            <div style={{ textAlign: 'left', lineHeight: 1.2, maxWidth: '140px', overflow: 'hidden' }}>
+              <div
+                suppressHydrationWarning
+                style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}
+              >
+                {currentUser.name || currentUser.email}
+              </div>
+              <div
+                suppressHydrationWarning
+                style={{ fontSize: '11px', color: '#64748b' }}
+              >
+                {currentUser.role === 'CUSTOMER' ? 'Customer' : currentUser.role}
+              </div>
             </div>
             <ChevronDown size={14} color="#64748b" style={{ marginLeft: '4px' }} />
           </button>
@@ -290,8 +365,29 @@ export const Header: React.FC<HeaderProps> = ({
                 zIndex: 100,
               }}
             >
+              <Link
+                href="/customer/settings"
+                onClick={() => setShowUserMenu(false)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '9px 12px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  color: '#334155',
+                  textDecoration: 'none',
+                  textAlign: 'left',
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f1f5f9')}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
+              >
+                <Settings size={15} />
+                <span>Profile Settings</span>
+              </Link>
               <button
-                onClick={handleLogout}
+                onClick={handleLogoutClick}
                 style={{
                   width: '100%',
                   display: 'flex',
@@ -316,6 +412,11 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+      <LogoutConfirmModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleConfirmLogout}
+      />
     </header>
   );
 };

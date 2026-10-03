@@ -44,6 +44,77 @@ Authenticates verified customers and pre-provisioned internal accounts. Returns 
 }
 ```
 
+### `GET /auth/profile`
+
+Retrieves the authenticated user's profile details. Requires Bearer JWT token.
+
+Response:
+```json
+{
+	"id": "7",
+	"email": "tamngoi192@gmail.com",
+	"role": "CUSTOMER",
+	"fullName": "Nguyễn Văn Tâm",
+	"name": "Nguyễn Văn Tâm",
+	"phone": "0912345678",
+	"address": "123 Nguyễn Huệ, TP.HCM",
+	"avatarUrl": "",
+	"createdAt": "2026-09-30T10:00:00.000Z"
+}
+```
+
+### `PATCH /auth/profile`
+
+Updates the authenticated user's profile information. Requires Bearer JWT token.
+
+Request body:
+```json
+{
+	"fullName": "Nguyễn Văn Tâm",
+	"phone": "0912345678",
+	"address": "123 Nguyễn Huệ, Quận 1, TP.HCM",
+	"avatarUrl": ""
+}
+```
+
+Response:
+```json
+{
+	"message": "Profile updated successfully",
+	"user": {
+		"id": "7",
+		"email": "tamngoi192@gmail.com",
+		"role": "CUSTOMER",
+		"fullName": "Nguyễn Văn Tâm",
+		"name": "Nguyễn Văn Tâm",
+		"phone": "0912345678",
+		"address": "123 Nguyễn Huệ, Quận 1, TP.HCM",
+		"avatarUrl": "",
+		"createdAt": "2026-09-30T10:00:00.000Z"
+	}
+}
+```
+
+### `POST /auth/change-password`
+
+Changes the password for the currently authenticated user. Requires Bearer JWT token.
+
+Request body:
+```json
+{
+	"currentPassword": "OldPassword123",
+	"newPassword": "NewPassword123",
+	"confirmPassword": "NewPassword123"
+}
+```
+
+Response:
+```json
+{
+	"message": "Mật khẩu đã được thay đổi thành công"
+}
+```
+
 ## Local MySQL and SMTP configuration
 
 The backend reads database and SMTP settings from `backend/.env`. `SMTP_USER` and `SMTP_PASSWORD` belong to a dedicated system sender account, not to the customer. The customer email from `POST /auth/register` is passed as the recipient of the OTP email. Required values for the real registration flow are `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASSWORD`. For Gmail, use an App Password with two-step verification enabled. Never commit `backend/.env` or expose `SMTP_PASSWORD`.
@@ -205,6 +276,36 @@ Retrieves all notifications for the authenticated user (sorted newest first).
 
 ### `PATCH /notifications/:id/read`
 Marks a notification as read.
+
+## Horses endpoints
+
+### `GET /horses`
+Retrieves all racehorses belonging to the authenticated customer.
+
+### `GET /horses/:id`
+Retrieves details of a specific racehorse. Customers can only view their own horses.
+
+### `POST /horses`
+Registers a new racehorse profile directly into the database.
+- **Body:**
+```json
+{
+  "name": "Pegasus Star",
+  "breed": "Thoroughbred",
+  "gender": "male",
+  "age": 5,
+  "dateOfBirth": "2021-04-15",
+  "microchipNo": "985141001248999",
+  "passportNo": "FEI-VN-2026-888",
+  "status": "active"
+}
+```
+
+### `PUT /horses/:id`
+Updates details of a racehorse profile owned by the customer.
+
+### `DELETE /horses/:id`
+Deletes a horse profile. If the horse has been part of past shipments, it is soft-deleted to status `'retired'` to preserve transport audit history.
 
 ## Contract rules
 
