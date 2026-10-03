@@ -18,15 +18,37 @@ export default function RequestsPage() {
     const fetchRequests = async () => {
       try {
         const data = await apiClient<any[]>('/orders/my-orders');
-        // Map backend `TransportOrder` to frontend `TransportRequest` properties used in this view
-        const mappedData = data.map((item) => ({
-          ...item,
-          requestCode: item.id.toString(), // or real request code if backend adds it
-          horse: item.horses?.[0] || { name: 'Multiple Horses' },
-          origin: item.originLocation,
-          destination: item.destinationLocation,
-          departureDate: new Date(item.requestedDate).toLocaleDateString('en-GB'),
-        }));
+        const statusMap: Record<string, { label: string; variant: 'pending' | 'success' | 'danger' | 'transit' | 'neutral' }> = {
+          requested: { label: 'Pending Approval', variant: 'pending' },
+          under_review: { label: 'Under Review', variant: 'pending' },
+          IN_REVIEW: { label: 'Under Review', variant: 'pending' },
+          approved: { label: 'Approved', variant: 'success' },
+          APPROVED: { label: 'Approved', variant: 'success' },
+          change_requested: { label: 'Change Requested', variant: 'pending' },
+          rejected: { label: 'Rejected', variant: 'danger' },
+          REJECTED: { label: 'Rejected', variant: 'danger' },
+          planning: { label: 'Planning', variant: 'neutral' },
+          in_transit: { label: 'In Transit', variant: 'transit' },
+          IN_TRANSIT: { label: 'In Transit', variant: 'transit' },
+          completed: { label: 'Completed', variant: 'success' },
+          COMPLETED: { label: 'Completed', variant: 'success' },
+          cancelled: { label: 'Cancelled', variant: 'danger' },
+          CANCELLED: { label: 'Cancelled', variant: 'danger' },
+        };
+
+        const mappedData = data.map((item) => {
+          const statusInfo = statusMap[item.status] || { label: item.status || 'Pending', variant: 'pending' as const };
+          return {
+            ...item,
+            requestCode: item.requestCode || `REQ-${String(item.id).padStart(3, '0')}`,
+            horse: item.horses?.[0] || { name: 'Multiple Horses' },
+            origin: item.originLocation,
+            destination: item.destinationLocation,
+            departureDate: item.requestedDate ? new Date(item.requestedDate).toLocaleDateString('en-GB') : '',
+            statusLabel: item.statusLabel || statusInfo.label,
+            statusVariant: statusInfo.variant,
+          };
+        });
         setRequests(mappedData);
       } catch (err) {
         console.error('Failed to fetch requests, falling back to mock:', err);
@@ -45,8 +67,17 @@ export default function RequestsPage() {
       r.horse?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.origin?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.destination?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'ALL' || r.status === filterStatus || r.status.toUpperCase() === filterStatus;
-    return matchesSearch && matchesFilter;
+
+    if (!matchesSearch) return false;
+    if (filterStatus === 'ALL') return true;
+
+    const s = String(r.status || '').toLowerCase();
+    if (filterStatus === 'SUBMITTED') return s === 'requested' || s === 'submitted';
+    if (filterStatus === 'IN_REVIEW') return s === 'under_review' || s === 'change_requested';
+    if (filterStatus === 'IN_TRANSIT') return s === 'in_transit';
+    if (filterStatus === 'CANCELLED') return s === 'cancelled' || s === 'rejected';
+
+    return s === filterStatus.toLowerCase();
   });
 
   return (
@@ -211,17 +242,9 @@ export default function RequestsPage() {
                 <td style={{ padding: '16px 14px' }}>{req.departureDate}</td>
                 <td style={{ padding: '16px 14px' }}>
                   <StatusBadge
-                    label={req.statusLabel}
-                    variant={
-                      req.status === 'IN_TRANSIT'
-                        ? 'transit'
-                        : req.status === 'APPROVED'
-                        ? 'success'
-                        : req.status === 'CANCELLED'
-                        ? 'danger'
-                        : 'pending'
-                    }
-                    hasDot={req.status === 'IN_TRANSIT'}
+                    label={req.statusLabel || 'Pending'}
+                    variant={req.statusVariant || 'pending'}
+                    hasDot={req.status === 'in_transit' || req.status === 'IN_TRANSIT'}
                   />
                 </td>
                 <td style={{ padding: '16px 14px', textAlign: 'right' }}>

@@ -3,15 +3,21 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, Calendar, MapPin, MoreHorizontal, X, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Calendar, MapPin, MoreHorizontal, X, ChevronDown, AlertTriangle, Edit3, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useCustomerStore } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
+import { AddHorseModal } from '@/components/horses/AddHorseModal';
+import { EditHorseModal } from '@/components/horses/EditHorseModal';
+import { DeleteHorseModal } from '@/components/horses/DeleteHorseModal';
 
 export default function HorsesPage() {
   const router = useRouter();
   const { horses } = useCustomerStore();
   const [searchTerm, setSearchTerm] = useState('');
+  const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
+  const [editingHorse, setEditingHorse] = useState<Horse | null>(null);
+  const [deletingHorse, setDeletingHorse] = useState<Horse | null>(null);
 
   // Fallback if horses store empty
   const displayHorses = horses.length > 0 ? horses : [];
@@ -54,7 +60,7 @@ export default function HorsesPage() {
         <Button
           variant="primary"
           style={{ borderRadius: '8px', padding: '10px 16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}
-          onClick={() => alert('Add New Horse')}
+          onClick={() => setIsAddHorseModalOpen(true)}
         >
           <Plus size={18} />
           Add New Horse
@@ -201,9 +207,48 @@ export default function HorsesPage() {
                     <h3 style={{ margin: '0 0 4px 0', fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>{horse.name}</h3>
                     <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>{horse.breed} • {horse.gender}</p>
                   </div>
-                  <button style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}>
-                    <MoreHorizontal size={20} />
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      title="Chỉnh sửa con ngựa"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingHorse(horse);
+                      }}
+                      style={{
+                        background: 'none',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '6px',
+                        color: '#64748b',
+                        cursor: 'pointer',
+                        padding: '6px 8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <Edit3 size={14} />
+                    </button>
+                    <button
+                      title="Xóa con ngựa"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingHorse(horse);
+                      }}
+                      style={{
+                        background: 'none',
+                        border: '1px solid #fecaca',
+                        borderRadius: '6px',
+                        color: '#dc2626',
+                        cursor: 'pointer',
+                        padding: '6px 8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Details Row */}
@@ -257,6 +302,27 @@ export default function HorsesPage() {
           );
         })}
       </div>
+
+      <AddHorseModal
+        isOpen={isAddHorseModalOpen}
+        onClose={() => setIsAddHorseModalOpen(false)}
+      />
+
+      {editingHorse && (
+        <EditHorseModal
+          isOpen={Boolean(editingHorse)}
+          onClose={() => setEditingHorse(null)}
+          horse={editingHorse}
+        />
+      )}
+
+      {deletingHorse && (
+        <DeleteHorseModal
+          isOpen={Boolean(deletingHorse)}
+          onClose={() => setDeletingHorse(null)}
+          horse={deletingHorse}
+        />
+      )}
     </div>
   );
 }
