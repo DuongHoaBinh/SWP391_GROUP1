@@ -54,6 +54,8 @@ export default function CustomerDashboardPage() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [activeRequestForUpload, setActiveRequestForUpload] = useState<string>('TR-2026-002');
   const [trackingRequest, setTrackingRequest] = useState<TransportRequest | null>(null);
+  const [requestFilter, setRequestFilter] = useState('ALL');
+  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
 
   const handleDocumentUploadSuccess = (uploadedDoc: any) => {
     uploadDocumentForRequest(activeRequestForUpload, uploadedDoc.title);
@@ -395,24 +397,68 @@ export default function CustomerDashboardPage() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                backgroundColor: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                padding: '6px 12px',
-                fontSize: '12.5px',
-                fontWeight: 600,
-                color: '#334155',
-                cursor: 'pointer',
-              }}
-            >
-              <Filter size={14} />
-              Filter
-            </button>
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowFilterDropdown(!showFilterDropdown)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  backgroundColor: requestFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
+                  border: requestFilter !== 'ALL' ? '1px solid #3b82f6' : '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  padding: '6px 12px',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  color: requestFilter !== 'ALL' ? '#2563eb' : '#334155',
+                  cursor: 'pointer',
+                }}
+              >
+                <Filter size={14} color={requestFilter !== 'ALL' ? '#2563eb' : '#64748b'} />
+                {requestFilter === 'ALL' ? 'Filter' : requestFilter}
+              </button>
+              {showFilterDropdown && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: '100%',
+                    marginTop: '6px',
+                    width: '180px',
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '10px',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                    padding: '6px',
+                    zIndex: 20,
+                  }}
+                >
+                  {['ALL', 'In Transit', 'Pending Documents', 'Approved', 'Action Required'].map((st) => (
+                    <button
+                      key={st}
+                      onClick={() => {
+                        setRequestFilter(st);
+                        setShowFilterDropdown(false);
+                      }}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '6px 10px',
+                        fontSize: '12px',
+                        fontWeight: requestFilter === st ? 700 : 500,
+                        color: requestFilter === st ? '#2563eb' : '#1e293b',
+                        backgroundColor: requestFilter === st ? '#eff6ff' : 'transparent',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {st === 'ALL' ? 'All Statuses' : st}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <Link
               href="/customer/requests"
               style={{
@@ -446,204 +492,212 @@ export default function CustomerDashboardPage() {
             </thead>
             <tbody>
               {/* Row 1: TR-2026-001 */}
-              <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-001</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>DXB</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Dubai</div>
+              {(requestFilter === 'ALL' || requestFilter === 'In Transit') && (
+                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-001</td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>DXB</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Dubai</div>
+                      </div>
+                      <span style={{ color: '#94a3b8' }}>→</span>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>SGN</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Ho Chi Minh City</div>
+                      </div>
                     </div>
-                    <span style={{ color: '#94a3b8' }}>→</span>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SGN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Ho Chi Minh City</div>
+                  </td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
+                        T
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>Thunder</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Thoroughbred · 4y</div>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
-                      T
+                  </td>
+                  <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Sep 28, 2026</td>
+                  <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 02, 2026</td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#eff6ff', color: '#2563eb' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
+                      In Transit
+                    </span>
+                  </td>
+                  <td style={{ padding: '16px 24px', textAlign: 'right' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button
+                        onClick={() => router.push('/customer/requests/tr-2026-001')}
+                        style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
+                      >
+                        View
+                      </button>
+                      <button aria-label="More options" style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
+                        <MoreHorizontal size={16} />
+                      </button>
                     </div>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>Thunder</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Thoroughbred · 4y</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Sep 28, 2026</td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 02, 2026</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#eff6ff', color: '#2563eb' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
-                    In Transit
-                  </span>
-                </td>
-                <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button
-                      onClick={() => router.push('/customer/requests/tr-2026-001')}
-                      style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
-                    >
-                      View
-                    </button>
-                    <button style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
-                      <MoreHorizontal size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                  </td>
+                </tr>
+              )}
 
               {/* Row 2: TR-2026-002 */}
-              <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-002</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SIN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Singapore</div>
+              {(requestFilter === 'ALL' || requestFilter === 'Pending Documents') && (
+                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-002</td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>SIN</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Singapore</div>
+                      </div>
+                      <span style={{ color: '#94a3b8' }}>→</span>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>SGN</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Ho Chi Minh City</div>
+                      </div>
                     </div>
-                    <span style={{ color: '#94a3b8' }}>→</span>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SGN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Ho Chi Minh City</div>
+                  </td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
+                        RS
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>Royal Star</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Arabian · 5y</div>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
-                      RS
+                  </td>
+                  <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 05, 2026</td>
+                  <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 07, 2026</td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fffbeb', color: '#d97706' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#d97706' }} />
+                      Pending Documents
+                    </span>
+                  </td>
+                  <td style={{ padding: '16px 24px', textAlign: 'right' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button
+                        onClick={() => router.push('/customer/requests/tr-2026-002')}
+                        style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
+                      >
+                        View
+                      </button>
+                      <button aria-label="More options" style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
+                        <MoreHorizontal size={16} />
+                      </button>
                     </div>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>Royal Star</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Arabian · 5y</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 05, 2026</td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 07, 2026</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fffbeb', color: '#d97706' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#d97706' }} />
-                    Pending Documents
-                  </span>
-                </td>
-                <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button
-                      onClick={() => router.push('/customer/requests/tr-2026-002')}
-                      style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
-                    >
-                      View
-                    </button>
-                    <button style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
-                      <MoreHorizontal size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                  </td>
+                </tr>
+              )}
 
               {/* Row 3: TR-2026-003 */}
-              <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-003</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>HKG</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Hong Kong</div>
+              {(requestFilter === 'ALL' || requestFilter === 'Approved') && (
+                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-003</td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>HKG</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Hong Kong</div>
+                      </div>
+                      <span style={{ color: '#94a3b8' }}>→</span>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>SGN</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Ho Chi Minh City</div>
+                      </div>
                     </div>
-                    <span style={{ color: '#94a3b8' }}>→</span>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SGN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Ho Chi Minh City</div>
+                  </td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
+                        GM
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>Golden Mile</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Thoroughbred · 3y</div>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
-                      GM
+                  </td>
+                  <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 12, 2026</td>
+                  <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 13, 2026</td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#ecfdf5', color: '#16a34a' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
+                      Approved
+                    </span>
+                  </td>
+                  <td style={{ padding: '16px 24px', textAlign: 'right' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button
+                        onClick={() => router.push('/customer/requests/tr-2026-003')}
+                        style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
+                      >
+                        View
+                      </button>
+                      <button aria-label="More options" style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
+                        <MoreHorizontal size={16} />
+                      </button>
                     </div>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>Golden Mile</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Thoroughbred · 3y</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 12, 2026</td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 13, 2026</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#ecfdf5', color: '#16a34a' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
-                    Approved
-                  </span>
-                </td>
-                <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button
-                      onClick={() => router.push('/customer/requests/tr-2026-003')}
-                      style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
-                    >
-                      View
-                    </button>
-                    <button style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
-                      <MoreHorizontal size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                  </td>
+                </tr>
+              )}
 
               {/* Row 4: TR-2026-004 */}
-              <tr>
-                <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-004</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SYD</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Sydney</div>
+              {(requestFilter === 'ALL' || requestFilter === 'Action Required') && (
+                <tr>
+                  <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-004</td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>SYD</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Sydney</div>
+                      </div>
+                      <span style={{ color: '#94a3b8' }}>→</span>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>SIN</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Singapore</div>
+                      </div>
                     </div>
-                    <span style={{ color: '#94a3b8' }}>→</span>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SIN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Singapore</div>
+                  </td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
+                        SA
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>Silver Arrow</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Standardbred · 6y</div>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
-                      SA
+                  </td>
+                  <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 18, 2026</td>
+                  <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 20, 2026</td>
+                  <td style={{ padding: '16px 20px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#dc2626' }} />
+                      Action Required
+                    </span>
+                  </td>
+                  <td style={{ padding: '16px 24px', textAlign: 'right' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button
+                        onClick={() => router.push('/customer/requests/tr-2026-004')}
+                        style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
+                      >
+                        View
+                      </button>
+                      <button aria-label="More options" style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
+                        <MoreHorizontal size={16} />
+                      </button>
                     </div>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>Silver Arrow</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Standardbred · 6y</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 18, 2026</td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 20, 2026</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fef2f2', color: '#dc2626' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#dc2626' }} />
-                    Action Required
-                  </span>
-                </td>
-                <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button
-                      onClick={() => router.push('/customer/requests/tr-2026-004')}
-                      style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
-                    >
-                      View
-                    </button>
-                    <button style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
-                      <MoreHorizontal size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

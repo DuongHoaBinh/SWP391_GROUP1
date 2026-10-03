@@ -7,9 +7,12 @@ import { Eye, EyeOff, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { AuthShowcasePanel } from '@/components/layout/AuthShowcasePanel';
 import { setAuthSession } from '@/lib/auth';
 import { mockCurrentUser } from '@/lib/mock-data';
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 function LoginFormContent() {
   const router = useRouter();
+  const { t } = useLanguage();
   const searchParams = useSearchParams();
   const redirectTarget = searchParams.get('redirect') || '/customer';
 
@@ -174,19 +177,22 @@ function LoginFormContent() {
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
           }}
         >
-          {/* Card Title */}
-          <h2
-            style={{
-              fontSize: '30px',
-              fontWeight: 800,
-              color: '#ffffff',
-              letterSpacing: '-0.02em',
-              lineHeight: 1.2,
-              marginBottom: '6px',
-            }}
-          >
-            Welcome back
-          </h2>
+          {/* Card Title & Language Switcher */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <h2
+              style={{
+                fontSize: '28px',
+                fontWeight: 800,
+                color: '#ffffff',
+                letterSpacing: '-0.02em',
+                lineHeight: 1.2,
+                margin: 0,
+              }}
+            >
+              {t('auth.login', 'Welcome back')}
+            </h2>
+            <LanguageSwitcher variant="pill" />
+          </div>
           <p
             style={{
               fontSize: '13.5px',
@@ -252,7 +258,7 @@ function LoginFormContent() {
                   marginBottom: '8px',
                 }}
               >
-                Email address
+                {t('auth.email', 'Email address')}
               </label>
               <input
                 type="email"
@@ -293,7 +299,7 @@ function LoginFormContent() {
                     color: '#cbd5e1',
                   }}
                 >
-                  Password
+                  {t('auth.password', 'Password')}
                 </label>
                 <Link
                   href="/forgot-password"
@@ -307,7 +313,7 @@ function LoginFormContent() {
                   onMouseEnter={(e) => ((e.target as HTMLElement).style.color = '#ffffff')}
                   onMouseLeave={(e) => ((e.target as HTMLElement).style.color = '#94a3b8')}
                 >
-                  Forgot password?
+                  {t('auth.forgotPassword', 'Forgot password?')}
                 </Link>
               </div>
 
@@ -377,7 +383,7 @@ function LoginFormContent() {
                   userSelect: 'none',
                 }}
               >
-                Remember me for 30 days
+                {t('auth.rememberMe', 'Remember me')}
               </label>
             </div>
 
@@ -427,7 +433,7 @@ function LoginFormContent() {
                   Signed In
                 </>
               ) : (
-                'Sign In'
+                t('auth.login', 'Sign In')
               )}
             </button>
           </form>
@@ -557,7 +563,7 @@ function LoginFormContent() {
               color: '#94a3b8',
             }}
           >
-            Don&apos;t have an account?{' '}
+            {t('auth.donthaveAccount', "Don't have an account?")}{' '}
             <Link
               href="/register"
               style={{
@@ -566,7 +572,7 @@ function LoginFormContent() {
                 textDecoration: 'none',
               }}
             >
-              Create account
+              {t('auth.register', 'Create account')}
             </Link>
           </div>
         </div>
