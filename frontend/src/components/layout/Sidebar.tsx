@@ -20,6 +20,7 @@ import { apiClient } from '@/lib/api-client';
 import { mockCurrentUser } from '@/lib/mock-data';
 import { UserProfile } from '@/lib/types';
 import { LogoutConfirmModal } from './LogoutConfirmModal';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface NavItem {
   label: string;
@@ -36,6 +37,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose }) => {
   const pathname = usePathname();
   const router = useRouter();
+  const { t } = useLanguage();
   const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
@@ -67,17 +69,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
 
   const navItems: NavItem[] = [
     {
-      label: 'Dashboard',
+      label: t('nav.dashboard', 'Dashboard'),
       href: '/customer',
       icon: <LayoutDashboard size={18} />,
     },
     {
-      label: 'Transport Requests',
+      label: t('nav.requests', 'Transport Requests'),
       href: '/customer/requests',
       icon: <Truck size={18} />,
     },
     {
-      label: 'My Horses',
+      label: t('nav.horses', 'My Horses'),
       href: '/customer/horses',
       icon: (
         <svg
@@ -98,18 +100,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
       ),
     },
     {
-      label: 'Documents',
+      label: t('nav.documents', 'Documents'),
       href: '/customer/documents',
       icon: <FolderClosed size={18} />,
       badge: 2,
     },
     {
-      label: 'Trip Tracking',
+      label: t('nav.tracking', 'Trip Tracking'),
       href: '/customer/tracking',
       icon: <Navigation size={18} />,
     },
     {
-      label: 'Notifications',
+      label: t('common.notifications', 'Notifications'),
       href: '/customer/notifications',
       icon: <Bell size={18} />,
       badge: unreadNotifs > 0 ? unreadNotifs : undefined,
@@ -118,12 +120,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
 
   const managementItems: NavItem[] = [
     {
-      label: 'Reports',
+      label: t('nav.reports', 'Reports'),
       href: '/customer/reports',
       icon: <BarChart3 size={18} />,
     },
     {
-      label: 'Settings',
+      label: t('common.settings', 'Settings'),
       href: '/customer/settings',
       icon: <Settings size={18} />,
     },
