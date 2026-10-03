@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface NavItem {
   label: string;
@@ -36,6 +38,7 @@ export default function CoordinatorLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { t } = useLanguage();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -57,27 +60,27 @@ export default function CoordinatorLayout({
 
   const navItems: NavItem[] = [
     {
-      label: 'Dashboard',
+      label: t('nav.dashboard', 'Dashboard'),
       href: '/coordinator',
       icon: <LayoutDashboard size={18} />,
     },
     {
-      label: 'Route Planning',
+      label: t('nav.routes', 'Route Planning'),
       href: '/coordinator/routes',
       icon: <Map size={18} />,
     },
     {
-      label: 'Vehicle Management',
+      label: t('nav.vehicles', 'Vehicle Management'),
       href: '/coordinator/vehicles',
       icon: <Truck size={18} />,
     },
     {
-      label: 'Trip Schedule',
+      label: t('nav.schedule', 'Trip Schedule'),
       href: '/coordinator/schedule',
       icon: <CalendarDays size={18} />,
     },
     {
-      label: 'Trip Monitoring',
+      label: t('nav.monitoring', 'Trip Monitoring'),
       href: '/coordinator/monitoring',
       icon: <Radio size={18} />,
     },
@@ -85,18 +88,18 @@ export default function CoordinatorLayout({
 
   const managementItems: NavItem[] = [
     {
-      label: 'Alerts',
+      label: t('nav.alerts', 'Alerts'),
       href: '/coordinator/alerts',
       icon: <AlertTriangle size={18} />,
       badge: 3,
     },
     {
-      label: 'Notifications',
+      label: t('common.notifications', 'Notifications'),
       href: '/coordinator/notifications',
       icon: <Bell size={18} />,
     },
     {
-      label: 'Settings',
+      label: t('common.settings', 'Settings'),
       href: '/coordinator/settings',
       icon: <Settings size={18} />,
     },
@@ -563,9 +566,11 @@ export default function CoordinatorLayout({
               <Menu size={22} />
             </button>
             <div>
-              <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1.2 }}>Dashboard</h2>
+              <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1.2 }}>
+                {t('coordinator.title', 'Dashboard')}
+              </h2>
               <p style={{ fontSize: '13px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }} className="hidden sm:block">
-                Overview of fleet, routes and transportation schedules.
+                {t('coordinator.subtitle', 'Overview of fleet, routes and transportation schedules.')}
               </p>
             </div>
           </div>
@@ -586,7 +591,7 @@ export default function CoordinatorLayout({
             <Search size={15} color="#9ca3af" style={{ marginRight: '10px', flexShrink: 0 }} />
             <input
               type="text"
-              placeholder="Search trips, vehicles, routes..."
+              placeholder={t('common.search', 'Search trips, vehicles, routes...')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyDown={(e) => {
@@ -621,7 +626,10 @@ export default function CoordinatorLayout({
           </div>
 
           {/* Right: Actions & User */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            {/* Language Switcher */}
+            <LanguageSwitcher variant="pill" />
+
             <button
               style={{
                 width: '36px',
