@@ -1,19 +1,74 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Bell, Check, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bell, Check, Trash2, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { mockNotifications } from '@/lib/mock-data';
 import { NotificationItem } from '@/lib/types';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
+import { apiClient } from '@/lib/api-client';
+
+function formatTimeAgo(dateStr: string) {
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
 
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<NotificationItem[]>(mockNotifications);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
-  const handleMarkAllRead = () => {
+  const fetchNotifications = async () => {
+    try {
+      const data = await apiClient<any[]>('/notifications');
+      if (Array.isArray(data) && data.length > 0) {
+        const mapped: NotificationItem[] = data.map((item) => {
+          const isSuccess = item.title?.toLowerCase().includes('phê duyệt') || item.title?.toLowerCase().includes('approved');
+          const isCritical = item.notifType === 'health_alert' || item.title?.toLowerCase().includes('từ chối') || item.title?.toLowerCase().includes('rejected');
+          return {
+            id: String(item.id),
+            type: isCritical ? 'CRITICAL' : isSuccess ? 'SUCCESS' : 'INFO',
+            title: item.title,
+            message: item.message,
+            timeAgo: item.createdAt ? formatTimeAgo(item.createdAt) : 'Recently',
+            isRead: Boolean(item.isRead),
+            relatedRequestCode: item.shipmentId ? `REQ-${String(item.shipmentId).padStart(3, '0')}` : undefined,
+            actionText: item.shipmentId ? 'Xem chi tiết đơn' : undefined,
+            actionUrl: item.shipmentId ? `/customer/requests/${item.shipmentId}` : undefined,
+          };
+        });
+        setNotifications(mapped);
+      } else {
+        setNotifications(mockNotifications);
+      }
+    } catch (err) {
+      console.error('Failed to fetch notifications, fallback to mock:', err);
+      setNotifications(mockNotifications);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, []);
+
+  const handleMarkAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    for (const notif of notifications.filter((n) => !n.isRead)) {
+      try {
+        await apiClient(`/notifications/${notif.id}/read`, { method: 'PATCH' });
+      } catch {
+        // ignore
+      }
+    }
   };
 
   const handleClear = () => {
@@ -102,7 +157,23 @@ export default function NotificationsPage() {
                 <div style={{ fontSize: '13.5px', color: 'var(--text-body)', marginTop: '4px' }}>
                   {notif.message}
                 </div>
-                {notif.actionText && (
+                {notif.actionUrl ? (
+                  <Link
+                    href={notif.actionUrl}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      marginTop: '6px',
+                      fontSize: '13px',
+                      color: 'var(--primary)',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    {notif.actionText || 'Xem chi tiết'} →
+                  </Link>
+                ) : notif.actionText ? (
                   <button
                     onClick={() => setIsUploadOpen(true)}
                     style={{
@@ -110,11 +181,15 @@ export default function NotificationsPage() {
                       fontSize: '13px',
                       color: notif.type === 'CRITICAL' ? '#dc2626' : 'var(--primary)',
                       fontWeight: 600,
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 0,
                     }}
                   >
                     {notif.actionText} →
                   </button>
-                )}
+                ) : null}
                 <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '6px' }}>{notif.timeAgo}</div>
               </div>
 

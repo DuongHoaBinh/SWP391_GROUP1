@@ -15,8 +15,28 @@ import {
   Save,
   AlertCircle,
   FileText,
+  Loader2,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
+import { Horse } from '@/lib/types';
+import { AddHorseModal } from '@/components/horses/AddHorseModal';
+import { apiClient } from '@/lib/api-client';
+import { getCurrentUser } from '@/lib/auth';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+
+const formSchema = z.object({
+  title: z.string().min(1, 'Request title is required'),
+  transportType: z.enum(['International', 'Domestic']),
+  origin: z.string().min(1, 'Origin is required'),
+  destination: z.string().min(1, 'Destination is required'),
+  departureDate: z.string().min(1, 'Departure date is required'),
+  arrivalDate: z.string().optional(),
+  horseCount: z.coerce.number().min(1),
+  specialReqs: z.string().optional(),
+});
+type FormData = z.infer<typeof formSchema>;
 
 function CreateTransportRequestForm() {
   const router = useRouter();
@@ -27,16 +47,31 @@ function CreateTransportRequestForm() {
 
   // Step state (1 to 4)
   const [currentStep, setCurrentStep] = useState(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
 
-  // Form states
-  const [title, setTitle] = useState('');
-  const [transportType, setTransportType] = useState<'International' | 'Domestic'>('International');
-  const [origin, setOrigin] = useState('Ho Chi Minh City, Vietnam');
-  const [destination, setDestination] = useState('Singapore Turf Club');
-  const [departureDate, setDepartureDate] = useState('2026-10-15');
-  const [arrivalDate, setArrivalDate] = useState('2026-10-16');
-  const [horseCount, setHorseCount] = useState(1);
-  const [specialReqs, setSpecialReqs] = useState('');
+  // Form states using react-hook-form
+  const {
+    register,
+    handleSubmit,
+    watch,
+    trigger,
+    formState: { errors },
+  } = useForm<FormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      title: '',
+      transportType: 'International',
+      origin: 'Ho Chi Minh City, Vietnam',
+      destination: 'Singapore Turf Club',
+      departureDate: '2026-10-15',
+      arrivalDate: '2026-10-16',
+      horseCount: 1,
+      specialReqs: '',
+    },
+  });
+
+  const formValues = watch();
 
   // Selected horses
   const [selectedHorseIds, setSelectedHorseIds] = useState<string[]>(
@@ -49,22 +84,10 @@ function CreateTransportRequestForm() {
     }
   }, [preselectedHorseId]);
 
-  // Validation errors
-  const [errors, setErrors] = useState<{ [key: string]: string }>({});
-
-  const validateStep1 = () => {
-    const errs: { [key: string]: string } = {};
-    if (!title.trim()) errs.title = 'Request title is required.';
-    if (!origin.trim()) errs.origin = 'Origin is required.';
-    if (!destination.trim()) errs.destination = 'Destination is required.';
-    if (!departureDate) errs.departureDate = 'Departure date is required.';
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (currentStep === 1) {
-      if (!validateStep1()) return;
+      const isValid = await trigger(['title', 'origin', 'destination', 'departureDate']);
+      if (!isValid) return;
     }
     if (currentStep < 4) {
       setCurrentStep(currentStep + 1);
@@ -77,30 +100,58 @@ function CreateTransportRequestForm() {
     }
   };
 
-  const handleSubmit = () => {
-    const newReq = createRequest({
-      title,
-      transportType,
-      origin,
-      destination,
-      departureDate,
-      arrivalDate,
-      horseIds: selectedHorseIds,
-      specialReqs,
-    });
-    router.push(`/customer/requests/${newReq.id}`);
+  const onSubmitForm = async (data: FormData) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const selectedHorsesData = horses.filter(h => selectedHorseIds.includes(h.id)).map(h => ({
+        name: h.name,
+        breed: h.breed,
+        gender: h.gender === 'Stallion' ? 'male' : h.gender === 'Mare' ? 'female' : 'gelding',
+        age: h.age,
+      }));
+
+      const currentUser = getCurrentUser();
+      const payload = {
+        contactName: currentUser.fullName || currentUser.name || 'Current Customer',
+        contactPhone: currentUser.phone || '0901234567',
+        contactEmail: currentUser.email || 'customer@example.com',
+        requestedHorseCount: selectedHorseIds.length,
+        originLocation: data.origin,
+        destinationLocation: data.destination,
+        requestedDate: new Date(data.departureDate).toISOString(),
+        specialRequirements: data.specialReqs,
+        horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
+        // Fallback for single horse if array is not preferred by backend yet
+        horseName: selectedHorsesData[0]?.name,
+        horseBreed: selectedHorsesData[0]?.breed,
+        horseGender: selectedHorsesData[0]?.gender,
+        horseAge: selectedHorsesData[0]?.age,
+      };
+
+      const newReq = await apiClient<any>('/orders', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      router.push(`/customer/requests/${newReq.id}`);
+    } catch (error) {
+      console.error('Failed to create request:', error);
+      alert('Failed to submit request. Please try again.');
+      setIsSubmitting(false);
+    }
   };
 
   const handleSaveDraft = () => {
     const newReq = createRequest({
-      title: title || 'Draft Transport Request',
-      transportType,
-      origin,
-      destination,
-      departureDate,
-      arrivalDate,
+      title: formValues.title || 'Draft Transport Request',
+      transportType: formValues.transportType,
+      origin: formValues.origin,
+      destination: formValues.destination,
+      departureDate: formValues.departureDate,
+      arrivalDate: formValues.arrivalDate || '',
       horseIds: selectedHorseIds,
-      specialReqs,
+      specialReqs: formValues.specialReqs,
     });
     router.push('/customer/requests');
   };
@@ -251,8 +302,7 @@ function CreateTransportRequestForm() {
                   </label>
                   <input
                     type="text"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
+                    {...register('title')}
                     placeholder="Enter request title (e.g. Championship Transport to Singapore)"
                     style={{
                       width: '100%',
@@ -265,7 +315,7 @@ function CreateTransportRequestForm() {
                   />
                   {errors.title && (
                     <span style={{ fontSize: '12px', color: '#dc2626', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <AlertCircle size={12} /> {errors.title}
+                      <AlertCircle size={12} /> {errors.title.message}
                     </span>
                   )}
                 </div>
@@ -275,8 +325,7 @@ function CreateTransportRequestForm() {
                     Transportation Type <span style={{ color: '#dc2626' }}>*</span>
                   </label>
                   <select
-                    value={transportType}
-                    onChange={(e) => setTransportType(e.target.value as any)}
+                    {...register('transportType')}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -302,8 +351,7 @@ function CreateTransportRequestForm() {
                     <MapPin size={16} color="#94a3b8" style={{ position: 'absolute', top: '13px', left: '12px' }} />
                     <input
                       type="text"
-                      value={origin}
-                      onChange={(e) => setOrigin(e.target.value)}
+                      {...register('origin')}
                       placeholder="Search origin (e.g. Ho Chi Minh City, Vietnam)"
                       style={{
                         width: '100%',
@@ -315,7 +363,7 @@ function CreateTransportRequestForm() {
                       }}
                     />
                   </div>
-                  {errors.origin && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.origin}</span>}
+                  {errors.origin && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.origin.message}</span>}
                 </div>
 
                 <div>
@@ -326,8 +374,7 @@ function CreateTransportRequestForm() {
                     <Flag size={16} color="#94a3b8" style={{ position: 'absolute', top: '13px', left: '12px' }} />
                     <input
                       type="text"
-                      value={destination}
-                      onChange={(e) => setDestination(e.target.value)}
+                      {...register('destination')}
                       placeholder="Search destination (e.g. Singapore Turf Club)"
                       style={{
                         width: '100%',
@@ -339,7 +386,7 @@ function CreateTransportRequestForm() {
                       }}
                     />
                   </div>
-                  {errors.destination && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.destination}</span>}
+                  {errors.destination && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.destination.message}</span>}
                 </div>
               </div>
 
@@ -357,11 +404,11 @@ function CreateTransportRequestForm() {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  <span style={{ fontWeight: 700, color: 'var(--text-heading)', fontSize: '14px' }}>{origin || 'Origin'}</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text-heading)', fontSize: '14px' }}>{formValues.origin || 'Origin'}</span>
                   <div style={{ width: '80px', height: '1px', backgroundColor: '#93c5fd', position: 'relative' }}>
                     <Plane size={14} color="#2563eb" style={{ position: 'absolute', top: '-7px', left: '33px' }} />
                   </div>
-                  <span style={{ fontWeight: 700, color: 'var(--text-heading)', fontSize: '14px' }}>{destination || 'Destination'}</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text-heading)', fontSize: '14px' }}>{formValues.destination || 'Destination'}</span>
                 </div>
                 <span style={{ fontSize: '12px', color: '#1e40af', fontWeight: 600, backgroundColor: '#ffffff', padding: '4px 10px', borderRadius: '6px' }}>
                   Est. Distance: 1,100 km • Est. Time: 12 hrs
@@ -376,8 +423,7 @@ function CreateTransportRequestForm() {
                   </label>
                   <input
                     type="date"
-                    value={departureDate}
-                    onChange={(e) => setDepartureDate(e.target.value)}
+                    {...register('departureDate')}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -395,8 +441,7 @@ function CreateTransportRequestForm() {
                   </label>
                   <input
                     type="date"
-                    value={arrivalDate}
-                    onChange={(e) => setArrivalDate(e.target.value)}
+                    {...register('arrivalDate')}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -415,8 +460,7 @@ function CreateTransportRequestForm() {
                   <input
                     type="number"
                     min={1}
-                    value={horseCount}
-                    onChange={(e) => setHorseCount(parseInt(e.target.value) || 1)}
+                    {...register('horseCount')}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -438,8 +482,7 @@ function CreateTransportRequestForm() {
                 </label>
                 <textarea
                   rows={3}
-                  value={specialReqs}
-                  onChange={(e) => setSpecialReqs(e.target.value)}
+                  {...register('specialReqs')}
                   placeholder="Enter any special transportation requirements (e.g. Temperature-controlled vehicle required, specific hydration schedule)..."
                   style={{
                     width: '100%',
@@ -476,7 +519,7 @@ function CreateTransportRequestForm() {
                 </p>
               </div>
               <button
-                onClick={() => alert('Add new horse form')}
+                onClick={() => setIsAddHorseModalOpen(true)}
                 style={{
                   padding: '8px 16px',
                   borderRadius: '8px',
@@ -488,6 +531,7 @@ function CreateTransportRequestForm() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
+                  cursor: 'pointer',
                 }}
               >
                 <Plus size={14} /> Add New Horse
@@ -652,17 +696,17 @@ function CreateTransportRequestForm() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                 <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
                   <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Request Title</span>
-                  <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-heading)', marginTop: '2px' }}>{title || 'Untitled Request'}</div>
+                  <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-heading)', marginTop: '2px' }}>{formValues.title || 'Untitled Request'}</div>
                 </div>
                 <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
                   <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Route</span>
                   <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>
-                    {origin} → {destination}
+                    {formValues.origin} → {formValues.destination}
                   </div>
                 </div>
                 <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
                   <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Departure Date</span>
-                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>{departureDate}</div>
+                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>{formValues.departureDate}</div>
                 </div>
               </div>
 
@@ -786,11 +830,12 @@ function CreateTransportRequestForm() {
             </button>
           ) : (
             <button
-              onClick={handleSubmit}
+              onClick={handleSubmit(onSubmitForm)}
+              disabled={isSubmitting}
               style={{
                 padding: '9px 26px',
                 borderRadius: '8px',
-                backgroundColor: '#16a34a',
+                backgroundColor: isSubmitting ? '#94a3b8' : '#16a34a',
                 color: '#ffffff',
                 fontSize: '13.5px',
                 fontWeight: 600,
@@ -798,14 +843,31 @@ function CreateTransportRequestForm() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)',
+                boxShadow: isSubmitting ? 'none' : '0 2px 8px rgba(22, 163, 74, 0.3)',
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
               }}
             >
-              Submit Request <Check size={16} strokeWidth={2.5} />
+              {isSubmitting ? (
+                <>
+                  Submitting... <Loader2 size={16} className="animate-spin" />
+                </>
+              ) : (
+                <>
+                  Submit Request <Check size={16} strokeWidth={2.5} />
+                </>
+              )}
             </button>
           )}
         </div>
       </div>
+
+      <AddHorseModal
+        isOpen={isAddHorseModalOpen}
+        onClose={() => setIsAddHorseModalOpen(false)}
+        onHorseAdded={(newHorse) => {
+          setSelectedHorseIds((prev) => [...prev, newHorse.id]);
+        }}
+      />
     </div>
   );
 }

@@ -6,6 +6,8 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ChevronRight,
   Edit3,
+  Trash2,
+  CheckCircle2,
   MoreVertical,
   Check,
   Clock,
@@ -19,6 +21,8 @@ import {
 import { useCustomerStore } from '@/lib/customer-store';
 import { HorseDocument } from '@/lib/types';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
+import { EditHorseModal } from '@/components/horses/EditHorseModal';
+import { DeleteHorseModal } from '@/components/horses/DeleteHorseModal';
 
 export default function HorseDetailPage() {
   const params = useParams();
@@ -50,6 +54,9 @@ export default function HorseDetailPage() {
 
   const [previewDoc, setPreviewDoc] = useState<HorseDocument | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
 
   const hasMissingDoc = horse.documents?.some((d) => d.status === 'Missing');
 
@@ -115,12 +122,13 @@ export default function HorseDetailPage() {
               fontWeight: 600,
               border: 'none',
               boxShadow: 'var(--shadow-sm)',
+              cursor: 'pointer',
             }}
           >
             Ship This Horse
           </button>
           <button
-            onClick={() => alert(`Edit profile for ${horse.name}`)}
+            onClick={() => setIsEditModalOpen(true)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -133,13 +141,54 @@ export default function HorseDetailPage() {
               fontWeight: 600,
               color: 'var(--text-body)',
               boxShadow: 'var(--shadow-sm)',
+              cursor: 'pointer',
             }}
           >
             <Edit3 size={15} />
             <span>Edit Horse</span>
           </button>
+          <button
+            onClick={() => setIsDeleteModalOpen(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 16px',
+              borderRadius: '8px',
+              border: '1px solid #fecaca',
+              backgroundColor: '#fff5f5',
+              fontSize: '13.5px',
+              fontWeight: 600,
+              color: '#dc2626',
+              boxShadow: 'var(--shadow-sm)',
+              cursor: 'pointer',
+            }}
+          >
+            <Trash2 size={15} />
+            <span>Delete Horse</span>
+          </button>
         </div>
       </div>
+
+      {feedbackSuccess && (
+        <div
+          style={{
+            padding: '12px 18px',
+            borderRadius: '10px',
+            backgroundColor: '#ecfdf5',
+            border: '1px solid #a7f3d0',
+            color: '#065f46',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            fontSize: '14px',
+            fontWeight: 600,
+          }}
+        >
+          <CheckCircle2 size={18} color="#059669" />
+          <span>{feedbackSuccess}</span>
+        </div>
+      )}
 
       {/* HORSE PROFILE HERO CARD */}
       <div
@@ -861,6 +910,31 @@ export default function HorseDetailPage() {
         onClose={() => setIsUploadOpen(false)}
         onSuccess={handleUploadSuccess}
       />
+
+      {/* Edit Horse Modal */}
+      {isEditModalOpen && (
+        <EditHorseModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          horse={horse}
+          onHorseUpdated={(updated) => {
+            setFeedbackSuccess(`Đã cập nhật thông tin con ngựa "${updated.name}" thành công!`);
+            setTimeout(() => setFeedbackSuccess(null), 5000);
+          }}
+        />
+      )}
+
+      {/* Delete Horse Modal */}
+      {isDeleteModalOpen && (
+        <DeleteHorseModal
+          isOpen={isDeleteModalOpen}
+          onClose={() => setIsDeleteModalOpen(false)}
+          horse={horse}
+          onHorseDeleted={() => {
+            router.push('/customer/horses');
+          }}
+        />
+      )}
     </div>
   );
 }

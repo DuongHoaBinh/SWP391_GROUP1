@@ -10,6 +10,10 @@ export enum UserRole {
 export interface AuthUser {
   id: string;
   email: string;
+  fullName?: string;
+  phone?: string | null;
+  address?: string | null;
+  avatarUrl?: string | null;
   passwordHash: string;
   role: UserRole;
   emailVerified: boolean;
