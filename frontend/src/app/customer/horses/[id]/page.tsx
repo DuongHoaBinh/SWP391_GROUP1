@@ -23,6 +23,7 @@ import { HorseDocument } from '@/lib/types';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { EditHorseModal } from '@/components/horses/EditHorseModal';
 import { DeleteHorseModal } from '@/components/horses/DeleteHorseModal';
+import toast from 'react-hot-toast';
 
 export default function HorseDetailPage() {
   const params = useParams();
@@ -31,32 +32,73 @@ export default function HorseDetailPage() {
 
   const { getHorseById, uploadDocumentForHorse, uploadDocumentForRequest } = useCustomerStore();
 
-  const horse = getHorseById(horseId) || getHorseById('hrs-001') || {
-    id: 'hrs-001',
-    code: 'HOR-2026-001',
-    name: 'Thunder',
-    breed: 'Thoroughbred',
-    age: 6,
-    gender: 'Male (Stallion)',
-    dob: '12 May 2020',
-    color: 'Bay',
-    weight: '520 kg',
-    microchipNumber: '985141000123456',
-    passportNumber: 'HP-2026-001',
-    ownerName: 'John Doe',
-    medicalStatus: 'Healthy',
-    vaccinationStatus: 'Up to date',
-    quarantineStatus: 'Pending',
-    lastExamDate: '20 Sep 2026',
-    veterinarian: 'Dr. Nguyen',
-    specialRequirements: 'Temperature-controlled transportation recommended.',
-  };
+  const horse = getHorseById(horseId);
 
   const [previewDoc, setPreviewDoc] = useState<HorseDocument | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
+
+  if (!horse) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '400px',
+          padding: '48px 24px',
+          backgroundColor: '#ffffff',
+          borderRadius: '16px',
+          border: '1px solid #e5e7eb',
+          textAlign: 'center',
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+        }}
+      >
+        <div
+          style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            backgroundColor: '#fef2f2',
+            color: '#ef4444',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '16px',
+          }}
+        >
+          <AlertTriangle size={32} />
+        </div>
+        <h3 style={{ fontSize: '20px', fontWeight: 700, color: '#111827', margin: '0 0 8px 0' }}>
+          Không tìm thấy hồ sơ ngựa
+        </h3>
+        <p style={{ fontSize: '14px', color: '#6b7280', maxWidth: '440px', margin: '0 0 24px 0', lineHeight: 1.5 }}>
+          Hồ sơ ngựa với mã ID &ldquo;{horseId}&rdquo; không tồn tại hoặc đã bị xóa khỏi hệ thống.
+        </p>
+        <Link
+          href="/customer/horses"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 20px',
+            backgroundColor: '#2563eb',
+            color: '#ffffff',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: 600,
+            textDecoration: 'none',
+            boxShadow: '0 1px 2px rgba(37, 99, 235, 0.2)',
+          }}
+        >
+          ← Quay lại danh sách ngựa
+        </Link>
+      </div>
+    );
+  }
 
   const hasMissingDoc = horse.documents?.some((d) => d.status === 'Missing');
 
@@ -883,7 +925,7 @@ export default function HorseDetailPage() {
                 Close
               </button>
               <button
-                onClick={() => alert(`Downloading ${previewDoc.title}`)}
+                onClick={() => toast.success(`Đang tải xuống tài liệu ${previewDoc.title}...`)}
                 style={{
                   padding: '9px 20px',
                   borderRadius: '8px',

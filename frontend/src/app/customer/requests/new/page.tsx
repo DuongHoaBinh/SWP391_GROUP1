@@ -22,6 +22,7 @@ import { Horse } from '@/lib/types';
 import { AddHorseModal } from '@/components/horses/AddHorseModal';
 import { apiClient } from '@/lib/api-client';
 import { getCurrentUser } from '@/lib/auth';
+import toast from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -137,7 +138,7 @@ function CreateTransportRequestForm() {
       router.push(`/customer/requests/${newReq.id}`);
     } catch (error) {
       console.error('Failed to create request:', error);
-      alert('Failed to submit request. Please try again.');
+      toast.error('Failed to submit request. Please try again.');
       setIsSubmitting(false);
     }
   };
@@ -652,7 +653,7 @@ function CreateTransportRequestForm() {
                     </span>
                   ) : (
                     <button
-                      onClick={() => alert(`Upload dialog for ${doc.name}`)}
+                      onClick={() => toast.success(`Upload dialog ready for ${doc.name}`)}
                       style={{
                         padding: '6px 14px',
                         borderRadius: '6px',

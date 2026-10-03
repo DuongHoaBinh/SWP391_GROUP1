@@ -210,6 +210,7 @@ export default function HorsesPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <button
                       title="Chỉnh sửa con ngựa"
+                      aria-label="Edit horse"
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditingHorse(horse);
@@ -230,6 +231,7 @@ export default function HorsesPage() {
                     </button>
                     <button
                       title="Xóa con ngựa"
+                      aria-label="Delete horse"
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeletingHorse(horse);

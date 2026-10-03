@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { CustomerStoreProvider } from '@/lib/customer-store';
@@ -12,6 +12,8 @@ export default function CustomerLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   useEffect(() => {
     // Ensure active session exists so user never gets blocked or stuck
     const token = getAuthToken();
@@ -23,16 +25,16 @@ export default function CustomerLayout({
   return (
     <CustomerStoreProvider>
       <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--bg-page)' }}>
-        {/* Sidebar Navigation */}
-        <Sidebar />
+        {/* Sidebar Navigation (with Mobile Drawer) */}
+        <Sidebar mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
 
         {/* Main Content Area */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, backgroundColor: '#f8fafc' }}>
-          <Header />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, backgroundColor: '#f8fafc', overflowX: 'hidden' }}>
+          <Header onMenuClick={() => setMobileMenuOpen(true)} />
           <main
             style={{
               flex: 1,
-              padding: '28px 32px 48px 32px',
+              padding: '24px 20px 48px 20px',
               maxWidth: '1600px',
               width: '100%',
               margin: '0 auto',

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, ChevronDown, Search, LogOut, Check, ExternalLink, Settings } from 'lucide-react';
+import { Bell, ChevronDown, Search, LogOut, Check, ExternalLink, Settings, Menu } from 'lucide-react';
 import { getCurrentUser, clearAuthSession } from '@/lib/auth';
 import { apiClient } from '@/lib/api-client';
 import { mockCurrentUser, mockNotifications } from '@/lib/mock-data';
@@ -24,11 +24,13 @@ function formatHeaderTimeAgo(dateStr: string) {
 interface HeaderProps {
   title?: string;
   subtitle?: string;
+  onMenuClick?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   title = 'Dashboard',
   subtitle = 'Overview of your racehorse transportation activities.',
+  onMenuClick,
 }) => {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
@@ -36,6 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [searchValue, setSearchValue] = useState('');
 
   const fetchNotifications = async () => {
     try {
@@ -114,37 +117,48 @@ export const Header: React.FC<HeaderProps> = ({
       }}
     >
       {/* Title & Subtitle */}
-      <div>
-        <h1
-          style={{
-            fontSize: '20px',
-            fontWeight: 800,
-            color: '#0f172a',
-            letterSpacing: '-0.02em',
-            margin: 0,
-            lineHeight: 1.2,
-          }}
-        >
-          {title}
-        </h1>
-        <p
-          style={{
-            fontSize: '13px',
-            color: '#64748b',
-            marginTop: '2px',
-            marginBottom: 0,
-          }}
-        >
-          {subtitle}
-        </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {onMenuClick && (
+          <button
+            onClick={onMenuClick}
+            className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shrink-0"
+            aria-label="Open navigation menu"
+          >
+            <Menu size={20} />
+          </button>
+        )}
+        <div>
+          <h1
+            style={{
+              fontSize: '20px',
+              fontWeight: 800,
+              color: '#0f172a',
+              letterSpacing: '-0.02em',
+              margin: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            {title}
+          </h1>
+          <p
+            style={{
+              fontSize: '13px',
+              color: '#64748b',
+              marginTop: '2px',
+              marginBottom: 0,
+            }}
+          >
+            {subtitle}
+          </p>
+        </div>
       </div>
 
       {/* Right Controls: Search Bar + Notifications + User Profile */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
         {/* Search Bar */}
         <div
+          className="hidden sm:flex"
           style={{
-            display: 'flex',
             alignItems: 'center',
             backgroundColor: '#ffffff',
             border: '1px solid #e2e8f0',
@@ -157,7 +171,14 @@ export const Header: React.FC<HeaderProps> = ({
           <Search size={16} color="#94a3b8" style={{ marginRight: '8px', flexShrink: 0 }} />
           <input
             type="text"
-            placeholder="Search requests, horses, do..."
+            placeholder="Search requests, horses..."
+            value={searchValue}
+            onChange={(e) => setSearchValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && searchValue.trim()) {
+                router.push(`/customer/requests?search=${encodeURIComponent(searchValue.trim())}`);
+              }
+            }}
             style={{
               border: 'none',
               outline: 'none',
