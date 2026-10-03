@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -19,9 +19,12 @@ import {
   CalendarDays,
   Bell,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 export default function CoordinatorDashboardPage() {
   const router = useRouter();
+  const [tripFilter, setTripFilter] = useState('ALL');
+  const [showTripFilterDropdown, setShowTripFilterDropdown] = useState(false);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -330,23 +333,68 @@ export default function CoordinatorDashboardPage() {
                   Live monitoring of all active and scheduled trips
                 </p>
               </div>
-              <button
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '6px 12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: '#374151',
-                  backgroundColor: '#ffffff',
-                  cursor: 'pointer',
-                }}
-              >
-                <Filter size={13} color="#9ca3af" /> Filter
-              </button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setShowTripFilterDropdown(!showTripFilterDropdown)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    border: tripFilter !== 'ALL' ? '1px solid #3b82f6' : '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: tripFilter !== 'ALL' ? '#2563eb' : '#374151',
+                    backgroundColor: tripFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Filter size={13} color={tripFilter !== 'ALL' ? '#2563eb' : '#9ca3af'} />
+                  {tripFilter === 'ALL' ? 'Filter' : tripFilter}
+                </button>
+                {showTripFilterDropdown && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      top: '100%',
+                      marginTop: '6px',
+                      width: '160px',
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                      padding: '6px',
+                      zIndex: 20,
+                    }}
+                  >
+                    {['ALL', 'In Transit', 'Delayed', 'Scheduled'].map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => {
+                          setTripFilter(st);
+                          setShowTripFilterDropdown(false);
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '6px 10px',
+                          fontSize: '12px',
+                          fontWeight: tripFilter === st ? 700 : 500,
+                          color: tripFilter === st ? '#2563eb' : '#374151',
+                          backgroundColor: tripFilter === st ? '#eff6ff' : 'transparent',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {st === 'ALL' ? 'All Trips' : st}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div style={{ overflowX: 'auto' }}>
@@ -363,70 +411,76 @@ export default function CoordinatorDashboardPage() {
                 </thead>
                 <tbody>
                   {/* Row 1 */}
-                  <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>TR-2026-001</p>
-                      <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer' }}>Thunder</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1f2937' }}>
-                      Dubai <span style={{ color: '#9ca3af' }}>→</span> Singapore
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#1f2937', margin: 0 }}>VH-024</p>
-                      <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>John Smith (Escort)</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Sep 28</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 02</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} /> In Transit
-                      </span>
-                    </td>
-                  </tr>
+                  {(tripFilter === 'ALL' || tripFilter === 'In Transit') && (
+                    <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+                      <td style={{ padding: '16px 24px' }}>
+                        <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>TR-2026-001</p>
+                        <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer' }}>Thunder</p>
+                      </td>
+                      <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1f2937' }}>
+                        Dubai <span style={{ color: '#9ca3af' }}>→</span> Singapore
+                      </td>
+                      <td style={{ padding: '16px 24px' }}>
+                        <p style={{ fontWeight: 700, color: '#1f2937', margin: 0 }}>VH-024</p>
+                        <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>John Smith (Escort)</p>
+                      </td>
+                      <td style={{ padding: '16px 24px', color: '#4b5563' }}>Sep 28</td>
+                      <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 02</td>
+                      <td style={{ padding: '16px 24px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
+                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} /> In Transit
+                        </span>
+                      </td>
+                    </tr>
+                  )}
 
                   {/* Row 2 */}
-                  <tr style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: 'rgba(254, 242, 242, 0.25)' }}>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>TR-2026-002</p>
-                      <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer' }}>Silver Star</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1f2937' }}>
-                      London <span style={{ color: '#9ca3af' }}>→</span> Paris
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#1f2937', margin: 0 }}>VH-012</p>
-                      <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Mike Johnson</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Sep 26</td>
-                    <td style={{ padding: '16px 24px', color: '#dc2626', fontWeight: 700 }}>Sep 27</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#fef2f2', color: '#b91c1c' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444' }} /> Delayed
-                      </span>
-                    </td>
-                  </tr>
+                  {(tripFilter === 'ALL' || tripFilter === 'Delayed') && (
+                    <tr style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: 'rgba(254, 242, 242, 0.25)' }}>
+                      <td style={{ padding: '16px 24px' }}>
+                        <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>TR-2026-002</p>
+                        <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer' }}>Silver Star</p>
+                      </td>
+                      <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1f2937' }}>
+                        London <span style={{ color: '#9ca3af' }}>→</span> Paris
+                      </td>
+                      <td style={{ padding: '16px 24px' }}>
+                        <p style={{ fontWeight: 700, color: '#1f2937', margin: 0 }}>VH-012</p>
+                        <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Mike Johnson</p>
+                      </td>
+                      <td style={{ padding: '16px 24px', color: '#4b5563' }}>Sep 26</td>
+                      <td style={{ padding: '16px 24px', color: '#dc2626', fontWeight: 700 }}>Sep 27</td>
+                      <td style={{ padding: '16px 24px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#fef2f2', color: '#b91c1c' }}>
+                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444' }} /> Delayed
+                        </span>
+                      </td>
+                    </tr>
+                  )}
 
                   {/* Row 3 */}
-                  <tr>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>TR-2026-003</p>
-                      <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer' }}>Midnight</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1f2937' }}>
-                      Tokyo <span style={{ color: '#9ca3af' }}>→</span> Seoul
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#1f2937', margin: 0 }}>VH-045</p>
-                      <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Sarah Lee</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 05</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 06</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#f3f4f6', color: '#4b5563' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#6b7280' }} /> Scheduled
-                      </span>
-                    </td>
-                  </tr>
+                  {(tripFilter === 'ALL' || tripFilter === 'Scheduled') && (
+                    <tr>
+                      <td style={{ padding: '16px 24px' }}>
+                        <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>TR-2026-003</p>
+                        <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer' }}>Midnight</p>
+                      </td>
+                      <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1f2937' }}>
+                        Tokyo <span style={{ color: '#9ca3af' }}>→</span> Seoul
+                      </td>
+                      <td style={{ padding: '16px 24px' }}>
+                        <p style={{ fontWeight: 700, color: '#1f2937', margin: 0 }}>VH-045</p>
+                        <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Sarah Lee</p>
+                      </td>
+                      <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 05</td>
+                      <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 06</td>
+                      <td style={{ padding: '16px 24px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#f3f4f6', color: '#4b5563' }}>
+                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#6b7280' }} /> Scheduled
+                        </span>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -547,7 +601,7 @@ export default function CoordinatorDashboardPage() {
             <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {/* Alert 1 */}
               <div
-                onClick={() => alert('Adjust Trip TR-2026-002')}
+                onClick={() => toast.success('Đang mở chi tiết điều chỉnh chuyến TR-2026-002')}
                 style={{ padding: '12px', borderRadius: '8px', border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'background-color 0.15s' }}
                 onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f9fafb')}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
@@ -564,7 +618,10 @@ export default function CoordinatorDashboardPage() {
 
               {/* Alert 2 */}
               <div
-                onClick={() => alert('Reassign Vehicle VH-009')}
+                onClick={() => {
+                  toast.success('Đang chuyển hướng tới quản lý xe VH-009');
+                  router.push('/coordinator/vehicles');
+                }}
                 style={{ padding: '12px', borderRadius: '8px', border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'background-color 0.15s' }}
                 onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f9fafb')}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
@@ -581,7 +638,7 @@ export default function CoordinatorDashboardPage() {
 
               {/* Alert 3 */}
               <div
-                onClick={() => alert('View Customs details for TR-2026-005')}
+                onClick={() => toast.success('Đang xem chi tiết thủ tục hải quan cho chuyến TR-2026-005')}
                 style={{ padding: '12px', borderRadius: '8px', border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'background-color 0.15s' }}
                 onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f9fafb')}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
@@ -638,7 +695,10 @@ export default function CoordinatorDashboardPage() {
           </div>
 
           <div
-            onClick={() => alert('Adjust Trip')}
+            onClick={() => {
+              toast.success('Đang chuyển hướng tới danh sách chuyến đi');
+              router.push('/coordinator/schedule');
+            }}
             style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
           >
             <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>

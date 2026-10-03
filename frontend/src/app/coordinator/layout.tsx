@@ -16,8 +16,11 @@ import {
   LogOut,
   Search,
   ChevronDown,
+  Menu,
+  X,
 } from 'lucide-react';
 import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
+import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 
 interface NavItem {
   label: string;
@@ -33,6 +36,9 @@ export default function CoordinatorLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     // Ensure active coordinator session exists
@@ -96,17 +102,24 @@ export default function CoordinatorLayout({
     },
   ];
 
-  const handleLogout = () => {
-    if (confirm('Are you sure you want to log out?')) {
-      clearAuthSession();
-      router.push('/login');
-    }
+  const handleLogoutConfirm = () => {
+    setShowLogoutModal(false);
+    clearAuthSession();
+    router.push('/login');
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif" }}>
-      {/* LEFT SIDEBAR */}
+    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif", overflowX: 'hidden' }}>
+      {/* Logout confirmation modal */}
+      <LogoutConfirmModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleLogoutConfirm}
+      />
+
+      {/* LEFT SIDEBAR (DESKTOP) */}
       <aside
+        className="hidden md:flex"
         style={{
           width: '260px',
           backgroundColor: '#0f172a',
@@ -322,8 +335,9 @@ export default function CoordinatorLayout({
             </div>
 
             <button
-              onClick={handleLogout}
+              onClick={() => setShowLogoutModal(true)}
               title="Log out"
+              aria-label="Log out"
               style={{
                 color: '#64748b',
                 background: 'none',
@@ -337,6 +351,179 @@ export default function CoordinatorLayout({
           </div>
         </div>
       </aside>
+
+      {/* MOBILE DRAWER */}
+      {mobileMenuOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile Navigation"
+          className="fixed inset-0 z-50 flex md:hidden"
+        >
+          <div
+            className="fixed inset-0 bg-black/50 transition-opacity"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <aside
+            style={{
+              width: '260px',
+              backgroundColor: '#0f172a',
+              color: '#94a3b8',
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100vh',
+              position: 'relative',
+              zIndex: 51,
+            }}
+          >
+            {/* Logo + Close */}
+            <div
+              style={{
+                height: '72px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0 20px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '8px',
+                    backgroundColor: '#2563eb',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 800,
+                    fontSize: '17px',
+                    marginRight: '12px',
+                  }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4">
+                    <circle cx="5" cy="19" r="2" fill="#fff" />
+                    <path d="M5 17c0-5 4-9 9-9h5" />
+                    <polyline points="15 4 19 8 15 12" />
+                  </svg>
+                </div>
+                <h1 style={{ color: '#ffffff', fontWeight: 800, fontSize: '14px', margin: 0 }}>
+                  RaceHorse <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500 }}>Logistics</span>
+                </h1>
+              </div>
+              <button
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close navigation"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: '4px',
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Nav links */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: '28px' }}>
+              <div>
+                <p style={{ padding: '0 12px', fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Overview
+                </p>
+                <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  {navItems.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '9px 12px',
+                        borderRadius: '8px',
+                        fontSize: '13.5px',
+                        color: pathname === item.href ? '#ffffff' : '#94a3b8',
+                        backgroundColor: pathname === item.href ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {item.icon} {item.label}
+                      </span>
+                    </Link>
+                  ))}
+                </nav>
+              </div>
+
+              <div>
+                <p style={{ padding: '0 12px', fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Management
+                </p>
+                <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  {managementItems.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '9px 12px',
+                        borderRadius: '8px',
+                        fontSize: '13.5px',
+                        color: pathname === item.href ? '#ffffff' : '#94a3b8',
+                        backgroundColor: pathname === item.href ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {item.icon} {item.label}
+                      </span>
+                      {item.badge && (
+                        <span style={{ backgroundColor: '#2563eb', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '999px' }}>
+                          {item.badge}
+                        </span>
+                      )}
+                    </Link>
+                  ))}
+                </nav>
+              </div>
+            </div>
+
+            {/* Logout button */}
+            <div style={{ padding: '16px', borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setShowLogoutModal(true);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  color: '#ef4444',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '13.5px',
+                  fontWeight: 600,
+                }}
+              >
+                <LogOut size={16} />
+                <span>Log out</span>
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {/* MAIN CONTENT AREA */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
@@ -356,18 +543,37 @@ export default function CoordinatorLayout({
             flexShrink: 0,
           }}
         >
-          {/* Left: Title */}
-          <div>
-            <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1.2 }}>Dashboard</h2>
-            <p style={{ fontSize: '13px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
-              Overview of fleet, routes and transportation schedules.
-            </p>
+          {/* Left: Mobile Menu Toggle & Title */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open mobile menu"
+              className="md:hidden"
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#374151',
+              }}
+            >
+              <Menu size={22} />
+            </button>
+            <div>
+              <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1.2 }}>Dashboard</h2>
+              <p style={{ fontSize: '13px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }} className="hidden sm:block">
+                Overview of fleet, routes and transportation schedules.
+              </p>
+            </div>
           </div>
 
           {/* Center: Search */}
           <div
+            className="hidden sm:flex"
             style={{
-              display: 'flex',
               alignItems: 'center',
               backgroundColor: '#f9fafb',
               border: '1px solid #e5e7eb',
@@ -381,6 +587,13 @@ export default function CoordinatorLayout({
             <input
               type="text"
               placeholder="Search trips, vehicles, routes..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchTerm.trim()) {
+                  router.push(`/coordinator/routes?search=${encodeURIComponent(searchTerm.trim())}`);
+                }
+              }}
               style={{
                 border: 'none',
                 outline: 'none',

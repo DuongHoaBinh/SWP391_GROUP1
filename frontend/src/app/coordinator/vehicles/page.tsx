@@ -229,6 +229,7 @@ export default function VehicleManagementPage() {
                         }}
                         className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg hover:bg-slate-100"
                         title="Edit Vehicle"
+                        aria-label="Edit vehicle"
                       >
                         <Edit size={16} />
                       </button>
@@ -239,6 +240,7 @@ export default function VehicleManagementPage() {
                         }}
                         className="p-1.5 text-slate-500 hover:text-red-600 rounded-lg hover:bg-slate-100"
                         title="Delete Vehicle"
+                        aria-label="Delete vehicle"
                       >
                         <Trash2 size={16} />
                       </button>
