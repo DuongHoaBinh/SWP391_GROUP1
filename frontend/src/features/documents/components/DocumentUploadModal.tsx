@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { UploadCloud, FileText, CheckCircle, AlertCircle, X } from 'lucide-react';
 import { DocumentItem } from '@/lib/types';
 import { mockDocuments } from '@/lib/mock-data';
+import { useDocumentStore } from '@/lib/document-store';
 
 const uploadSchema = z.object({
   documentId: z.string().min(1, 'Please select a document requirement'),
@@ -36,6 +37,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isDone, setIsDone] = useState(false);
+  const { submitDocumentForReview } = useDocumentStore();
 
   // Filter only documents that need upload
   const pendingDocs = mockDocuments.filter(d => d.status === 'PENDING' || d.status === 'REJECTED');
@@ -69,6 +71,15 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         status: 'SUBMITTED',
         fileUrl: `/uploads/${data.file[0].name}`,
       };
+
+      // Submit into Specialist review queue
+      submitDocumentForReview({
+        reqCode: targetDoc.requestCode || 'TR-2026-001',
+        horseName: targetDoc.horseName || 'Thunder',
+        type: targetDoc.title,
+        customerName: 'Alex Morgan',
+        fileUrl: `/uploads/${data.file[0].name}`,
+      });
       
       onSuccess(updated);
       
@@ -76,7 +87,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         setIsDone(false);
         onClose();
       }, 700);
-    }, 1200);
+    }, 800);
   };
 
   return (
