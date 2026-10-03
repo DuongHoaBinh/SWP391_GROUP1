@@ -74,41 +74,43 @@ export default function TripSchedulePage() {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left text-sm border-collapse">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              <th className="p-4">Order Code</th>
-              <th className="p-4">Departure Time</th>
-              <th className="p-4">Assigned Vehicle</th>
-              <th className="p-4">Driver & Escort</th>
-              <th className="p-4">Route Title</th>
-              <th className="p-4">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {schedules.map(s => (
-              <tr key={s.id} className="hover:bg-slate-50/70">
-                <td className="p-4 font-bold text-blue-600">{s.orderCode}</td>
-                <td className="p-4 text-slate-800 font-semibold flex items-center gap-1.5">
-                  <Clock size={14} className="text-slate-400" /> {s.departureTime}
-                </td>
-                <td className="p-4 font-medium text-slate-700">
-                  <span className="bg-slate-100 px-2.5 py-1 rounded text-xs font-bold">{s.vehicleCode}</span>
-                </td>
-                <td className="p-4 text-slate-700">
-                  <p className="font-semibold text-slate-900 m-0">{s.driverName}</p>
-                  <p className="text-xs text-slate-500 m-0">Escort: {s.escortName}</p>
-                </td>
-                <td className="p-4 font-medium text-slate-700">{s.routeTitle}</td>
-                <td className="p-4">
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
-                    {s.status}
-                  </span>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <th className="p-4">Order Code</th>
+                <th className="p-4">Departure Time</th>
+                <th className="p-4">Assigned Vehicle</th>
+                <th className="p-4">Driver & Escort</th>
+                <th className="p-4">Route Title</th>
+                <th className="p-4">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {schedules.map(s => (
+                <tr key={s.id} className="hover:bg-slate-50/70">
+                  <td className="p-4 font-bold text-blue-600">{s.orderCode}</td>
+                  <td className="p-4 text-slate-800 font-semibold flex items-center gap-1.5">
+                    <Clock size={14} className="text-slate-400" /> {s.departureTime}
+                  </td>
+                  <td className="p-4 font-medium text-slate-700">
+                    <span className="bg-slate-100 px-2.5 py-1 rounded text-xs font-bold">{s.vehicleCode}</span>
+                  </td>
+                  <td className="p-4 text-slate-700">
+                    <p className="font-semibold text-slate-900 m-0">{s.driverName}</p>
+                    <p className="text-xs text-slate-500 m-0">Escort: {s.escortName}</p>
+                  </td>
+                  <td className="p-4 font-medium text-slate-700">{s.routeTitle}</td>
+                  <td className="p-4">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+                      {s.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Add Schedule Modal */}
