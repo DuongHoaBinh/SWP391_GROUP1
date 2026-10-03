@@ -117,7 +117,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             </div>
 
             {selectedStatus === 'APPROVED' && (
-              <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="animate-fade-in">
                 <label className="text-sm font-semibold text-slate-800 block mb-1.5">
                   Valid Until (Expiry Date) <span className="text-red-500">*</span>
                 </label>
@@ -138,7 +138,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             )}
 
             {selectedStatus === 'REJECTED' && (
-              <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="animate-fade-in">
                 <label className="text-sm font-semibold text-slate-800 block mb-1.5">
                   Reason for Rejection <span className="text-red-500">*</span>
                 </label>

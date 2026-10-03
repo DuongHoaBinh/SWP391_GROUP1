@@ -26,10 +26,14 @@ export default function SpecialistDashboardPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [pendingDocs, setPendingDocs] = useState(MOCK_PENDING_DOCS);
+  const [filterType, setFilterType] = useState('ALL');
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
   
   // Modal State
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
+
+  const displayedDocs = pendingDocs.filter(doc => filterType === 'ALL' || doc.type.toLowerCase().includes(filterType.toLowerCase()));
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -132,9 +136,41 @@ export default function SpecialistDashboardPage() {
                 <h3 className="text-base font-bold text-slate-900 m-0">Document Review Queue</h3>
                 <p className="text-xs font-medium text-slate-500 mt-1">Documents submitted by customers awaiting approval</p>
               </div>
-              <button className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
-                <Filter size={14} className="text-slate-400" /> Filter
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowFilterMenu(!showFilterMenu)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm font-semibold transition-colors ${
+                    filterType !== 'ALL'
+                      ? 'border-blue-500 text-blue-600 bg-blue-50'
+                      : 'border-slate-300 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Filter size={14} className={filterType !== 'ALL' ? 'text-blue-500' : 'text-slate-400'} />
+                  {filterType === 'ALL' ? 'Filter' : filterType}
+                </button>
+                {showFilterMenu && (
+                  <div className="absolute right-0 mt-2 w-44 bg-white border border-slate-200 rounded-xl shadow-lg p-2 z-20">
+                    <button
+                      onClick={() => { setFilterType('ALL'); setShowFilterMenu(false); }}
+                      className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${filterType === 'ALL' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      All Types
+                    </button>
+                    <button
+                      onClick={() => { setFilterType('Vaccination'); setShowFilterMenu(false); }}
+                      className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${filterType === 'Vaccination' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      Vaccination
+                    </button>
+                    <button
+                      onClick={() => { setFilterType('Medical'); setShowFilterMenu(false); }}
+                      className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${filterType === 'Medical' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      Medical
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -165,7 +201,7 @@ export default function SpecialistDashboardPage() {
                         ))}
                       </td>
                     </tr>
-                  ) : pendingDocs.map((doc) => (
+                  ) : displayedDocs.map((doc) => (
                     <tr key={doc.id} className="hover:bg-slate-50/50">
                       <td className="p-4 font-bold text-slate-900">{doc.id}</td>
                       <td className="p-4">
