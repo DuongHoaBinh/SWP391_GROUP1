@@ -278,19 +278,40 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
         if (r.requestCode === requestCode) {
           const updatedDocs = r.documents?.map((d) =>
             d.title.toLowerCase().includes(docTitle.toLowerCase()) || docTitle.toLowerCase().includes(d.title.toLowerCase())
-              ? { ...d, status: 'Approved' as const, warning: undefined, uploadedDate: 'Today' }
+              ? { ...d, status: 'Under Review' as const, warning: undefined, uploadedDate: 'Today' }
               : d
           );
-          const hasMissing = updatedDocs?.some((d) => d.status === 'Missing');
+
+          // Push into Specialist Review Queue via localStorage
+          try {
+            const currentPendingRaw = localStorage.getItem('equitransit_spec_pending_docs_v1');
+            const currentPending = currentPendingRaw ? JSON.parse(currentPendingRaw) : [];
+            const primaryHorseName = r.horse?.name || 'Horse';
+            const newPendingDoc = {
+              id: `DOC-2026-${Math.floor(100 + Math.random() * 900)}`,
+              reqCode: requestCode,
+              horseName: primaryHorseName,
+              type: docTitle,
+              iconType: docTitle.toLowerCase().includes('vaccin') ? 'vaccination' : docTitle.toLowerCase().includes('medic') ? 'medical' : 'other',
+              date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
+              status: 'PENDING',
+              customerName: 'Customer',
+              submittedAt: new Date().toISOString(),
+            };
+            localStorage.setItem('equitransit_spec_pending_docs_v1', JSON.stringify([newPendingDoc, ...currentPending]));
+          } catch {
+            // ignore
+          }
+
           return {
             ...r,
             documents: updatedDocs,
-            pendingDocumentsCount: hasMissing ? 1 : 0,
+            pendingDocumentsCount: (r.pendingDocumentsCount || 0),
             activities: [
               {
                 id: `act-${Date.now()}`,
                 timestamp: 'Just now',
-                description: `${docTitle} uploaded and approved by specialist check.`,
+                description: `${docTitle} uploaded. Awaiting Transport Specialist verification.`,
                 actor: 'By Customer (John Doe)',
                 type: 'customer',
               },
