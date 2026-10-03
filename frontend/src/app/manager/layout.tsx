@@ -16,8 +16,11 @@ import {
   LogOut,
   Search,
   ChevronDown,
+  Menu,
+  X,
 } from 'lucide-react';
 import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
+import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 
 interface NavItem {
   label: string;
@@ -36,6 +39,9 @@ export default function ManagerLayout({
   const router = useRouter();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     // Ensure active manager session exists
@@ -103,21 +109,187 @@ export default function ManagerLayout({
   ];
 
   const handleLogout = () => {
-    if (confirm('Are you sure you want to log out?')) {
-      clearAuthSession();
-      router.push('/login');
-    }
+    setShowLogoutModal(true);
+  };
+
+  const handleConfirmLogout = () => {
+    setShowLogoutModal(false);
+    clearAuthSession();
+    router.push('/login');
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif" }}>
-      {/* LEFT SIDEBAR */}
+    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif", overflowX: 'hidden' }}>
+      <LogoutConfirmModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleConfirmLogout}
+      />
+
+      {/* Mobile Drawer */}
+      {mobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <aside
+            style={{
+              width: '260px',
+              backgroundColor: '#0f172a',
+              color: '#94a3b8',
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100vh',
+              position: 'relative',
+              zIndex: 51,
+              borderRight: '1px solid rgba(255, 255, 255, 0.05)',
+            }}
+            className="animate-fade-in shadow-2xl"
+          >
+            <div
+              style={{
+                height: '72px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0 20px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '8px',
+                    backgroundColor: '#2563eb',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 800,
+                    fontSize: '17px',
+                    marginRight: '12px',
+                    boxShadow: '0 0 15px rgba(37, 99, 235, 0.5)',
+                  }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4">
+                    <circle cx="5" cy="19" r="2" fill="#fff" />
+                    <path d="M5 17c0-5 4-9 9-9h5" />
+                    <polyline points="15 4 19 8 15 12" />
+                  </svg>
+                </div>
+                <div>
+                  <h1 style={{ color: '#ffffff', fontWeight: 800, fontSize: '14px', letterSpacing: '0.02em', lineHeight: 1.2, margin: 0 }}>
+                    RaceHorse
+                    <br />
+                    <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500 }}>Logistics</span>
+                  </h1>
+                </div>
+              </div>
+              <button
+                onClick={() => setMobileMenuOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+                aria-label="Close navigation menu"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: '28px' }}>
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px 12px' }}>
+                  Main Operations
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {navItems.map((item) => {
+                    const isActive = item.href === '/manager' ? pathname === '/manager' : pathname?.startsWith(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 14px',
+                          borderRadius: '10px',
+                          backgroundColor: isActive ? '#1e3a8a' : 'transparent',
+                          color: isActive ? '#ffffff' : '#94a3b8',
+                          fontWeight: isActive ? 600 : 500,
+                          fontSize: '13.5px',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ color: isActive ? '#60a5fa' : '#64748b' }}>{item.icon}</span>
+                          {item.label}
+                        </div>
+                        {item.badge && (
+                          <span style={{ backgroundColor: item.badgeColor === 'danger' ? '#ef4444' : '#2563eb', color: '#ffffff', fontSize: '10.5px', fontWeight: 700, padding: '2px 7px', borderRadius: '999px' }}>
+                            {item.badge}
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px 12px' }}>
+                  Management
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {managementItems.map((item) => {
+                    const isActive = pathname?.startsWith(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 14px',
+                          borderRadius: '10px',
+                          backgroundColor: isActive ? '#1e3a8a' : 'transparent',
+                          color: isActive ? '#ffffff' : '#94a3b8',
+                          fontWeight: isActive ? 600 : 500,
+                          fontSize: '13.5px',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ color: isActive ? '#60a5fa' : '#64748b' }}>{item.icon}</span>
+                          {item.label}
+                        </div>
+                        {item.badge && (
+                          <span style={{ backgroundColor: '#2563eb', color: '#ffffff', fontSize: '10.5px', fontWeight: 700, padding: '2px 7px', borderRadius: '999px' }}>
+                            {item.badge}
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* LEFT SIDEBAR (Desktop) */}
       <aside
+        className="hidden md:flex"
         style={{
           width: '260px',
           backgroundColor: '#0f172a',
           color: '#94a3b8',
-          display: 'flex',
           flexDirection: 'column',
           height: '100vh',
           position: 'sticky',
@@ -430,18 +602,37 @@ export default function ManagerLayout({
             flexShrink: 0,
           }}
         >
-          {/* Left: Title */}
-          <div>
-            <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1.2 }}>Dashboard</h2>
-            <p style={{ fontSize: '13px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
-              Overview of your racehorse transportation activities.
-            </p>
+          {/* Left: Mobile Menu Toggle & Title */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open mobile menu"
+              className="md:hidden"
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#374151',
+              }}
+            >
+              <Menu size={22} />
+            </button>
+            <div>
+              <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1.2 }}>Dashboard</h2>
+              <p style={{ fontSize: '13px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }} className="hidden sm:block">
+                Overview of your racehorse transportation activities.
+              </p>
+            </div>
           </div>
 
           {/* Center: Search */}
           <div
+            className="hidden sm:flex"
             style={{
-              display: 'flex',
               alignItems: 'center',
               backgroundColor: '#f9fafb',
               border: '1px solid #e5e7eb',
@@ -455,6 +646,13 @@ export default function ManagerLayout({
             <input
               type="text"
               placeholder="Search requests, horses, documents..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchTerm.trim()) {
+                  router.push(`/manager/requests?search=${encodeURIComponent(searchTerm.trim())}`);
+                }
+              }}
               style={{
                 border: 'none',
                 outline: 'none',

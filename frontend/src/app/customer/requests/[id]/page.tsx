@@ -170,7 +170,7 @@ export default function RequestDetailPage() {
   const [isResubmitting, setIsResubmitting] = useState(false);
   const [resubmitError, setResubmitError] = useState('');
 
-  if (loading || !request) {
+  if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         <div style={{ height: '40px', width: '30%', backgroundColor: '#e5e7eb', borderRadius: '8px', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
@@ -181,6 +181,66 @@ export default function RequestDetailPage() {
             50% { opacity: .5; }
           }
         `}</style>
+      </div>
+    );
+  }
+
+  if (error || !request) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '400px',
+          padding: '48px 24px',
+          backgroundColor: '#ffffff',
+          borderRadius: '16px',
+          border: '1px solid #e5e7eb',
+          textAlign: 'center',
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+        }}
+      >
+        <div
+          style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            backgroundColor: '#fef2f2',
+            color: '#ef4444',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '16px',
+          }}
+        >
+          <AlertTriangle size={32} />
+        </div>
+        <h3 style={{ fontSize: '20px', fontWeight: 700, color: '#111827', margin: '0 0 8px 0' }}>
+          Không tìm thấy đơn vận chuyển
+        </h3>
+        <p style={{ fontSize: '14px', color: '#6b7280', maxWidth: '440px', margin: '0 0 24px 0', lineHeight: 1.5 }}>
+          Yêu cầu vận chuyển với mã ID &ldquo;{requestId}&rdquo; không tồn tại hoặc đã bị xóa khỏi hệ thống.
+        </p>
+        <Link
+          href="/customer/requests"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 20px',
+            backgroundColor: '#2563eb',
+            color: '#ffffff',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: 600,
+            textDecoration: 'none',
+            boxShadow: '0 1px 2px rgba(37, 99, 235, 0.2)',
+          }}
+        >
+          ← Quay lại danh sách đơn
+        </Link>
       </div>
     );
   }
@@ -315,6 +375,7 @@ export default function RequestDetailPage() {
             </button>
           )}
           <button
+            aria-label="More options"
             style={{
               width: '38px',
               height: '38px',
@@ -808,7 +869,7 @@ export default function RequestDetailPage() {
                           Upload Missing Document
                         </button>
                       ) : (
-                        <button style={{ color: '#94a3b8', border: 'none', background: 'none' }}>
+                        <button aria-label="View document details" style={{ color: '#94a3b8', border: 'none', background: 'none' }}>
                           <Eye size={18} />
                         </button>
                       )}

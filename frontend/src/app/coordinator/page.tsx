@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -18,10 +18,110 @@ import {
   Sliders,
   CalendarDays,
   Bell,
+  Check,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { useFleetRouteStore } from '@/lib/fleet-route-store';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 export default function CoordinatorDashboardPage() {
   const router = useRouter();
+  const { t } = useLanguage();
+  const { vehicles, routes, schedules, alerts, acknowledgeAlert } = useFleetRouteStore();
+  const [tripFilter, setTripFilter] = useState('ALL');
+  const [showTripFilterDropdown, setShowTripFilterDropdown] = useState(false);
+
+  // Dynamic KPI Metrics
+  const activeTrips = schedules.filter((s) => s.status === 'In Transit').length;
+  const scheduledDepartures = schedules.filter((s) => s.status === 'Scheduled').length;
+  const delayedTrips = schedules.filter((s) => s.status === 'Delayed').length;
+  const completedTrips = schedules.filter((s) => s.status === 'Completed').length;
+
+  const availableVehicles = vehicles.filter((v) => v.status === 'available').length;
+  const inUseVehicles = vehicles.filter((v) => v.status === 'in_use').length;
+  const inMaintenanceVehicles = vehicles.filter((v) => v.status === 'maintenance').length;
+
+  const unacknowledgedAlerts = alerts.filter((a) => !a.isAcknowledged);
+
+  // Featured trip for Route Progress
+  const featuredTrip = schedules.find((s) => s.status === 'In Transit') || schedules[0];
+
+  // Filtered schedules for table
+  const filteredSchedules = tripFilter === 'ALL' 
+    ? schedules 
+    : schedules.filter((s) => s.status === tripFilter);
+
+  const formatDisplayDate = (dStr: string) => {
+    if (!dStr) return '—';
+    if (dStr.includes('T')) {
+      try {
+        const d = new Date(dStr);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      } catch {
+        return dStr;
+      }
+    }
+    return dStr;
+  };
+
+  const getTripStatusBadge = (status: string) => {
+    switch (status) {
+      case 'In Transit':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} /> {t('status.inTransit', 'In Transit')}
+          </span>
+        );
+      case 'Delayed':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#fef2f2', color: '#b91c1c' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444' }} /> {t('status.delayed', 'Delayed')}
+          </span>
+        );
+      case 'Scheduled':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#f3f4f6', color: '#4b5563' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#6b7280' }} /> {t('status.scheduled', 'Scheduled')}
+          </span>
+        );
+      case 'Completed':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#ecfdf5', color: '#047857' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} /> {t('status.completed', 'Completed')}
+          </span>
+        );
+      default:
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#f1f5f9', color: '#475569' }}>
+            {status}
+          </span>
+        );
+    }
+  };
+
+  const getVehicleStatusBadge = (status: string) => {
+    switch (status) {
+      case 'available':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#ecfdf5', color: '#047857' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} /> {t('status.available', 'Available')}
+          </span>
+        );
+      case 'in_use':
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} /> {t('status.inUse', 'In Use')}
+          </span>
+        );
+      case 'maintenance':
+      default:
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#fffbeb', color: '#b45309' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b' }} /> {t('status.maintenance', 'Maintenance')}
+          </span>
+        );
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -49,10 +149,10 @@ export default function CoordinatorDashboardPage() {
             Saturday, September 26
           </p>
           <h2 style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff', margin: '0 0 6px 0', lineHeight: 1.2 }}>
-            Good morning, Alex
+            {t('coordinator.welcome', 'Good morning')}, Alex
           </h2>
           <p style={{ fontSize: '14px', color: '#94a3b8', margin: 0, fontWeight: 500 }}>
-            Here is an overview of today&apos;s fleet and route operations.
+            {t('coordinator.subtitle', "Here is an overview of today's fleet and route operations.")}
           </p>
 
           {/* Chips */}
@@ -73,7 +173,7 @@ export default function CoordinatorDashboardPage() {
               }}
             >
               <Plane size={14} color="#60a5fa" />
-              <span>14 active trips</span>
+              <span>{String(activeTrips).padStart(2, '0')} {t('coordinator.activeTrips', 'active trips')}</span>
             </div>
 
             <div
@@ -92,7 +192,7 @@ export default function CoordinatorDashboardPage() {
               }}
             >
               <Truck size={14} color="#34d399" />
-              <span>09 vehicles available</span>
+              <span>{String(availableVehicles).padStart(2, '0')} {t('coordinator.availableVehicles', 'vehicles available')}</span>
             </div>
 
             <div
@@ -102,16 +202,16 @@ export default function CoordinatorDashboardPage() {
                 gap: '8px',
                 padding: '6px 12px',
                 borderRadius: '8px',
-                backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
+                backgroundColor: delayedTrips > 0 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.1)',
+                border: delayedTrips > 0 ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
                 fontSize: '12px',
                 fontWeight: 500,
                 color: '#ffffff',
                 backdropFilter: 'blur(4px)',
               }}
             >
-              <Clock size={14} color="#f87171" />
-              <span>03 delayed trips</span>
+              <Clock size={14} color={delayedTrips > 0 ? '#f87171' : '#94a3b8'} />
+              <span>{String(delayedTrips).padStart(2, '0')} {t('coordinator.delayedTrips', 'delayed trips')}</span>
             </div>
           </div>
         </div>
@@ -136,7 +236,7 @@ export default function CoordinatorDashboardPage() {
           onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#1d4ed8')}
           onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#2563eb')}
         >
-          <MapPin size={16} /> Plan New Route
+          <MapPin size={16} /> {t('coordinator.planNewRoute', 'Plan New Route')}
         </button>
       </div>
 
@@ -152,43 +252,45 @@ export default function CoordinatorDashboardPage() {
           <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
             <Truck size={20} />
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>14</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Active Trips</p>
+          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(activeTrips).padStart(2, '0')}</h3>
+          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.activeTrips', 'Active Trips')}</p>
         </div>
 
         <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
           <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
             <Truck size={20} />
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>09</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Available Vehicles</p>
+          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(availableVehicles).padStart(2, '0')}</h3>
+          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.availableVehicles', 'Available Vehicles')}</p>
         </div>
 
         <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
           <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#f8fafc', color: '#475569', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
             <CalendarCheck size={20} />
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>06</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Scheduled Departures</p>
+          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(scheduledDepartures).padStart(2, '0')}</h3>
+          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.scheduledDepartures', 'Scheduled Departures')}</p>
         </div>
 
         <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fef2f2', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: delayedTrips > 0 ? '#fef2f2' : '#f8fafc', color: delayedTrips > 0 ? '#ef4444' : '#6b7280', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Clock size={20} />
             </div>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: '#dc2626', backgroundColor: '#fef2f2', padding: '2px 7px', borderRadius: '4px' }}>Action Req</span>
+            {delayedTrips > 0 && (
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#dc2626', backgroundColor: '#fef2f2', padding: '2px 7px', borderRadius: '4px' }}>Action Req</span>
+            )}
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#dc2626', margin: '0 0 4px 0', lineHeight: 1 }}>03</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Delayed Trips</p>
+          <h3 style={{ fontSize: '30px', fontWeight: 800, color: delayedTrips > 0 ? '#dc2626' : '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(delayedTrips).padStart(2, '0')}</h3>
+          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.delayedTrips', 'Delayed Trips')}</p>
         </div>
 
         <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
           <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
             <Wrench size={20} />
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>02</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>In Maintenance</p>
+          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(inMaintenanceVehicles).padStart(2, '0')}</h3>
+          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.inMaintenance', 'In Maintenance')}</p>
         </div>
       </div>
 
@@ -223,7 +325,9 @@ export default function CoordinatorDashboardPage() {
                 backgroundColor: 'rgba(249, 250, 251, 0.5)',
               }}
             >
-              <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>Active Route Progress</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>
+                {t('coordinator.routeProgress', 'Active Route Progress')}
+              </h3>
               <div
                 style={{
                   padding: '4px 10px',
@@ -236,7 +340,7 @@ export default function CoordinatorDashboardPage() {
                   border: '1px solid #dbeafe',
                 }}
               >
-                TR-2026-001 (Thunder)
+                {featuredTrip ? `${featuredTrip.id} (${featuredTrip.horseName})` : 'No Active Trip'}
               </div>
             </div>
 
@@ -253,8 +357,12 @@ export default function CoordinatorDashboardPage() {
                     <Flag size={18} />
                   </div>
                   <div>
-                    <p style={{ fontSize: '12px', fontWeight: 700, color: '#1f2937', margin: 0, lineHeight: 1.2 }}>Dubai</p>
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>Origin</p>
+                    <p style={{ fontSize: '12px', fontWeight: 700, color: '#1f2937', margin: 0, lineHeight: 1.2 }}>
+                      {featuredTrip ? featuredTrip.origin.split(',')[0] : 'Origin'}
+                    </p>
+                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
+                      {t('coordinator.origin', 'Origin')}
+                    </p>
                   </div>
                 </div>
 
@@ -265,7 +373,9 @@ export default function CoordinatorDashboardPage() {
                   </div>
                   <div>
                     <p style={{ fontSize: '12px', fontWeight: 700, color: '#1f2937', margin: 0, lineHeight: 1.2 }}>Mumbai</p>
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>Transit Stop</p>
+                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
+                      {t('coordinator.transitStop', 'Transit Stop')}
+                    </p>
                   </div>
                 </div>
 
@@ -276,7 +386,9 @@ export default function CoordinatorDashboardPage() {
                   </div>
                   <div>
                     <p style={{ fontSize: '12px', fontWeight: 700, color: '#2563eb', margin: 0, lineHeight: 1.2 }}>Singapore</p>
-                    <p style={{ fontSize: '10px', color: '#2563eb', margin: '2px 0 0 0', fontWeight: 600 }}>Quarantine</p>
+                    <p style={{ fontSize: '10px', color: '#2563eb', margin: '2px 0 0 0', fontWeight: 600 }}>
+                      {t('coordinator.quarantine', 'Quarantine')}
+                    </p>
                   </div>
                 </div>
 
@@ -287,7 +399,9 @@ export default function CoordinatorDashboardPage() {
                   </div>
                   <div>
                     <p style={{ fontSize: '12px', fontWeight: 700, color: '#4b5563', margin: 0, lineHeight: 1.2 }}>Bangkok</p>
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>Rest Stop</p>
+                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
+                      {t('coordinator.restStop', 'Rest Stop')}
+                    </p>
                   </div>
                 </div>
 
@@ -297,8 +411,12 @@ export default function CoordinatorDashboardPage() {
                     <CheckCircle2 size={18} />
                   </div>
                   <div>
-                    <p style={{ fontSize: '12px', fontWeight: 700, color: '#4b5563', margin: 0, lineHeight: 1.2 }}>Ho Chi Minh</p>
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>Destination</p>
+                    <p style={{ fontSize: '12px', fontWeight: 700, color: '#4b5563', margin: 0, lineHeight: 1.2 }}>
+                      {featuredTrip ? featuredTrip.destination.split(',')[0] : 'Destination'}
+                    </p>
+                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
+                      {t('coordinator.destination', 'Destination')}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -325,108 +443,131 @@ export default function CoordinatorDashboardPage() {
               }}
             >
               <div>
-                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>Trip Schedule</h3>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>
+                  {t('coordinator.tripSchedule', 'Trip Schedule')}
+                </h3>
                 <p style={{ fontSize: '12px', fontWeight: 500, color: '#6b7280', margin: '2px 0 0 0' }}>
-                  Live monitoring of all active and scheduled trips
+                  {t('coordinator.tripScheduleDesc', 'Live monitoring of all active and scheduled trips')} ({filteredSchedules.length})
                 </p>
               </div>
-              <button
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '6px 12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: '#374151',
-                  backgroundColor: '#ffffff',
-                  cursor: 'pointer',
-                }}
-              >
-                <Filter size={13} color="#9ca3af" /> Filter
-              </button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setShowTripFilterDropdown(!showTripFilterDropdown)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    border: tripFilter !== 'ALL' ? '1px solid #3b82f6' : '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: tripFilter !== 'ALL' ? '#2563eb' : '#374151',
+                    backgroundColor: tripFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Filter size={13} color={tripFilter !== 'ALL' ? '#2563eb' : '#9ca3af'} />
+                  {tripFilter === 'ALL' ? 'Filter' : tripFilter}
+                </button>
+                {showTripFilterDropdown && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      top: '100%',
+                      marginTop: '6px',
+                      width: '160px',
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                      padding: '6px',
+                      zIndex: 20,
+                    }}
+                  >
+                    {['ALL', 'In Transit', 'Delayed', 'Scheduled', 'Completed'].map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => {
+                          setTripFilter(st);
+                          setShowTripFilterDropdown(false);
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '6px 10px',
+                          fontSize: '12px',
+                          fontWeight: tripFilter === st ? 700 : 500,
+                          color: tripFilter === st ? '#2563eb' : '#374151',
+                          backgroundColor: tripFilter === st ? '#eff6ff' : 'transparent',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {st === 'ALL' ? 'All Trips' : st}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    <th style={{ padding: '12px 24px' }}>Trip ID / Horse</th>
-                    <th style={{ padding: '12px 24px' }}>Route</th>
-                    <th style={{ padding: '12px 24px' }}>Vehicle / Driver</th>
-                    <th style={{ padding: '12px 24px' }}>Departure</th>
-                    <th style={{ padding: '12px 24px' }}>Arrival</th>
-                    <th style={{ padding: '12px 24px' }}>Status</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.tripIdHorse', 'Trip ID / Horse')}</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.route', 'Route')}</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.vehicleDriver', 'Vehicle / Driver')}</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.departure', 'Departure')}</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.arrival', 'Arrival')}</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.status', 'Status')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Row 1 */}
-                  <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>TR-2026-001</p>
-                      <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer' }}>Thunder</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1f2937' }}>
-                      Dubai <span style={{ color: '#9ca3af' }}>→</span> Singapore
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#1f2937', margin: 0 }}>VH-024</p>
-                      <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>John Smith (Escort)</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Sep 28</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 02</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} /> In Transit
-                      </span>
-                    </td>
-                  </tr>
-
-                  {/* Row 2 */}
-                  <tr style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: 'rgba(254, 242, 242, 0.25)' }}>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>TR-2026-002</p>
-                      <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer' }}>Silver Star</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1f2937' }}>
-                      London <span style={{ color: '#9ca3af' }}>→</span> Paris
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#1f2937', margin: 0 }}>VH-012</p>
-                      <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Mike Johnson</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Sep 26</td>
-                    <td style={{ padding: '16px 24px', color: '#dc2626', fontWeight: 700 }}>Sep 27</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#fef2f2', color: '#b91c1c' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444' }} /> Delayed
-                      </span>
-                    </td>
-                  </tr>
-
-                  {/* Row 3 */}
-                  <tr>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>TR-2026-003</p>
-                      <p style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer' }}>Midnight</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1f2937' }}>
-                      Tokyo <span style={{ color: '#9ca3af' }}>→</span> Seoul
-                    </td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#1f2937', margin: 0 }}>VH-045</p>
-                      <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Sarah Lee</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 05</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 06</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#f3f4f6', color: '#4b5563' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#6b7280' }} /> Scheduled
-                      </span>
-                    </td>
-                  </tr>
+                  {filteredSchedules.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '32px 24px', textAlign: 'center', color: '#6b7280' }}>
+                        No trips found matching filter "{tripFilter}".
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSchedules.map((trip) => (
+                      <tr 
+                        key={trip.id} 
+                        style={{ 
+                          borderBottom: '1px solid #f3f4f6',
+                          backgroundColor: trip.status === 'Delayed' ? 'rgba(254, 242, 242, 0.25)' : '#ffffff',
+                        }}
+                      >
+                        <td style={{ padding: '16px 24px' }}>
+                          <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>{trip.id}</p>
+                          <p 
+                            onClick={() => router.push('/coordinator/schedule')}
+                            style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer', fontWeight: 600 }}
+                          >
+                            {trip.horseName}
+                          </p>
+                        </td>
+                        <td style={{ padding: '16px 24px', fontWeight: 600, color: '#1f2937' }}>
+                          {trip.origin} <span style={{ color: '#9ca3af' }}>→</span> {trip.destination}
+                        </td>
+                        <td style={{ padding: '16px 24px' }}>
+                          <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>{trip.vehicleCode}</p>
+                          <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>{trip.driverName}</p>
+                        </td>
+                        <td style={{ padding: '16px 24px', color: '#4b5563' }}>{formatDisplayDate(trip.departureTime)}</td>
+                        <td style={{ padding: '16px 24px', color: trip.status === 'Delayed' ? '#dc2626' : '#4b5563', fontWeight: trip.status === 'Delayed' ? 700 : 400 }}>
+                          {formatDisplayDate(trip.estimatedArrival)}
+                        </td>
+                        <td style={{ padding: '16px 24px' }}>
+                          {getTripStatusBadge(trip.status)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -442,54 +583,66 @@ export default function CoordinatorDashboardPage() {
               overflow: 'hidden',
             }}
           >
-            <div style={{ padding: '18px 24px', borderBottom: '1px solid #e5e7eb' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>Vehicle Fleet Status</h3>
+            <div style={{ padding: '18px 24px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>
+                  {t('coordinator.vehicleFleetStatus', 'Vehicle Fleet Status')}
+                </h3>
+                <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>
+                  Showing {vehicles.slice(0, 5).length} of {vehicles.length} fleet units
+                </p>
+              </div>
+              <button
+                onClick={() => router.push('/coordinator/vehicles')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  backgroundColor: '#ffffff',
+                  color: '#374151',
+                  cursor: 'pointer',
+                }}
+              >
+                {t('coordinator.viewAllVehicles', 'View All Vehicles →')}
+              </button>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    <th style={{ padding: '12px 24px' }}>Vehicle ID</th>
-                    <th style={{ padding: '12px 24px' }}>Type &amp; Cap.</th>
-                    <th style={{ padding: '12px 24px' }}>Location</th>
-                    <th style={{ padding: '12px 24px' }}>Status</th>
-                    <th style={{ padding: '12px 24px' }}>Assigned Trip</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.vehicleId', 'Vehicle ID')}</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.typeCap', 'Type & Cap.')}</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.location', 'Location')}</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.status', 'Status')}</th>
+                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.assignedTrip', 'Assigned Trip')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#111827' }}>VH-024</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Boeing 747 Cargo (12)</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Singapore (SIN)</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} /> In Transit
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#2563eb', fontWeight: 600 }}>TR-2026-001</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#111827' }}>VH-018</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Heavy Truck (2)</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>London Depot</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#ecfdf5', color: '#047857' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} /> Available
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#9ca3af' }}>—</td>
-                  </tr>
-                  <tr style={{ backgroundColor: 'rgba(255, 251, 235, 0.35)' }}>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#111827' }}>VH-009</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Standard Trailer (3)</td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Dubai Service Center</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#fffbeb', color: '#b45309' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b' }} /> Maintenance
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#9ca3af' }}>—</td>
-                  </tr>
+                  {vehicles.slice(0, 5).map((veh) => (
+                    <tr 
+                      key={veh.id} 
+                      style={{ 
+                        borderBottom: '1px solid #f3f4f6',
+                        backgroundColor: veh.status === 'maintenance' ? 'rgba(255, 251, 235, 0.35)' : '#ffffff',
+                      }}
+                    >
+                      <td style={{ padding: '16px 24px', fontWeight: 700, color: '#111827' }}>
+                        <div>{veh.code}</div>
+                      </td>
+                      <td style={{ padding: '16px 24px', color: '#4b5563' }}>
+                        {veh.type} ({veh.capacity} stalls)
+                      </td>
+                      <td style={{ padding: '16px 24px', color: '#4b5563' }}>{veh.location}</td>
+                      <td style={{ padding: '16px 24px' }}>
+                        {getVehicleStatusBadge(veh.status)}
+                      </td>
+                      <td style={{ padding: '16px 24px', color: veh.assignedTripCode ? '#2563eb' : '#9ca3af', fontWeight: veh.assignedTripCode ? 600 : 400 }}>
+                        {veh.assignedTripCode || '—'}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -508,23 +661,33 @@ export default function CoordinatorDashboardPage() {
               padding: '20px',
             }}
           >
-            <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: '0 0 16px 0' }}>Vehicle Status</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: '0 0 16px 0' }}>
+              {t('coordinator.vehicleStatus', 'Vehicle Status')}
+            </h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div style={{ padding: '12px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Available</span>
-                <span style={{ fontSize: '20px', fontWeight: 800, color: '#10b981' }}>09</span>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+                  {t('status.available', 'Available')}
+                </span>
+                <span style={{ fontSize: '20px', fontWeight: 800, color: '#10b981' }}>{String(availableVehicles).padStart(2, '0')}</span>
               </div>
-              <div style={{ padding: '12px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>In Transit</span>
-                <span style={{ fontSize: '20px', fontWeight: 800, color: '#2563eb' }}>12</span>
+              <div style={{ padding: '12px', backgroundColor: '#eff6ff', border: '1px solid #dbeafe', borderRadius: '8px', textAlign: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+                  {t('status.inUse', 'In Use')}
+                </span>
+                <span style={{ fontSize: '20px', fontWeight: 800, color: '#2563eb' }}>{String(inUseVehicles).padStart(2, '0')}</span>
               </div>
               <div style={{ padding: '12px', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', borderRadius: '8px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#d97706', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Maintenance</span>
-                <span style={{ fontSize: '20px', fontWeight: 800, color: '#d97706' }}>03</span>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#d97706', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+                  {t('status.maintenance', 'Maintenance')}
+                </span>
+                <span style={{ fontSize: '20px', fontWeight: 800, color: '#d97706' }}>{String(inMaintenanceVehicles).padStart(2, '0')}</span>
               </div>
-              <div style={{ padding: '12px', backgroundColor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '8px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#dc2626', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Unavailable</span>
-                <span style={{ fontSize: '20px', fontWeight: 800, color: '#dc2626' }}>02</span>
+              <div style={{ padding: '12px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', textAlign: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+                  {t('coordinator.totalFleet', 'Total Fleet')}
+                </span>
+                <span style={{ fontSize: '20px', fontWeight: 800, color: '#1e293b' }}>{String(vehicles.length).padStart(2, '0')}</span>
               </div>
             </div>
           </div>
@@ -539,62 +702,66 @@ export default function CoordinatorDashboardPage() {
               overflow: 'hidden',
             }}
           >
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', backgroundColor: 'rgba(254, 242, 242, 0.25)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', backgroundColor: unacknowledgedAlerts.length > 0 ? 'rgba(254, 242, 242, 0.25)' : '#f9fafb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Bell size={16} color="#ef4444" /> Schedule Alerts
+                <Bell size={16} color={unacknowledgedAlerts.length > 0 ? '#ef4444' : '#6b7280'} /> {t('coordinator.alerts.title', 'Schedule Alerts')}
               </h3>
+              <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', backgroundColor: unacknowledgedAlerts.length > 0 ? '#fee2e2' : '#e5e7eb', color: unacknowledgedAlerts.length > 0 ? '#dc2626' : '#4b5563' }}>
+                {unacknowledgedAlerts.length} {t('coordinator.alerts.active', 'Active')}
+              </span>
             </div>
             <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {/* Alert 1 */}
-              <div
-                onClick={() => alert('Adjust Trip TR-2026-002')}
-                style={{ padding: '12px', borderRadius: '8px', border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'background-color 0.15s' }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f9fafb')}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <p style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827', margin: 0 }}>Route Delay</p>
-                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>10m ago</span>
+              {unacknowledgedAlerts.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>
+                  <CheckCircle2 size={24} color="#10b981" style={{ margin: '0 auto 8px' }} />
+                  <p style={{ margin: 0, fontWeight: 600, color: '#111827' }}>{t('coordinator.alerts.allClearTitle', 'All Clear')}</p>
+                  <p style={{ margin: '2px 0 0 0', fontSize: '12px' }}>{t('coordinator.alerts.allClearDesc', 'No pending operational alerts.')}</p>
                 </div>
-                <p style={{ fontSize: '12px', color: '#4b5563', margin: '4px 0 6px 0' }}>
-                  TR-2026-002 delayed by 4 hours. Estimated arrival adjusted.
-                </p>
-                <span style={{ fontSize: '11px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase' }}>Adjust Trip →</span>
-              </div>
-
-              {/* Alert 2 */}
-              <div
-                onClick={() => alert('Reassign Vehicle VH-009')}
-                style={{ padding: '12px', borderRadius: '8px', border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'background-color 0.15s' }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f9fafb')}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <p style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827', margin: 0 }}>Vehicle Conflict</p>
-                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>1h ago</span>
-                </div>
-                <p style={{ fontSize: '12px', color: '#4b5563', margin: '4px 0 6px 0' }}>
-                  VH-009 assigned to TR-2026-010 is scheduled for maintenance.
-                </p>
-                <span style={{ fontSize: '11px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase' }}>Reassign Vehicle →</span>
-              </div>
-
-              {/* Alert 3 */}
-              <div
-                onClick={() => alert('View Customs details for TR-2026-005')}
-                style={{ padding: '12px', borderRadius: '8px', border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'background-color 0.15s' }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f9fafb')}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <p style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827', margin: 0 }}>Departure Conflict</p>
-                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>2h ago</span>
-                </div>
-                <p style={{ fontSize: '12px', color: '#4b5563', margin: '4px 0 6px 0' }}>
-                  Customs delay at DXB may impact departure of TR-2026-005.
-                </p>
-                <span style={{ fontSize: '11px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase' }}>View Details →</span>
-              </div>
+              ) : (
+                unacknowledgedAlerts.slice(0, 3).map((al) => (
+                  <div
+                    key={al.id}
+                    style={{ padding: '12px', borderRadius: '8px', border: '1px solid #f1f5f9', transition: 'background-color 0.15s' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <p style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827', margin: 0 }}>{al.type}</p>
+                      <span style={{ fontSize: '11px', color: '#9ca3af' }}>{al.timeAgo}</span>
+                    </div>
+                    <p style={{ fontSize: '12px', color: '#4b5563', margin: '4px 0 8px 0' }}>
+                      {al.message}
+                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span 
+                        onClick={() => router.push('/coordinator/alerts')}
+                        style={{ fontSize: '11px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', cursor: 'pointer' }}
+                      >
+                        {t('coordinator.alerts.reviewAlert', 'Review Alert')} ({al.tripCode}) →
+                      </span>
+                      <button
+                        onClick={() => {
+                          acknowledgeAlert(al.id);
+                          toast.success(t('coordinator.alerts.acknowledgedSuccess', 'Alert acknowledged'));
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          border: '1px solid #e5e7eb',
+                          backgroundColor: '#ffffff',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#4b5563',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Check size={12} /> {t('coordinator.acknowledge', 'Acknowledge')}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -602,7 +769,9 @@ export default function CoordinatorDashboardPage() {
 
       {/* 4. QUICK ACTIONS */}
       <div>
-        <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', marginBottom: '14px' }}>Quick Actions</h3>
+        <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', marginBottom: '14px' }}>
+          {t('coordinator.quickActions.title', 'Quick Actions')}
+        </h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
           <div
             onClick={() => router.push('/coordinator/routes')}
@@ -611,8 +780,10 @@ export default function CoordinatorDashboardPage() {
             <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
               <MapPin size={20} />
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px 0' }}>Plan Route</h4>
-            <p style={{ fontSize: '12px', color: '#bfdbfe', margin: 0, fontWeight: 500 }}>Create a new transport route</p>
+            <h4 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px 0' }}>{t('nav.routePlanning', 'Plan Route')}</h4>
+            <p style={{ fontSize: '12px', color: '#bfdbfe', margin: 0, fontWeight: 500 }}>
+              {t('coordinator.quickActions.planRouteDesc', 'Create a new transport route')}
+            </p>
           </div>
 
           <div
@@ -622,8 +793,12 @@ export default function CoordinatorDashboardPage() {
             <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
               <Truck size={20} />
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>Manage Vehicles</h4>
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>Update fleet assignments</p>
+            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>
+              {t('coordinator.manageVehicles', 'Manage Vehicles')}
+            </h4>
+            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>
+              {t('coordinator.quickActions.manageVehiclesDesc', 'Update fleet assignments')}
+            </p>
           </div>
 
           <div
@@ -633,19 +808,30 @@ export default function CoordinatorDashboardPage() {
             <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#f3e8ff', color: '#a855f7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
               <CalendarDays size={20} />
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>View Schedule</h4>
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>Check all upcoming trips</p>
+            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>
+              {t('coordinator.viewSchedule', 'View Schedule')}
+            </h4>
+            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>
+              {t('coordinator.quickActions.viewScheduleDesc', 'Check all upcoming trips')}
+            </p>
           </div>
 
           <div
-            onClick={() => alert('Adjust Trip')}
+            onClick={() => {
+              toast.success(t('coordinator.quickActions.adjustTripDesc', 'Modify active trip details'));
+              router.push('/coordinator/schedule');
+            }}
             style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
           >
             <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
               <Sliders size={20} />
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>Adjust Trip</h4>
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>Modify active trip details</p>
+            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>
+              {t('coordinator.adjustTrip', 'Adjust Trip')}
+            </h4>
+            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>
+              {t('coordinator.quickActions.adjustTripDesc', 'Modify active trip details')}
+            </p>
           </div>
         </div>
       </div>

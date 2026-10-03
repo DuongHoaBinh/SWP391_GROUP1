@@ -15,11 +15,20 @@ export default function DocumentsPage() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
   useEffect(() => {
-    // Mock fetching data from API
+    try {
+      const saved = localStorage.getItem('equitransit_cust_docs_list_v1');
+      if (saved) {
+        setDocuments(JSON.parse(saved));
+        setIsLoading(false);
+        return;
+      }
+    } catch {
+      // ignore
+    }
     const timer = setTimeout(() => {
       setDocuments(mockDocuments);
       setIsLoading(false);
-    }, 800);
+    }, 400);
     return () => clearTimeout(timer);
   }, []);
 
@@ -182,9 +191,13 @@ export default function DocumentsPage() {
           isOpen={isUploadOpen}
           onClose={() => setIsUploadOpen(false)}
           onSuccess={(uploaded) => {
-            setDocuments((prev) =>
-              prev.map((d) => (d.id === uploaded.id ? uploaded : d))
-            );
+            setDocuments((prev) => {
+              const updated = prev.map((d) => (d.id === uploaded.id ? uploaded : d));
+              try {
+                localStorage.setItem('equitransit_cust_docs_list_v1', JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
             toast.success(`${uploaded.title} submitted for review!`);
           }}
         />

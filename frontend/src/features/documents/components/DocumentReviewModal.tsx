@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { FileText, CheckCircle, XCircle, AlertCircle, Calendar } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useDocumentStore } from '@/lib/document-store';
 
 const reviewSchema = z.object({
   status: z.enum(['APPROVED', 'REJECTED']),
@@ -50,6 +51,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   onSuccess,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { reviewDocument } = useDocumentStore();
 
   const {
     register,
@@ -60,6 +62,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
     resolver: zodResolver(reviewSchema),
     defaultValues: {
       status: 'APPROVED',
+      expiryDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     },
   });
 
@@ -67,17 +70,20 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
 
   const onSubmit = (data: ReviewFormData) => {
     setIsSubmitting(true);
-    // Mock API call
-    setTimeout(() => {
+    try {
+      reviewDocument(documentId, data.status, data.expiryDate, data.rejectionReason);
       setIsSubmitting(false);
       onSuccess(documentId, data.status);
       toast.success(
-        data.status === 'APPROVED' 
-          ? 'Document approved successfully!' 
-          : 'Document rejected. Customer will be notified.'
+        data.status === 'APPROVED'
+          ? `Document approved! Valid until ${data.expiryDate}`
+          : 'Document rejected. Customer requested to re-upload.'
       );
       onClose();
-    }, 1000);
+    } catch (e: any) {
+      setIsSubmitting(false);
+      toast.error(e.message || 'Error processing review');
+    }
   };
 
   return (
@@ -117,7 +123,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             </div>
 
             {selectedStatus === 'APPROVED' && (
-              <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="animate-fade-in">
                 <label className="text-sm font-semibold text-slate-800 block mb-1.5">
                   Valid Until (Expiry Date) <span className="text-red-500">*</span>
                 </label>
@@ -138,7 +144,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             )}
 
             {selectedStatus === 'REJECTED' && (
-              <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="animate-fade-in">
                 <label className="text-sm font-semibold text-slate-800 block mb-1.5">
                   Reason for Rejection <span className="text-red-500">*</span>
                 </label>

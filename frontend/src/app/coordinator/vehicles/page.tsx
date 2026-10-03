@@ -9,26 +9,10 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
 
-interface Vehicle {
-  id: string;
-  code: string;
-  type: 'Climate-Controlled Truck' | 'Air Cargo Stall' | 'Specialized Container';
-  capacity: number;
-  status: 'available' | 'in_use' | 'maintenance';
-  lastInspection: string;
-  location: string;
-}
-
-const INITIAL_VEHICLES: Vehicle[] = [
-  { id: 'v-1', code: 'TRK-VN-089', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', lastInspection: '2026-09-20', location: 'HCMC Depot' },
-  { id: 'v-2', code: 'TRK-VN-102', type: 'Climate-Controlled Truck', capacity: 6, status: 'in_use', lastInspection: '2026-09-25', location: 'Transit: Moc Bai Border' },
-  { id: 'v-3', code: 'AIR-SG-330', type: 'Air Cargo Stall', capacity: 2, status: 'available', lastInspection: '2026-09-18', location: 'Tan Son Nhat Airport' },
-  { id: 'v-4', code: 'TRK-TH-501', type: 'Climate-Controlled Truck', capacity: 4, status: 'maintenance', lastInspection: '2026-09-10', location: 'Bangkok Service Yard' },
-  { id: 'v-5', code: 'CNT-FEI-09', type: 'Specialized Container', capacity: 3, status: 'available', lastInspection: '2026-09-28', location: 'Changi Logistics Hub' },
-];
+import { useFleetRouteStore, Vehicle } from '@/lib/fleet-route-store';
 
 export default function VehicleManagementPage() {
-  const [vehicles, setVehicles] = useState<Vehicle[]>(INITIAL_VEHICLES);
+  const { vehicles, addVehicle, updateVehicle, deleteVehicle } = useFleetRouteStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('ALL');
 
@@ -53,17 +37,15 @@ export default function VehicleManagementPage() {
       toast.error('Please enter vehicle plate/code and current location.');
       return;
     }
-    const newVehicle: Vehicle = {
-      id: `v-${Date.now()}`,
-      code: formData.code,
-      type: formData.type as any,
+    const created = addVehicle({
+      code: formData.code.trim().toUpperCase(),
+      type: formData.type as any || 'Climate-Controlled Truck',
       capacity: Number(formData.capacity) || 4,
-      status: formData.status as any || 'available',
+      status: (formData.status as any) || 'available',
       lastInspection: new Date().toISOString().split('T')[0],
-      location: formData.location,
-    };
-    setVehicles([newVehicle, ...vehicles]);
-    toast.success(`Vehicle ${newVehicle.code} added successfully!`);
+      location: formData.location.trim(),
+    });
+    toast.success(`Vehicle ${created.code} added successfully!`);
     setIsAddOpen(false);
     setFormData({ code: '', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', location: '' });
   };
@@ -71,7 +53,11 @@ export default function VehicleManagementPage() {
   const handleEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedVehicle) return;
-    setVehicles(vehicles.map(v => v.id === selectedVehicle.id ? { ...v, ...formData } as Vehicle : v));
+    updateVehicle(selectedVehicle.id, {
+      ...formData,
+      code: formData.code?.trim().toUpperCase(),
+      capacity: Number(formData.capacity) || 4,
+    });
     toast.success(`Vehicle ${formData.code} updated!`);
     setIsEditOpen(false);
     setSelectedVehicle(null);
@@ -79,7 +65,7 @@ export default function VehicleManagementPage() {
 
   const handleDelete = () => {
     if (!selectedVehicle) return;
-    setVehicles(vehicles.filter(v => v.id !== selectedVehicle.id));
+    deleteVehicle(selectedVehicle.id);
     toast.success(`Vehicle ${selectedVehicle.code} removed.`);
     setIsDeleteOpen(false);
     setSelectedVehicle(null);
@@ -229,6 +215,7 @@ export default function VehicleManagementPage() {
                         }}
                         className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg hover:bg-slate-100"
                         title="Edit Vehicle"
+                        aria-label="Edit vehicle"
                       >
                         <Edit size={16} />
                       </button>
@@ -239,6 +226,7 @@ export default function VehicleManagementPage() {
                         }}
                         className="p-1.5 text-slate-500 hover:text-red-600 rounded-lg hover:bg-slate-100"
                         title="Delete Vehicle"
+                        aria-label="Delete vehicle"
                       >
                         <Trash2 size={16} />
                       </button>

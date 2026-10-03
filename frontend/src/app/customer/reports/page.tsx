@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { ArrowLeft, BarChart3, TrendingUp, Calendar, CheckCircle2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import toast from 'react-hot-toast';
 
 export default function CustomerReportsPage() {
   return (
@@ -58,7 +59,7 @@ export default function CustomerReportsPage() {
         <p className="text-sm text-slate-500 max-w-md mx-auto mt-1 mb-5">
           Export full PDF statements of past horse transports, invoices, and veterinary inspection forms.
         </p>
-        <Button variant="outline" size="sm" onClick={() => alert('Exporting summary PDF...')}>
+        <Button variant="outline" size="sm" onClick={() => toast.success('Đang tạo và tải báo cáo vận chuyển (PDF)...')}>
           Download Transport Statement (PDF)
         </Button>
       </div>
