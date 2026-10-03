@@ -1,17 +1,20 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Filter, Syringe, Stethoscope, CheckCircle } from 'lucide-react';
+import { Search, Filter, Syringe, Stethoscope, FileText, CheckCircle } from 'lucide-react';
 import { DocumentReviewModal } from '@/features/documents/components/DocumentReviewModal';
+import { useDocumentStore } from '@/lib/document-store';
 import toast from 'react-hot-toast';
 
-const MOCK_PENDING = [
-  { id: 'DOC-2026-041', reqCode: 'TR-2026-001', horseName: 'Thunder', type: 'Vaccination Certificate', icon: Syringe, date: 'Sep 24, 2026' },
-  { id: 'DOC-2026-042', reqCode: 'TR-2026-002', horseName: 'Silver Star', type: 'Medical Certificate', icon: Stethoscope, date: 'Sep 25, 2026' }
-];
+const getDocIcon = (type: string) => {
+  const t = type.toLowerCase();
+  if (t.includes('vaccin')) return Syringe;
+  if (t.includes('medic') || t.includes('health')) return Stethoscope;
+  return FileText;
+};
 
 export default function DocumentApprovalPage() {
-  const [pendingDocs, setPendingDocs] = useState(MOCK_PENDING);
+  const { pendingDocs } = useDocumentStore();
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -19,7 +22,7 @@ export default function DocumentApprovalPage() {
   const [showFilterMenu, setShowFilterMenu] = useState(false);
 
   const handleReviewSuccess = (id: string, status: 'APPROVED' | 'REJECTED') => {
-    setPendingDocs(prev => prev.filter(d => d.id !== id));
+    setSelectedDoc(null);
   };
 
   const filteredDocs = pendingDocs.filter(doc => {
@@ -110,7 +113,7 @@ export default function DocumentApprovalPage() {
                     <p className="text-xs text-blue-600 font-semibold m-0">{doc.reqCode}</p>
                   </td>
                   <td className="p-4 text-slate-700 font-medium flex items-center gap-2">
-                    <doc.icon size={16} className="text-slate-400" /> {doc.type}
+                    {React.createElement(getDocIcon(doc.type), { size: 16, className: 'text-slate-400 shrink-0' })} {doc.type}
                   </td>
                   <td className="p-4 text-slate-600 font-medium">{doc.date}</td>
                   <td className="p-4 text-right">
