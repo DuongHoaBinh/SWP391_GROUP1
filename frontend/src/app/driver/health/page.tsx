@@ -114,51 +114,54 @@ export default function HorseHealthPage() {
           <span className="text-xs font-bold text-slate-500">{logs.length} Logged Checks</span>
         </div>
 
-        <table className="w-full text-left text-sm border-collapse">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              <th className="p-4">Horse</th>
-              <th className="p-4">Body Temp</th>
-              <th className="p-4">Heart Rate</th>
-              <th className="p-4">Condition</th>
-              <th className="p-4">Observation Notes</th>
-              <th className="p-4">Logged Time</th>
-              <th className="p-4 text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {logs.map(log => (
-              <tr key={log.id} className="hover:bg-slate-50/70">
-                <td className="p-4 font-bold text-slate-900">{log.horseName}</td>
-                <td className="p-4 font-semibold text-slate-800">
-                  <span className={`inline-flex items-center gap-1 ${log.tempC > 38.3 ? 'text-amber-600 font-bold' : 'text-slate-800'}`}>
-                    <Thermometer size={14} /> {log.tempC}°C
-                  </span>
-                </td>
-                <td className="p-4 font-medium text-slate-700">{log.heartRateBpm} bpm</td>
-                <td className="p-4">
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                    log.condition === 'Stable' ? 'bg-emerald-100 text-emerald-800' :
-                    log.condition === 'Stressed' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
-                  }`}>
-                    {log.condition}
-                  </span>
-                </td>
-                <td className="p-4 text-xs text-slate-600 max-w-xs">{log.notes}</td>
-                <td className="p-4 text-xs text-slate-500">{log.loggedAt}</td>
-                <td className="p-4 text-right">
-                  <button 
-                    onClick={() => handleDeleteLog(log.id)}
-                    className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-slate-100"
-                    title="Delete log"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <th className="p-4">Horse</th>
+                <th className="p-4">Body Temp</th>
+                <th className="p-4">Heart Rate</th>
+                <th className="p-4">Condition</th>
+                <th className="p-4">Observation Notes</th>
+                <th className="p-4">Logged Time</th>
+                <th className="p-4 text-right">Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {logs.map(log => (
+                <tr key={log.id} className="hover:bg-slate-50/70">
+                  <td className="p-4 font-bold text-slate-900">{log.horseName}</td>
+                  <td className="p-4 font-semibold text-slate-800">
+                    <span className={`inline-flex items-center gap-1 ${log.tempC > 38.3 ? 'text-amber-600 font-bold' : 'text-slate-800'}`}>
+                      <Thermometer size={14} /> {log.tempC}°C
+                    </span>
+                  </td>
+                  <td className="p-4 font-medium text-slate-700">{log.heartRateBpm} bpm</td>
+                  <td className="p-4">
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                      log.condition === 'Stable' ? 'bg-emerald-100 text-emerald-800' :
+                      log.condition === 'Stressed' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {log.condition}
+                    </span>
+                  </td>
+                  <td className="p-4 text-xs text-slate-600 max-w-xs">{log.notes}</td>
+                  <td className="p-4 text-xs text-slate-500">{log.loggedAt}</td>
+                  <td className="p-4 text-right">
+                    <button 
+                      onClick={() => handleDeleteLog(log.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-slate-100"
+                      title="Delete log"
+                      aria-label="Delete health record"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Add Observation Modal */}
