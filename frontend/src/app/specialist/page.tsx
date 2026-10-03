@@ -6,26 +6,23 @@ import { useRouter } from 'next/navigation';
 import {
   FileSignature, AlertTriangle, Clock, ArrowRight, Search, FileX, ShieldCheck, 
   TrendingUp, Filter, Syringe, Stethoscope, Building2, FolderOpen, Scale,
-  CheckCircle, XCircle
+  CheckCircle, XCircle, FileText
 } from 'lucide-react';
 import { DocumentReviewModal } from '@/features/documents/components/DocumentReviewModal';
+import { useDocumentStore } from '@/lib/document-store';
 import toast from 'react-hot-toast';
 
-// Mock Data
-const MOCK_PENDING_DOCS = [
-  { id: 'DOC-2026-041', reqCode: 'TR-2026-001', horseName: 'Thunder', type: 'Vaccination Certificate', icon: Syringe, date: 'Sep 24, 2026', status: 'PENDING' },
-  { id: 'DOC-2026-042', reqCode: 'TR-2026-002', horseName: 'Silver Star', type: 'Medical Certificate', icon: Stethoscope, date: 'Sep 25, 2026', status: 'PENDING' }
-];
-
-const MOCK_MISSING_DOCS = [
-  { id: 'MISS-1', reqCode: 'TR-2026-002', horseName: 'Royal Star', type: 'Quarantine Certificate', due: 'Sep 29, 2026', status: 'MISSING' },
-  { id: 'MISS-2', reqCode: 'TR-2026-008', horseName: 'Midnight', type: 'Export Permit (UAE)', due: 'Oct 01, 2026', status: 'REJECTED' }
-];
+const getDocIcon = (type: string) => {
+  const t = type.toLowerCase();
+  if (t.includes('vaccin')) return Syringe;
+  if (t.includes('medic') || t.includes('health')) return Stethoscope;
+  return FileText;
+};
 
 export default function SpecialistDashboardPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
-  const [pendingDocs, setPendingDocs] = useState(MOCK_PENDING_DOCS);
+  const { pendingDocs, missingDocs } = useDocumentStore();
   const [filterType, setFilterType] = useState('ALL');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   
@@ -38,7 +35,7 @@ export default function SpecialistDashboardPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsLoading(false);
-    }, 800);
+    }, 400);
     return () => clearTimeout(timer);
   }, []);
 
@@ -48,7 +45,7 @@ export default function SpecialistDashboardPage() {
   };
 
   const handleReviewSuccess = (id: string, status: 'APPROVED' | 'REJECTED') => {
-    setPendingDocs(prev => prev.filter(d => d.id !== id));
+    setSelectedDoc(null);
   };
 
   return (
@@ -71,7 +68,7 @@ export default function SpecialistDashboardPage() {
             </div>
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/30 text-xs font-medium text-white backdrop-blur-sm">
               <AlertTriangle size={14} className="text-red-400" />
-              <span>05 missing documents</span>
+              <span>{missingDocs.length.toString().padStart(2, '0')} missing documents</span>
             </div>
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-xs font-medium text-white backdrop-blur-sm">
               <Clock size={14} className="text-amber-400" />
@@ -93,9 +90,9 @@ export default function SpecialistDashboardPage() {
       {/* 2. KPI CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {[
-          { title: 'Pending Documents', val: pendingDocs.length.toString(), icon: FileSignature, bg: 'bg-amber-50 text-amber-600', tag: 'Today', tagBg: 'bg-slate-100 text-slate-500' },
+          { title: 'Pending Documents', val: pendingDocs.length.toString().padStart(2, '0'), icon: FileSignature, bg: 'bg-amber-50 text-amber-600', tag: 'Today', tagBg: 'bg-slate-100 text-slate-500' },
           { title: 'Under Review', val: '07', icon: Search, bg: 'bg-blue-50 text-blue-600', tag: 'In Progress', tagBg: 'bg-blue-50 text-blue-600' },
-          { title: 'Missing Documents', val: '05', icon: FileX, bg: 'bg-red-50 text-red-600', tag: 'Needs Action', tagBg: 'bg-red-50 text-red-600' },
+          { title: 'Missing Documents', val: missingDocs.length.toString().padStart(2, '0'), icon: FileX, bg: 'bg-red-50 text-red-600', tag: 'Needs Action', tagBg: 'bg-red-50 text-red-600' },
           { title: 'Expiring Soon', val: '03', icon: Clock, bg: 'bg-orange-50 text-orange-600', tag: 'Next 7 Days', tagBg: 'bg-amber-50 text-amber-600' },
         ].map((card, idx) => (
           <div key={idx} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -215,7 +212,7 @@ export default function SpecialistDashboardPage() {
                       </td>
                       <td className="p-4 text-slate-700">
                         <span className="inline-flex items-center gap-1.5 font-medium">
-                          <doc.icon size={16} className="text-slate-400" /> {doc.type}
+                          {React.createElement(getDocIcon(doc.type), { size: 16, className: 'text-slate-400 shrink-0' })} {doc.type}
                         </span>
                       </td>
                       <td className="p-4 text-slate-600 font-medium">{doc.date}</td>
@@ -274,7 +271,7 @@ export default function SpecialistDashboardPage() {
                         <div className="h-6 bg-slate-100 rounded w-1/2 mx-auto animate-pulse"></div>
                       </td>
                     </tr>
-                  ) : MOCK_MISSING_DOCS.map((doc) => (
+                  ) : missingDocs.map((doc) => (
                     <tr key={doc.id} className="hover:bg-slate-50/50">
                       <td className="p-4">
                         <p className="font-bold text-slate-900 m-0">{doc.horseName}</p>
@@ -285,6 +282,11 @@ export default function SpecialistDashboardPage() {
                           {doc.status === 'MISSING' ? <FileX size={16} className="text-red-500" /> : <FolderOpen size={16} className="text-slate-400" />} 
                           {doc.type}
                         </span>
+                        {doc.rejectionReason && (
+                          <span className="block text-[11px] text-red-600 mt-0.5 font-normal">
+                            Reason: {doc.rejectionReason}
+                          </span>
+                        )}
                       </td>
                       <td className="p-4 text-red-600 font-bold">{doc.due}</td>
                       <td className="p-4">
@@ -294,7 +296,7 @@ export default function SpecialistDashboardPage() {
                       </td>
                       <td className="p-4 text-right">
                         <button
-                          onClick={() => toast.success(`Notification sent to customer for ${doc.type}`)}
+                          onClick={() => toast.success(`Reminder sent to ${doc.customer} for ${doc.type}`)}
                           className="px-4 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 shadow-sm transition-colors"
                         >
                           Request
@@ -302,6 +304,13 @@ export default function SpecialistDashboardPage() {
                       </td>
                     </tr>
                   ))}
+                  {!isLoading && missingDocs.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-slate-500 font-medium">
+                        No missing documents!
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
