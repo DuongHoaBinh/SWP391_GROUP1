@@ -28,34 +28,36 @@ export default function ManagerStaffPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left text-sm border-collapse">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              <th className="p-4">Staff Member</th>
-              <th className="p-4">Assigned Role</th>
-              <th className="p-4">Contact</th>
-              <th className="p-4">Active Trip Assignments</th>
-              <th className="p-4">Duty Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {staff.map(s => (
-              <tr key={s.id} className="hover:bg-slate-50/70">
-                <td className="p-4 font-bold text-slate-900">{s.name}</td>
-                <td className="p-4 font-semibold text-blue-600">{s.role}</td>
-                <td className="p-4 text-slate-600 text-xs">{s.email}</td>
-                <td className="p-4 font-bold text-slate-800">{s.activeTrips} Trips Assigned</td>
-                <td className="p-4">
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                    s.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {s.status}
-                  </span>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <th className="p-4">Staff Member</th>
+                <th className="p-4">Assigned Role</th>
+                <th className="p-4">Contact</th>
+                <th className="p-4">Active Trip Assignments</th>
+                <th className="p-4">Duty Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {staff.map(s => (
+                <tr key={s.id} className="hover:bg-slate-50/70">
+                  <td className="p-4 font-bold text-slate-900">{s.name}</td>
+                  <td className="p-4 font-semibold text-blue-600">{s.role}</td>
+                  <td className="p-4 text-slate-600 text-xs">{s.email}</td>
+                  <td className="p-4 font-bold text-slate-800">{s.activeTrips} Trips Assigned</td>
+                  <td className="p-4">
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                      s.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {s.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

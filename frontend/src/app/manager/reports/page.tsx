@@ -3,6 +3,7 @@
 import React from 'react';
 import { BarChart3, TrendingUp, DollarSign, Clock, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import toast from 'react-hot-toast';
 
 export default function ManagerReportsPage() {
   return (
@@ -14,7 +15,7 @@ export default function ManagerReportsPage() {
             Executive operational overview, on-time delivery percentages, and financial summaries.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => alert('Exporting Executive PDF Report...')}>
+        <Button variant="outline" size="sm" onClick={() => toast.success('Exporting Executive PDF Report...')}>
           Export Performance Report
         </Button>
       </div>
