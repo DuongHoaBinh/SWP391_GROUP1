@@ -9,6 +9,8 @@ import { mockCurrentUser, mockNotifications } from '@/lib/mock-data';
 import { UserProfile, NotificationItem } from '@/lib/types';
 import Link from 'next/link';
 import { LogoutConfirmModal } from './LogoutConfirmModal';
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 function formatHeaderTimeAgo(dateStr: string) {
   const diffMs = Date.now() - new Date(dateStr).getTime();
@@ -33,6 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   onMenuClick,
 }) => {
   const router = useRouter();
+  const { t } = useLanguage();
   const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -171,7 +174,7 @@ export const Header: React.FC<HeaderProps> = ({
           <Search size={16} color="#94a3b8" style={{ marginRight: '8px', flexShrink: 0 }} />
           <input
             type="text"
-            placeholder="Search requests, horses..."
+            placeholder={t('common.search', 'Search requests, horses...')}
             value={searchValue}
             onChange={(e) => setSearchValue(e.target.value)}
             onKeyDown={(e) => {
@@ -203,6 +206,9 @@ export const Header: React.FC<HeaderProps> = ({
             ⌘K
           </span>
         </div>
+
+        {/* Language Switcher */}
+        <LanguageSwitcher variant="pill" />
 
         {/* Notification Bell Dropdown */}
         <div style={{ position: 'relative' }}>
@@ -270,13 +276,13 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
               >
                 <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
-                  Notifications ({unreadCount})
+                  {t('common.notifications', 'Notifications')} ({unreadCount})
                 </div>
                 <button
                   onClick={handleMarkAllRead}
                   style={{ fontSize: '12px', color: '#2563eb', fontWeight: 600, cursor: 'pointer' }}
                 >
-                  Mark all read
+                  {t('common.markAllRead', 'Mark all read')}
                 </button>
               </div>
 
@@ -311,7 +317,7 @@ export const Header: React.FC<HeaderProps> = ({
                   backgroundColor: '#fafbfc',
                 }}
               >
-                View all notifications
+                {t('common.viewDetails', 'View all notifications')}
               </Link>
             </div>
           )}
@@ -405,7 +411,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
               >
                 <Settings size={15} />
-                <span>Profile Settings</span>
+                <span>{t('common.settings', 'Profile Settings')}</span>
               </Link>
               <button
                 onClick={handleLogoutClick}
@@ -422,12 +428,13 @@ export const Header: React.FC<HeaderProps> = ({
                   border: 'none',
                   background: 'none',
                   textAlign: 'left',
+                  borderTop: '1px solid #f1f5f9',
                 }}
                 onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#fef2f2')}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
               >
                 <LogOut size={15} />
-                <span>Log out</span>
+                <span>{t('common.logout', 'Log out')}</span>
               </button>
             </div>
           )}
