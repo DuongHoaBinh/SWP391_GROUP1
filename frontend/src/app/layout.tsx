@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Toaster } from 'react-hot-toast';
 import { DocumentStoreProvider } from '@/lib/document-store';
+import { FleetRouteStoreProvider } from '@/lib/fleet-route-store';
 import { LanguageProvider } from '@/lib/i18n/LanguageContext';
 import './globals.css';
 
@@ -19,7 +20,9 @@ export default function RootLayout({
       <body>
         <LanguageProvider>
           <DocumentStoreProvider>
-            {children}
+            <FleetRouteStoreProvider>
+              {children}
+            </FleetRouteStoreProvider>
           </DocumentStoreProvider>
         </LanguageProvider>
         <Toaster position="top-right" />
