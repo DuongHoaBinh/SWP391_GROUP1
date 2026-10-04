@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Toaster } from 'react-hot-toast';
+import { DocumentStoreProvider } from '@/lib/document-store';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        {children}
+        <DocumentStoreProvider>
+          {children}
+        </DocumentStoreProvider>
         <Toaster position="top-right" />
       </body>
     </html>

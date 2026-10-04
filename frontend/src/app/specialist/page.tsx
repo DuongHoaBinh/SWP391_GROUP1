@@ -1,116 +1,77 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  FileSignature,
-  AlertTriangle,
-  Clock,
-  ArrowRight,
-  Search,
-  FileX,
-  ShieldCheck,
-  TrendingUp,
-  Filter,
-  Syringe,
-  Stethoscope,
-  Building2,
-  FolderOpen,
-  Scale,
+  FileSignature, AlertTriangle, Clock, ArrowRight, Search, FileX, ShieldCheck, 
+  TrendingUp, Filter, Syringe, Stethoscope, Building2, FolderOpen, Scale,
+  CheckCircle, XCircle, FileText
 } from 'lucide-react';
+import { DocumentReviewModal } from '@/features/documents/components/DocumentReviewModal';
+import { useDocumentStore } from '@/lib/document-store';
+import toast from 'react-hot-toast';
+
+const getDocIcon = (type: string) => {
+  const t = type.toLowerCase();
+  if (t.includes('vaccin')) return Syringe;
+  if (t.includes('medic') || t.includes('health')) return Stethoscope;
+  return FileText;
+};
 
 export default function SpecialistDashboardPage() {
   const router = useRouter();
+  const [isLoading, setIsLoading] = useState(true);
+  const { pendingDocs, missingDocs } = useDocumentStore();
+  const [filterType, setFilterType] = useState('ALL');
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  
+  // Modal State
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<any>(null);
+
+  const displayedDocs = pendingDocs.filter(doc => filterType === 'ALL' || doc.type.toLowerCase().includes(filterType.toLowerCase()));
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const openReviewModal = (doc: any) => {
+    setSelectedDoc(doc);
+    setReviewModalOpen(true);
+  };
+
+  const handleReviewSuccess = (id: string, status: 'APPROVED' | 'REJECTED') => {
+    setSelectedDoc(null);
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="flex flex-col gap-6 pb-12">
       {/* 1. WELCOME BANNER */}
-      <div
-        style={{
-          backgroundColor: '#0f172a',
-          backgroundImage:
-            'linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px)',
-          backgroundSize: '20px 20px',
-          borderRadius: '16px',
-          padding: '28px 34px',
-          border: '1px solid rgba(15, 23, 42, 0.2)',
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '20px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-        }}
-      >
-        <div>
-          <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.12em', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '8px' }}>
-            Saturday, September 26
-          </p>
-          <h2 style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff', margin: '0 0 6px 0', lineHeight: 1.2 }}>
-            Good morning, Alex
-          </h2>
-          <p style={{ fontSize: '14px', color: '#94a3b8', margin: 0, fontWeight: 500 }}>
-            Here is an overview of your compliance activities.
-          </p>
+      <div className="bg-slate-900 rounded-2xl p-8 border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl relative overflow-hidden">
+        {/* Decorative pattern */}
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'linear-gradient(#ffffff 1px, transparent 1px), linear-gradient(90deg, #ffffff 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
+        
+        <div className="relative z-10 w-full md:w-auto">
+          <p className="text-[11px] font-bold tracking-widest text-slate-400 uppercase mb-2">Saturday, September 26</p>
+          <h2 className="text-3xl font-bold text-white mb-1">Good morning, Sarah</h2>
+          <p className="text-sm font-medium text-slate-400 m-0">Here is an overview of your compliance activities.</p>
 
           {/* Chips */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px', marginTop: '20px' }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: '#ffffff',
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              <FileSignature size={14} color="#60a5fa" />
-              <span>12 documents pending</span>
+          <div className="flex flex-wrap items-center gap-3 mt-5">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 text-xs font-medium text-white backdrop-blur-sm">
+              <FileSignature size={14} className="text-blue-400" />
+              <span>{pendingDocs.length} documents pending</span>
             </div>
-
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: '#ffffff',
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              <AlertTriangle size={14} color="#f87171" />
-              <span>05 missing documents</span>
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/30 text-xs font-medium text-white backdrop-blur-sm">
+              <AlertTriangle size={14} className="text-red-400" />
+              <span>{missingDocs.length.toString().padStart(2, '0')} missing documents</span>
             </div>
-
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                border: '1px solid rgba(245, 158, 11, 0.3)',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: '#ffffff',
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              <Clock size={14} color="#fbbf24" />
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-xs font-medium text-white backdrop-blur-sm">
+              <Clock size={14} className="text-amber-400" />
               <span>03 documents expiring soon</span>
             </div>
           </div>
@@ -118,330 +79,238 @@ export default function SpecialistDashboardPage() {
 
         <button
           onClick={() => {
-            const tableElem = document.getElementById('review-queue-table');
-            if (tableElem) {
-              tableElem.scrollIntoView({ behavior: 'smooth' });
-            }
+            document.getElementById('review-queue-table')?.scrollIntoView({ behavior: 'smooth' });
           }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: '#2563eb',
-            color: '#ffffff',
-            padding: '12px 22px',
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: 600,
-            border: '1px solid rgba(96, 165, 250, 0.3)',
-            boxShadow: '0 0 20px rgba(37, 99, 235, 0.4)',
-            cursor: 'pointer',
-            transition: 'background-color 0.15s',
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#1d4ed8')}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#2563eb')}
+          className="relative z-10 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-colors border border-blue-500 w-full md:w-auto justify-center"
         >
-          Review Documents <ArrowRight size={14} />
+          Review Documents <ArrowRight size={16} />
         </button>
       </div>
 
-      {/* 2. KPI CARDS (5 Columns) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '16px',
-        }}
-      >
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <FileSignature size={20} />
+      {/* 2. KPI CARDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {[
+          { title: 'Pending Documents', val: pendingDocs.length.toString().padStart(2, '0'), icon: FileSignature, bg: 'bg-amber-50 text-amber-600', tag: 'Today', tagBg: 'bg-slate-100 text-slate-500' },
+          { title: 'Under Review', val: '07', icon: Search, bg: 'bg-blue-50 text-blue-600', tag: 'In Progress', tagBg: 'bg-blue-50 text-blue-600' },
+          { title: 'Missing Documents', val: missingDocs.length.toString().padStart(2, '0'), icon: FileX, bg: 'bg-red-50 text-red-600', tag: 'Needs Action', tagBg: 'bg-red-50 text-red-600' },
+          { title: 'Expiring Soon', val: '03', icon: Clock, bg: 'bg-orange-50 text-orange-600', tag: 'Next 7 Days', tagBg: 'bg-amber-50 text-amber-600' },
+        ].map((card, idx) => (
+          <div key={idx} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <div className="flex justify-between items-start mb-3">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${card.bg}`}>
+                <card.icon size={20} />
+              </div>
+              <span className={`text-[11px] font-bold px-2 py-1 rounded-md ${card.tagBg}`}>{card.tag}</span>
             </div>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', backgroundColor: '#f3f4f6', padding: '2px 7px', borderRadius: '4px' }}>Today</span>
+            <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">{card.val}</h3>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider m-0">{card.title}</p>
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>12</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Pending Documents</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Search size={20} />
-            </div>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: '#2563eb', backgroundColor: '#eff6ff', padding: '2px 7px', borderRadius: '4px' }}>In Progress</span>
-          </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>07</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Under Review</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fef2f2', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <FileX size={20} />
-            </div>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: '#dc2626', backgroundColor: '#fef2f2', padding: '2px 7px', borderRadius: '4px' }}>Needs Action</span>
-          </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>05</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Missing Documents</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fff7ed', color: '#ea580c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Clock size={20} />
-            </div>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: '#d97706', backgroundColor: '#fffbeb', padding: '2px 7px', borderRadius: '4px' }}>Next 7 Days</span>
-          </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>03</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Expiring Soon</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        ))}
+        {/* Compliance Rate Card */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+          <div className="flex justify-between items-start mb-3">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-emerald-50 text-emerald-600">
               <ShieldCheck size={20} />
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '11px', fontWeight: 700, color: '#059669', backgroundColor: '#ecfdf5', padding: '2px 7px', borderRadius: '4px' }}>
+            <div className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md">
               <TrendingUp size={12} /> +0.5%
             </div>
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>92%</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Compliance Rate</p>
+          <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">92%</h3>
+          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider m-0">Compliance Rate</p>
         </div>
       </div>
 
       {/* 3. MAIN GRID (2 Cols Left, 1 Col Right) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
-          gap: '24px',
-          alignItems: 'start',
-        }}
-      >
-        {/* LEFT COLUMN: Review Queue + Missing Documents */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', gridColumn: 'span 2' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        {/* LEFT COLUMN: Queue + Missing */}
+        <div className="flex flex-col gap-6 lg:col-span-2">
+          
           {/* DOCUMENT REVIEW QUEUE */}
-          <div
-            id="review-queue-table"
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                padding: '18px 24px',
-                borderBottom: '1px solid #e5e7eb',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
+          <div id="review-queue-table" className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-200 flex justify-between items-center bg-white">
               <div>
-                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>Document Review Queue</h3>
-                <p style={{ fontSize: '12px', fontWeight: 500, color: '#6b7280', margin: '2px 0 0 0' }}>
-                  Documents submitted by customers awaiting approval
-                </p>
+                <h3 className="text-base font-bold text-slate-900 m-0">Document Review Queue</h3>
+                <p className="text-xs font-medium text-slate-500 mt-1">Documents submitted by customers awaiting approval</p>
               </div>
-              <button
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '6px 12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: '#374151',
-                  backgroundColor: '#ffffff',
-                  cursor: 'pointer',
-                }}
-              >
-                <Filter size={13} color="#9ca3af" /> Filter
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowFilterMenu(!showFilterMenu)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm font-semibold transition-colors ${
+                    filterType !== 'ALL'
+                      ? 'border-blue-500 text-blue-600 bg-blue-50'
+                      : 'border-slate-300 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Filter size={14} className={filterType !== 'ALL' ? 'text-blue-500' : 'text-slate-400'} />
+                  {filterType === 'ALL' ? 'Filter' : filterType}
+                </button>
+                {showFilterMenu && (
+                  <div className="absolute right-0 mt-2 w-44 bg-white border border-slate-200 rounded-xl shadow-lg p-2 z-20">
+                    <button
+                      onClick={() => { setFilterType('ALL'); setShowFilterMenu(false); }}
+                      className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${filterType === 'ALL' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      All Types
+                    </button>
+                    <button
+                      onClick={() => { setFilterType('Vaccination'); setShowFilterMenu(false); }}
+                      className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${filterType === 'Vaccination' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      Vaccination
+                    </button>
+                    <button
+                      onClick={() => { setFilterType('Medical'); setShowFilterMenu(false); }}
+                      className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${filterType === 'Medical' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      Medical
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
                 <thead>
-                  <tr style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    <th style={{ padding: '12px 24px' }}>Document ID</th>
-                    <th style={{ padding: '12px 24px' }}>Horse / Request</th>
-                    <th style={{ padding: '12px 24px' }}>Document Type</th>
-                    <th style={{ padding: '12px 24px' }}>Submitted</th>
-                    <th style={{ padding: '12px 24px' }}>Status</th>
-                    <th style={{ padding: '12px 24px', textAlign: 'right' }}>Action</th>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="p-4">Document ID</th>
+                    <th className="p-4">Horse / Request</th>
+                    <th className="p-4">Document Type</th>
+                    <th className="p-4">Submitted</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4 text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {/* Row 1 */}
-                  <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#111827' }}>DOC-2026-041</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ width: '30px', height: '30px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>
-                          ♞
+                <tbody className="divide-y divide-slate-100">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={6} className="p-0">
+                        {[1, 2].map(i => (
+                          <div key={i} className="flex px-4 py-5 gap-4">
+                            <div className="w-20 h-5 bg-slate-100 rounded animate-pulse" />
+                            <div className="w-32 h-8 bg-slate-100 rounded animate-pulse" />
+                            <div className="w-40 h-5 bg-slate-100 rounded animate-pulse" />
+                            <div className="w-20 h-5 bg-slate-100 rounded animate-pulse" />
+                            <div className="w-24 h-6 bg-slate-100 rounded-full animate-pulse" />
+                            <div className="ml-auto w-20 h-8 bg-slate-100 rounded-lg animate-pulse" />
+                          </div>
+                        ))}
+                      </td>
+                    </tr>
+                  ) : displayedDocs.map((doc) => (
+                    <tr key={doc.id} className="hover:bg-slate-50/50">
+                      <td className="p-4 font-bold text-slate-900">{doc.id}</td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-sm">♞</div>
+                          <div>
+                            <p className="font-bold text-slate-900 m-0">{doc.horseName}</p>
+                            <p className="text-xs text-blue-600 font-semibold cursor-pointer m-0 hover:underline">{doc.reqCode}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>Thunder</p>
-                          <p style={{ fontSize: '11px', color: '#2563eb', margin: 0, fontWeight: 600, cursor: 'pointer' }}>TR-2026-001</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#374151' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        <Syringe size={14} color="#9ca3af" /> Vaccination Certificate
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Sep 24, 2026</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#fffbeb', color: '#b45309', border: '1px solid #fef3c7' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b' }} /> Pending Review
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                      <button
-                        onClick={() => alert('Reviewing Vaccination Certificate for Thunder')}
-                        style={{ padding: '6px 14px', borderRadius: '8px', border: '1px solid #2563eb', backgroundColor: '#2563eb', color: '#ffffff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        Review
-                      </button>
-                    </td>
-                  </tr>
-
-                  {/* Row 2 */}
-                  <tr>
-                    <td style={{ padding: '16px 24px', fontWeight: 700, color: '#111827' }}>DOC-2026-042</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ width: '30px', height: '30px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>
-                          ♞
-                        </div>
-                        <div>
-                          <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>Silver Star</p>
-                          <p style={{ fontSize: '11px', color: '#2563eb', margin: 0, fontWeight: 600, cursor: 'pointer' }}>TR-2026-002</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#374151' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        <Stethoscope size={14} color="#9ca3af" /> Medical Certificate
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Sep 25, 2026</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#fffbeb', color: '#b45309', border: '1px solid #fef3c7' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b' }} /> Pending Review
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                      <button
-                        onClick={() => alert('Reviewing Medical Certificate for Silver Star')}
-                        style={{ padding: '6px 14px', borderRadius: '8px', border: '1px solid #2563eb', backgroundColor: '#2563eb', color: '#ffffff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        Review
-                      </button>
-                    </td>
-                  </tr>
+                      </td>
+                      <td className="p-4 text-slate-700">
+                        <span className="inline-flex items-center gap-1.5 font-medium">
+                          {React.createElement(getDocIcon(doc.type), { size: 16, className: 'text-slate-400 shrink-0' })} {doc.type}
+                        </span>
+                      </td>
+                      <td className="p-4 text-slate-600 font-medium">{doc.date}</td>
+                      <td className="p-4">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-100">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Pending Review
+                        </span>
+                      </td>
+                      <td className="p-4 text-right">
+                        <button
+                          onClick={() => openReviewModal(doc)}
+                          className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-sm transition-colors"
+                        >
+                          Review
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!isLoading && pendingDocs.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-500 font-medium">
+                        <CheckCircle size={32} className="mx-auto text-green-500 mb-2" />
+                        All caught up! No pending documents in the queue.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
 
           {/* MISSING DOCUMENTS TABLE */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                padding: '18px 24px',
-                borderBottom: '1px solid #e5e7eb',
-                backgroundColor: 'rgba(254, 242, 242, 0.35)',
-              }}
-            >
-              <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <AlertTriangle size={18} color="#ef4444" /> Documents Requiring Attention
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-200 bg-red-50/50">
+              <h3 className="text-base font-bold text-slate-900 m-0 flex items-center gap-2">
+                <AlertTriangle size={18} className="text-red-500" /> Documents Requiring Attention
               </h3>
-              <p style={{ fontSize: '12px', fontWeight: 500, color: '#6b7280', margin: '2px 0 0 0' }}>
-                Missing or rejected documents that block transport approval
-              </p>
+              <p className="text-xs font-medium text-slate-600 mt-1">Missing or rejected documents that block transport approval</p>
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
                 <thead>
-                  <tr style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    <th style={{ padding: '12px 24px' }}>Horse / Request</th>
-                    <th style={{ padding: '12px 24px' }}>Missing Document</th>
-                    <th style={{ padding: '12px 24px' }}>Due Date</th>
-                    <th style={{ padding: '12px 24px' }}>Status</th>
-                    <th style={{ padding: '12px 24px', textAlign: 'right' }}>Action</th>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="p-4">Horse / Request</th>
+                    <th className="p-4">Missing Document</th>
+                    <th className="p-4">Due Date</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4 text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody>
-                  <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>Royal Star</p>
-                      <p style={{ fontSize: '11px', color: '#2563eb', margin: 0, fontWeight: 600, cursor: 'pointer' }}>TR-2026-002</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#1f2937' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        <FileX size={15} color="#ef4444" /> Quarantine Certificate
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#dc2626', fontWeight: 700 }}>Sep 29, 2026</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#fef2f2', color: '#b91c1c', border: '1px solid #fee2e2' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444' }} /> Missing
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                      <button
-                        onClick={() => alert('Sending notification to customer for missing Quarantine Certificate')}
-                        style={{ padding: '6px 14px', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', color: '#374151', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        Request
-                      </button>
-                    </td>
-                  </tr>
-
-                  <tr>
-                    <td style={{ padding: '16px 24px' }}>
-                      <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>Midnight</p>
-                      <p style={{ fontSize: '11px', color: '#2563eb', margin: 0, fontWeight: 600, cursor: 'pointer' }}>TR-2026-008</p>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#1f2937' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        <FolderOpen size={15} color="#9ca3af" /> Export Permit (UAE)
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', color: '#4b5563' }}>Oct 01, 2026</td>
-                    <td style={{ padding: '16px 24px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#fef2f2', color: '#b91c1c', border: '1px solid #fee2e2' }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444' }} /> Rejected
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                      <button
-                        onClick={() => alert('Sending notification to customer for re-submitting Export Permit')}
-                        style={{ padding: '6px 14px', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', color: '#374151', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        Request
-                      </button>
-                    </td>
-                  </tr>
+                <tbody className="divide-y divide-slate-100">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={5} className="p-4 text-center">
+                        <div className="h-6 bg-slate-100 rounded w-1/2 mx-auto animate-pulse"></div>
+                      </td>
+                    </tr>
+                  ) : missingDocs.map((doc) => (
+                    <tr key={doc.id} className="hover:bg-slate-50/50">
+                      <td className="p-4">
+                        <p className="font-bold text-slate-900 m-0">{doc.horseName}</p>
+                        <p className="text-xs text-blue-600 font-semibold cursor-pointer m-0 hover:underline">{doc.reqCode}</p>
+                      </td>
+                      <td className="p-4 text-slate-800 font-medium">
+                        <span className="inline-flex items-center gap-1.5">
+                          {doc.status === 'MISSING' ? <FileX size={16} className="text-red-500" /> : <FolderOpen size={16} className="text-slate-400" />} 
+                          {doc.type}
+                        </span>
+                        {doc.rejectionReason && (
+                          <span className="block text-[11px] text-red-600 mt-0.5 font-normal">
+                            Reason: {doc.rejectionReason}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4 text-red-600 font-bold">{doc.due}</td>
+                      <td className="p-4">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-red-50 text-red-700 border border-red-100">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> {doc.status}
+                        </span>
+                      </td>
+                      <td className="p-4 text-right">
+                        <button
+                          onClick={() => toast.success(`Reminder sent to ${doc.customer} for ${doc.type}`)}
+                          className="px-4 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 shadow-sm transition-colors"
+                        >
+                          Request
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!isLoading && missingDocs.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-slate-500 font-medium">
+                        No missing documents!
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -449,174 +318,101 @@ export default function SpecialistDashboardPage() {
         </div>
 
         {/* RIGHT COLUMN: Compliance Overview + Expiring Docs + Regulations */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="flex flex-col gap-6">
+          
           {/* COMPLIANCE OVERVIEW */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              padding: '20px',
-            }}
-          >
-            <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: '0 0 16px 0' }}>Compliance Overview</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Medical */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#374151', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Stethoscope size={15} color="#9ca3af" /> Medical Compliance
-                  </span>
-                  <span style={{ fontSize: '13.5px', fontWeight: 700, color: '#10b981' }}>92%</span>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+            <h3 className="text-base font-bold text-slate-900 mb-5">Compliance Overview</h3>
+            <div className="flex flex-col gap-5">
+              {[
+                { label: 'Medical Compliance', icon: Stethoscope, pct: 92, color: 'bg-emerald-500' },
+                { label: 'Quarantine Compliance', icon: ShieldCheck, pct: 96, color: 'bg-emerald-500' },
+                { label: 'Customs Compliance', icon: Building2, pct: 89, color: 'bg-amber-500' },
+              ].map((item, idx) => (
+                <div key={idx}>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                      <item.icon size={16} className="text-slate-400" /> {item.label}
+                    </span>
+                    <span className={`text-sm font-bold ${item.pct >= 90 ? 'text-emerald-600' : 'text-amber-600'}`}>{item.pct}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${item.color}`} style={{ width: `${item.pct}%` }} />
+                  </div>
                 </div>
-                <div style={{ width: '100%', height: '8px', backgroundColor: '#f3f4f6', borderRadius: '999px', overflow: 'hidden' }}>
-                  <div style={{ width: '92%', height: '100%', backgroundColor: '#10b981', borderRadius: '999px' }} />
-                </div>
-              </div>
-
-              {/* Quarantine */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#374151', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <ShieldCheck size={15} color="#9ca3af" /> Quarantine Compliance
-                  </span>
-                  <span style={{ fontSize: '13.5px', fontWeight: 700, color: '#10b981' }}>96%</span>
-                </div>
-                <div style={{ width: '100%', height: '8px', backgroundColor: '#f3f4f6', borderRadius: '999px', overflow: 'hidden' }}>
-                  <div style={{ width: '96%', height: '100%', backgroundColor: '#10b981', borderRadius: '999px' }} />
-                </div>
-              </div>
-
-              {/* Customs */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#374151', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Building2 size={15} color="#9ca3af" /> Customs Compliance
-                  </span>
-                  <span style={{ fontSize: '13.5px', fontWeight: 700, color: '#d97706' }}>89%</span>
-                </div>
-                <div style={{ width: '100%', height: '8px', backgroundColor: '#f3f4f6', borderRadius: '999px', overflow: 'hidden' }}>
-                  <div style={{ width: '89%', height: '100%', backgroundColor: '#f59e0b', borderRadius: '999px' }} />
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
           {/* DOCUMENT EXPIRATION */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              padding: '20px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: 0 }}>Expiring Documents</h3>
-              <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#b45309', backgroundColor: '#fffbeb', padding: '2px 8px', borderRadius: '999px' }}>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-slate-900 m-0">Expiring Documents</h3>
+              <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-100">
                 3 Soon
               </span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {/* Doc 1 */}
-              <div
-                onClick={() => alert('View EIA Certificate details')}
-                style={{
-                  padding: '12px',
-                  border: '1px solid #f3f4f6',
-                  backgroundColor: '#f9fafb',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  cursor: 'pointer',
-                }}
+            <div className="flex flex-col gap-3">
+              <div 
+                onClick={() => toast('Viewing EIA Certificate', { icon: '📄' })}
+                className="p-3 border border-slate-100 bg-slate-50 rounded-lg flex justify-between items-center cursor-pointer hover:border-slate-200 hover:shadow-sm transition-all"
               >
                 <div>
-                  <p style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827', margin: 0 }}>EIA Certificate</p>
-                  <p style={{ fontSize: '11px', color: '#6b7280', margin: '2px 0 0 0' }}>Thunder (TR-2026-001)</p>
+                  <p className="font-bold text-sm text-slate-900 m-0">EIA Certificate</p>
+                  <p className="text-xs text-slate-500 mt-1">Thunder (TR-2026-001)</p>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#b45309', backgroundColor: '#fffbeb', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginBottom: '2px' }}>
+                <div className="text-right">
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded inline-block mb-1">
                     Expires in 3 days
                   </span>
-                  <p style={{ fontSize: '10px', color: '#6b7280', margin: 0 }}>Sep 29, 2026</p>
+                  <p className="text-[10px] text-slate-500 m-0 font-medium">Sep 29, 2026</p>
                 </div>
               </div>
 
-              {/* Doc 2 */}
-              <div
-                onClick={() => alert('View Import Permit details')}
-                style={{
-                  padding: '12px',
-                  border: '1px solid #fee2e2',
-                  backgroundColor: 'rgba(254, 242, 242, 0.4)',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  cursor: 'pointer',
-                }}
+              <div 
+                onClick={() => toast('Viewing Import Permit', { icon: '⚠️' })}
+                className="p-3 border border-red-100 bg-red-50/50 rounded-lg flex justify-between items-center cursor-pointer hover:border-red-200 hover:bg-red-50 transition-all"
               >
                 <div>
-                  <p style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827', margin: 0 }}>Import Permit (SG)</p>
-                  <p style={{ fontSize: '11px', color: '#6b7280', margin: '2px 0 0 0' }}>Starlight (TR-2026-015)</p>
+                  <p className="font-bold text-sm text-slate-900 m-0">Import Permit (SG)</p>
+                  <p className="text-xs text-slate-500 mt-1">Starlight (TR-2026-015)</p>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', backgroundColor: '#fef2f2', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginBottom: '2px' }}>
+                <div className="text-right">
+                  <span className="text-[10px] font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded inline-block mb-1">
                     Expired
                   </span>
-                  <p style={{ fontSize: '10px', color: '#dc2626', margin: 0, fontWeight: 600 }}>Yesterday</p>
+                  <p className="text-[10px] text-red-600 m-0 font-bold">Yesterday</p>
                 </div>
               </div>
             </div>
           </div>
 
           {/* REGULATIONS COMPACT */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
-          >
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>Regulations Watchlist</h3>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-slate-200 bg-slate-50">
+              <h3 className="text-sm font-bold text-slate-900 m-0">Regulations Watchlist</h3>
             </div>
-            <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <div
-                onClick={() => alert('Viewing Singapore quarantine protocol update')}
-                style={{ padding: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderRadius: '8px' }}
+            <div className="p-3 flex flex-col gap-2">
+              <div 
+                onClick={() => toast.success('Fetching Singapore protocols')}
+                className="p-3 flex justify-between items-center cursor-pointer rounded-lg hover:bg-slate-50 transition-colors"
               >
                 <div>
-                  <p style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    🇸🇬 Singapore
-                  </p>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Quarantine Protocol Update</p>
+                  <p className="font-bold text-sm text-slate-900 m-0 flex items-center gap-1.5">🇸🇬 Singapore</p>
+                  <p className="text-xs text-slate-500 mt-1">Quarantine Protocol Update</p>
                 </div>
-                <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#047857', backgroundColor: '#ecfdf5', padding: '2px 7px', borderRadius: '4px' }}>
-                  Active
-                </span>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded">Active</span>
               </div>
-
-              <div
-                onClick={() => alert('Viewing UAE equine import regulations')}
-                style={{ padding: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderRadius: '8px' }}
+              <div 
+                onClick={() => toast.success('Fetching UAE regulations')}
+                className="p-3 flex justify-between items-center cursor-pointer rounded-lg hover:bg-slate-50 transition-colors"
               >
                 <div>
-                  <p style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    🇦🇪 UAE
-                  </p>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Equine Import Regulations</p>
+                  <p className="font-bold text-sm text-slate-900 m-0 flex items-center gap-1.5">🇦🇪 UAE</p>
+                  <p className="text-xs text-slate-500 mt-1">Equine Import Regulations</p>
                 </div>
-                <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#b45309', backgroundColor: '#fffbeb', padding: '2px 7px', borderRadius: '4px' }}>
-                  Review Required
-                </span>
+                <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1 rounded">Review Req.</span>
               </div>
             </div>
           </div>
@@ -624,54 +420,41 @@ export default function SpecialistDashboardPage() {
       </div>
 
       {/* 4. QUICK ACTIONS */}
-      <div>
-        <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', marginBottom: '14px' }}>Quick Actions</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-          <div
-            onClick={() => router.push('/specialist/approval')}
-            style={{ backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-              <Search size={20} />
+      <div className="mt-2">
+        <h3 className="text-base font-bold text-slate-900 mb-4">Quick Actions</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { title: 'Review Documents', desc: 'Process pending submissions', icon: Search, bg: 'bg-blue-600 text-white hover:bg-blue-700', iconBg: 'bg-white/20', descColor: 'text-blue-100', route: '/specialist/approval' },
+            { title: 'Create Dossier', desc: 'Compile transport documents', icon: FolderOpen, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-blue-50 text-blue-600', descColor: 'text-slate-500', route: '/specialist/documents' },
+            { title: 'Request Missing', desc: 'Notify clients of missing docs', icon: FileX, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-red-50 text-red-600', descColor: 'text-slate-500', route: '/specialist/missing' },
+            { title: 'View Regulations', desc: 'Check border compliance', icon: Scale, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-emerald-50 text-emerald-600', descColor: 'text-slate-500', route: '/specialist/regulations' },
+          ].map((action, idx) => (
+            <div 
+              key={idx}
+              onClick={() => router.push(action.route)}
+              className={`rounded-xl p-5 cursor-pointer shadow-sm transition-all duration-200 hover:shadow-md ${action.bg}`}
+            >
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-4 ${action.iconBg}`}>
+                <action.icon size={20} />
+              </div>
+              <h4 className="text-sm font-bold m-0 mb-1">{action.title}</h4>
+              <p className={`text-xs font-medium m-0 ${action.descColor}`}>{action.desc}</p>
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px 0' }}>Review Documents</h4>
-            <p style={{ fontSize: '12px', color: '#bfdbfe', margin: 0, fontWeight: 500 }}>Process pending submissions</p>
-          </div>
-
-          <div
-            onClick={() => router.push('/specialist/documents')}
-            style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-              <FolderOpen size={20} />
-            </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>Create Dossier</h4>
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>Compile transport documents</p>
-          </div>
-
-          <div
-            onClick={() => router.push('/specialist/missing')}
-            style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fef2f2', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-              <FileX size={20} />
-            </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>Request Missing</h4>
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>Notify clients of missing docs</p>
-          </div>
-
-          <div
-            onClick={() => router.push('/specialist/regulations')}
-            style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-              <Scale size={20} />
-            </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>View Regulations</h4>
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>Check border compliance</p>
-          </div>
+          ))}
         </div>
       </div>
+
+      {/* Review Modal */}
+      {selectedDoc && (
+        <DocumentReviewModal
+          isOpen={reviewModalOpen}
+          onClose={() => setReviewModalOpen(false)}
+          documentId={selectedDoc.id}
+          horseName={selectedDoc.horseName}
+          docTitle={selectedDoc.type}
+          onSuccess={handleReviewSuccess}
+        />
+      )}
     </div>
   );
 }
