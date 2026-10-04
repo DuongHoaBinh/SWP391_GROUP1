@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -15,8 +15,11 @@ import {
   LogOut,
   Search,
   ChevronDown,
+  Menu,
+  X,
 } from 'lucide-react';
 import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
+import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 
 interface NavItem {
   label: string;
@@ -33,6 +36,9 @@ export default function SpecialistLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     // Ensure active specialist session exists
@@ -40,11 +46,11 @@ export default function SpecialistLayout({
     if (!token) {
       setAuthSession('mock-jwt-token-specialist', {
         id: 'usr-spec-01',
-        name: 'Alex Morgan',
-        email: 'alex.m@racehorse.logistics',
+        name: 'Sarah Jenkins',
+        email: 'sarah.j@racehorse.logistics',
         role: 'TRANSPORT_SPECIALIST',
         organization: 'RaceHorse Logistics',
-        initials: 'AM',
+        initials: 'SJ',
       });
     }
   }, []);
@@ -94,58 +100,26 @@ export default function SpecialistLayout({
     },
   ];
 
-  const handleLogout = () => {
-    if (confirm('Are you sure you want to log out?')) {
-      clearAuthSession();
-      router.push('/login');
-    }
+  const handleLogoutConfirm = () => {
+    setShowLogoutModal(false);
+    clearAuthSession();
+    router.push('/login');
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif" }}>
-      {/* LEFT SIDEBAR */}
-      <aside
-        style={{
-          width: '260px',
-          backgroundColor: '#0f172a',
-          color: '#94a3b8',
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100vh',
-          position: 'sticky',
-          top: 0,
-          zIndex: 40,
-          borderRight: '1px solid rgba(255, 255, 255, 0.05)',
-          flexShrink: 0,
-        }}
-      >
+    <div className="flex min-h-screen bg-slate-50 font-sans overflow-x-hidden" style={{ overflowX: 'hidden' }}>
+      {/* Logout confirmation modal */}
+      <LogoutConfirmModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleLogoutConfirm}
+      />
+
+      {/* LEFT SIDEBAR (DESKTOP) */}
+      <aside className="hidden md:flex w-[260px] bg-slate-900 text-slate-400 flex-col h-screen sticky top-0 z-40 border-r border-white/5 shrink-0">
         {/* Logo */}
-        <div
-          style={{
-            height: '72px',
-            display: 'flex',
-            alignItems: 'center',
-            padding: '0 24px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-            flexShrink: 0,
-          }}
-        >
-          <div
-            style={{
-              width: '34px',
-              height: '34px',
-              borderRadius: '8px',
-              backgroundColor: '#2563eb',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 800,
-              fontSize: '17px',
-              marginRight: '12px',
-              boxShadow: '0 0 15px rgba(37, 99, 235, 0.5)',
-            }}
-          >
+        <div className="h-[72px] flex items-center px-6 border-b border-white/5 shrink-0">
+          <div className="w-[34px] h-[34px] rounded-lg bg-blue-600 text-white flex items-center justify-center font-extrabold text-[17px] mr-3 shadow-[0_0_15px_rgba(37,99,235,0.5)]">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4">
               <circle cx="5" cy="19" r="2" fill="#fff" />
               <path d="M5 17c0-5 4-9 9-9h5" />
@@ -153,31 +127,22 @@ export default function SpecialistLayout({
             </svg>
           </div>
           <div>
-            <h1 style={{ color: '#ffffff', fontWeight: 800, fontSize: '14px', letterSpacing: '0.02em', lineHeight: 1.2, margin: 0 }}>
+            <h1 className="text-white font-extrabold text-sm tracking-[0.02em] leading-tight m-0">
               RaceHorse
               <br />
-              <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500 }}>Logistics</span>
+              <span className="text-[10px] text-slate-400 font-medium">Logistics</span>
             </h1>
           </div>
         </div>
 
         {/* Navigation */}
-        <div
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '24px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '28px',
-          }}
-        >
+        <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-7">
           {/* OVERVIEW GROUP */}
           <div>
-            <p style={{ padding: '0 12px', fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>
+            <p className="px-3 text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-2">
               Overview
             </p>
-            <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <nav className="flex flex-col gap-1">
               {navItems.map((item) => {
                 const isActive = item.href === '/specialist' ? pathname === '/specialist' : pathname?.startsWith(item.href);
 
@@ -185,35 +150,22 @@ export default function SpecialistLayout({
                   <Link
                     key={item.href}
                     href={item.href}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '9px 12px',
-                      borderRadius: '8px',
-                      fontSize: '13.5px',
-                      fontWeight: isActive ? 600 : 500,
-                      color: isActive ? '#ffffff' : '#94a3b8',
-                      backgroundColor: isActive ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                      border: isActive ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid transparent',
-                      textDecoration: 'none',
-                    }}
+                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-[13.5px] font-medium transition-colors ${
+                      isActive 
+                        ? 'font-semibold text-white bg-white/10 border border-white/5' 
+                        : 'text-slate-400 border border-transparent hover:bg-white/5 hover:text-slate-300'
+                    }`}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <span style={{ color: isActive ? '#cbd5e1' : '#64748b' }}>{item.icon}</span>
+                    <div className="flex items-center gap-3">
+                      <span className={isActive ? 'text-slate-300' : 'text-slate-500'}>{item.icon}</span>
                       <span>{item.label}</span>
                     </div>
 
                     {item.badge !== undefined && (
                       <span
-                        style={{
-                          backgroundColor: item.badgeColor === 'danger' ? '#ef4444' : '#2563eb',
-                          color: '#ffffff',
-                          fontSize: '10px',
-                          fontWeight: 700,
-                          padding: '2px 7px',
-                          borderRadius: '999px',
-                        }}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full text-white ${
+                          item.badgeColor === 'danger' ? 'bg-red-500' : 'bg-blue-600'
+                        }`}
                       >
                         {item.badge}
                       </span>
@@ -226,10 +178,10 @@ export default function SpecialistLayout({
 
           {/* MANAGEMENT GROUP */}
           <div>
-            <p style={{ padding: '0 12px', fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>
+            <p className="px-3 text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-2">
               Management
             </p>
-            <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <nav className="flex flex-col gap-1">
               {managementItems.map((item) => {
                 const isActive = pathname?.startsWith(item.href);
 
@@ -237,21 +189,14 @@ export default function SpecialistLayout({
                   <Link
                     key={item.href}
                     href={item.href}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '9px 12px',
-                      borderRadius: '8px',
-                      fontSize: '13.5px',
-                      fontWeight: isActive ? 600 : 500,
-                      color: isActive ? '#ffffff' : '#94a3b8',
-                      backgroundColor: isActive ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                      textDecoration: 'none',
-                    }}
+                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-[13.5px] font-medium transition-colors ${
+                      isActive 
+                        ? 'font-semibold text-white bg-white/10 border border-white/5' 
+                        : 'text-slate-400 border border-transparent hover:bg-white/5 hover:text-slate-300'
+                    }`}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <span style={{ color: isActive ? '#cbd5e1' : '#64748b' }}>{item.icon}</span>
+                    <div className="flex items-center gap-3">
+                      <span className={isActive ? 'text-slate-300' : 'text-slate-500'}>{item.icon}</span>
                       <span>{item.label}</span>
                     </div>
                   </Link>
@@ -262,73 +207,35 @@ export default function SpecialistLayout({
         </div>
 
         {/* Bottom Area */}
-        <div style={{ padding: '16px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div className="p-4 border-t border-white/5 flex flex-col gap-2.5">
           <Link
             href="/specialist/support"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '8px 12px',
-              fontSize: '13px',
-              color: '#94a3b8',
-              textDecoration: 'none',
-              borderRadius: '8px',
-            }}
+            className="flex items-center gap-3 px-3 py-2 text-[13px] text-slate-400 hover:text-white transition-colors rounded-lg"
           >
-            <HelpCircle size={17} color="#64748b" />
+            <HelpCircle size={17} className="text-slate-500" />
             <span>Help & Support</span>
           </Link>
 
-          <div
-            style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-              borderRadius: '12px',
-              padding: '10px 12px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '50%',
-                  backgroundColor: '#2563eb',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  color: '#ffffff',
-                  flexShrink: 0,
-                }}
-              >
-                AM
+          <div className="bg-white/5 rounded-xl px-3 py-2.5 flex items-center justify-between border border-white/10">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-[34px] h-[34px] rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                SJ
               </div>
-              <div style={{ minWidth: 0 }}>
-                <p style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  Alex Morgan
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-white m-0 truncate">
+                  Sarah Jenkins
                 </p>
-                <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <p className="text-[10px] text-slate-400 m-0 truncate">
                   Transport Specialist
                 </p>
               </div>
             </div>
 
             <button
-              onClick={handleLogout}
+              onClick={() => setShowLogoutModal(true)}
               title="Log out"
-              style={{
-                color: '#64748b',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '4px',
-              }}
+              aria-label="Log out"
+              className="text-slate-500 hover:text-red-400 p-1 bg-transparent border-none cursor-pointer transition-colors"
             >
               <LogOut size={16} />
             </button>
@@ -336,138 +243,167 @@ export default function SpecialistLayout({
         </div>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-        {/* TOP HEADER */}
-        <header
-          style={{
-            height: '72px',
-            backgroundColor: '#ffffff',
-            borderBottom: '1px solid #e5e7eb',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0 24px',
-            position: 'sticky',
-            top: 0,
-            zIndex: 30,
-            flexShrink: 0,
-          }}
+      {/* MOBILE DRAWER */}
+      {mobileMenuOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile Navigation"
+          className="fixed inset-0 z-50 flex md:hidden"
         >
-          {/* Left: Title */}
-          <div>
-            <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1.2 }}>Dashboard</h2>
-            <p style={{ fontSize: '13px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
-              Overview of medical, quarantine and customs compliance.
-            </p>
+          <div
+            className="fixed inset-0 bg-black/50 transition-opacity"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <aside className="w-[260px] bg-slate-900 text-slate-400 flex flex-col h-screen relative z-50">
+            {/* Logo + Close */}
+            <div className="h-[72px] flex items-center justify-between px-5 border-b border-white/5 shrink-0">
+              <div className="flex items-center">
+                <div className="w-[34px] h-[34px] rounded-lg bg-blue-600 text-white flex items-center justify-center font-extrabold text-[17px] mr-3">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4">
+                    <circle cx="5" cy="19" r="2" fill="#fff" />
+                    <path d="M5 17c0-5 4-9 9-9h5" />
+                    <polyline points="15 4 19 8 15 12" />
+                  </svg>
+                </div>
+                <h1 className="text-white font-extrabold text-sm m-0">
+                  RaceHorse <span className="text-[10px] text-slate-400 font-medium">Logistics</span>
+                </h1>
+              </div>
+              <button
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close navigation"
+                className="bg-transparent border-none text-slate-400 p-1 cursor-pointer hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Nav links */}
+            <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-6">
+              <div>
+                <p className="px-3 text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-2">Overview</p>
+                <nav className="flex flex-col gap-1">
+                  {navItems.map((item) => {
+                    const isActive = item.href === '/specialist' ? pathname === '/specialist' : pathname?.startsWith(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={`flex items-center justify-between px-3 py-2 rounded-lg text-[13.5px] font-medium ${
+                          isActive ? 'text-white bg-white/10' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {item.icon}
+                          <span>{item.label}</span>
+                        </div>
+                        {item.badge !== undefined && (
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full text-white ${item.badgeColor === 'danger' ? 'bg-red-500' : 'bg-blue-600'}`}>
+                            {item.badge}
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+
+              <div>
+                <p className="px-3 text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-2">Management</p>
+                <nav className="flex flex-col gap-1">
+                  {managementItems.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-3 px-3 py-2 rounded-lg text-[13.5px] font-medium text-slate-400 hover:text-white"
+                    >
+                      {item.icon}
+                      <span>{item.label}</span>
+                    </Link>
+                  ))}
+                </nav>
+              </div>
+            </div>
+
+            {/* Mobile Logout */}
+            <div className="p-4 border-t border-white/5">
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setShowLogoutModal(true);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-red-500/10 text-red-400 border-none cursor-pointer font-semibold text-[13.5px]"
+              >
+                <LogOut size={16} />
+                <span>Log out</span>
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* MAIN CONTENT AREA */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* TOP HEADER */}
+        <header className="h-[72px] bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-30 shrink-0">
+          {/* Left: Mobile Menu Toggle & Title */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open mobile menu"
+              className="md:hidden bg-transparent border-none cursor-pointer p-1 text-slate-700 flex items-center justify-center"
+            >
+              <Menu size={22} />
+            </button>
+            <div>
+              <h2 className="text-[17px] font-bold text-slate-900 m-0 leading-tight">Specialist Workspace</h2>
+              <p className="text-[13px] text-slate-500 mt-0.5 mb-0 font-medium hidden sm:block">
+                Medical, quarantine, and customs compliance operations.
+              </p>
+            </div>
           </div>
 
           {/* Center: Search */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              backgroundColor: '#f9fafb',
-              border: '1px solid #e5e7eb',
-              borderRadius: '8px',
-              padding: '8px 14px',
-              width: '380px',
-              position: 'relative',
-            }}
-          >
-            <Search size={15} color="#9ca3af" style={{ marginRight: '10px', flexShrink: 0 }} />
+          <div className="hidden sm:flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 w-[380px] relative focus-within:ring-2 focus-within:ring-blue-100 focus-within:border-blue-400 transition-all">
+            <Search size={15} className="text-slate-400 mr-2 shrink-0" />
             <input
               type="text"
               placeholder="Search horses, documents, requests..."
-              style={{
-                border: 'none',
-                outline: 'none',
-                backgroundColor: 'transparent',
-                fontSize: '13.5px',
-                color: '#1f2937',
-                width: '100%',
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchTerm.trim()) {
+                  router.push(`/specialist/documents?search=${encodeURIComponent(searchTerm.trim())}`);
+                }
               }}
+              className="border-none outline-none bg-transparent text-[13.5px] text-slate-800 w-full placeholder-slate-400"
             />
-            <span
-              style={{
-                fontSize: '10.5px',
-                fontWeight: 700,
-                color: '#9ca3af',
-                backgroundColor: '#ffffff',
-                border: '1px solid #e5e7eb',
-                padding: '2px 5px',
-                borderRadius: '4px',
-                flexShrink: 0,
-                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
-              }}
-            >
+            <span className="text-[10.5px] font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded shrink-0 shadow-sm">
               ⌘K
             </span>
           </div>
 
           {/* Right: Actions & User */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div className="flex items-center gap-4">
             <button
-              style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                border: '1px solid #e5e7eb',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#6b7280',
-                backgroundColor: '#ffffff',
-                position: 'relative',
-                cursor: 'pointer',
-              }}
+              aria-label="Notifications"
+              className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 bg-white relative cursor-pointer hover:bg-slate-50 transition-colors"
             >
               <Bell size={16} />
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '8px',
-                  right: '9px',
-                  width: '7px',
-                  height: '7px',
-                  borderRadius: '50%',
-                  backgroundColor: '#ef4444',
-                  border: '1px solid #ffffff',
-                }}
-              />
+              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 border border-white" />
             </button>
 
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                backgroundColor: '#f9fafb',
-                border: '1px solid #e5e7eb',
-                borderRadius: '999px',
-                padding: '3px 12px 3px 4px',
-              }}
-            >
-              <div
-                style={{
-                  width: '30px',
-                  height: '30px',
-                  borderRadius: '50%',
-                  backgroundColor: '#2563eb',
-                  color: '#ffffff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                }}
-              >
-                AM
+            <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-full pl-1 pr-3 py-1 cursor-pointer hover:bg-slate-100 transition-colors">
+              <div className="w-[30px] h-[30px] rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shadow-inner">
+                SJ
               </div>
-              <div style={{ textAlign: 'left', lineHeight: 1.2 }}>
-                <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0 }}>Alex Morgan</p>
-                <p style={{ fontSize: '10px', color: '#6b7280', margin: 0, fontWeight: 500, display: 'flex', alignItems: 'center', gap: '3px' }}>
-                  Transport Specialist <ChevronDown size={10} />
+              <div className="text-left leading-tight">
+                <p className="text-[13px] font-semibold text-slate-900 m-0">Sarah Jenkins</p>
+                <p className="text-[10px] text-slate-500 m-0 font-medium flex items-center gap-1">
+                  Specialist <ChevronDown size={10} />
                 </p>
               </div>
             </div>
@@ -475,8 +411,8 @@ export default function SpecialistLayout({
         </header>
 
         {/* Content Container */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
-          <div style={{ maxWidth: '1400px', margin: '0 auto' }}>{children}</div>
+        <div className="flex-1 overflow-y-auto p-8">
+          <div className="max-w-[1400px] mx-auto">{children}</div>
         </div>
       </main>
     </div>
