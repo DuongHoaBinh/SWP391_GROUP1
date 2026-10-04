@@ -46,13 +46,28 @@ export class DocumentsService {
   async uploadDocument(
     user: AuthenticatedUser,
     dto: UploadDocumentDto,
+    file?: Express.Multer.File,
   ): Promise<TransportDocument> {
     const regulation = await this.documentsStore.findRegulationById(dto.regulationId);
     if (!regulation) {
       throw new BadRequestException(`Quy định ID #${dto.regulationId} không tồn tại trong hệ thống`);
     }
 
-    const documentId = await this.documentsStore.createDocument(Number(user.id), dto);
+    let finalUrl = dto.fileUrl;
+    if (file) {
+      finalUrl = `/uploads/documents/${file.filename}`;
+    }
+
+    if (!finalUrl || finalUrl.trim().length === 0) {
+      throw new BadRequestException('Vui lòng chọn file từ máy tính hoặc cung cấp fileUrl');
+    }
+
+    const payload: UploadDocumentDto = {
+      ...dto,
+      fileUrl: finalUrl,
+    };
+
+    const documentId = await this.documentsStore.createDocument(Number(user.id), payload);
     const created = await this.documentsStore.findDocumentById(documentId);
     if (!created) {
       throw new NotFoundException('Không tìm thấy tài liệu sau khi tạo');

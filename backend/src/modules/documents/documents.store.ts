@@ -149,7 +149,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
         uploadedBy,
         dto.docType,
         dto.docNumber ?? null,
-        dto.fileUrl,
+        dto.fileUrl ?? '',
         issueDate,
         expiryDate,
       ],

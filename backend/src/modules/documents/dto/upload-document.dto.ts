@@ -1,13 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
 
 export class UploadDocumentDto {
   @ApiProperty({ example: 1, description: 'ID con ngựa được đính kèm tài liệu' })
+  @Type(() => Number)
   @IsInt({ message: 'horseId phải là số nguyên' })
   @Min(1)
   horseId: number;
 
   @ApiProperty({ example: 1, description: 'ID quy định áp dụng trong bảng regulation' })
+  @Type(() => Number)
   @IsInt({ message: 'regulationId phải là số nguyên' })
   @Min(1)
   regulationId: number;
@@ -25,13 +28,13 @@ export class UploadDocumentDto {
   @IsString()
   docNumber?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'https://storage.example.com/documents/horses/xich-tho-passport.pdf',
-    description: 'Đường dẫn URL file tài liệu đã tải lên',
+    description: 'Đường dẫn URL file tài liệu (tùy chọn nếu đã đính kèm file từ máy tính)',
   })
-  @IsNotEmpty({ message: 'fileUrl là bắt buộc' })
+  @IsOptional()
   @IsString()
-  fileUrl: string;
+  fileUrl?: string;
 
   @ApiPropertyOptional({ example: '2026-01-10', description: 'Ngày cấp văn bản (YYYY-MM-DD)' })
   @IsOptional()
