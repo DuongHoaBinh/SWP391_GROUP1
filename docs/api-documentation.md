@@ -307,6 +307,133 @@ Updates details of a racehorse profile owned by the customer.
 ### `DELETE /horses/:id`
 Deletes a horse profile. If the horse has been part of past shipments, it is soft-deleted to status `'retired'` to preserve transport audit history.
 
+## Fleet endpoints (Flow 3: Fleet Management & Capacity Allocation)
+
+Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)
+
+### `GET /fleet/vehicles`
+Lists transport vehicles. Supports optional query filters: `?status=available|in_use|maintenance` and `?type=truck|aircraft_stall|container`.
+
+### `GET /fleet/vehicles/:id`
+Retrieves details of a specific vehicle.
+
+### `POST /fleet/vehicles` (Fleet Coordinator / Manager / Admin)
+Registers a new transport vehicle with plate/code and horse capacity.
+- **Body:**
+```json
+{
+  "vehicleType": "truck",
+  "plateOrCode": "51C-888.99",
+  "capacity": 4,
+  "status": "available"
+}
+```
+
+### `GET /fleet/staff` (Fleet Coordinator / Manager / Admin)
+Lists drivers, escorts, and coordinators available for trip assignment.
+
+### `GET /fleet/shipments/:id/assignments`
+Retrieves all vehicles and staff assigned to a specific shipment.
+
+### `POST /fleet/shipments/:id/assign-vehicles` (Fleet Coordinator / Manager / Admin)
+Assigns vehicles to an approved transport order. Enforces rule: total vehicle capacity must be >= `requestedHorseCount`. Sets vehicle status to `in_use` and order status to `planning`.
+- **Body:** `{ "vehicleIds": [1, 2] }`
+
+### `POST /fleet/shipments/:id/assign-staff` (Fleet Coordinator / Manager / Admin)
+Assigns drivers and escorts to a transport trip and sends system notifications.
+- **Body:**
+```json
+{
+  "assignments": [
+    { "userId": 5, "roleInShipment": "driver" },
+    { "userId": 6, "roleInShipment": "escort" }
+  ]
+}
+```
+
+## Routes endpoints (Flow 3: Route Planning & Trip Publishing)
+
+Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)
+
+### `GET /routes/shipment/:shipmentId`
+Retrieves the planned route and ordered stops for a shipment.
+
+### `GET /routes/shipment/:shipmentId/plan`
+Returns the full trip plan (route, assigned vehicles, staff) and readiness evaluation (`isReadyToPublish`, list of `missingRequirements`).
+
+### `POST /routes/shipment/:shipmentId` (Fleet Coordinator / Manager / Admin)
+Creates or updates an ordered route with stops (rest, border check, quarantine, refuel, other). International routes must include at least one `border_check` or `quarantine` stop.
+- **Body:**
+```json
+{
+  "routeName": "Tuyến TP.HCM - Mộc Bài - Phnom Penh - Singapore",
+  "totalDistanceKm": 1250.5,
+  "stops": [
+    {
+      "sequenceNo": 1,
+      "stopType": "other",
+      "locationName": "Củ Chi Horse Farm, TP.HCM",
+      "country": "Vietnam",
+      "plannedDeparture": "2026-10-15T08:00:00Z"
+    },
+    {
+      "sequenceNo": 2,
+      "stopType": "border_check",
+      "locationName": "Mộc Bài Border Gate",
+      "country": "Vietnam",
+      "plannedArrival": "2026-10-15T12:00:00Z",
+      "plannedDeparture": "2026-10-15T14:00:00Z"
+    },
+    {
+      "sequenceNo": 3,
+      "stopType": "rest",
+      "locationName": "Phnom Penh Vet Care Station",
+      "country": "Cambodia",
+      "plannedArrival": "2026-10-15T19:00:00Z",
+      "plannedDeparture": "2026-10-16T06:00:00Z"
+    },
+    {
+      "sequenceNo": 4,
+      "stopType": "quarantine",
+      "locationName": "Singapore Turf Club Quarantine Station",
+      "country": "Singapore",
+      "plannedArrival": "2026-10-17T15:00:00Z"
+    }
+  ]
+}
+```
+
+### `PATCH /routes/:routeId/schedule` (Fleet Coordinator / Manager / Admin)
+Modifies planned schedule times on stops. A mandatory `reason` is required for audit history.
+- **Body:**
+```json
+{
+  "reason": "Thời tiết xấu và ùn tắc tại cửa khẩu, lùi giờ khởi hành 2 tiếng",
+  "stops": [
+    {
+      "stopId": 2,
+      "plannedArrival": "2026-10-15T14:00:00Z",
+      "plannedDeparture": "2026-10-15T16:00:00Z"
+    }
+  ]
+}
+```
+
+### `POST /routes/shipment/:shipmentId/publish` (Logistics Manager / Coordinator / Admin)
+Publishes the trip plan. Validates that the order is approved, route has >= 2 stops, assigned vehicles meet horse capacity, and staff is assigned. Changes shipment status to `in_transit` and route status to `active`. Notifies customer and operations team.
+- **Body:** `{ "notes": "Xe đã chuẩn bị đầy đủ oxy và thuốc chống say" }`
+
+### `POST /routes/stops/:stopId/progress` (Driver / Escort / Operations)
+Records actual progress at a milestone stop (`arrived`, `customs_cleared`, `departed`, `delivered`) and notifies the coordinator and customer.
+- **Body:**
+```json
+{
+  "status": "arrived",
+  "actualArrival": "2026-10-15T12:15:00Z",
+  "notes": "Đã đến trạm Mộc Bài an toàn, kiểm tra sức khỏe ngựa ổn định"
+}
+```
+
 ## Contract rules
 
 - Every mutation returns the updated resource status and an audit identifier.

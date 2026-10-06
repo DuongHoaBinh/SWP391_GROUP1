@@ -326,6 +326,22 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
+  async updateShipmentStatus(shipmentId: number, status: ShipmentStatus): Promise<boolean> {
+    const [result] = await this.pool.execute(
+      'UPDATE shipment SET status = ?, updated_at = NOW() WHERE shipment_id = ?',
+      [status, shipmentId],
+    );
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async findById(shipmentId: number): Promise<TransportOrder | undefined> {
+    return this.findShipmentById(shipmentId);
+  }
+
+  async updateStatus(shipmentId: number, status: ShipmentStatus): Promise<boolean> {
+    return this.updateShipmentStatus(shipmentId, status);
+  }
+
   async updateAndResubmitShipment(
     customerId: number,
     shipmentId: number,
