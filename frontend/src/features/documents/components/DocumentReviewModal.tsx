@@ -9,11 +9,14 @@ import { Button } from '@/components/ui/Button';
 import { FileText, CheckCircle, XCircle, AlertCircle, Calendar } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useDocumentStore } from '@/lib/document-store';
+import { documentsApi } from '../api/documents.api';
 
 const reviewSchema = z.object({
   status: z.enum(['APPROVED', 'REJECTED']),
   rejectionReason: z.string().optional(),
   expiryDate: z.string().optional(),
+  authorityName: z.string().optional(),
+  referenceNumber: z.string().optional(),
 }).superRefine((data, ctx) => {
   if (data.status === 'REJECTED' && (!data.rejectionReason || data.rejectionReason.length < 5)) {
     ctx.addIssue({
@@ -63,21 +66,48 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
     defaultValues: {
       status: 'APPROVED',
       expiryDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      authorityName: 'Cục Thú Y & Hải Quan Cửa Khẩu',
+      referenceNumber: 'HQ-SG-2026-9812',
     },
   });
 
   const selectedStatus = watch('status');
 
-  const onSubmit = (data: ReviewFormData) => {
+  const onSubmit = async (data: ReviewFormData) => {
     setIsSubmitting(true);
     try {
+      const numericId = parseInt(documentId.replace(/\D/g, ''), 10);
+      if (!isNaN(numericId) && numericId > 0) {
+        if (data.status === 'APPROVED') {
+          try {
+            await documentsApi.recordAuthorityApproval(numericId, {
+              authorityName: data.authorityName || 'Cục Thú Y & Hải Quan Cửa Khẩu',
+              status: 'approved',
+              referenceNumber: data.referenceNumber,
+              notes: 'Hồ sơ kiểm dịch đạt yêu cầu xuất nhập cảnh',
+            });
+          } catch (apprErr: any) {
+            console.warn('Backend authority approval notice:', apprErr);
+          }
+        }
+        try {
+          await documentsApi.reviewDocument(numericId, {
+            status: data.status === 'APPROVED' ? 'approved' : 'rejected',
+            expiryDate: data.status === 'APPROVED' ? data.expiryDate : undefined,
+            notes: data.status === 'REJECTED' ? data.rejectionReason : undefined,
+          });
+        } catch (revErr: any) {
+          console.warn('Backend API review notice:', revErr);
+        }
+      }
+
       reviewDocument(documentId, data.status, data.expiryDate, data.rejectionReason);
       setIsSubmitting(false);
       onSuccess(documentId, data.status);
       toast.success(
         data.status === 'APPROVED'
-          ? `Document approved! Valid until ${data.expiryDate}`
-          : 'Document rejected. Customer requested to re-upload.'
+          ? `Đã duyệt hồ sơ & ghi nhận phê duyệt từ ${data.authorityName || 'Cơ quan chức năng'}!`
+          : 'Đã từ chối hồ sơ. Yêu cầu khách hàng tải lại bản hợp lệ.'
       );
       onClose();
     } catch (e: any) {
@@ -123,23 +153,49 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             </div>
 
             {selectedStatus === 'APPROVED' && (
-              <div className="animate-fade-in">
-                <label className="text-sm font-semibold text-slate-800 block mb-1.5">
-                  Valid Until (Expiry Date) <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-2.5 text-slate-400" size={18} />
+              <div className="animate-fade-in flex flex-col gap-3">
+                <div>
+                  <label className="text-sm font-semibold text-slate-800 block mb-1.5">
+                    Valid Until (Expiry Date) <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-2.5 text-slate-400" size={18} />
+                    <input
+                      type="date"
+                      {...register('expiryDate')}
+                      className={`w-full pl-10 pr-3 py-2.5 rounded-lg border text-sm bg-white outline-none transition-colors ${errors.expiryDate ? 'border-red-500' : 'border-slate-300 focus:border-blue-500'}`}
+                    />
+                  </div>
+                  {errors.expiryDate && (
+                    <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                      <AlertCircle size={12} /> {errors.expiryDate.message as string}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold text-slate-800 block mb-1.5">
+                    Cơ quan phê duyệt (Hải quan / Cục Thú Y)
+                  </label>
                   <input
-                    type="date"
-                    {...register('expiryDate')}
-                    className={`w-full pl-10 pr-3 py-2.5 rounded-lg border text-sm bg-white outline-none transition-colors ${errors.expiryDate ? 'border-red-500' : 'border-slate-300 focus:border-blue-500'}`}
+                    type="text"
+                    {...register('authorityName')}
+                    placeholder="Ví dụ: Cục Thú Y Vùng VI / Singapore AVA & SFA"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white outline-none focus:border-blue-500"
                   />
                 </div>
-                {errors.expiryDate && (
-                  <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle size={12} /> {errors.expiryDate.message as string}
-                  </span>
-                )}
+
+                <div>
+                  <label className="text-sm font-semibold text-slate-800 block mb-1.5">
+                    Số công văn / Mã phê duyệt Hải quan
+                  </label>
+                  <input
+                    type="text"
+                    {...register('referenceNumber')}
+                    placeholder="Ví dụ: HQ-SG-2026-9812 hoặc CTY-GKD-88"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white outline-none focus:border-blue-500"
+                  />
+                </div>
               </div>
             )}
 

@@ -67,6 +67,8 @@ export function clearAuthSession() {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem('equitransit_cust_docs_list_v1');
+  localStorage.removeItem('equitransit_docs_v1');
 
   // Clear cookies
   document.cookie = `${TOKEN_KEY}=; path=/; max-age=0; SameSite=Lax`;

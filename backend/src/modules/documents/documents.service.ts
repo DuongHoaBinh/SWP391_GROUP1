@@ -99,6 +99,24 @@ export class DocumentsService {
     return this.documentsStore.findDocumentsByHorseId(horseId);
   }
 
+  async getDocuments(
+    user: AuthenticatedUser,
+    status?: string,
+    horseId?: number,
+  ): Promise<TransportDocument[]> {
+    const filter: { uploadedBy?: number; status?: string; horseId?: number } = {};
+    if (user.role === UserRole.CUSTOMER) {
+      filter.uploadedBy = Number(user.id);
+    }
+    if (status) {
+      filter.status = status;
+    }
+    if (horseId) {
+      filter.horseId = horseId;
+    }
+    return this.documentsStore.findDocuments(filter);
+  }
+
   // --- Order Compliance Checklist ---
   async getOrderComplianceChecklist(
     user: AuthenticatedUser,
@@ -202,10 +220,20 @@ export class DocumentsService {
           ? `bị từ chối. Lý do: "${dto.notes}"`
           : 'được đánh dấu là đã hết hạn';
 
+    const docTitleMap: Record<string, string> = {
+      health_certificate: 'Giấy chứng nhận kiểm dịch',
+      horse_passport: 'Hộ chiếu ngựa FEI',
+      import_permit: 'Giấy phép nhập khẩu',
+      export_permit: 'Giấy phép xuất khẩu',
+      customs_declaration: 'Tờ khai hải quan',
+    };
+    const friendlyDocTitle = doc.regulationTitle || docTitleMap[doc.docType] || doc.docType;
+    const orderText = doc.requestCode ? ` (Đơn ${doc.requestCode})` : '';
+
     await this.notificationsService.createNotification(
       doc.uploadedBy,
       'Cập nhật trạng thái thẩm định tài liệu kiểm dịch',
-      `Tài liệu "${doc.docType}" (Mã số: #${documentId}) của ngựa "${doc.horseName ?? 'ngựa'}" ${statusText} bởi Chuyên viên Transport Specialist.`,
+      `Tài liệu "${friendlyDocTitle}" của ngựa "${doc.horseName ?? 'ngựa'}"${orderText} ${statusText} bởi Chuyên viên Transport Specialist.`,
       'status_update',
     );
 
@@ -240,10 +268,20 @@ export class DocumentsService {
     }
 
     // Gửi thông báo cho khách hàng
+    const docTitleMap: Record<string, string> = {
+      health_certificate: 'Giấy chứng nhận kiểm dịch',
+      horse_passport: 'Hộ chiếu ngựa FEI',
+      import_permit: 'Giấy phép nhập khẩu',
+      export_permit: 'Giấy phép xuất khẩu',
+      customs_declaration: 'Tờ khai hải quan',
+    };
+    const friendlyDocTitle = doc.regulationTitle || docTitleMap[doc.docType] || doc.docType;
+    const docCode = `DOC-${String(documentId).padStart(3, '0')}`;
+
     await this.notificationsService.createNotification(
       doc.uploadedBy,
       'Cập nhật kết quả phê duyệt từ cơ quan chức năng',
-      `Tài liệu "${doc.docType}" của ngựa "${doc.horseName ?? 'ngựa'}" đã có kết quả từ ${dto.authorityName}: ${dto.status.toUpperCase()}.`,
+      `Tài liệu "${friendlyDocTitle}" (Mã: ${docCode}) của ngựa "${doc.horseName ?? 'ngựa'}" đã có kết quả từ ${dto.authorityName}: ${dto.status.toUpperCase()}.`,
       'status_update',
     );
 
@@ -296,5 +334,22 @@ export class DocumentsService {
       message: `Đã gửi thông báo nhắc nhở bổ sung hồ sơ tới khách hàng cho đơn #${orderId}.`,
       missingCount: checklist.totalRequiredDocuments - checklist.approvedDocumentsCount,
     };
+  }
+
+  async deleteDocument(
+    user: AuthenticatedUser,
+    documentId: number,
+  ): Promise<{ success: boolean; message: string }> {
+    const isAdminOrSpecialist =
+      user.role === UserRole.ADMIN || user.role === UserRole.TRANSPORT_SPECIALIST;
+    const deleted = await this.documentsStore.deleteDocument(
+      documentId,
+      Number(user.id),
+      isAdminOrSpecialist,
+    );
+    if (!deleted) {
+      throw new NotFoundException(`Tài liệu #${documentId} không tồn tại hoặc bạn không có quyền xóa`);
+    }
+    return { success: true, message: `Tài liệu #${documentId} đã được xóa thành công` };
   }
 }

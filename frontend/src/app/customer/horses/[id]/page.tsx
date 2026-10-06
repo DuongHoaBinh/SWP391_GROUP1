@@ -17,6 +17,8 @@ import {
   X,
   FileText,
   UserCheck,
+  Camera,
+  Loader2,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { HorseDocument } from '@/lib/types';
@@ -29,7 +31,9 @@ export default function HorseDetailPage() {
   const router = useRouter();
   const horseId = params?.id as string;
 
-  const { getHorseById, uploadDocumentForHorse, uploadDocumentForRequest } = useCustomerStore();
+  const { getHorseById, uploadDocumentForHorse, uploadDocumentForRequest, uploadHorseAvatar } = useCustomerStore();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
   const horse = getHorseById(horseId) || getHorseById('hrs-001') || {
     id: 'hrs-001',
@@ -59,6 +63,22 @@ export default function HorseDetailPage() {
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
 
   const hasMissingDoc = horse.documents?.some((d) => d.status === 'Missing');
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingAvatar(true);
+      await uploadHorseAvatar(horse.id, file);
+      setFeedbackSuccess('Cập nhật ảnh đại diện con ngựa thành công!');
+      setTimeout(() => setFeedbackSuccess(null), 4000);
+    } catch (err: any) {
+      alert(err?.message || 'Không thể tải lên ảnh đại diện.');
+    } finally {
+      setIsUploadingAvatar(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const handleUploadSuccess = (uploadedDoc: any) => {
     uploadDocumentForHorse(horse.id, uploadedDoc.title);
@@ -205,42 +225,124 @@ export default function HorseDetailPage() {
           flexWrap: 'wrap',
         }}
       >
-        {/* Avatar */}
-        <div
-          style={{
-            width: '130px',
-            height: '130px',
-            borderRadius: '50%',
-            overflow: 'hidden',
-            border: '4px solid #f8fafc',
-            boxShadow: '0 0 0 1px #e2e8f0',
-            flexShrink: 0,
-            backgroundColor: '#eff6ff',
-          }}
-        >
-          {horse.photoUrl ? (
-            <img
-              src={horse.photoUrl}
-              alt={horse.name}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          ) : (
-            <div
-              style={{
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--primary)',
-              }}
-            >
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M22 17v-1c0-4-3-7-7-7H9l-2-3H3l1 5-2 3v3h10" />
-                <circle cx="8" cy="7" r="1" />
-              </svg>
-            </div>
-          )}
+        {/* Avatar with click-to-upload & Camera Overlay */}
+        <div style={{ position: 'relative' }}>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleAvatarChange}
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            style={{ display: 'none' }}
+          />
+          <div
+            onClick={() => !isUploadingAvatar && fileInputRef.current?.click()}
+            title="Nhấn để đổi ảnh đại diện cho ngựa"
+            style={{
+              width: '130px',
+              height: '130px',
+              borderRadius: '50%',
+              overflow: 'hidden',
+              border: '4px solid #f8fafc',
+              boxShadow: '0 0 0 1px #e2e8f0',
+              flexShrink: 0,
+              backgroundColor: '#eff6ff',
+              cursor: isUploadingAvatar ? 'wait' : 'pointer',
+              position: 'relative',
+              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+            }}
+          >
+            {horse.photoUrl ? (
+              <img
+                src={horse.photoUrl}
+                alt={horse.name}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--primary)',
+                }}
+              >
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 17v-1c0-4-3-7-7-7H9l-2-3H3l1 5-2 3v3h10" />
+                  <circle cx="8" cy="7" r="1" />
+                </svg>
+              </div>
+            )}
+
+            {/* Hover / Loading Overlay */}
+            {isUploadingAvatar ? (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff',
+                  gap: '6px',
+                }}
+              >
+                <Loader2 size={24} className="animate-spin" />
+                <span style={{ fontSize: '11px', fontWeight: 600 }}>Uploading...</span>
+              </div>
+            ) : (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                  padding: '4px 0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  color: '#ffffff',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  transition: 'opacity 0.2s ease',
+                }}
+              >
+                <Camera size={13} />
+                <span>Đổi ảnh</span>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Camera Badge at bottom-right */}
+          <button
+            type="button"
+            onClick={() => !isUploadingAvatar && fileInputRef.current?.click()}
+            title="Đổi ảnh đại diện"
+            style={{
+              position: 'absolute',
+              bottom: '4px',
+              right: '4px',
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              backgroundColor: '#2563eb',
+              color: '#ffffff',
+              border: '2px solid #ffffff',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              zIndex: 2,
+            }}
+          >
+            <Camera size={15} />
+          </button>
         </div>
 
         {/* Details & Quick Stats */}

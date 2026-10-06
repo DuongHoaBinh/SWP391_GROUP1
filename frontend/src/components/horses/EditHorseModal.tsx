@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { useCustomerStore } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
-import { Check, Loader2, Save, X, AlertCircle } from 'lucide-react';
+import { Check, Loader2, Save, X, AlertCircle, Camera } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 
 interface EditHorseModalProps {
@@ -20,7 +20,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
   horse,
   onHorseUpdated,
 }) => {
-  const { updateHorse } = useCustomerStore();
+  const { updateHorse, uploadHorseAvatar, refreshHorses } = useCustomerStore();
 
   const [name, setName] = useState(horse.name || '');
   const [breed, setBreed] = useState(horse.breed || 'Thoroughbred');
@@ -37,6 +37,9 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
     (horse.medicalStatus as any) || 'Healthy'
   );
   const [specialRequirements, setSpecialRequirements] = useState(horse.specialRequirements || '');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(horse.photoUrl || null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -57,6 +60,8 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
       setMicrochipNumber(horse.microchipNumber || '');
       setMedicalStatus((horse.medicalStatus as any) || 'Healthy');
       setSpecialRequirements(horse.specialRequirements || '');
+      setPhotoPreview(horse.photoUrl || null);
+      setPhotoFile(null);
       setError('');
     }
   }, [isOpen, horse]);
@@ -74,6 +79,15 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
     const targetBackendId = horse.backendId || (Number(horse.id) > 0 ? Number(horse.id) : undefined);
 
     try {
+      let uploadedPhotoUrl: string | undefined = undefined;
+      if (photoFile) {
+        try {
+          uploadedPhotoUrl = await uploadHorseAvatar(horse.id, photoFile);
+        } catch (uploadErr) {
+          console.warn('Upload horse avatar error:', uploadErr);
+        }
+      }
+
       // 1. If backend ID is known, send update to MySQL via REST API
       if (targetBackendId) {
         try {
@@ -83,6 +97,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               name: name.trim(),
               breed,
               age: Number(age) || 4,
+              quantity: 1,
               gender: gender === 'Stallion' ? 'male' : gender === 'Mare' ? 'female' : 'gelding',
               dateOfBirth: dob || undefined,
               passportNo: passportNumber.trim() || undefined,
@@ -100,6 +115,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
         name: name.trim(),
         breed,
         age: Number(age) || 4,
+        quantity: 1,
         gender,
         dob,
         color,
@@ -108,6 +124,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
         microchipNumber: microchipNumber.trim(),
         medicalStatus,
         specialRequirements: specialRequirements.trim(),
+        ...(uploadedPhotoUrl ? { photoUrl: uploadedPhotoUrl, avatarUrl: uploadedPhotoUrl } : {}),
       };
 
       updateHorse(horse.id, updatedFields);
@@ -156,6 +173,79 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
             <span>{error}</span>
           </div>
         )}
+
+        {/* Photo Upload Picker */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            padding: '12px 16px',
+            backgroundColor: '#f8fafc',
+            borderRadius: '12px',
+            border: '1px solid #e2e8f0',
+          }}
+        >
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                setPhotoFile(file);
+                setPhotoPreview(URL.createObjectURL(file));
+              }
+            }}
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            style={{ display: 'none' }}
+          />
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '50%',
+              backgroundColor: '#eff6ff',
+              border: '2px dashed #93c5fd',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              overflow: 'hidden',
+              flexShrink: 0,
+            }}
+          >
+            {photoPreview ? (
+              <img src={photoPreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <Camera size={24} color="#3b82f6" />
+            )}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)' }}>
+              Ảnh đại diện con ngựa
+            </div>
+            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+              Chọn ảnh mới từ máy tính để thay đổi ảnh đại diện (JPG, PNG, WEBP)
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              backgroundColor: '#ffffff',
+              fontSize: '12.5px',
+              fontWeight: 600,
+              color: '#334155',
+              cursor: 'pointer',
+            }}
+          >
+            {photoPreview ? 'Đổi ảnh' : 'Chọn ảnh'}
+          </button>
+        </div>
 
         {/* Row 1: Name & Breed */}
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '16px' }}>
@@ -210,7 +300,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
         </div>
 
         {/* Row 2: Age, Gender, DOB */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: '16px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
               Tuổi (Years)

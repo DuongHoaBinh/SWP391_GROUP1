@@ -109,4 +109,14 @@ export class OrdersController {
   ) {
     return this.ordersService.updateOrder(user, id, dto);
   }
+
+  @Patch(':id/complete')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.DRIVER_ESCORT)
+  @ApiOperation({ summary: 'Mark shipment completed and horses delivered' })
+  completeOrder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.completeOrder(user, id);
+  }
 }

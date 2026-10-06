@@ -16,6 +16,7 @@ import {
   AlertCircle,
   FileText,
   Loader2,
+  Truck,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
@@ -43,7 +44,7 @@ function CreateTransportRequestForm() {
   const searchParams = useSearchParams();
   const preselectedHorseId = searchParams.get('horseId');
 
-  const { horses, createRequest } = useCustomerStore();
+  const { horses, createRequest, refreshHorses } = useCustomerStore();
 
   // Step state (1 to 4)
   const [currentStep, setCurrentStep] = useState(1);
@@ -73,21 +74,83 @@ function CreateTransportRequestForm() {
 
   const formValues = watch();
 
-  // Selected horses
-  const [selectedHorseIds, setSelectedHorseIds] = useState<string[]>(
-    preselectedHorseId ? [preselectedHorseId] : [horses[0]?.id || 'hrs-001']
-  );
+  // Horse quantities mapping: horseId -> quantity
+  const [horseQuantities, setHorseQuantities] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    if (preselectedHorseId && !selectedHorseIds.includes(preselectedHorseId)) {
-      setSelectedHorseIds([preselectedHorseId]);
+    if (preselectedHorseId) {
+      const target = horses.find((item) => item.id === preselectedHorseId);
+      if (target && (target.status === 'active' || target.availabilityStatus === 'Available')) {
+        setHorseQuantities({ [preselectedHorseId]: formValues.horseCount ? Number(formValues.horseCount) : 1 });
+      }
+    } else if (horses.length > 0 && Object.keys(horseQuantities).length === 0) {
+      const firstAvailable = horses.find(
+        (h) => h.status === 'active' || h.availabilityStatus === 'Available'
+      );
+      if (firstAvailable) {
+        setHorseQuantities({ [firstAvailable.id]: formValues.horseCount ? Number(formValues.horseCount) : 1 });
+      }
     }
-  }, [preselectedHorseId]);
+  }, [preselectedHorseId, horses]);
+
+  const selectedHorseIds = Object.keys(horseQuantities).filter((id) => (horseQuantities[id] || 0) > 0);
+  const totalSelectedHorses = Object.values(horseQuantities).reduce((sum, q) => sum + (q || 0), 0);
+
+  const selectedHorses = horses
+    .filter((h) => (horseQuantities[h.id] || 0) > 0)
+    .map((h) => ({
+      ...h,
+      quantity: horseQuantities[h.id] || 1,
+    }));
+
+  const breedBreakdown = selectedHorses.reduce((acc, h) => {
+    const breed = h.breed || 'Other Breed';
+    acc[breed] = (acc[breed] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const toggleHorseSelection = (id: string) => {
+    const target = horses.find((h) => h.id === id);
+    if (!target) return;
+    const isUnavailable =
+      target.status === 'in_transit' ||
+      target.availabilityStatus === 'In Transit' ||
+      target.status === 'delivered' ||
+      target.availabilityStatus === 'Delivered' ||
+      target.status === 'retired';
+    if (isUnavailable) return;
+
+    setHorseQuantities((prev) => {
+      const next = { ...prev };
+      if ((next[id] || 0) > 0) {
+        delete next[id];
+      } else {
+        next[id] = 1;
+      }
+      return next;
+    });
+  };
 
   const handleContinue = async () => {
     if (currentStep === 1) {
       const isValid = await trigger(['title', 'origin', 'destination', 'departureDate']);
       if (!isValid) return;
+    }
+    if (currentStep === 2) {
+      if (totalSelectedHorses === 0) {
+        alert('Vui lòng chọn ít nhất một con ngựa sẵn sàng vận chuyển.');
+        return;
+      }
+      const invalidSelected = selectedHorses.find(
+        (h) =>
+          h.status === 'in_transit' ||
+          h.availabilityStatus === 'In Transit' ||
+          h.status === 'delivered'
+      );
+      if (invalidSelected) {
+        alert(`Ngựa "${invalidSelected.name}" đang vận chuyển hoặc đã bàn giao, không thể chọn.`);
+        return;
+      }
     }
     if (currentStep < 4) {
       setCurrentStep(currentStep + 1);
@@ -104,19 +167,34 @@ function CreateTransportRequestForm() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const selectedHorsesData = horses.filter(h => selectedHorseIds.includes(h.id)).map(h => ({
-        name: h.name,
-        breed: h.breed,
-        gender: h.gender === 'Stallion' ? 'male' : h.gender === 'Mare' ? 'female' : 'gelding',
-        age: h.age,
-      }));
+      const selectedHorsesData: Array<{
+        horseId?: number;
+        name: string;
+        breed?: string;
+        gender?: 'male' | 'female' | 'gelding';
+        age?: number;
+        quantity: number;
+      }> = [];
+
+      for (const h of selectedHorses) {
+        const qty = h.quantity || 1;
+        const numericHorseId = h.backendId || (Number(h.id) > 0 ? Number(h.id) : undefined);
+        selectedHorsesData.push({
+          horseId: numericHorseId,
+          name: h.name,
+          breed: h.breed,
+          gender: h.gender === 'Stallion' ? 'male' : h.gender === 'Mare' ? 'female' : 'gelding',
+          age: h.age,
+          quantity: qty,
+        });
+      }
 
       const currentUser = getCurrentUser();
       const payload = {
         contactName: currentUser.fullName || currentUser.name || 'Current Customer',
         contactPhone: currentUser.phone || '0901234567',
         contactEmail: currentUser.email || 'customer@example.com',
-        requestedHorseCount: selectedHorseIds.length,
+        requestedHorseCount: totalSelectedHorses || (data.horseCount ? Number(data.horseCount) : 1),
         originLocation: data.origin,
         destinationLocation: data.destination,
         requestedDate: new Date(data.departureDate).toISOString(),
@@ -133,6 +211,11 @@ function CreateTransportRequestForm() {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+
+      // Refresh horse stock in store
+      try {
+        await refreshHorses();
+      } catch {}
 
       router.push(`/customer/requests/${newReq.id}`);
     } catch (error) {
@@ -154,16 +237,6 @@ function CreateTransportRequestForm() {
       specialReqs: formValues.specialReqs,
     });
     router.push('/customer/requests');
-  };
-
-  const toggleHorseSelection = (id: string) => {
-    if (selectedHorseIds.includes(id)) {
-      if (selectedHorseIds.length > 1) {
-        setSelectedHorseIds(selectedHorseIds.filter((hId) => hId !== id));
-      }
-    } else {
-      setSelectedHorseIds([...selectedHorseIds, id]);
-    }
   };
 
   const progressPercent = ((currentStep - 1) / 3) * 100;
@@ -515,8 +588,39 @@ function CreateTransportRequestForm() {
                   Horse Information
                 </h3>
                 <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                  Select one or multiple horses for this transport ({selectedHorseIds.length} selected).
+                  Tích chọn các con ngựa cần vận chuyển (Đã chọn {totalSelectedHorses} / {formValues.horseCount || 1} con yêu cầu).
                 </p>
+                {selectedHorses.length > 0 && (
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-heading)' }}>
+                      Breed Breakdown:
+                    </span>
+                    {Object.entries(breedBreakdown).map(([breed, count]) => (
+                      <span
+                        key={breed}
+                        style={{
+                          fontSize: '11.5px',
+                          padding: '3px 10px',
+                          borderRadius: '20px',
+                          backgroundColor: '#e0f2fe',
+                          color: '#0284c7',
+                          fontWeight: 600,
+                          border: '1px solid #bae6fd',
+                        }}
+                      >
+                        {breed}: <strong>{count}</strong>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {formValues.horseCount && totalSelectedHorses !== Number(formValues.horseCount) && (
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#ea580c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertCircle size={13} />
+                    {totalSelectedHorses < Number(formValues.horseCount)
+                      ? `Bạn đã đăng ký ${formValues.horseCount} con ở Bước 1. Hiện tại đã chọn ${totalSelectedHorses} con (cần chọn thêm ${Number(formValues.horseCount) - totalSelectedHorses} con).`
+                      : `Bạn đang chọn ${totalSelectedHorses} con (nhiều hơn ${formValues.horseCount} con đăng ký ở Bước 1).`}
+                  </div>
+                )}
               </div>
               <button
                 onClick={() => setIsAddHorseModalOpen(true)}
@@ -552,25 +656,68 @@ function CreateTransportRequestForm() {
                 </thead>
                 <tbody>
                   {horses.map((h) => {
-                    const isSelected = selectedHorseIds.includes(h.id);
+                    const isInTransit = h.status === 'in_transit' || h.availabilityStatus === 'In Transit';
+                    const isDelivered = h.status === 'delivered' || h.availabilityStatus === 'Delivered';
+                    const isRetired = h.status === 'retired' || h.status === 'deceased';
+                    const isUnavailable = isInTransit || isDelivered || isRetired;
+                    const isSelected = (horseQuantities[h.id] || 0) > 0;
                     return (
                       <tr
                         key={h.id}
                         style={{
                           borderBottom: '1px solid var(--border-light)',
-                          backgroundColor: isSelected ? '#eff6ff' : 'transparent',
+                          backgroundColor: isSelected ? '#eff6ff' : isUnavailable ? '#f8fafc' : 'transparent',
+                          opacity: isUnavailable ? 0.7 : 1,
                         }}
                       >
                         <td style={{ padding: '16px', textAlign: 'center' }}>
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => toggleHorseSelection(h.id)}
-                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                            disabled={isUnavailable}
+                            onChange={() => !isUnavailable && toggleHorseSelection(h.id)}
+                            style={{ width: '16px', height: '16px', cursor: isUnavailable ? 'not-allowed' : 'pointer' }}
                           />
                         </td>
                         <td style={{ padding: '16px', fontWeight: 700, color: 'var(--text-heading)' }}>
-                          {h.name}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div
+                              style={{
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '50%',
+                                overflow: 'hidden',
+                                backgroundColor: '#eff6ff',
+                                border: '1px solid #e2e8f0',
+                                flexShrink: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              {h.photoUrl ? (
+                                <img src={h.photoUrl} alt={h.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              ) : (
+                                <span style={{ fontSize: '14px', fontWeight: 700, color: '#2563eb' }}>{h.name.charAt(0)}</span>
+                              )}
+                            </div>
+                            <div>
+                              <div>{h.name}</div>
+                              {isInTransit ? (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#e0e7ff', color: '#4338ca', fontSize: '11px', fontWeight: 700 }}>
+                                  <Truck size={12} /> Đang vận chuyển
+                                </div>
+                              ) : isDelivered ? (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#ecfdf5', color: '#047857', fontSize: '11px', fontWeight: 700 }}>
+                                  <Check size={12} /> Đã bàn giao
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '11px', fontWeight: 600, color: '#16a34a', marginTop: '2px' }}>
+                                  ● Sẵn sàng vận chuyển
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </td>
                         <td style={{ padding: '16px', color: 'var(--text-body)' }}>{h.breed}</td>
                         <td style={{ padding: '16px', color: 'var(--text-body)' }}>
@@ -711,28 +858,50 @@ function CreateTransportRequestForm() {
               </div>
 
               <div>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)' }}>
-                  Selected Horses ({selectedHorseIds.length})
-                </span>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                  {horses
-                    .filter((h) => selectedHorseIds.includes(h.id))
-                    .map((h) => (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)' }}>
+                    Selected Horses ({totalSelectedHorses} horses)
+                  </span>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {Object.entries(breedBreakdown).map(([breed, count]) => (
                       <span
-                        key={h.id}
+                        key={breed}
                         style={{
-                          padding: '6px 12px',
-                          borderRadius: '8px',
-                          backgroundColor: '#eff6ff',
-                          color: 'var(--primary)',
-                          fontSize: '13px',
+                          fontSize: '11px',
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          backgroundColor: '#e0f2fe',
+                          color: '#0284c7',
                           fontWeight: 600,
-                          border: '1px solid #dbeafe',
+                          border: '1px solid #bae6fd',
                         }}
                       >
-                        {h.name} ({h.breed})
+                        {breed}: {count}
                       </span>
                     ))}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
+                  {selectedHorses.map((h) => (
+                    <span
+                      key={h.id}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: '8px',
+                        backgroundColor: '#eff6ff',
+                        color: 'var(--primary)',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        border: '1px solid #dbeafe',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                      }}
+                    >
+                      <span>{h.name}</span>
+                      <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 500 }}>• {h.breed}</span>
+                    </span>
+                  ))}
                 </div>
               </div>
             </div>
@@ -865,7 +1034,7 @@ function CreateTransportRequestForm() {
         isOpen={isAddHorseModalOpen}
         onClose={() => setIsAddHorseModalOpen(false)}
         onHorseAdded={(newHorse) => {
-          setSelectedHorseIds((prev) => [...prev, newHorse.id]);
+          setHorseQuantities((prev) => ({ ...prev, [newHorse.id]: 1 }));
         }}
       />
     </div>

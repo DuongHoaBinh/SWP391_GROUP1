@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { documentsApi } from '@/features/documents/api/documents.api';
 
 export type DocIconType = 'vaccination' | 'medical' | 'quarantine' | 'permit' | 'passport' | 'other';
 
@@ -60,6 +61,7 @@ interface DocumentStoreContextType {
     totalDocs?: number;
   }) => SpecialistDossier;
   submitDocumentForReview: (data: {
+    id?: string;
     reqCode: string;
     horseName: string;
     type: string;
@@ -202,6 +204,46 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error('Error loading documents from localStorage:', e);
     }
     setIsLoaded(true);
+
+    // Fetch real pending documents from backend API if available
+    const syncFromApi = async () => {
+      try {
+        const apiDocs = await documentsApi.getDocuments({ status: 'submitted' });
+        if (apiDocs && apiDocs.length > 0) {
+          const mapped: SpecialistPendingDoc[] = apiDocs.map((d) => {
+            const typeLower = (d.regulationDocType || d.docType).toLowerCase();
+            let iconType: DocIconType = 'other';
+            if (typeLower.includes('vaccin')) iconType = 'vaccination';
+            else if (typeLower.includes('medic') || typeLower.includes('health')) iconType = 'medical';
+            else if (typeLower.includes('quarant')) iconType = 'quarantine';
+            else if (typeLower.includes('permit')) iconType = 'permit';
+            else if (typeLower.includes('passport')) iconType = 'passport';
+
+            return {
+              id: `DOC-${d.id}`,
+              reqCode: `TR-HORSE-${d.horseId}`,
+              horseName: d.horseName || `Horse #${d.horseId}`,
+              type: d.regulationDocType || d.docType,
+              iconType,
+              date: d.createdAt ? new Date(d.createdAt).toLocaleDateString() : 'Just now',
+              status: 'PENDING',
+              customerName: d.uploaderName || d.uploaderEmail || 'Customer',
+              fileUrl: d.fileUrl,
+              submittedAt: d.createdAt,
+            };
+          });
+
+          setPendingDocs((prev) => {
+            const existingIds = new Set(prev.map((p) => p.id));
+            const newOnes = mapped.filter((m) => !existingIds.has(m.id));
+            return [...newOnes, ...prev];
+          });
+        }
+      } catch (err) {
+        // Backend offline or non-specialist role
+      }
+    };
+    syncFromApi();
   }, []);
 
   // Save to LocalStorage on change
@@ -425,6 +467,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
   // Submit document (Customer upload or manual addition)
   const submitDocumentForReview = useCallback(
     (data: {
+      id?: string;
       reqCode: string;
       horseName: string;
       type: string;
@@ -440,7 +483,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
       else if (typeLower.includes('passport')) iconType = 'passport';
 
       const newDoc: SpecialistPendingDoc = {
-        id: `DOC-2026-${Math.floor(100 + Math.random() * 900)}`,
+        id: data.id || `DOC-2026-${Math.floor(100 + Math.random() * 900)}`,
         reqCode: data.reqCode,
         horseName: data.horseName,
         type: data.type,
@@ -478,6 +521,19 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
   // Send Reminder to Customer
   const sendReminder = useCallback(
     (id: string) => {
+      const targetDoc = missingDocs.find((m) => m.id === id);
+      if (targetDoc) {
+        const orderIdMatch = targetDoc.reqCode.match(/\d+/);
+        if (orderIdMatch) {
+          const orderId = parseInt(orderIdMatch[0], 10);
+          documentsApi
+            .notifyMissingDocuments(orderId, {
+              message: `Urgent: Missing/Rejected ${targetDoc.type} for horse ${targetDoc.horseName}. Please upload the revised certificate to prevent shipment delay.`,
+            })
+            .catch((e) => console.warn('Notification API info:', e));
+        }
+      }
+
       const updated = missingDocs.map((m) => {
         if (m.id === id) {
           return {

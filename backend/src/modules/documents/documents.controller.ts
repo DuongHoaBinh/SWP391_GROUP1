@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -108,6 +109,22 @@ export class DocumentsController {
     return this.documentsService.uploadDocument(user, dto, file);
   }
 
+  @Get()
+  @ApiOperation({ summary: 'Lấy danh sách chứng từ (khách hàng xem của mình, chuyên viên xem toàn bộ)' })
+  @ApiQuery({ name: 'status', required: false, description: 'Lọc theo trạng thái (submitted, approved, rejected, expired)' })
+  @ApiQuery({ name: 'horseId', required: false, description: 'Lọc theo ID con ngựa' })
+  getDocuments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('status') status?: string,
+    @Query('horseId') horseId?: string,
+  ) {
+    return this.documentsService.getDocuments(
+      user,
+      status,
+      horseId ? Number(horseId) : undefined,
+    );
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Xem chi tiết một tài liệu kèm lịch sử phê duyệt của cơ quan chức năng' })
   getDocumentById(
@@ -115,6 +132,15 @@ export class DocumentsController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.documentsService.getDocumentById(user, id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Khách hàng hoặc chuyên viên xóa tài liệu' })
+  deleteDocument(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.documentsService.deleteDocument(user, id);
   }
 
   @Get('horse/:horseId')
