@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -100,41 +100,96 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       await this.createAttachment(shipmentId, dto.medicalDocumentUrl, customerId);
     }
 
-    // 3. Lưu thông tin con ngựa vào bảng horse và liên kết qua shipment_horse
-    const horsesToInsert: Array<{
+    // 3. Xử lý các con ngựa trong đơn vận chuyển: bắt buộc chọn từ My Horses và chuyển trạng thái sang in_transit
+    const horsesToProcess: Array<{
+      horseId?: number;
       name: string;
       breed: string | null;
       gender: 'male' | 'female' | 'gelding' | null;
       age: number | null;
+      quantity: number;
     }> = [];
 
     if (dto.horses && dto.horses.length > 0) {
       for (const h of dto.horses) {
-        horsesToInsert.push({
+        horsesToProcess.push({
+          horseId: h.horseId,
           name: h.name,
           breed: h.breed ?? null,
           gender: h.gender ?? null,
           age: h.age ?? null,
+          quantity: h.quantity && h.quantity > 0 ? h.quantity : 1,
         });
       }
     } else if (dto.horseName) {
-      horsesToInsert.push({
+      horsesToProcess.push({
         name: dto.horseName,
         breed: dto.horseBreed ?? null,
         gender: dto.horseGender ?? null,
         age: dto.horseAge ?? null,
+        quantity: dto.requestedHorseCount || 1,
       });
     }
 
-    for (const h of horsesToInsert) {
-      const [hResult] = await this.pool.execute(
-        'INSERT INTO horse (owner_id, name, breed, gender, age, status) VALUES (?, ?, ?, ?, ?, ?)',
-        [customerId, h.name, h.breed, h.gender, h.age, 'active'],
+    if (horsesToProcess.length === 0) {
+      throw new BadRequestException('Vui lòng chọn ít nhất một con ngựa cho đơn vận chuyển.');
+    }
+
+    for (const h of horsesToProcess) {
+      let targetHorseId = h.horseId;
+
+      if (!targetHorseId) {
+        const [existing] = await this.pool.execute<RowDataPacket[]>(
+          'SELECT horse_id, name, status FROM horse WHERE owner_id = ? AND name = ? AND (status IS NULL OR status != "deleted") ORDER BY horse_id DESC LIMIT 1',
+          [customerId, h.name],
+        );
+        if (existing.length > 0) {
+          targetHorseId = existing[0].horse_id;
+        }
+      }
+
+      if (!targetHorseId) {
+        throw new BadRequestException(
+          `Ngựa "${h.name}" không tồn tại trong danh sách "My Horses" của bạn. Vui lòng tạo hồ sơ ngựa trước khi gửi yêu cầu vận chuyển.`,
+        );
+      }
+
+      const [horseRows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT horse_id, name, status FROM horse WHERE horse_id = ? AND owner_id = ?',
+        [targetHorseId, customerId],
       );
-      const horseId = (hResult as { insertId: number }).insertId;
+
+      if (horseRows.length === 0) {
+        throw new BadRequestException(`Không tìm thấy hồ sơ hợp lệ của ngựa "${h.name}" thuộc tài khoản của bạn.`);
+      }
+
+      const horse = horseRows[0];
+      if (horse.status === 'in_transit') {
+        throw new BadRequestException(
+          `Ngựa "${horse.name}" hiện đang trong chuyến vận chuyển khác. Không thể chọn vận chuyển nhiều đơn cùng lúc.`,
+        );
+      }
+      if (horse.status === 'delivered') {
+        throw new BadRequestException(
+          `Ngựa "${horse.name}" đã hoàn tất chuyến vận chuyển trước đó (đã bàn giao).`,
+        );
+      }
+      if (horse.status !== 'active') {
+        throw new BadRequestException(
+          `Ngựa "${horse.name}" hiện không sẵn sàng để vận chuyển (trạng thái: ${horse.status}).`,
+        );
+      }
+
+      // Liên kết vào shipment
       await this.pool.execute(
-        'INSERT INTO shipment_horse (shipment_id, horse_id) VALUES (?, ?)',
-        [shipmentId, horseId],
+        'INSERT INTO shipment_horse (shipment_id, horse_id, quantity) VALUES (?, ?, ?)',
+        [shipmentId, targetHorseId, h.quantity],
+      );
+
+      // Cập nhật trạng thái con ngựa sang in_transit để khóa con ngựa không thể đi đơn khác
+      await this.pool.execute(
+        'UPDATE horse SET status = "in_transit" WHERE horse_id = ?',
+        [targetHorseId],
       );
     }
 
@@ -225,6 +280,33 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
        SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = CASE WHEN ? > 0 THEN ? ELSE total_cost END
        WHERE shipment_id = ?`,
       [status, approvedBy, rejectionReason, totalCost, totalCost, shipmentId],
+    );
+
+    if (status === ShipmentStatus.REJECTED) {
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'active'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)`,
+        [shipmentId],
+      );
+    }
+
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async completeShipment(shipmentId: number): Promise<boolean> {
+    const [result] = await this.pool.execute(
+      `UPDATE shipment
+       SET status = 'completed', actual_arrival_date = NOW()
+       WHERE shipment_id = ?`,
+      [shipmentId],
+    );
+
+    await this.pool.execute(
+      `UPDATE horse
+       SET status = 'delivered'
+       WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)`,
+      [shipmentId],
     );
 
     return (result as { affectedRows: number }).affectedRows > 0;
@@ -339,7 +421,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     );
 
     const [horses] = await this.pool.execute<HorseRow[]>(
-      `SELECT h.horse_id, h.name, h.breed, h.gender, h.age
+      `SELECT h.horse_id, h.name, h.breed, h.gender, h.age, sh.quantity
        FROM shipment_horse sh
        JOIN horse h ON h.horse_id = sh.horse_id
        WHERE sh.shipment_id = ?`,
@@ -380,12 +462,13 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         fileType: att.file_type,
         uploadedAt: new Date(att.uploaded_at).toISOString(),
       })),
-      horses: horses.map((h) => ({
+      horses: (horses as any[]).map((h) => ({
         horseId: h.horse_id,
         name: h.name,
         breed: h.breed,
         gender: h.gender,
         age: h.age !== null ? Number(h.age) : null,
+        quantity: h.quantity !== null && h.quantity !== undefined ? Number(h.quantity) : 1,
       })),
     };
   }

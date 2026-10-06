@@ -63,6 +63,7 @@ export interface Horse {
   name: string;
   breed: string;
   age: number;
+  quantity?: number;
   gender: 'Stallion' | 'Mare' | 'Gelding' | string;
   microchipNumber: string;
   passportNumber: string;
@@ -73,7 +74,8 @@ export interface Horse {
   color?: string;
   weight?: string;
   location?: string;
-  availabilityStatus?: 'In Transit' | 'Scheduled' | 'Available' | 'Not Cleared';
+  availabilityStatus?: 'In Transit' | 'Scheduled' | 'Available' | 'Not Cleared' | 'Delivered' | 'Retired';
+  status?: 'active' | 'in_transit' | 'delivered' | 'retired' | 'deceased' | string;
   medicalStatus?: 'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention' | 'Treatment';
   documentStatus?: 'Valid' | 'Expiring Soon' | 'Missing';
   vaccinationStatus?: string;

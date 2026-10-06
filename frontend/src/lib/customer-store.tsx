@@ -18,6 +18,15 @@ import {
 
 import { apiClient } from './api-client';
 
+import { getCurrentUser } from './auth';
+
+export const getFullPhotoUrl = (url?: string | null): string | undefined => {
+  if (!url) return undefined;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) return url;
+  const baseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000/api').replace(/\/api\/?$/, '');
+  return `${baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+};
+
 interface CustomerStoreContextType {
   requests: TransportRequest[];
   horses: Horse[];
@@ -45,33 +54,44 @@ interface CustomerStoreContextType {
   updateHorse: (horseId: string, data: Partial<Horse>) => void;
   deleteHorse: (horseId: string) => void;
   refreshHorses: () => Promise<void>;
+  uploadHorseAvatar: (horseId: string, file: File) => Promise<string>;
+  uploadStandalonePhoto: (file: File) => Promise<string>;
 }
 
 const CustomerStoreContext = createContext<CustomerStoreContextType | null>(null);
 
-const STORAGE_KEY_PREFIX = 'equitransit_store_';
+const getStorageKey = (key: string) => {
+  const user = getCurrentUser();
+  const userId = user?.id || 'guest';
+  return `equitransit_store_u${userId}_${key}`;
+};
 
 export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [requests, setRequests] = useState<TransportRequest[]>(initialRequests);
-  const [horses, setHorses] = useState<Horse[]>(initialHorses);
+  const [horses, setHorses] = useState<Horse[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>(initialNotifications);
   const [documents, setDocuments] = useState<DocumentItem[]>(initialDocuments);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from localStorage on client mount
+  // Load from localStorage on client mount (user-scoped)
   useEffect(() => {
     try {
-      const savedRequests = localStorage.getItem(`${STORAGE_KEY_PREFIX}requests`);
-      const savedHorses = localStorage.getItem(`${STORAGE_KEY_PREFIX}horses`);
-      const savedNotifs = localStorage.getItem(`${STORAGE_KEY_PREFIX}notifs`);
-      const savedDocs = localStorage.getItem(`${STORAGE_KEY_PREFIX}docs`);
+      const user = getCurrentUser();
+      if (!user) {
+        setIsLoaded(true);
+        return;
+      }
+      const savedRequests = localStorage.getItem(getStorageKey('requests'));
+      const savedHorses = localStorage.getItem(getStorageKey('horses'));
+      const savedNotifs = localStorage.getItem(getStorageKey('notifs'));
+      const savedDocs = localStorage.getItem(getStorageKey('docs'));
 
       if (savedRequests) setRequests(JSON.parse(savedRequests));
       if (savedHorses) setHorses(JSON.parse(savedHorses));
       if (savedNotifs) setNotifications(JSON.parse(savedNotifs));
       if (savedDocs) setDocuments(JSON.parse(savedDocs));
     } catch {
-      // Ignore parse errors, fallback to initial
+      // Ignore parse errors
     }
     setIsLoaded(true);
     refreshHorses();
@@ -80,64 +100,65 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
   const refreshHorses = async () => {
     try {
       const data = await apiClient<any[]>('/horses');
-      if (Array.isArray(data) && data.length > 0) {
-        setHorses((prev) => {
-          const backendMapped: Horse[] = data.map((item) => {
-            const existing = prev.find(
-              (p) =>
-                p.id === String(item.id) ||
-                p.backendId === item.id ||
-                p.name.toLowerCase() === item.name.toLowerCase()
-            );
-            return {
-              id: existing?.id || String(item.id),
-              backendId: item.id,
-              code: existing?.code || `HR-${String(item.id).padStart(5, '0')}`,
-              name: item.name,
-              breed: item.breed || existing?.breed || 'Thoroughbred',
-              age: item.age || existing?.age || 4,
-              gender:
-                item.gender === 'female'
-                  ? 'Mare'
-                  : item.gender === 'gelding'
-                  ? 'Gelding'
-                  : 'Stallion',
-              dob: item.dateOfBirth
-                ? new Date(item.dateOfBirth).toISOString().split('T')[0]
-                : existing?.dob || '2022-01-15',
-              microchipNumber: item.microchipNo || existing?.microchipNumber || '',
-              passportNumber: item.passportNo || existing?.passportNumber || '',
-              ownerName: existing?.ownerName || 'Nguyễn Bình',
-              availabilityStatus: item.status === 'active' ? 'Available' : 'Not Cleared',
-              medicalStatus: existing?.medicalStatus || 'Healthy',
-              documentStatus: existing?.documentStatus || 'Valid',
-              color: existing?.color || 'Bay',
-              weight: existing?.weight || '480 kg',
-              location: existing?.location || 'Ho Chi Minh City, Vietnam',
-              documents: existing?.documents || [],
-              medicalHistory: existing?.medicalHistory || [],
-            };
-          });
-
-          const extras = prev.filter(
-            (p) => !backendMapped.some((b) => b.id === p.id || (p.backendId && b.backendId === p.backendId))
-          );
-          return [...backendMapped, ...extras];
-        });
+      if (Array.isArray(data)) {
+        const backendMapped: Horse[] = data
+          .filter((item) => item.status !== 'retired' && item.status !== 'deleted')
+          .map((item) => ({
+          id: String(item.id || item.horse_id),
+          backendId: item.id || item.horse_id,
+          code: item.passportNo || `HR-${String(item.id || item.horse_id).padStart(5, '0')}`,
+          name: item.name,
+          breed: item.breed || 'Thoroughbred',
+          age: Number(item.age) || 4,
+          gender:
+            item.gender === 'female'
+              ? 'Mare'
+              : item.gender === 'gelding'
+              ? 'Gelding'
+              : 'Stallion',
+          dob: item.dateOfBirth
+            ? new Date(item.dateOfBirth).toISOString().split('T')[0]
+            : '2022-01-15',
+          microchipNumber: item.microchipNo || '',
+          passportNumber: item.passportNo || '',
+          ownerName: 'You',
+          photoUrl: getFullPhotoUrl(item.photoUrl),
+          avatarUrl: getFullPhotoUrl(item.photoUrl),
+          availabilityStatus:
+            item.status === 'in_transit'
+              ? 'In Transit'
+              : item.status === 'delivered'
+              ? 'Delivered'
+              : item.status === 'active'
+              ? 'Available'
+              : 'Not Cleared',
+          status: item.status || 'active',
+          medicalStatus: 'Healthy',
+          documentStatus: 'Valid',
+          color: 'Bay',
+          weight: '480 kg',
+          location: 'Stable',
+          quantity: item.quantity !== undefined && item.quantity !== null ? Number(item.quantity) : 1,
+          documents: [],
+          medicalHistory: [],
+        }));
+        setHorses(backendMapped);
       }
     } catch {
       // Unauthenticated or network issue
     }
   };
 
-  // Save to localStorage whenever state changes
+  // Save to localStorage whenever state changes (user-scoped)
   useEffect(() => {
     if (!isLoaded) return;
     try {
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}requests`, JSON.stringify(requests));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}horses`, JSON.stringify(horses));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}notifs`, JSON.stringify(notifications));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}docs`, JSON.stringify(documents));
+      const user = getCurrentUser();
+      if (!user) return;
+      localStorage.setItem(getStorageKey('requests'), JSON.stringify(requests));
+      localStorage.setItem(getStorageKey('horses'), JSON.stringify(horses));
+      localStorage.setItem(getStorageKey('notifs'), JSON.stringify(notifications));
+      localStorage.setItem(getStorageKey('docs'), JSON.stringify(documents));
     } catch {
       // Storage full or unavailable
     }
@@ -414,6 +435,7 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
       documentStatus: 'Valid',
       color: horseData.color || 'Bay',
       weight: horseData.weight || '480 kg',
+      quantity: horseData.quantity !== undefined ? horseData.quantity : 1,
       microchipNumber: horseData.microchipNumber || `985141001248${Math.floor(100 + Math.random() * 900)}`,
       passportNumber: horseData.passportNumber || `FEI-VN-2026-${Math.floor(100 + Math.random() * 900)}`,
       ownerName: horseData.ownerName || 'Nguyễn Bình',
@@ -442,6 +464,37 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
+  const uploadHorseAvatar = async (horseId: string, file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const horse = horses.find((h) => h.id === horseId || (h.backendId && String(h.backendId) === horseId));
+    const targetId = horse?.backendId || (Number(horseId) > 0 ? Number(horseId) : horseId);
+
+    const res = await apiClient<any>(`/horses/${targetId}/avatar`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const fullUrl = getFullPhotoUrl(res?.photoUrl) || '';
+    if (fullUrl) {
+      updateHorse(horseId, { photoUrl: fullUrl, avatarUrl: fullUrl });
+    }
+
+    await refreshHorses();
+    return fullUrl;
+  };
+
+  const uploadStandalonePhoto = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await apiClient<{ url: string }>('/horses/upload-photo', {
+      method: 'POST',
+      body: formData,
+    });
+    return res.url;
+  };
+
   return (
     <CustomerStoreContext.Provider
       value={{
@@ -462,6 +515,8 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
         updateHorse,
         deleteHorse,
         refreshHorses,
+        uploadHorseAvatar,
+        uploadStandalonePhoto,
       }}
     >
       {children}

@@ -6,6 +6,8 @@ import { DocumentReviewModal } from '@/features/documents/components/DocumentRev
 import { useDocumentStore } from '@/lib/document-store';
 import toast from 'react-hot-toast';
 
+import { documentsApi } from '@/features/documents/api/documents.api';
+
 const getDocIcon = (type: string) => {
   const t = type.toLowerCase();
   if (t.includes('vaccin')) return Syringe;
@@ -20,12 +22,49 @@ export default function DocumentApprovalPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [realPendingDocs, setRealPendingDocs] = useState<any[]>([]);
+
+  const fetchRealPending = async () => {
+    try {
+      const data = await documentsApi.getDocuments({ status: 'submitted' });
+      if (Array.isArray(data)) {
+        const mapped = data.map((d: any) => ({
+          id: `DOC-${d.id}`,
+          backendId: d.id,
+          reqCode: d.regulationCountry ? `TR-${d.regulationCountry.toUpperCase().slice(0, 3)}` : `TR-HORSE-${d.horseId}`,
+          horseName: d.horseName || `Horse #${d.horseId}`,
+          type: d.regulationTitle || d.regulationDocType || d.docType,
+          date: d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recent',
+          customerName: d.uploaderName || d.uploaderEmail || 'Customer',
+          fileUrl: d.fileUrl,
+          status: 'PENDING',
+        }));
+        setRealPendingDocs(mapped);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch real pending docs:', e);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchRealPending();
+  }, []);
 
   const handleReviewSuccess = (id: string, status: 'APPROVED' | 'REJECTED') => {
     setSelectedDoc(null);
+    fetchRealPending();
   };
 
-  const filteredDocs = pendingDocs.filter(doc => {
+  const allPending = React.useMemo(() => {
+    const map = new Map<string, any>();
+    realPendingDocs.forEach((d) => map.set(d.id, d));
+    pendingDocs.forEach((d) => {
+      if (!map.has(d.id)) map.set(d.id, d);
+    });
+    return Array.from(map.values());
+  }, [realPendingDocs, pendingDocs]);
+
+  const filteredDocs = allPending.filter((doc) => {
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch = !q ||
       doc.id.toLowerCase().includes(q) ||
@@ -126,7 +165,7 @@ export default function DocumentApprovalPage() {
                   </td>
                 </tr>
               ))}
-              {pendingDocs.length === 0 && (
+              {allPending.length === 0 && (
                 <tr>
                   <td colSpan={5} className="p-8 text-center text-slate-500 font-medium">
                     <CheckCircle size={32} className="mx-auto text-green-500 mb-2" />

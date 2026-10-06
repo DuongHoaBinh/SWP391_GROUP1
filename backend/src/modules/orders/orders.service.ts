@@ -79,10 +79,11 @@ export class OrdersService {
     );
 
     // Gửi thông báo đến customer
+    const code = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
       'Yêu cầu vận chuyển đã được phê duyệt',
-      `Yêu cầu vận chuyển mã #${orderId} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được Logistics Manager phê duyệt. Bộ phận điều phối sẽ chuẩn bị phương tiện và lộ trình tiếp theo.`,
+      `Yêu cầu vận chuyển mã ${code} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được Logistics Manager phê duyệt. Bộ phận điều phối sẽ chuẩn bị phương tiện và lộ trình tiếp theo.`,
       'status_update',
       orderId,
     );
@@ -116,10 +117,11 @@ export class OrdersService {
     );
 
     // Gửi thông báo đến customer kèm lý do
+    const rejectCode = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
       'Yêu cầu vận chuyển bị từ chối',
-      `Yêu cầu vận chuyển mã #${orderId} đã bị từ chối bởi Logistics Manager. Lý do: ${dto.reason}`,
+      `Yêu cầu vận chuyển mã ${rejectCode} đã bị từ chối bởi Logistics Manager. Lý do: ${dto.reason}`,
       'status_update',
       orderId,
     );
@@ -147,10 +149,11 @@ export class OrdersService {
     await this.ordersStore.updateShipmentChangeRequest(orderId, dto.reason);
 
     // Gửi thông báo đến customer kèm lý do cần chỉnh sửa
+    const changeCode = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
       'Yêu cầu chỉnh sửa thông tin vận chuyển',
-      `Đơn vận chuyển mã #${orderId} cần được chỉnh sửa: "${dto.reason}". Vui lòng cập nhật lại thông tin và gửi lại đơn để tiếp tục xét duyệt.`,
+      `Đơn vận chuyển mã ${changeCode} cần được chỉnh sửa: "${dto.reason}". Vui lòng cập nhật lại thông tin và gửi lại đơn để tiếp tục xét duyệt.`,
       'status_update',
       orderId,
     );
@@ -190,6 +193,27 @@ export class OrdersService {
       order.customerId,
       'Đơn vận chuyển đã được gửi lại',
       `Đơn vận chuyển mã #${orderId} đã được cập nhật thành công và chuyển lại cho Logistics Manager xét duyệt.`,
+      'status_update',
+      orderId,
+    );
+
+    const updated = await this.ordersStore.findShipmentById(orderId);
+    return updated!;
+  }
+
+  async completeOrder(user: AuthenticatedUser, orderId: number): Promise<TransportOrder> {
+    const order = await this.ordersStore.findShipmentById(orderId);
+    if (!order) {
+      throw new NotFoundException(`Transport order #${orderId} not found`);
+    }
+
+    await this.ordersStore.completeShipment(orderId);
+
+    const code = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
+    await this.notificationsService.createNotification(
+      order.customerId,
+      'Chuyến vận chuyển đã hoàn thành',
+      `Đơn vận chuyển mã ${code} đã hoàn tất thành công. Ngựa đã được bàn giao an toàn tại điểm đến (${order.destinationLocation}).`,
       'status_update',
       orderId,
     );

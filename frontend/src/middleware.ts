@@ -11,11 +11,14 @@ export function middleware(request: NextRequest) {
     LOGISTICS_MANAGER: '/manager',
     TRANSPORT_SPECIALIST: '/specialist',
     FLEET_ROUTE_COORDINATOR: '/coordinator',
+    COORDINATOR: '/coordinator',
     DRIVER_ESCORT: '/driver',
-    ADMIN: '/admin',
+    DRIVER: '/driver',
+    ADMIN: '/manager',
   };
 
-  const userDashboard = roleToPath[role] || '/customer';
+  const normalizedRole = role.toUpperCase();
+  const userDashboard = roleToPath[normalizedRole] || '/customer';
 
   // 1. Root route ('/'): redirect based on authentication status
   if (pathname === '/') {
@@ -48,9 +51,9 @@ export function middleware(request: NextRequest) {
     }
 
     // Role enforcement: Prevent users from accessing other roles' dashboards
-    // if (matchedPrefix !== userDashboard) {
-    //   return NextResponse.redirect(new URL(userDashboard, request.url));
-    // }
+    if (normalizedRole !== 'ADMIN' && matchedPrefix !== userDashboard) {
+      return NextResponse.redirect(new URL(userDashboard, request.url));
+    }
   }
 
   return NextResponse.next();

@@ -36,9 +36,11 @@ export interface TransportDocument {
   id: number;
   horseId: number;
   horseName?: string;
+  requestCode?: string;
   regulationId: number;
   regulationCountry?: string;
   regulationDocType?: string;
+  regulationTitle?: string;
   uploadedBy: number;
   uploaderName?: string;
   uploaderEmail?: string;

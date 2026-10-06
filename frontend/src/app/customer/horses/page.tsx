@@ -13,20 +13,48 @@ import { DeleteHorseModal } from '@/components/horses/DeleteHorseModal';
 
 export default function HorsesPage() {
   const router = useRouter();
-  const { horses } = useCustomerStore();
+  const { horses, refreshHorses } = useCustomerStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
   const [editingHorse, setEditingHorse] = useState<Horse | null>(null);
   const [deletingHorse, setDeletingHorse] = useState<Horse | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'AVAILABLE' | 'IN_TRANSIT' | 'DELIVERED'>('ALL');
 
-  // Fallback if horses store empty
-  const displayHorses = horses.length > 0 ? horses : [];
+  React.useEffect(() => {
+    refreshHorses();
+  }, []);
+
+  // Exclude soft-deleted/retired horses
+  const displayHorses = horses.filter(
+    (h) => (h as any).status !== 'retired' && (h as any).status !== 'deleted'
+  );
+
+  const filteredHorses = displayHorses.filter((h) => {
+    const matchesSearch =
+      h.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (h.code && h.code.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    if (!matchesSearch) return false;
+
+    if (statusFilter === 'AVAILABLE') {
+      return h.availabilityStatus === 'Available' || h.status === 'active';
+    }
+    if (statusFilter === 'IN_TRANSIT') {
+      return h.availabilityStatus === 'In Transit' || h.status === 'in_transit';
+    }
+    if (statusFilter === 'DELIVERED') {
+      return h.availabilityStatus === 'Delivered' || h.status === 'delivered';
+    }
+    return true;
+  });
 
   const getStatusColor = (status?: string) => {
     switch (status) {
       case 'In Transit':
       case 'Scheduled':
         return { bg: '#e0e7ff', text: '#3730a3', dot: '#4f46e5' };
+      case 'Delivered':
+        return { bg: '#ecfdf5', text: '#047857', dot: '#10b981' };
       case 'Available':
         return { bg: '#dcfce7', text: '#166534', dot: '#22c55e' };
       case 'Not Cleared':
@@ -76,13 +104,14 @@ export default function HorsesPage() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 17v-1c0-4-3-7-7-7H9l-2-3H3l1 5-2 3v3h10" /><circle cx="8" cy="7" r="1" /></svg>
             </div>
             <div style={{ fontSize: '12px', fontWeight: 600, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5v14"/></svg>
-              2 this year
+              In stable
             </div>
           </div>
           <div>
-            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>08</div>
-            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px' }}>Total Horses</div>
+            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+              {String(displayHorses.length).padStart(2, '0')}
+            </div>
+            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px' }}>Total Registered Horses</div>
           </div>
         </div>
 
@@ -94,11 +123,13 @@ export default function HorsesPage() {
             </div>
             <div style={{ fontSize: '12px', fontWeight: 600, color: '#2563eb', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
-              1 In transit
+              Active
             </div>
           </div>
           <div>
-            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>05</div>
+            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+              {String(displayHorses.filter((h) => h.availabilityStatus === 'Available' || h.availabilityStatus === 'In Transit').length).padStart(2, '0')}
+            </div>
             <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px' }}>Active for Transport</div>
           </div>
         </div>
@@ -110,11 +141,13 @@ export default function HorsesPage() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
             </div>
             <div style={{ fontSize: '12px', fontWeight: 600, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              75% compliant
+              Healthy
             </div>
           </div>
           <div>
-            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>06</div>
+            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+              {String(displayHorses.filter((h) => h.medicalStatus === 'Healthy' || h.documentStatus === 'Valid').length).padStart(2, '0')}
+            </div>
             <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px' }}>Documents Valid</div>
           </div>
         </div>
@@ -126,19 +159,21 @@ export default function HorsesPage() {
               <AlertTriangle size={20} />
             </div>
             <div style={{ fontSize: '12px', fontWeight: 600, color: '#ea580c', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              Within 14 days
+              Attention
             </div>
           </div>
           <div>
-            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>02</div>
+            <div style={{ fontSize: '28px', fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+              {String(displayHorses.filter((h) => h.documentStatus === 'Expiring Soon' || h.documentStatus === 'Missing').length).padStart(2, '0')}
+            </div>
             <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px' }}>Documents Expiring Soon</div>
           </div>
         </div>
       </div>
 
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: '#fff', padding: '12px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-        <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
+      {/* Filters & Status Tabs */}
+      <div style={{ display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: '#fff', padding: '12px', borderRadius: '12px', border: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: '220px', maxWidth: '300px' }}>
           <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
           <input 
             type="text" 
@@ -149,25 +184,69 @@ export default function HorsesPage() {
           />
         </div>
         
-        {['All breed', 'All gender', 'All health', 'All documents'].map((filter, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '14px', color: '#475569', cursor: 'pointer', minWidth: '130px' }}>
-            {filter}
-            <ChevronDown size={14} color="#94a3b8" style={{ marginLeft: '8px' }} />
-          </div>
-        ))}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {[
+            { key: 'ALL', label: 'Tất cả', count: displayHorses.length },
+            { key: 'AVAILABLE', label: 'Sẵn sàng', count: displayHorses.filter(h => h.availabilityStatus === 'Available' || h.status === 'active').length },
+            { key: 'IN_TRANSIT', label: 'Đang vận chuyển', count: displayHorses.filter(h => h.availabilityStatus === 'In Transit' || h.status === 'in_transit').length },
+            { key: 'DELIVERED', label: 'Đã hoàn tất', count: displayHorses.filter(h => h.availabilityStatus === 'Delivered' || h.status === 'delivered').length },
+          ].map((tab) => {
+            const isActive = statusFilter === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setStatusFilter(tab.key as any)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  border: isActive ? '1px solid #2563eb' : '1px solid #e2e8f0',
+                  backgroundColor: isActive ? '#eff6ff' : '#f8fafc',
+                  color: isActive ? '#1d4ed8' : '#475569',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>{tab.label}</span>
+                <span style={{
+                  padding: '2px 6px',
+                  borderRadius: '10px',
+                  fontSize: '11px',
+                  backgroundColor: isActive ? '#2563eb' : '#e2e8f0',
+                  color: isActive ? '#ffffff' : '#475569',
+                }}>
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
         
-        <button style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: '#94a3b8', fontSize: '14px', fontWeight: 500, cursor: 'pointer', marginLeft: 'auto' }}>
-          <X size={14} /> Clear Filters
-        </button>
+        {(searchTerm || statusFilter !== 'ALL') && (
+          <button
+            onClick={() => {
+              setSearchTerm('');
+              setStatusFilter('ALL');
+            }}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: '#94a3b8', fontSize: '14px', fontWeight: 500, cursor: 'pointer', marginLeft: 'auto' }}
+          >
+            <X size={14} /> Clear Filters
+          </button>
+        )}
       </div>
 
       <div style={{ fontSize: '14px', color: '#64748b' }}>
-        Showing <strong>{displayHorses.length}</strong> of {displayHorses.length} horses
+        Showing <strong>{filteredHorses.length}</strong> of {displayHorses.length} horses
       </div>
 
       {/* Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
-        {displayHorses.map((horse) => {
+        {filteredHorses.map((horse) => {
           const availColor = getStatusColor(horse.availabilityStatus);
           const healthColor = getStatusColor(horse.medicalStatus);
           const docColor = getStatusColor(horse.documentStatus);
@@ -204,7 +283,9 @@ export default function HorsesPage() {
                 {/* Title Row */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <h3 style={{ margin: '0 0 4px 0', fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>{horse.name}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <h3 style={{ margin: '0 0 4px 0', fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>{horse.name}</h3>
+                    </div>
                     <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>{horse.breed} • {horse.gender}</p>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

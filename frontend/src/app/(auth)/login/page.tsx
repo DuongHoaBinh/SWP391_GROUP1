@@ -87,13 +87,33 @@ function LoginFormContent() {
       }
     }
 
+    const roleRoutes: Record<string, string> = {
+      CUSTOMER: '/customer',
+      LOGISTICS_MANAGER: '/manager',
+      TRANSPORT_SPECIALIST: '/specialist',
+      FLEET_ROUTE_COORDINATOR: '/coordinator',
+      COORDINATOR: '/coordinator',
+      DRIVER_ESCORT: '/driver',
+      DRIVER: '/driver',
+      ADMIN: '/manager',
+    };
+
+    const userRoleKey = (authUser.role || 'CUSTOMER').toUpperCase();
+    const defaultRoleRoute = roleRoutes[userRoleKey] || '/customer';
+
+    const customRedirect = searchParams.get('redirect');
+    const finalRoute =
+      customRedirect && customRedirect !== '/customer' && !customRedirect.startsWith('/login')
+        ? customRedirect
+        : defaultRoleRoute;
+
     setAuthSession(authToken, authUser);
     setIsLoading(false);
     setIsSuccess(true);
 
     setTimeout(() => {
-      router.push(redirectTarget);
-    }, 1200);
+      router.push(finalRoute);
+    }, 1000);
   };
 
   return (

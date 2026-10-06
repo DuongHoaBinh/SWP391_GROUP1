@@ -44,4 +44,15 @@ export class CreateHorseDto {
   @IsEnum(HorseStatus)
   @IsOptional()
   status?: HorseStatus;
+
+  @ApiPropertyOptional({ description: 'Số lượng con ngựa', example: 5, default: 1 })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  quantity?: number;
+
+  @ApiPropertyOptional({ description: 'Đường dẫn ảnh đại diện của ngựa', example: '/uploads/horses/123456.jpg' })
+  @IsString()
+  @IsOptional()
+  photoUrl?: string;
 }

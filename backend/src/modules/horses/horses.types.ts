@@ -7,6 +7,7 @@ export enum HorseGender {
 export enum HorseStatus {
   ACTIVE = 'active',
   IN_TRANSIT = 'in_transit',
+  DELIVERED = 'delivered',
   RETIRED = 'retired',
   DECEASED = 'deceased',
 }
@@ -22,5 +23,7 @@ export interface HorseEntity {
   microchipNo: string | null;
   passportNo: string | null;
   status: HorseStatus;
+  quantity: number;
+  photoUrl: string | null;
   createdAt: string;
 }

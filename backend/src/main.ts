@@ -12,6 +12,10 @@ async function bootstrap() {
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
   }
+  const horsesUploadDir = join(process.cwd(), 'uploads', 'horses');
+  if (!fs.existsSync(horsesUploadDir)) {
+    fs.mkdirSync(horsesUploadDir, { recursive: true });
+  }
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });

@@ -131,6 +131,7 @@ const fetcher = async (url: string) => {
 
   return {
     ...data,
+    requestedHorseCount: data.requestedHorseCount || data.requested_horse_count || (normalizedHorses.length || 1),
     requestCode: data.requestCode || `REQ-${String(data.id).padStart(3, '0')}`,
     horse: normalizedHorses[0]?.horse || { name: 'Racehorse' },
     horses: normalizedHorses,
@@ -547,6 +548,12 @@ export default function RequestDetailPage() {
                   {request.estimatedArrivalDate}
                 </p>
               </div>
+              <div>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Number of Horses</span>
+                <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--primary)', margin: '2px 0 0 0' }}>
+                  {request.requestedHorseCount || request.horses?.length || 1} horses
+                </p>
+              </div>
             </div>
           </div>
 
@@ -626,7 +633,7 @@ export default function RequestDetailPage() {
           >
             <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
               <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                Horses ({request.horses?.length || 2})
+                Horses ({request.horses?.length || request.requestedHorseCount || 1})
               </h4>
             </div>
 

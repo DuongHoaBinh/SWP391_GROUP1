@@ -22,6 +22,7 @@ export interface OrderHorse {
   breed: string | null;
   gender: 'male' | 'female' | 'gelding' | null;
   age: number | null;
+  quantity?: number;
 }
 
 export interface TransportOrder {

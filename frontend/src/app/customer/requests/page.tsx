@@ -47,6 +47,7 @@ export default function RequestsPage() {
             departureDate: item.requestedDate ? new Date(item.requestedDate).toLocaleDateString('en-GB') : '',
             statusLabel: item.statusLabel || statusInfo.label,
             statusVariant: statusInfo.variant,
+            requestedHorseCount: item.requestedHorseCount || item.requested_horse_count || (item.horses?.length || 1),
           };
         });
         setRequests(mappedData);
@@ -229,12 +230,19 @@ export default function RequestsPage() {
                   </Link>
                 </td>
                 <td style={{ padding: '16px 14px' }}>
-                  <Link
-                    href={`/customer/horses/${req.horse.id || 'hrs-001'}`}
-                    style={{ fontWeight: 600, color: 'var(--text-heading)' }}
-                  >
-                    {req.horse.name}
-                  </Link>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Link
+                      href={`/customer/horses/${req.horse.id || 'hrs-001'}`}
+                      style={{ fontWeight: 600, color: 'var(--text-heading)' }}
+                    >
+                      {req.horse.name}
+                    </Link>
+                    {req.requestedHorseCount && req.requestedHorseCount > 1 ? (
+                      <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', backgroundColor: '#eff6ff', color: '#2563eb', fontWeight: 700, border: '1px solid #dbeafe' }}>
+                        +{req.requestedHorseCount - 1} more
+                      </span>
+                    ) : null}
+                  </div>
                 </td>
                 <td style={{ padding: '16px 14px' }}>
                   {req.origin} → {req.destination}

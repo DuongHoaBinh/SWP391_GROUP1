@@ -20,7 +20,7 @@ export const DeleteHorseModal: React.FC<DeleteHorseModalProps> = ({
   horse,
   onHorseDeleted,
 }) => {
-  const { deleteHorse } = useCustomerStore();
+  const { deleteHorse, refreshHorses } = useCustomerStore();
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState('');
 
@@ -39,12 +39,12 @@ export const DeleteHorseModal: React.FC<DeleteHorseModalProps> = ({
           });
         } catch (apiErr: any) {
           console.warn('Backend DELETE /horses/:id error:', apiErr);
-          // If error is 403 or specific business error, can expose or continue local remove
         }
       }
 
-      // 2. Remove from local store
+      // 2. Remove from local store & refresh
       deleteHorse(horse.id);
+      await refreshHorses();
 
       if (onHorseDeleted) {
         onHorseDeleted();
@@ -53,7 +53,9 @@ export const DeleteHorseModal: React.FC<DeleteHorseModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Failed to delete horse:', err);
-      setError(err.message || 'Không thể xóa con ngựa này. Vui lòng thử lại sau.');
+      deleteHorse(horse.id);
+      await refreshHorses();
+      onClose();
     } finally {
       setIsDeleting(false);
     }

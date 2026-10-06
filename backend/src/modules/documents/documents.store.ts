@@ -35,8 +35,12 @@ interface DocumentRow extends RowDataPacket {
   created_at: Date;
   horse_name?: string;
   country?: string;
+  regulation_title?: string;
+  regulation_doc_type?: string;
   uploader_name?: string;
   uploader_email?: string;
+  request_code?: string;
+  shipment_id?: number;
 }
 
 interface ApprovalRow extends RowDataPacket {
@@ -159,7 +163,8 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
 
   async findDocumentById(id: number): Promise<TransportDocument | undefined> {
     const [rows] = await this.pool.execute<DocumentRow[]>(
-      `SELECT d.*, h.name as horse_name, r.country, u.full_name as uploader_name, u.email as uploader_email
+      `SELECT d.*, h.name as horse_name, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
+        (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id
        FROM transport_document d
        JOIN horse h ON h.horse_id = d.horse_id
        JOIN regulation r ON r.regulation_id = d.regulation_id
@@ -177,9 +182,11 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       id: r.document_id,
       horseId: r.horse_id,
       horseName: r.horse_name,
+      requestCode: r.shipment_id ? `REQ-${String(r.shipment_id).padStart(3, '0')}` : undefined,
       regulationId: r.regulation_id,
       regulationCountry: r.country,
-      regulationDocType: r.doc_type,
+      regulationDocType: r.regulation_doc_type || r.doc_type,
+      regulationTitle: r.regulation_title || r.doc_type,
       uploadedBy: r.uploaded_by,
       uploaderName: r.uploader_name,
       uploaderEmail: r.uploader_email,
@@ -197,7 +204,8 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
 
   async findDocumentsByHorseId(horseId: number): Promise<TransportDocument[]> {
     const [rows] = await this.pool.execute<DocumentRow[]>(
-      `SELECT d.*, h.name as horse_name, r.country, u.full_name as uploader_name, u.email as uploader_email
+      `SELECT d.*, h.name as horse_name, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
+        (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id
        FROM transport_document d
        JOIN horse h ON h.horse_id = d.horse_id
        JOIN regulation r ON r.regulation_id = d.regulation_id
@@ -212,9 +220,73 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
         id: r.document_id,
         horseId: r.horse_id,
         horseName: r.horse_name,
+        requestCode: r.shipment_id ? `REQ-${String(r.shipment_id).padStart(3, '0')}` : undefined,
         regulationId: r.regulation_id,
         regulationCountry: r.country,
-        regulationDocType: r.doc_type,
+        regulationDocType: r.regulation_doc_type || r.doc_type,
+        regulationTitle: r.regulation_title || r.doc_type,
+        uploadedBy: r.uploaded_by,
+        uploaderName: r.uploader_name,
+        uploaderEmail: r.uploader_email,
+        docType: r.doc_type,
+        docNumber: r.doc_number,
+        fileUrl: r.file_url,
+        issueDate: r.issue_date ? new Date(r.issue_date).toISOString().split('T')[0] : null,
+        expiryDate: r.expiry_date ? new Date(r.expiry_date).toISOString().split('T')[0] : null,
+        status: r.status,
+        reviewerNotes: r.reviewer_notes,
+        createdAt: new Date(r.created_at).toISOString(),
+        approvals: await this.findApprovalsByDocumentId(r.document_id),
+      })),
+    );
+  }
+
+  async findDocuments(filter: {
+    uploadedBy?: number;
+    status?: string;
+    horseId?: number;
+  }): Promise<TransportDocument[]> {
+    let query = `
+      SELECT d.*, h.name as horse_name, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
+        (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id
+      FROM transport_document d
+      JOIN horse h ON h.horse_id = d.horse_id
+      JOIN regulation r ON r.regulation_id = d.regulation_id
+      JOIN \`user\` u ON u.user_id = d.uploaded_by
+    `;
+    const conditions: string[] = [];
+    const params: any[] = [];
+
+    if (filter.uploadedBy !== undefined) {
+      conditions.push('d.uploaded_by = ?');
+      params.push(filter.uploadedBy);
+    }
+    if (filter.status) {
+      conditions.push('d.status = ?');
+      params.push(filter.status.toLowerCase());
+    }
+    if (filter.horseId !== undefined) {
+      conditions.push('d.horse_id = ?');
+      params.push(filter.horseId);
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    query += ' ORDER BY d.created_at DESC';
+
+    const [rows] = await this.pool.execute<DocumentRow[]>(query, params);
+
+    return Promise.all(
+      rows.map(async (r) => ({
+        id: r.document_id,
+        horseId: r.horse_id,
+        horseName: r.horse_name,
+        requestCode: r.shipment_id ? `REQ-${String(r.shipment_id).padStart(3, '0')}` : undefined,
+        regulationId: r.regulation_id,
+        regulationCountry: r.country,
+        regulationDocType: r.regulation_doc_type || r.doc_type,
+        regulationTitle: r.regulation_title || r.doc_type,
         uploadedBy: r.uploaded_by,
         uploaderName: r.uploader_name,
         uploaderEmail: r.uploader_email,
@@ -245,6 +317,17 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
            expiry_date = COALESCE(?, expiry_date)
        WHERE document_id = ?`,
       [status, notes ?? null, newExpiryDate, documentId],
+    );
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async deleteDocument(documentId: number, userId: number, isAdminOrSpecialist: boolean): Promise<boolean> {
+    await this.pool.execute('DELETE FROM document_approval WHERE document_id = ?', [documentId]);
+    const [result] = await this.pool.execute(
+      isAdminOrSpecialist
+        ? 'DELETE FROM transport_document WHERE document_id = ?'
+        : 'DELETE FROM transport_document WHERE document_id = ? AND uploaded_by = ?',
+      isAdminOrSpecialist ? [documentId] : [documentId, userId],
     );
     return (result as { affectedRows: number }).affectedRows > 0;
   }
