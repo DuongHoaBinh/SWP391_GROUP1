@@ -98,23 +98,28 @@ const fetcher = async (url: string) => {
     requested: 2,
     under_review: 2,
     IN_REVIEW: 2,
-    approved: 4,
     change_requested: 2,
     rejected: 2,
-    in_transit: 6,
-    completed: 7,
+    approved: 3,
+    APPROVED: 3,
+    planning: 4,
+    PLANNING: 4,
+    in_transit: 5,
+    IN_TRANSIT: 5,
+    completed: 6,
+    COMPLETED: 6,
     cancelled: 1,
+    CANCELLED: 1,
   };
   const activeStepIndex = statusStepMap[data.status] || 2;
 
   const timeline = [
     { stage: 1, name: 'Request Created', status: 'completed' },
-    { stage: 2, name: 'Docs Submitted', status: activeStepIndex >= 2 ? 'completed' : 'pending' },
-    { stage: 3, name: 'Document Review', status: activeStepIndex === 2 ? 'active' : activeStepIndex > 2 ? 'completed' : 'pending' },
-    { stage: 4, name: 'Request Approved', status: activeStepIndex === 4 ? 'active' : activeStepIndex > 4 ? 'completed' : 'pending' },
-    { stage: 5, name: 'Trip Planned', status: activeStepIndex >= 5 ? 'completed' : 'pending' },
-    { stage: 6, name: 'In Transit', status: activeStepIndex === 6 ? 'active' : activeStepIndex > 6 ? 'completed' : 'pending' },
-    { stage: 7, name: 'Handover Completed', status: activeStepIndex === 7 ? 'completed' : 'pending' },
+    { stage: 2, name: 'Manager Approval', status: activeStepIndex === 2 ? 'active' : activeStepIndex > 2 ? 'completed' : 'pending' },
+    { stage: 3, name: 'Quarantine & Docs', status: activeStepIndex === 3 ? 'active' : activeStepIndex > 3 ? 'completed' : 'pending' },
+    { stage: 4, name: 'Trip Planned', status: activeStepIndex === 4 ? 'active' : activeStepIndex > 4 ? 'completed' : 'pending' },
+    { stage: 5, name: 'In Transit', status: activeStepIndex === 5 ? 'active' : activeStepIndex > 5 ? 'completed' : 'pending' },
+    { stage: 6, name: 'Handover Completed', status: activeStepIndex === 6 ? (data.status === 'completed' || data.status === 'COMPLETED' ? 'completed' : 'active') : activeStepIndex > 6 ? 'completed' : 'pending' },
   ];
 
   const statusLabels: Record<string, string> = {
@@ -410,7 +415,7 @@ export default function RequestDetailPage() {
                   position: 'absolute',
                   top: '18px',
                   left: '30px',
-                  width: `${(request.activeStepIndex / 6) * 88}%`,
+                  width: `${((Math.max(1, request.activeStepIndex) - 1) / 5) * 88}%`,
                   height: '4px',
                   backgroundColor: '#16a34a',
                   zIndex: 0,
@@ -419,7 +424,7 @@ export default function RequestDetailPage() {
                 }}
               />
 
-              {/* 7 Stages */}
+              {/* 6 Stages */}
               <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
                 {request.timeline?.map((stage: any) => {
                   const isCompleted = stage.status === 'completed';
@@ -465,10 +470,11 @@ export default function RequestDetailPage() {
                         {isActive && <Search size={14} />}
                         {!isCompleted && !isActive && (
                           <>
-                            {stage.stage === 4 && <ThumbsUp size={14} />}
-                            {stage.stage === 5 && <CalendarCheck size={14} />}
-                            {stage.stage === 6 && <Plane size={14} />}
-                            {stage.stage === 7 && <Flag size={14} />}
+                            {stage.stage === 2 && <ThumbsUp size={14} />}
+                            {stage.stage === 3 && <FileText size={14} />}
+                            {stage.stage === 4 && <CalendarCheck size={14} />}
+                            {stage.stage === 5 && <Plane size={14} />}
+                            {stage.stage === 6 && <Flag size={14} />}
                           </>
                         )}
                       </div>
