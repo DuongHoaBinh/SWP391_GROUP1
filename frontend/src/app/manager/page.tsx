@@ -43,6 +43,16 @@ export default function ManagerDashboardPage() {
     revalidateOnFocus: true,
   });
 
+  // Filter State
+  const [requestCostFilter, setRequestCostFilter] = useState<'ALL' | 'NEEDS_COST' | 'HAS_COST'>('ALL');
+  const [showRequestFilterDropdown, setShowRequestFilterDropdown] = useState(false);
+
+  const filteredPendingRequests = pendingRequests.filter((req: any) => {
+    if (requestCostFilter === 'NEEDS_COST') return req.totalCost === null;
+    if (requestCostFilter === 'HAS_COST') return req.totalCost !== null;
+    return true;
+  });
+
   // Modal States
   const [activeModal, setActiveModal] = useState<'NONE' | 'APPROVE' | 'REJECT' | 'CHANGE'>('NONE');
   const [selectedOrderId, setSelectedOrderId] = useState<number | string | null>(null);
@@ -601,7 +611,7 @@ export default function ManagerDashboardPage() {
                     <td style={{ padding: '16px 24px', textAlign: 'right' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
                         <button
-                          onClick={() => alert('Reviewing Incident: Emergency Route Blockage on TR-2026-014')}
+                          onClick={() => toast.success('Reviewing Incident: Emergency Route Blockage on TR-2026-014')}
                           style={{
                             padding: '6px 12px',
                             border: '1px solid #d1d5db',
@@ -615,7 +625,7 @@ export default function ManagerDashboardPage() {
                         >
                           Review
                         </button>
-                        <button style={{ color: '#9ca3af', border: 'none', background: 'none', cursor: 'pointer' }}>
+                        <button aria-label="More options" style={{ color: '#9ca3af', border: 'none', background: 'none', cursor: 'pointer' }}>
                           <MoreHorizontal size={16} />
                         </button>
                       </div>
@@ -655,7 +665,7 @@ export default function ManagerDashboardPage() {
                     <td style={{ padding: '16px 24px', textAlign: 'right' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
                         <button
-                          onClick={() => alert('Reviewing Incident: Flight Delay EK998 on TR-2026-009')}
+                          onClick={() => toast.success('Reviewing Incident: Flight Delay EK998 on TR-2026-009')}
                           style={{
                             padding: '6px 12px',
                             border: '1px solid #d1d5db',
@@ -669,7 +679,7 @@ export default function ManagerDashboardPage() {
                         >
                           Review
                         </button>
-                        <button style={{ color: '#9ca3af', border: 'none', background: 'none', cursor: 'pointer' }}>
+                        <button aria-label="More options" style={{ color: '#9ca3af', border: 'none', background: 'none', cursor: 'pointer' }}>
                           <MoreHorizontal size={16} />
                         </button>
                       </div>
@@ -708,23 +718,72 @@ export default function ManagerDashboardPage() {
               </div>
 
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '6px 12px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: '#374151',
-                    backgroundColor: '#ffffff',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Filter size={13} color="#9ca3af" /> Filter
-                </button>
+                <div style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => setShowRequestFilterDropdown(!showRequestFilterDropdown)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 12px',
+                      border: requestCostFilter !== 'ALL' ? '1px solid #3b82f6' : '1px solid #d1d5db',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: requestCostFilter !== 'ALL' ? '#2563eb' : '#374151',
+                      backgroundColor: requestCostFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Filter size={13} color={requestCostFilter !== 'ALL' ? '#2563eb' : '#9ca3af'} />
+                    {requestCostFilter === 'ALL' ? 'Filter' : requestCostFilter === 'NEEDS_COST' ? 'Needs Cost' : 'Costed'}
+                  </button>
+                  {showRequestFilterDropdown && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: '100%',
+                        marginTop: '6px',
+                        width: '160px',
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                        padding: '6px',
+                        zIndex: 20,
+                      }}
+                    >
+                      {[
+                        { label: 'All Requests', val: 'ALL' },
+                        { label: 'Needs Cost', val: 'NEEDS_COST' },
+                        { label: 'Costed', val: 'HAS_COST' },
+                      ].map((item) => (
+                        <button
+                          key={item.val}
+                          onClick={() => {
+                            setRequestCostFilter(item.val as any);
+                            setShowRequestFilterDropdown(false);
+                          }}
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '6px 10px',
+                            fontSize: '12px',
+                            fontWeight: requestCostFilter === item.val ? 700 : 500,
+                            color: requestCostFilter === item.val ? '#2563eb' : '#374151',
+                            backgroundColor: requestCostFilter === item.val ? '#eff6ff' : 'transparent',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <Link
                   href="/manager/requests"
                   style={{
@@ -775,14 +834,14 @@ export default function ManagerDashboardPage() {
                         `}</style>
                       </td>
                     </tr>
-                  ) : pendingRequests.length === 0 ? (
+                  ) : filteredPendingRequests.length === 0 ? (
                     <tr>
                       <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: '#6b7280' }}>
-                        No pending requests requiring approval.
+                        No pending requests matching the filter.
                       </td>
                     </tr>
                   ) : (
-                    pendingRequests.map((req) => (
+                    filteredPendingRequests.map((req: any) => (
                       <tr key={req.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                         <td style={{ padding: '16px 24px' }}>
                           <span style={{ fontWeight: 700, color: '#111827' }}>{req.id}</span>
@@ -1017,7 +1076,7 @@ export default function ManagerDashboardPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                 <span style={{ fontWeight: 700, color: '#111827', fontSize: '13.5px' }}>Trip TR-2026-014</span>
                 <span
-                  onClick={() => alert('Viewing route details for TR-2026-014')}
+                  onClick={() => toast.success('Viewing route details for TR-2026-014')}
                   style={{ fontSize: '12px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}
                 >
                   View details

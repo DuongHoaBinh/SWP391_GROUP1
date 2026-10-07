@@ -17,6 +17,7 @@ import {
   PlayCircle,
   FileEdit,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 export default function DriverDashboardPage() {
   const router = useRouter();
@@ -115,7 +116,7 @@ export default function DriverDashboardPage() {
         </div>
 
         <button
-          onClick={() => alert('Quick Action: Update Trip Milestone & Location')}
+          onClick={() => router.push('/driver/status')}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -256,7 +257,7 @@ export default function DriverDashboardPage() {
               {/* Action Buttons */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                 <button
-                  onClick={() => alert('Opening Status Update Modal')}
+                  onClick={() => router.push('/driver/status')}
                   style={{
                     flex: '1 1 200px',
                     padding: '14px 20px',
@@ -421,7 +422,7 @@ export default function DriverDashboardPage() {
                   <Clock size={13} /> Last Check: 08:40
                 </p>
                 <button
-                  onClick={() => alert('Log health for Thunder')}
+                  onClick={() => router.push('/driver/health')}
                   style={{
                     width: '100%',
                     padding: '10px',
@@ -469,7 +470,7 @@ export default function DriverDashboardPage() {
                   <Clock size={13} /> Last Check: 09:15
                 </p>
                 <button
-                  onClick={() => alert('Log health for Royal Star')}
+                  onClick={() => router.push('/driver/health')}
                   style={{
                     width: '100%',
                     padding: '10px',
@@ -508,7 +509,7 @@ export default function DriverDashboardPage() {
               Report an incident immediately if a horse or vehicle requires urgent attention.
             </p>
             <button
-              onClick={() => alert('Emergency dispatch initiated: Logistics Manager and Vet alerted!')}
+              onClick={() => toast.error('Emergency dispatch initiated: Logistics Manager and Vet alerted!')}
               style={{
                 width: '100%',
                 padding: '14px',
@@ -586,7 +587,7 @@ export default function DriverDashboardPage() {
         <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', marginBottom: '12px' }}>Quick Actions</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
           <div
-            onClick={() => alert('Update Status')}
+            onClick={() => router.push('/driver/status')}
             style={{ backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)' }}
           >
             <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
@@ -596,7 +597,7 @@ export default function DriverDashboardPage() {
           </div>
 
           <div
-            onClick={() => alert('Update Health')}
+            onClick={() => router.push('/driver/health')}
             style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
           >
             <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
@@ -616,7 +617,7 @@ export default function DriverDashboardPage() {
           </div>
 
           <div
-            onClick={() => alert('Emergency assistance triggered')}
+            onClick={() => toast.error('Emergency assistance triggered: Dispatcher notified.')}
             style={{ backgroundColor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
           >
             <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#dc2626', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
