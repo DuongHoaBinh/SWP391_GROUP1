@@ -12,9 +12,7 @@ import {
   Plus,
   Check,
   ArrowRight,
-  Save,
   AlertCircle,
-  FileText,
   Loader2,
   Truck,
   Navigation,
@@ -70,9 +68,9 @@ function CreateTransportRequestForm() {
   const searchParams = useSearchParams();
   const preselectedHorseId = searchParams.get('horseId');
 
-  const { horses, createRequest, refreshHorses } = useCustomerStore();
+  const { horses, refreshHorses } = useCustomerStore();
 
-  // Step state (1 to 4)
+  // Step state (1 to 3)
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
@@ -111,20 +109,24 @@ function CreateTransportRequestForm() {
     if (preselectedHorseId) {
       const target = horses.find((item) => item.id === preselectedHorseId);
       if (target && (target.status === 'active' || target.availabilityStatus === 'Available')) {
-        setHorseQuantities({ [preselectedHorseId]: formValues.horseCount ? Number(formValues.horseCount) : 1 });
+        setHorseQuantities({ [preselectedHorseId]: 1 });
       }
     } else if (horses.length > 0 && Object.keys(horseQuantities).length === 0) {
       const firstAvailable = horses.find(
         (h) => h.status === 'active' || h.availabilityStatus === 'Available'
       );
       if (firstAvailable) {
-        setHorseQuantities({ [firstAvailable.id]: formValues.horseCount ? Number(formValues.horseCount) : 1 });
+        setHorseQuantities({ [firstAvailable.id]: 1 });
       }
     }
   }, [preselectedHorseId, horses]);
 
   const selectedHorseIds = Object.keys(horseQuantities).filter((id) => (horseQuantities[id] || 0) > 0);
   const totalSelectedHorses = Object.values(horseQuantities).reduce((sum, q) => sum + (q || 0), 0);
+
+  useEffect(() => {
+    setValue('horseCount', Math.max(1, totalSelectedHorses));
+  }, [totalSelectedHorses, setValue]);
 
   const selectedHorses = horses
     .filter((h) => (horseQuantities[h.id] || 0) > 0)
@@ -182,7 +184,7 @@ function CreateTransportRequestForm() {
         return;
       }
     }
-    if (currentStep < 4) {
+    if (currentStep < 3) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -260,21 +262,7 @@ function CreateTransportRequestForm() {
     }
   };
 
-  const handleSaveDraft = () => {
-    const newReq = createRequest({
-      title: formValues.title || 'Draft Transport Request',
-      transportType: formValues.transportType,
-      origin: formValues.origin,
-      destination: formValues.destination,
-      departureDate: formValues.departureDate,
-      arrivalDate: formValues.arrivalDate || '',
-      horseIds: selectedHorseIds,
-      specialReqs: formValues.specialReqs,
-    });
-    router.push('/customer/requests');
-  };
-
-  const progressPercent = ((currentStep - 1) / 3) * 100;
+  const progressPercent = ((currentStep - 1) / 2) * 100;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '90px' }}>
@@ -335,10 +323,9 @@ function CreateTransportRequestForm() {
 
           <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
             {[
-              { num: 1, label: 'Transport Info' },
-              { num: 2, label: 'Select Horse' },
-              { num: 3, label: 'Documents' },
-              { num: 4, label: 'Review & Submit' },
+              { num: 1, label: 'Thông tin lộ trình' },
+              { num: 2, label: 'Chọn ngựa vận chuyển' },
+              { num: 3, label: 'Rà soát & Gửi đơn' },
             ].map((step) => {
               const isPast = step.num < currentStep;
               const isActive = step.num === currentStep;
@@ -511,8 +498,8 @@ function CreateTransportRequestForm() {
                 }}
               />
 
-              {/* Row 3: Dates & Horses */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+              {/* Row 3: Dates */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
                 <div>
                   <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
                     Departure Date <span style={{ color: '#dc2626' }}>*</span>
@@ -545,26 +532,6 @@ function CreateTransportRequestForm() {
                       border: '1px solid #cbd5e1',
                       fontSize: '14px',
                       backgroundColor: '#f8fafc',
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Number of Horses <span style={{ color: '#dc2626' }}>*</span>
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    {...register('horseCount')}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      backgroundColor: '#f8fafc',
-                      textAlign: 'center',
                     }}
                   />
                 </div>
@@ -611,7 +578,7 @@ function CreateTransportRequestForm() {
                   Horse Information
                 </h3>
                 <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                  Tích chọn các con ngựa cần vận chuyển (Đã chọn {totalSelectedHorses} / {formValues.horseCount || 1} con yêu cầu).
+                  Tích chọn các con ngựa cần vận chuyển từ đàn của bạn (Đã chọn: {totalSelectedHorses} con).
                 </p>
                 {selectedHorses.length > 0 && (
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', alignItems: 'center' }}>
@@ -634,14 +601,6 @@ function CreateTransportRequestForm() {
                         {breed}: <strong>{count}</strong>
                       </span>
                     ))}
-                  </div>
-                )}
-                {formValues.horseCount && totalSelectedHorses !== Number(formValues.horseCount) && (
-                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#ea580c', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <AlertCircle size={13} />
-                    {totalSelectedHorses < Number(formValues.horseCount)
-                      ? `Bạn đã đăng ký ${formValues.horseCount} con ở Bước 1. Hiện tại đã chọn ${totalSelectedHorses} con (cần chọn thêm ${Number(formValues.horseCount) - totalSelectedHorses} con).`
-                      : `Bạn đang chọn ${totalSelectedHorses} con (nhiều hơn ${formValues.horseCount} con đăng ký ở Bước 1).`}
                   </div>
                 )}
               </div>
@@ -765,85 +724,8 @@ function CreateTransportRequestForm() {
           </div>
         )}
 
-        {/* STEP 3: DOCUMENTS CHECKLIST */}
+        {/* STEP 3: REVIEW & SUBMIT */}
         {currentStep === 3 && (
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-                Required Documents Checklist
-              </h3>
-              <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                Upload passports, vaccination certificates, and customs permits for selected horses.
-              </p>
-            </div>
-
-            <div style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {[
-                { name: 'Horse FEI Passport', required: true, uploaded: true },
-                { name: 'Equine Influenza Vaccination Record', required: true, uploaded: true },
-                { name: 'Veterinary Export Health Certificate', required: true, uploaded: false },
-                { name: 'Import / CITES Clearance Permit', required: false, uploaded: false },
-              ].map((doc, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    padding: '16px 20px',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border-card)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    backgroundColor: doc.uploaded ? '#f0fdf4' : '#ffffff',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <FileText size={22} color={doc.uploaded ? '#16a34a' : '#64748b'} />
-                    <div>
-                      <div style={{ fontWeight: 600, color: 'var(--text-heading)', fontSize: '14px' }}>
-                        {doc.name} {doc.required && <span style={{ color: '#dc2626' }}>*</span>}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>
-                        {doc.uploaded ? 'Verified on file' : 'Pending customer upload'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {doc.uploaded ? (
-                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Check size={14} /> Ready
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => alert(`Upload dialog for ${doc.name}`)}
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: '6px',
-                        border: '1px solid #cbd5e1',
-                        backgroundColor: '#ffffff',
-                        fontSize: '12.5px',
-                        fontWeight: 600,
-                        color: 'var(--primary)',
-                      }}
-                    >
-                      Browse File
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* STEP 4: REVIEW & SUBMIT */}
-        {currentStep === 4 && (
           <div
             style={{
               backgroundColor: '#ffffff',
@@ -1019,23 +901,6 @@ function CreateTransportRequestForm() {
           >
             Cancel
           </button>
-          <button
-            onClick={handleSaveDraft}
-            style={{
-              padding: '9px 18px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#f8fafc',
-              fontSize: '13.5px',
-              fontWeight: 600,
-              color: 'var(--text-body)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <Save size={15} /> Save as Draft
-          </button>
         </div>
 
         <div style={{ display: 'flex', gap: '12px' }}>
@@ -1056,7 +921,7 @@ function CreateTransportRequestForm() {
             </button>
           )}
 
-          {currentStep < 4 ? (
+          {currentStep < 3 ? (
             <button
               onClick={handleContinue}
               style={{
