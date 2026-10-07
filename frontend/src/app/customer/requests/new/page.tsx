@@ -17,12 +17,38 @@ import {
   FileText,
   Loader2,
   Truck,
+  Navigation,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
 import { AddHorseModal } from '@/components/horses/AddHorseModal';
 import { apiClient } from '@/lib/api-client';
 import { getCurrentUser } from '@/lib/auth';
+import dynamic from 'next/dynamic';
+
+const RoutePlanningMap = dynamic(
+  () => import('@/components/maps/RoutePlanningMap').then((mod) => mod.RoutePlanningMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        style={{
+          height: '360px',
+          backgroundColor: '#f1f5f9',
+          borderRadius: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#64748b',
+          fontSize: '13px',
+          fontWeight: 600,
+        }}
+      >
+        Đang tải bản đồ lộ trình & cửa khẩu...
+      </div>
+    ),
+  }
+);
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -56,6 +82,7 @@ function CreateTransportRequestForm() {
     register,
     handleSubmit,
     watch,
+    setValue,
     trigger,
     formState: { errors },
   } = useForm<FormData>({
@@ -73,6 +100,9 @@ function CreateTransportRequestForm() {
   });
 
   const formValues = watch();
+
+  // Route calculation and corridor metrics from Leaflet map
+  const [routeData, setRouteData] = useState<{ distanceKm: number; durationHours: number; mode: 'air' | 'road' } | null>(null);
 
   // Horse quantities mapping: horseId -> quantity
   const [horseQuantities, setHorseQuantities] = useState<Record<string, number>>({});
@@ -190,6 +220,11 @@ function CreateTransportRequestForm() {
       }
 
       const currentUser = getCurrentUser();
+      const routeNote = routeData
+        ? `[Lộ trình: ${routeData.mode === 'air' ? 'Đường Hàng Không' : 'Đường Bộ Liên Vận'}, ${routeData.distanceKm} km, ~${routeData.durationHours}h]`
+        : '';
+      const combinedReqs = [data.specialReqs, routeNote].filter(Boolean).join(' | ');
+
       const payload = {
         contactName: currentUser.fullName || currentUser.name || 'Current Customer',
         contactPhone: currentUser.phone || '0901234567',
@@ -198,7 +233,7 @@ function CreateTransportRequestForm() {
         originLocation: data.origin,
         destinationLocation: data.destination,
         requestedDate: new Date(data.departureDate).toISOString(),
-        specialRequirements: data.specialReqs,
+        specialRequirements: combinedReqs || undefined,
         horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
         // Fallback for single horse if array is not preferred by backend yet
         horseName: selectedHorsesData[0]?.name,
@@ -463,30 +498,18 @@ function CreateTransportRequestForm() {
                 </div>
               </div>
 
-              {/* Inline Route Summary */}
-              <div
-                style={{
-                  backgroundColor: '#eff6ff',
-                  border: '1px solid #dbeafe',
-                  borderRadius: '10px',
-                  padding: '14px 20px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '16px',
+              {/* Interactive Route & Border Checkpoints Map */}
+              <RoutePlanningMap
+                originText={formValues.origin}
+                destinationText={formValues.destination}
+                transportType={formValues.transportType}
+                onRouteCalculated={setRouteData}
+                onApplyPreset={(preset) => {
+                  setValue('origin', preset.origin, { shouldValidate: true });
+                  setValue('destination', preset.destination, { shouldValidate: true });
+                  setValue('transportType', preset.type, { shouldValidate: true });
                 }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  <span style={{ fontWeight: 700, color: 'var(--text-heading)', fontSize: '14px' }}>{formValues.origin || 'Origin'}</span>
-                  <div style={{ width: '80px', height: '1px', backgroundColor: '#93c5fd', position: 'relative' }}>
-                    <Plane size={14} color="#2563eb" style={{ position: 'absolute', top: '-7px', left: '33px' }} />
-                  </div>
-                  <span style={{ fontWeight: 700, color: 'var(--text-heading)', fontSize: '14px' }}>{formValues.destination || 'Destination'}</span>
-                </div>
-                <span style={{ fontSize: '12px', color: '#1e40af', fontWeight: 600, backgroundColor: '#ffffff', padding: '4px 10px', borderRadius: '6px' }}>
-                  Est. Distance: 1,100 km • Est. Time: 12 hrs
-                </span>
-              </div>
+              />
 
               {/* Row 3: Dates & Horses */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
@@ -856,6 +879,61 @@ function CreateTransportRequestForm() {
                   <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>{formValues.departureDate}</div>
                 </div>
               </div>
+
+              {/* Route & Customs Logistics Summary */}
+              {routeData && (
+                <div
+                  style={{
+                    backgroundColor: '#eff6ff',
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid #dbeafe',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '14px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '8px',
+                        backgroundColor: '#dbeafe',
+                        color: '#1d4ed8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Navigation size={18} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#1e40af' }}>
+                        Lộ trình: {routeData.mode === 'air' ? 'Đường Hàng Không (Air Freight Corridor)' : 'Đường Bộ Liên Vận (Overland Road)'}
+                      </div>
+                      <div style={{ fontSize: '12.5px', color: '#475569' }}>
+                        Quãng đường: <strong style={{ color: '#0f172a' }}>{routeData.distanceKm.toLocaleString()} km</strong> • Thời gian ước tính: <strong style={{ color: '#0f172a' }}>~{routeData.durationHours} giờ</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      padding: '4px 10px',
+                      borderRadius: '20px',
+                      backgroundColor: '#dcfce7',
+                      color: '#15803d',
+                      border: '1px solid #bbf7d0',
+                    }}
+                  >
+                    ✓ Đã tối ưu kiểm dịch & trạm thú y
+                  </span>
+                </div>
+              )}
 
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
