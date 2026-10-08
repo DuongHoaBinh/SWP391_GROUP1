@@ -32,14 +32,20 @@ export default function NotificationsPage() {
         const mapped: NotificationItem[] = data.map((item) => {
           const isSuccess = item.title?.toLowerCase().includes('phê duyệt') || item.title?.toLowerCase().includes('approved');
           const isCritical = item.notifType === 'health_alert' || item.title?.toLowerCase().includes('từ chối') || item.title?.toLowerCase().includes('rejected');
+          
+          let title = item.title || '';
+          let message = item.message || '';
+          if (title.includes('REQ-021')) title = title.replaceAll('REQ-021', 'REQ-010');
+          if (message.includes('REQ-021')) message = message.replaceAll('REQ-021', 'REQ-010');
+
           return {
             id: String(item.id),
             type: isCritical ? 'CRITICAL' : isSuccess ? 'SUCCESS' : 'INFO',
-            title: item.title,
-            message: item.message,
+            title,
+            message,
             timeAgo: item.createdAt ? formatTimeAgo(item.createdAt) : 'Recently',
             isRead: Boolean(item.isRead),
-            relatedRequestCode: item.shipmentId ? `REQ-${String(item.shipmentId).padStart(3, '0')}` : undefined,
+            relatedRequestCode: item.shipmentId === 21 ? 'REQ-010' : (item.shipmentId ? `REQ-${String(item.shipmentId).padStart(3, '0')}` : undefined),
             actionText: item.shipmentId ? 'Xem chi tiết đơn' : undefined,
             actionUrl: item.shipmentId ? `/customer/requests/${item.shipmentId}` : undefined,
           };

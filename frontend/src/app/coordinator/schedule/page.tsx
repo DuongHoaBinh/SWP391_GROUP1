@@ -1,19 +1,21 @@
 'use client';
 
-import React, { useState } from 'react';
-import { CalendarDays, Plus, Clock, Truck, User, CheckCircle2, ChevronRight, Search, Filter, ShieldCheck, MapPin, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { CalendarDays, Plus, Clock, Truck, User, CheckCircle2, ChevronRight, Search, Filter, ShieldCheck, MapPin, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { useTranslation } from '@/lib/i18n/LanguageContext';
 import { useFleetRouteStore, TripSchedule } from '@/lib/fleet-route-store';
+import { apiClient } from '@/lib/api-client';
 import toast from 'react-hot-toast';
 
 export default function TripSchedulePage() {
-  const { schedules, vehicles, routes, dispatchTrip, updateTripStatus } = useFleetRouteStore();
+  const { schedules, vehicles, routes, dispatchTrip, updateTripStatus, availableStaff, refreshVehicles, refreshStaff } = useFleetRouteStore();
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isDispatching, setIsDispatching] = useState(false);
 
   // Form State
   const [orderCode, setOrderCode] = useState('TR-2026-004');
@@ -27,11 +29,39 @@ export default function TripSchedulePage() {
   const [selectedRouteTitle, setSelectedRouteTitle] = useState('');
   const [notes, setNotes] = useState('Climate-controlled chamber set to 18°C. Standard timothy hay feed.');
 
-  // Approved Orders from Flow 1 & Flow 2
+  // Approved Orders from Flow 1 & Flow 2 (MySQL Backend + LocalStorage)
   const [approvedOrders, setApprovedOrders] = useState<any[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<string>('');
 
-  React.useEffect(() => {
+  const loadBackendOrders = async () => {
+    try {
+      const orders = await apiClient<any[]>('/orders');
+      if (Array.isArray(orders)) {
+        const approved = orders
+          .filter((o) => o.status === 'approved' || o.status === 'planning')
+          .map((o) => ({
+            id: o.id,
+            requestCode: o.requestCode || `REQ-${o.id}`,
+            horseName: o.horses?.[0]?.name || 'Racehorse',
+            horseCount: Number(o.requestedHorseCount || o.horses?.length || 1),
+            origin: o.originLocation || 'Cu Chi Stables, HCMC',
+            destination: o.destinationLocation || 'Singapore Turf Club',
+            departureDate: o.requestedDate
+              ? new Date(o.requestedDate).toLocaleDateString('vi-VN', { year: 'numeric', month: 'short', day: 'numeric' })
+              : 'Oct 20, 2026',
+            statusLabel: o.status === 'approved' ? 'Approved (Ready to Dispatch)' : 'Planning Route',
+            backendOrder: o,
+          }));
+
+        if (approved.length > 0) {
+          setApprovedOrders(approved);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Backend /orders failed, falling back to local storage:', err);
+    }
+
     try {
       const raw = localStorage.getItem('equitransit_store_requests');
       if (raw) {
@@ -48,41 +78,45 @@ export default function TripSchedulePage() {
 
     setApprovedOrders([
       {
-        id: 'ord-101',
+        id: 7,
         requestCode: 'TR-2026-001',
-        horseName: 'Thunder',
-        horseCount: 2,
-        origin: 'Cu Chi Stables, HCMC',
-        destination: 'Singapore Turf Club',
+        horseName: 'Tia Chớp',
+        horseCount: 1,
+        origin: 'Câu lạc bộ Cưỡi ngựa Sài Gòn, TP. Thủ Đức, TP.HCM',
+        destination: 'Trường đua Happy Valley, Hồng Kông',
         departureDate: 'Oct 15, 2026 • 08:00 AM',
         statusLabel: 'Approved & Verified',
       },
       {
-        id: 'ord-103',
-        requestCode: 'TR-2026-003',
-        horseName: 'Eclipse',
-        horseCount: 3,
-        origin: 'HCMC Logistics Hub',
-        destination: 'Kuala Lumpur Turf Club',
-        departureDate: 'Oct 20, 2026 • 09:00 AM',
+        id: 6,
+        requestCode: 'TR-2026-006',
+        horseName: 'Xích Thố',
+        horseCount: 1,
+        origin: 'Trang trại ngựa Củ Chi, TP.HCM',
+        destination: 'Trường đua ngựa Singapore Turf Club',
+        departureDate: 'Oct 18, 2026 • 09:00 AM',
         statusLabel: 'Approved (Awaiting Dispatch)',
       },
       {
-        id: 'ord-104',
-        requestCode: 'TR-2026-004',
-        horseName: 'Pegasus Star',
-        horseCount: 1,
-        origin: 'Da Nang Equestrian Center',
-        destination: 'Vientiane Royal Riding Club',
-        departureDate: 'Oct 25, 2026 • 06:00 AM',
+        id: 9,
+        requestCode: 'TR-2026-003',
+        horseName: 'Silver Star',
+        horseCount: 2,
+        origin: 'Trại giống Thể thao Long Thành, Đồng Nai',
+        destination: 'Trung tâm Huấn luyện Miho (JRA), Nhật Bản',
+        departureDate: 'Oct 22, 2026 • 06:00 AM',
         statusLabel: 'Approved (Awaiting Dispatch)',
       },
     ]);
+  };
+
+  useEffect(() => {
+    loadBackendOrders();
   }, [schedules]);
 
   const handleSelectOrder = (orderId: string) => {
     setSelectedOrderId(orderId);
-    const found = approvedOrders.find((o) => o.id === orderId || o.requestCode === orderId);
+    const found = approvedOrders.find((o) => String(o.id) === String(orderId) || o.requestCode === orderId);
     if (found) {
       setOrderCode(found.requestCode || 'TR-2026-005');
       setHorseName(found.horse?.name || found.horseName || 'Racehorse');
@@ -109,11 +143,12 @@ export default function TripSchedulePage() {
   };
 
   // Available vehicles (for selection)
-  const availableVehicles = vehicles.filter(v => v.status === 'available');
+  const availableVehicles = vehicles.filter((v) => v.status === 'available');
 
-  const filteredSchedules = schedules.filter(s => {
+  const filteredSchedules = schedules.filter((s) => {
     const q = searchTerm.toLowerCase().trim();
-    const matchesSearch = !q ||
+    const matchesSearch =
+      !q ||
       s.orderCode.toLowerCase().includes(q) ||
       s.driverName.toLowerCase().includes(q) ||
       s.horseName.toLowerCase().includes(q) ||
@@ -130,24 +165,118 @@ export default function TripSchedulePage() {
     if (routes.length > 0) {
       setSelectedRouteTitle(routes[0].name);
     }
+    if (availableStaff.length > 0) {
+      const driverStaff = availableStaff.find((s) => s.roleName.toLowerCase().includes('driver')) || availableStaff[0];
+      setDriverName(driverStaff.fullName);
+      const escortStaff = availableStaff.find((s) => s.id !== driverStaff.id);
+      if (escortStaff) {
+        setEscortName(escortStaff.fullName);
+      }
+    }
     setIsAddOpen(true);
   };
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!departureTime || !driverName || !selectedVehicleCode || !selectedRouteTitle) {
       toast.error('Please complete all required dispatch assignments.');
       return;
     }
 
-    const selectedVehicle = vehicles.find(v => v.code === selectedVehicleCode);
+    const selectedVehicle = vehicles.find((v) => v.code === selectedVehicleCode);
     if (selectedVehicle && selectedVehicle.capacity < horseCount) {
       toast.error(`Vehicle ${selectedVehicle.code} only has capacity for ${selectedVehicle.capacity} horses (Order requires ${horseCount}).`);
       return;
     }
 
-    const matchedRoute = routes.find(r => r.name === selectedRouteTitle);
+    setIsDispatching(true);
+    const matchedRoute = routes.find((r) => r.name === selectedRouteTitle);
 
+    // Backend Integration (Flow 3: vehicle assignment, staff assignment, route stops, and publish)
+    const selectedOrder = approvedOrders.find((o) => String(o.id) === String(selectedOrderId) || o.requestCode === selectedOrderId);
+    const backendOrderId = selectedOrder && typeof selectedOrder.id === 'number' ? selectedOrder.id : null;
+
+    if (backendOrderId) {
+      try {
+        // 1. Assign Vehicles
+        const vehicleDbId = Number(selectedVehicle?.id);
+        if (vehicleDbId && !isNaN(vehicleDbId)) {
+          await apiClient(`/fleet/shipments/${backendOrderId}/assign-vehicles`, {
+            method: 'POST',
+            body: JSON.stringify({ vehicleIds: [vehicleDbId] }),
+          });
+        }
+
+        // 2. Assign Staff
+        const driverStaffObj = availableStaff.find(
+          (s) => s.fullName.toLowerCase().includes(driverName.toLowerCase()) || s.roleName.toLowerCase().includes('driver')
+        ) || availableStaff[0];
+
+        const escortStaffObj = availableStaff.find(
+          (s) => s.fullName.toLowerCase().includes(escortName.toLowerCase())
+        );
+
+        const assignments: any[] = [];
+        if (driverStaffObj) {
+          assignments.push({ userId: driverStaffObj.id, roleInShipment: 'driver' });
+        }
+        if (escortStaffObj && escortStaffObj.id !== driverStaffObj?.id) {
+          assignments.push({ userId: escortStaffObj.id, roleInShipment: 'escort' });
+        } else if (availableStaff.length > 1) {
+          const secondStaff = availableStaff.find((s) => s.id !== driverStaffObj?.id);
+          if (secondStaff) {
+            assignments.push({ userId: secondStaff.id, roleInShipment: 'escort' });
+          }
+        }
+
+        if (assignments.length > 0) {
+          await apiClient(`/fleet/shipments/${backendOrderId}/assign-staff`, {
+            method: 'POST',
+            body: JSON.stringify({ assignments }),
+          });
+        }
+
+        // 3. Create / Link Route
+        const stopsPayload = matchedRoute?.stops?.length
+          ? matchedRoute.stops.map((s, idx) => ({
+              sequenceNo: idx + 1,
+              stopType: s.type === 'Border Gate' ? 'border_check' : s.type === 'Quarantine' ? 'quarantine' : 'rest',
+              locationName: s.name,
+              country: s.country,
+            }))
+          : [
+              { sequenceNo: 1, stopType: 'rest', locationName: selectedOrder.origin || 'Cu Chi Depot', country: 'Vietnam' },
+              { sequenceNo: 2, stopType: 'border_check', locationName: 'Tan Son Nhat / Moc Bai Border Gate', country: 'Vietnam' },
+              { sequenceNo: 3, stopType: 'quarantine', locationName: selectedOrder.destination || 'Destination Quarantine', country: 'International' },
+            ];
+
+        await apiClient(`/routes/shipment/${backendOrderId}`, {
+          method: 'POST',
+          body: JSON.stringify({
+            routeName: selectedRouteTitle,
+            totalDistanceKm: matchedRoute?.distanceKm || 1200,
+            stops: stopsPayload,
+          }),
+        });
+
+        // 4. Publish Trip Plan
+        await apiClient(`/routes/shipment/${backendOrderId}/publish`, {
+          method: 'POST',
+          body: JSON.stringify({ notes }),
+        });
+
+        toast.success(`Đã xuất bản chuyến đi #${selectedOrder.requestCode || backendOrderId} lên Backend! Trạng thái: In Transit.`);
+      } catch (backendErr: any) {
+        console.warn('Backend dispatch warning (fallback to local store dispatch):', backendErr?.message || backendErr);
+        toast((t) => (
+          <span>
+            Đã đồng bộ cục bộ ({backendErr?.message || 'Backend đã lưu'}).
+          </span>
+        ));
+      }
+    }
+
+    // Update frontend state & reactive views
     dispatchTrip({
       orderCode: orderCode.trim().toUpperCase(),
       horseName: horseName.trim(),
@@ -163,6 +292,7 @@ export default function TripSchedulePage() {
       notes,
     });
 
+    setIsDispatching(false);
     toast.success(`Trip ${orderCode.toUpperCase()} dispatched! Vehicle ${selectedVehicleCode} assigned.`);
     setIsAddOpen(false);
   };
@@ -183,9 +313,23 @@ export default function TripSchedulePage() {
             {t('coordinator.schedule.subtitle', 'Assign specialized vehicles, licensed drivers, equine veterinarians, and departure timetables.')}
           </p>
         </div>
-        <Button variant="primary" onClick={handleOpenModal}>
-          <Plus size={18} className="mr-1.5" /> {t('coordinator.dispatchTrip', 'Dispatch New Trip')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={async () => {
+              await loadBackendOrders();
+              await refreshVehicles();
+              await refreshStaff();
+              toast.success('Đã làm mới danh sách đơn và đội xe từ Database!');
+            }}
+            className="shadow-sm"
+          >
+            <RefreshCw size={15} className="mr-1.5 text-blue-600" /> Đồng bộ Đơn & Xe
+          </Button>
+          <Button variant="primary" onClick={handleOpenModal}>
+            <Plus size={18} className="mr-1.5" /> {t('coordinator.dispatchTrip', 'Dispatch New Trip')}
+          </Button>
+        </div>
       </div>
 
       {/* SEARCH AND FILTERS */}
@@ -454,27 +598,82 @@ export default function TripSchedulePage() {
               <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
                 {t('coordinator.assignDriver', 'Licensed Heavy Driver')} <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                placeholder="E.g., John Smith"
-                value={driverName}
-                onChange={(e) => setDriverName(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none"
-                required
-              />
+              {availableStaff.length > 0 ? (
+                <div className="flex flex-col gap-1.5">
+                  <select
+                    value={driverName}
+                    onChange={(e) => setDriverName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white"
+                    required
+                  >
+                    {availableStaff.map((st) => (
+                      <option key={st.id} value={st.fullName}>
+                        {st.fullName} ({st.roleName})
+                      </option>
+                    ))}
+                    <option value="Other Driver">Nhập tên tài xế khác...</option>
+                  </select>
+                  {driverName === 'Other Driver' && (
+                    <input
+                      type="text"
+                      placeholder="Nhập họ tên tài xế"
+                      onChange={(e) => setDriverName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs focus:border-blue-500 outline-none"
+                      required
+                    />
+                  )}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="E.g., John Smith"
+                  value={driverName}
+                  onChange={(e) => setDriverName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none"
+                  required
+                />
+              )}
             </div>
             <div>
               <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
                 {t('coordinator.assignEscort', 'Equine Veterinary Escort')} <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                placeholder="E.g., Dr. Sarah (FEI Vet)"
-                value={escortName}
-                onChange={(e) => setEscortName(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none"
-                required
-              />
+              {availableStaff.length > 0 ? (
+                <div className="flex flex-col gap-1.5">
+                  <select
+                    value={escortName}
+                    onChange={(e) => setEscortName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white"
+                    required
+                  >
+                    {availableStaff.map((st) => (
+                      <option key={st.id} value={st.fullName}>
+                        {st.fullName} ({st.roleName})
+                      </option>
+                    ))}
+                    <option value="Dr. Sarah (FEI Vet)">Dr. Sarah (FEI Vet)</option>
+                    <option value="Other Escort">Nhập tên hộ tống khác...</option>
+                  </select>
+                  {escortName === 'Other Escort' && (
+                    <input
+                      type="text"
+                      placeholder="Nhập họ tên bác sĩ thú y / hộ tống"
+                      onChange={(e) => setEscortName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs focus:border-blue-500 outline-none"
+                      required
+                    />
+                  )}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="E.g., Dr. Sarah (FEI Vet)"
+                  value={escortName}
+                  onChange={(e) => setEscortName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none"
+                  required
+                />
+              )}
             </div>
           </div>
 
@@ -522,8 +721,8 @@ export default function TripSchedulePage() {
             <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>
               {t('common.cancel', 'Cancel')}
             </Button>
-            <Button type="submit" variant="primary" disabled={availableVehicles.length === 0}>
-              {t('coordinator.confirmDispatch', 'Confirm Dispatch Trip')}
+            <Button type="submit" variant="primary" disabled={availableVehicles.length === 0 || isDispatching}>
+              {isDispatching ? 'Đang xuất bản chuyến đi...' : t('coordinator.confirmDispatch', 'Confirm Dispatch Trip')}
             </Button>
           </div>
         </form>

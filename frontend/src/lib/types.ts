@@ -170,6 +170,10 @@ export interface TransportRequest {
 
 export interface DocumentItem {
   id: string;
+  numericId?: number;
+  orderId?: number;
+  horseId?: number;
+  regulationId?: number;
   requestCode: string;
   horseName: string;
   title: string;

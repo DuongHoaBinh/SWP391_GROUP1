@@ -452,6 +452,7 @@ export default function SpecialistDashboardPage() {
           documentId={selectedDoc.id}
           horseName={selectedDoc.horseName}
           docTitle={selectedDoc.type}
+          fileUrl={selectedDoc.fileUrl}
           onSuccess={handleReviewSuccess}
         />
       )}

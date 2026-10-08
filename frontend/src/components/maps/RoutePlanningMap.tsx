@@ -93,7 +93,10 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
     }
   }, [mode, originText, destinationText, transportType, totalDistanceKm, estimatedHours]);
 
-  // Leaflet initialization
+  const leafletRef = useRef<any>(null);
+  const tileLayerRef = useRef<any>(null);
+
+  // Leaflet initialization - ONCE on mount
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -103,10 +106,16 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
       const L = (await import('leaflet')).default;
 
       if (!isMounted || !mapContainerRef.current) return;
+      leafletRef.current = L;
 
       // Clean up previous instance
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
+        try {
+          mapInstanceRef.current.stop();
+          mapInstanceRef.current.remove();
+        } catch {
+          // ignore
+        }
         mapInstanceRef.current = null;
       }
 
@@ -126,16 +135,17 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
           : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}';
 
-      L.tileLayer(tileUrl, {
+      const tileLayer = L.tileLayer(tileUrl, {
         maxZoom: 19,
         attribution: 'Esri, HERE, Garmin, METI/NASA, USGS',
       }).addTo(map);
+      tileLayerRef.current = tileLayer;
 
       const layersGroup = L.layerGroup().addTo(map);
       layersGroupRef.current = layersGroup;
       mapInstanceRef.current = map;
 
-      // Render markers & routes
+      // Initial render
       renderRoute(L, map, layersGroup);
     };
 
@@ -144,11 +154,32 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
     return () => {
       isMounted = false;
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
+        try {
+          mapInstanceRef.current.stop();
+          mapInstanceRef.current.remove();
+        } catch {
+          // ignore
+        }
         mapInstanceRef.current = null;
       }
     };
-  }, [mode, mapStyle, originText, destinationText]);
+  }, []);
+
+  // Update tile layer url when mapStyle changes
+  useEffect(() => {
+    if (!tileLayerRef.current) return;
+    const tileUrl =
+      mapStyle === 'satellite'
+        ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+        : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}';
+    tileLayerRef.current.setUrl(tileUrl);
+  }, [mapStyle]);
+
+  // Update route layers smoothly without destroying the map
+  useEffect(() => {
+    if (!mapInstanceRef.current || !layersGroupRef.current || !leafletRef.current) return;
+    renderRoute(leafletRef.current, mapInstanceRef.current, layersGroupRef.current);
+  }, [waypoints, mode]);
 
   const renderRoute = (L: any, map: any, group: any) => {
     group.clearLayers();
@@ -276,8 +307,12 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
       }).addTo(group);
     }
 
-    if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+    if (bounds.isValid() && map) {
+      try {
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12, animate: false });
+      } catch {
+        // ignore
+      }
     }
   };
 

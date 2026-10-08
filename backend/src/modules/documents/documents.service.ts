@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { DocumentsStore } from './documents.store';
 import { CreateRegulationDto } from './dto/create-regulation.dto';
+import { ApplyRegulationTemplateDto } from './dto/apply-regulation-template.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { RecordAuthorityApprovalDto } from './dto/record-authority-approval.dto';
@@ -15,11 +16,13 @@ import {
   HorseComplianceItem,
   OrderComplianceChecklist,
   Regulation,
+  RegulationTemplatePreset,
   TransportDocument,
 } from './documents.types';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
+import { REGULATION_PRESET_TEMPLATES } from './constants/regulation-presets.constant';
 
 @Injectable()
 export class DocumentsService {
@@ -31,6 +34,54 @@ export class DocumentsService {
   // --- Regulations ---
   async getRegulations(countryFilter?: string): Promise<Regulation[]> {
     return this.documentsStore.findRegulations(countryFilter);
+  }
+
+  getPresetTemplates(): RegulationTemplatePreset[] {
+    return REGULATION_PRESET_TEMPLATES;
+  }
+
+  async applyPresetTemplate(
+    user: AuthenticatedUser,
+    dto: ApplyRegulationTemplateDto,
+  ): Promise<Regulation[]> {
+    const preset = REGULATION_PRESET_TEMPLATES.find((p) => p.key === dto.templateKey);
+    if (!preset) {
+      throw new BadRequestException(`Không tìm thấy mẫu quy định có mã "${dto.templateKey}"`);
+    }
+
+    const effectiveDate = dto.effectiveDate || new Date().toISOString().split('T')[0];
+    const country = dto.country.trim();
+
+    for (const item of preset.items) {
+      await this.documentsStore.upsertRegulation(
+        country,
+        item.documentType,
+        item.description,
+        effectiveDate,
+      );
+    }
+
+    return this.documentsStore.findRegulations(country);
+  }
+
+  async deleteRegulation(
+    user: AuthenticatedUser,
+    id: number,
+  ): Promise<{ success: boolean; message: string }> {
+    const reg = await this.documentsStore.findRegulationById(id);
+    if (!reg) {
+      throw new NotFoundException(`Quy định mã #${id} không tồn tại`);
+    }
+
+    const linkedCount = await this.documentsStore.countDocumentsByRegulationId(id);
+    if (linkedCount > 0) {
+      throw new BadRequestException(
+        `Không thể xóa quy định "${reg.description || reg.documentType}" vì đã có ${linkedCount} hồ sơ/chứng từ của khách hàng liên kết.`,
+      );
+    }
+
+    await this.documentsStore.deleteRegulation(id);
+    return { success: true, message: `Đã xóa quy định #${id} thành công` };
   }
 
   async createRegulation(user: AuthenticatedUser, dto: CreateRegulationDto): Promise<Regulation> {
@@ -117,6 +168,29 @@ export class DocumentsService {
     return this.documentsStore.findDocuments(filter);
   }
 
+  detectDestinationCountry(location: string): string {
+    const dest = (location || '').toLowerCase();
+    if (dest.includes('singapore')) return 'Singapore';
+    if (dest.includes('malaysia') || dest.includes('kuala lumpur') || dest.includes('penang')) return 'Malaysia';
+    if (dest.includes('vietnam') || dest.includes('việt nam') || dest.includes('hà nội') || dest.includes('hồ chí minh') || dest.includes('saigon') || dest.includes('đà nẵng')) return 'Vietnam';
+    if (dest.includes('thailand') || dest.includes('thái lan') || dest.includes('bangkok')) return 'Thailand';
+    if (dest.includes('hong kong') || dest.includes('hongkong') || dest.includes('hồng kông')) return 'Hong Kong';
+    if (dest.includes('japan') || dest.includes('nhật bản') || dest.includes('tokyo') || dest.includes('osaka')) return 'Japan';
+    if (dest.includes('uae') || dest.includes('dubai') || dest.includes('abu dhabi') || dest.includes('emirates')) return 'United Arab Emirates';
+    if (dest.includes('qatar') || dest.includes('doha')) return 'Qatar';
+    if (dest.includes('australia') || dest.includes('úc') || dest.includes('sydney') || dest.includes('melbourne')) return 'Australia';
+    if (dest.includes('france') || dest.includes('pháp') || dest.includes('paris')) return 'France';
+    if (dest.includes('germany') || dest.includes('đức') || dest.includes('berlin')) return 'Germany';
+    if (dest.includes('united kingdom') || dest.includes('uk') || dest.includes('anh') || dest.includes('london')) return 'United Kingdom';
+    if (dest.includes('usa') || dest.includes('united states') || dest.includes('mỹ') || dest.includes('hoa kỳ')) return 'United States';
+    if (dest.includes('korea') || dest.includes('hàn quốc') || dest.includes('seoul')) return 'South Korea';
+    if (dest.includes('cambodia') || dest.includes('campuchia') || dest.includes('phnom penh')) return 'Cambodia';
+    if (dest.includes('laos') || dest.includes('lào') || dest.includes('vientiane')) return 'Laos';
+    if (dest.includes('indonesia') || dest.includes('jakarta')) return 'Indonesia';
+    if (dest.includes('philippines') || dest.includes('manila')) return 'Philippines';
+    return location.trim() || 'Global Baseline';
+  }
+
   // --- Order Compliance Checklist ---
   async getOrderComplianceChecklist(
     user: AuthenticatedUser,
@@ -131,17 +205,21 @@ export class DocumentsService {
       throw new ForbiddenException('Bạn chỉ có thể xem hồ sơ đơn hàng của chính mình');
     }
 
-    // Xác định quốc gia đích từ destination_location
-    let destinationCountry = 'Singapore';
-    const dest = order.destination_location.toLowerCase();
-    if (dest.includes('singapore')) destinationCountry = 'Singapore';
-    else if (dest.includes('malaysia')) destinationCountry = 'Malaysia';
-    else if (dest.includes('vietnam') || dest.includes('việt nam')) destinationCountry = 'Vietnam';
-    else if (dest.includes('thailand') || dest.includes('thái lan')) destinationCountry = 'Thailand';
-    else if (dest.includes('hong kong') || dest.includes('hongkong')) destinationCountry = 'Hong Kong';
+    // Xác định quốc gia đích thông minh từ destination_location
+    const destinationCountry = this.detectDestinationCountry(order.destination_location);
 
     // Lấy tất cả các quy định bắt buộc cho quốc gia đích
-    const applicableRegulations = await this.documentsStore.findRegulations(destinationCountry);
+    let applicableRegulations = await this.documentsStore.findRegulations(destinationCountry);
+    let isUsingGlobalBaseline = false;
+    let complianceNotice: string | undefined = undefined;
+
+    // NẾU QUỐC GIA ĐÍCH CHƯA ĐƯỢC THIẾT LẬP QUY CHẾ RIÊNG:
+    // Tự động kích hoạt Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI (Global Baseline)
+    if (applicableRegulations.length === 0) {
+      applicableRegulations = await this.documentsStore.findRegulations('Global Baseline');
+      isUsingGlobalBaseline = true;
+      complianceNotice = `Quốc gia đến "${destinationCountry}" hiện chưa có danh mục quy chế riêng. Hệ thống tự động áp dụng Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI.`;
+    }
 
     // Lấy danh sách ngựa trong đơn
     const horsesInOrder = await this.documentsStore.findHorsesInOrder(orderId);
@@ -176,6 +254,7 @@ export class DocumentsService {
     const totalRequiredDocs = applicableRegulations.length * horsesInOrder.length;
     const compliantHorsesCount = horseItems.filter((item) => item.isCompliant).length;
     const isFullyCompliant = compliantHorsesCount === horsesInOrder.length && horsesInOrder.length > 0;
+    const requirementsSent = await this.documentsStore.hasRequirementsSent(orderId, order.customer_id);
 
     return {
       orderId,
@@ -186,7 +265,81 @@ export class DocumentsService {
       totalRequiredDocuments: totalRequiredDocs,
       approvedDocumentsCount: totalApprovedDocs,
       isFullyCompliant,
+      isUsingGlobalBaseline,
+      complianceNotice,
+      requirementsSent,
       horses: horseItems,
+    };
+  }
+
+  // --- Orders Awaiting Compliance Setup (Flow 1 -> Flow 2 Handover) ---
+  async getOrdersAwaitingCompliance(user: AuthenticatedUser): Promise<any[]> {
+    const shipments = await this.documentsStore.findApprovedShipmentsForSpecialist();
+    const result = [];
+
+    for (const s of shipments) {
+      try {
+        const checklist = await this.getOrderComplianceChecklist(user, s.orderId);
+        result.push({
+          ...s,
+          destinationCountry: checklist.destinationCountry,
+          totalRequiredDocs: checklist.totalRequiredDocuments,
+          approvedDocsCount: checklist.approvedDocumentsCount,
+          isFullyCompliant: checklist.isFullyCompliant,
+          isUsingGlobalBaseline: checklist.isUsingGlobalBaseline,
+          complianceNotice: checklist.complianceNotice,
+        });
+      } catch (err) {
+        result.push({
+          ...s,
+          destinationCountry: this.detectDestinationCountry(s.destinationLocation),
+          totalRequiredDocs: 0,
+          approvedDocsCount: 0,
+          isFullyCompliant: false,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  async sendComplianceRequirements(
+    user: AuthenticatedUser,
+    orderId: number,
+    dto?: { customNotes?: string },
+  ): Promise<{ success: boolean; message: string; checklist: OrderComplianceChecklist }> {
+    const order = await this.documentsStore.findOrderDetails(orderId);
+    if (!order) {
+      throw new NotFoundException(`Đơn vận chuyển #${orderId} không tồn tại`);
+    }
+
+    const checklist = await this.getOrderComplianceChecklist(user, orderId);
+    const destinationCountry = checklist.destinationCountry;
+
+    // Thu thập danh sách các chứng chỉ cần nộp
+    const reqTitles = new Set<string>();
+    for (const h of checklist.horses) {
+      for (const m of h.missingRegulations) {
+        reqTitles.add(m.description || m.documentType);
+      }
+    }
+    const docListText = Array.from(reqTitles).slice(0, 4).join(', ');
+
+    const code = order.request_code || `REQ-${String(orderId).padStart(3, '0')}`;
+    const customText = dto?.customNotes?.trim() ? `\nLưu ý từ chuyên viên: "${dto.customNotes.trim()}"` : '';
+
+    await this.notificationsService.createNotification(
+      order.customer_id,
+      `Yêu cầu nộp hồ sơ kiểm dịch & hải quan - Đơn ${code}`,
+      `Chuyên viên kiểm dịch đã thiết lập danh mục hồ sơ bắt buộc cho chuyến đi đến "${destinationCountry}". Vui lòng kiểm tra và tải lên các chứng từ: [${docListText || 'Hộ chiếu FEI, Giấy kiểm dịch, Tiêm phòng'}].${customText}`,
+      'document_missing',
+      orderId,
+    );
+
+    return {
+      success: true,
+      message: `Đã gửi thông báo yêu cầu hồ sơ kiểm dịch cho khách hàng thành công!`,
+      checklist,
     };
   }
 
@@ -321,19 +474,55 @@ export class DocumentsService {
 
     const customMsg = dto.customMessage ? `\nLời nhắn từ chuyên viên: "${dto.customMessage}"` : '';
 
+    const code = order.request_code || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customer_id,
-      'Yêu cầu bổ sung hồ sơ pháp lý / kiểm dịch',
-      `Đơn vận chuyển mã #${orderId} đến ${checklist.destinationCountry} hiện chưa đủ điều kiện xuất phát do còn thiếu các chứng từ bắt buộc:\n${missingItemsText}${customMsg}\nVui lòng tải lên các tài liệu này sớm nhất có thể.`,
+      `Yêu cầu bổ sung hồ sơ pháp lý / kiểm dịch - Đơn ${code}`,
+      `Đơn vận chuyển mã ${code} đến "${checklist.destinationCountry}" hiện chưa đủ điều kiện xuất phát do còn thiếu các chứng từ bắt buộc:\n${missingItemsText}${customMsg}\nVui lòng tải lên các tài liệu này sớm nhất có thể.`,
       'document_missing',
       orderId,
     );
 
     return {
       success: true,
-      message: `Đã gửi thông báo nhắc nhở bổ sung hồ sơ tới khách hàng cho đơn #${orderId}.`,
+      message: `Đã gửi thông báo nhắc nhở bổ sung hồ sơ tới khách hàng cho đơn ${code}.`,
       missingCount: checklist.totalRequiredDocuments - checklist.approvedDocumentsCount,
     };
+  }
+
+  async reuploadDocument(
+    user: AuthenticatedUser,
+    documentId: number,
+    file?: Express.Multer.File,
+    dto?: { fileUrl?: string; docNumber?: string; notes?: string },
+  ): Promise<TransportDocument> {
+    const doc = await this.documentsStore.findDocumentById(documentId);
+    if (!doc) {
+      throw new NotFoundException(`Tài liệu #${documentId} không tồn tại`);
+    }
+
+    if (user.role === UserRole.CUSTOMER && doc.uploadedBy !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ có thể cập nhật tài liệu do chính mình tải lên');
+    }
+
+    let finalUrl = dto?.fileUrl || doc.fileUrl;
+    if (file) {
+      finalUrl = `/uploads/documents/${file.filename}`;
+    }
+
+    if (!finalUrl || finalUrl.trim().length === 0) {
+      throw new BadRequestException('Vui lòng chọn file mới từ máy tính để cập nhật');
+    }
+
+    await this.documentsStore.updateDocumentFile(
+      documentId,
+      finalUrl,
+      dto?.docNumber,
+      dto?.notes ? `[Cập nhật lại]: ${dto.notes}` : null,
+    );
+
+    const updated = await this.documentsStore.findDocumentById(documentId);
+    return updated!;
   }
 
   async deleteDocument(

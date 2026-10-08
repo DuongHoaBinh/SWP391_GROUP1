@@ -1,6 +1,15 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { apiClient } from '@/lib/api-client';
+
+export interface AvailableStaff {
+  id: number;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  roleName: string;
+}
 
 export interface Vehicle {
   id: string;
@@ -105,7 +114,10 @@ interface FleetRouteStoreContextType {
   milestones: TripMilestone[];
   healthLogs: HorseHealthLog[];
   telemetries: Record<string, TripTelemetry>;
+  availableStaff: AvailableStaff[];
   isLoaded: boolean;
+  refreshVehicles: () => Promise<void>;
+  refreshStaff: () => Promise<void>;
   // Dispatch Actions (Flow 3)
   dispatchTrip: (data: {
     orderCode: string;
@@ -123,7 +135,7 @@ interface FleetRouteStoreContextType {
   }) => TripSchedule;
   updateTripStatus: (tripIdOrCode: string, status: TripSchedule['status']) => void;
   // Vehicle CRUD
-  addVehicle: (data: Omit<Vehicle, 'id'>) => Vehicle;
+  addVehicle: (data: Omit<Vehicle, 'id'>) => Promise<Vehicle> | Vehicle;
   updateVehicle: (id: string, data: Partial<Vehicle>) => void;
   deleteVehicle: (id: string) => void;
   // Route CRUD
@@ -472,9 +484,49 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
   const [milestones, setMilestones] = useState<TripMilestone[]>(INITIAL_MILESTONES);
   const [healthLogs, setHealthLogs] = useState<HorseHealthLog[]>(INITIAL_HEALTH_LOGS);
   const [telemetries, setTelemetries] = useState<Record<string, TripTelemetry>>(INITIAL_TELEMETRIES);
+  const [availableStaff, setAvailableStaff] = useState<AvailableStaff[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from LocalStorage
+  const refreshVehicles = useCallback(async () => {
+    try {
+      const backendVehicles = await apiClient<any[]>('/fleet/vehicles');
+      if (Array.isArray(backendVehicles) && backendVehicles.length > 0) {
+        const typeReverseMap: Record<string, Vehicle['type']> = {
+          truck: 'Climate-Controlled Truck',
+          aircraft_stall: 'Air Cargo Stall',
+          container: 'Specialized Container',
+        };
+        const mapped: Vehicle[] = backendVehicles.map((v) => ({
+          id: String(v.id),
+          code: v.plateOrCode,
+          type: typeReverseMap[v.vehicleType] || 'Climate-Controlled Truck',
+          capacity: Number(v.capacity) || 4,
+          status: v.status || 'available',
+          lastInspection: v.createdAt ? v.createdAt.split('T')[0] : '2026-10-01',
+          location: 'Fleet Operations Depot',
+        }));
+        setVehicles(mapped);
+        try {
+          localStorage.setItem(STORAGE_KEYS.VEHICLES, JSON.stringify(mapped));
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('Backend /fleet/vehicles call unreached, using local cache:', err);
+    }
+  }, []);
+
+  const refreshStaff = useCallback(async () => {
+    try {
+      const staffList = await apiClient<AvailableStaff[]>('/fleet/staff');
+      if (Array.isArray(staffList) && staffList.length > 0) {
+        setAvailableStaff(staffList);
+      }
+    } catch (err) {
+      console.warn('Backend /fleet/staff call unreached:', err);
+    }
+  }, []);
+
+  // Load from LocalStorage & Backend
   useEffect(() => {
     try {
       const savedVehicles = localStorage.getItem(STORAGE_KEYS.VEHICLES);
@@ -496,7 +548,11 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
       console.error('Error loading fleet store from localStorage:', e);
     }
     setIsLoaded(true);
-  }, []);
+
+    // Live sync with Backend
+    refreshVehicles();
+    refreshStaff();
+  }, [refreshVehicles, refreshStaff]);
 
   const saveVehicles = useCallback((items: Vehicle[]) => {
     setVehicles(items);
@@ -722,10 +778,34 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
 
   // Vehicle Management
   const addVehicle = useCallback(
-    (data: Omit<Vehicle, 'id'>) => {
+    async (data: Omit<Vehicle, 'id'>) => {
+      let createdId = `v-${Date.now()}`;
+      try {
+        const typeMapping: Record<string, string> = {
+          'Climate-Controlled Truck': 'truck',
+          'Air Cargo Stall': 'aircraft_stall',
+          'Specialized Container': 'container',
+        };
+        const backendType = typeMapping[data.type] || 'truck';
+        const res = await apiClient<any>('/fleet/vehicles', {
+          method: 'POST',
+          body: JSON.stringify({
+            vehicleType: backendType,
+            plateOrCode: data.code,
+            capacity: Number(data.capacity) || 4,
+            status: data.status || 'available',
+          }),
+        });
+        if (res?.id) {
+          createdId = String(res.id);
+        }
+      } catch (err) {
+        console.warn('Backend create vehicle failed, saved locally:', err);
+      }
+
       const newV: Vehicle = {
         ...data,
-        id: `v-${Date.now()}`,
+        id: createdId,
       };
       saveVehicles([newV, ...vehicles]);
       return newV;
@@ -1014,7 +1094,10 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
         milestones,
         healthLogs,
         telemetries,
+        availableStaff,
         isLoaded,
+        refreshVehicles,
+        refreshStaff,
         dispatchTrip,
         updateTripStatus,
         addVehicle,

@@ -35,6 +35,10 @@ interface DocumentUploadModalProps {
   onSuccess: (uploadedDoc: DocumentItem) => void;
   defaultOrderId?: number | string;
   defaultHorseId?: number | string;
+  defaultRegulationId?: number | string;
+  reuploadDocId?: number;
+  reuploadTitle?: string;
+  onSwitchToBatch?: () => void;
 }
 
 interface OrderOption {
@@ -55,12 +59,25 @@ interface HorseOption {
 
 function detectCountry(dest: string = ''): string {
   const d = dest.toLowerCase();
+  if (d.includes('australia') || d.includes('úc') || d.includes('sydney') || d.includes('melbourne') || d.includes('brisbane')) return 'Australia';
   if (d.includes('singapore')) return 'Singapore';
-  if (d.includes('nhật') || d.includes('japan') || d.includes('miho') || d.includes('tokyo')) return 'Japan';
-  if (d.includes('hồng kông') || d.includes('hong kong') || d.includes('happy valley')) return 'Hong Kong';
-  if (d.includes('malaysia') || d.includes('kuala lumpur')) return 'Malaysia';
+  if (d.includes('nhật') || d.includes('japan') || d.includes('miho') || d.includes('tokyo') || d.includes('osaka')) return 'Japan';
+  if (d.includes('hồng kông') || d.includes('hong kong') || d.includes('happy valley') || d.includes('sha tin')) return 'Hong Kong';
+  if (d.includes('malaysia') || d.includes('kuala lumpur') || d.includes('penang')) return 'Malaysia';
   if (d.includes('thái lan') || d.includes('thailand') || d.includes('bangkok')) return 'Thailand';
-  return 'Vietnam';
+  if (d.includes('uae') || d.includes('dubai') || d.includes('abu dhabi') || d.includes('emirates')) return 'United Arab Emirates';
+  if (d.includes('qatar') || d.includes('doha')) return 'Qatar';
+  if (d.includes('pháp') || d.includes('france') || d.includes('paris')) return 'France';
+  if (d.includes('đức') || d.includes('germany') || d.includes('berlin')) return 'Germany';
+  if (d.includes('anh') || d.includes('united kingdom') || d.includes('uk') || d.includes('london')) return 'United Kingdom';
+  if (d.includes('mỹ') || d.includes('hoa kỳ') || d.includes('usa') || d.includes('united states')) return 'United States';
+  if (d.includes('hàn quốc') || d.includes('korea') || d.includes('seoul')) return 'South Korea';
+  if (d.includes('campuchia') || d.includes('cambodia')) return 'Cambodia';
+  if (d.includes('lào') || d.includes('laos')) return 'Laos';
+  if (d.includes('indonesia') || d.includes('jakarta')) return 'Indonesia';
+  if (d.includes('philippines') || d.includes('manila')) return 'Philippines';
+  if (d.includes('việt nam') || d.includes('vietnam') || d.includes('hà nội') || d.includes('hồ chí minh') || d.includes('saigon')) return 'Vietnam';
+  return dest.trim() || 'Global Baseline';
 }
 
 export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
@@ -69,6 +86,10 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   onSuccess,
   defaultOrderId,
   defaultHorseId,
+  defaultRegulationId,
+  reuploadDocId,
+  reuploadTitle,
+  onSwitchToBatch,
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isDone, setIsDone] = useState(false);
@@ -171,25 +192,37 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           setValue('orderId', ordIdStr);
 
           // Find horse in this order
-          const matchedHorse = initialOrder.horses[0] || fetchedHorses[0];
-          if (matchedHorse) {
-            setValue('horseId', String(matchedHorse.id));
+          if (defaultHorseId) {
+            setValue('horseId', String(defaultHorseId));
+          } else {
+            const matchedHorse = initialOrder.horses[0] || fetchedHorses[0];
+            if (matchedHorse) {
+              setValue('horseId', String(matchedHorse.id));
+            }
           }
 
-          // Filter regulation matching destination
-          const matchingReg = fetchedRegs.find(
-            (r) => r.country.toLowerCase() === initialOrder?.destinationCountry.toLowerCase()
-          );
-          if (matchingReg) {
-            setValue('regulationId', String(matchingReg.id));
-          } else if (fetchedRegs.length > 0) {
-            setValue('regulationId', String(fetchedRegs[0].id));
+          if (defaultRegulationId) {
+            setValue('regulationId', String(defaultRegulationId));
+          } else {
+            // Filter regulation matching destination or fallback to Global Baseline
+            const matchingReg =
+              fetchedRegs.find(
+                (r) => r.country.toLowerCase() === initialOrder?.destinationCountry.toLowerCase()
+              ) ||
+              fetchedRegs.find((r) => r.country.toLowerCase() === 'global baseline');
+            if (matchingReg) {
+              setValue('regulationId', String(matchingReg.id));
+            } else if (fetchedRegs.length > 0) {
+              setValue('regulationId', String(fetchedRegs[0].id));
+            }
           }
         } else if (fetchedHorses.length > 0) {
           setSelectedOrderId('direct');
           setValue('orderId', 'direct');
-          setValue('horseId', String(fetchedHorses[0].id));
-          if (fetchedRegs.length > 0) {
+          setValue('horseId', defaultHorseId ? String(defaultHorseId) : String(fetchedHorses[0].id));
+          if (defaultRegulationId) {
+            setValue('regulationId', String(defaultRegulationId));
+          } else if (fetchedRegs.length > 0) {
             setValue('regulationId', String(fetchedRegs[0].id));
           }
         }
@@ -199,7 +232,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     };
 
     loadData();
-  }, [isOpen, defaultOrderId, defaultHorseId, setValue]);
+  }, [isOpen, defaultOrderId, defaultHorseId, defaultRegulationId, setValue]);
 
   // Handle Order Selection Change
   const handleOrderChange = (ordId: string) => {
@@ -217,9 +250,11 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     if (order && order.horses.length > 0) {
       setValue('horseId', String(order.horses[0].id));
 
-      // Auto update regulation for this country
+      // Auto update regulation for this country, fallback to Global Baseline
       const destCountry = order.destinationCountry.toLowerCase();
-      const matchingReg = regulations.find((r) => r.country.toLowerCase() === destCountry);
+      const matchingReg =
+        regulations.find((r) => r.country.toLowerCase() === destCountry) ||
+        regulations.find((r) => r.country.toLowerCase() === 'global baseline');
       if (matchingReg) {
         setValue('regulationId', String(matchingReg.id));
       }
@@ -232,12 +267,26 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   const currentOrder = orders.find((o) => String(o.id) === selectedOrderId);
   const targetCountry = currentOrder ? currentOrder.destinationCountry : 'All';
 
-  // Filtered regulations: show matching country first, or all if toggled
-  const filteredRegulations = showAllRegulations || selectedOrderId === 'direct'
-    ? regulations
-    : regulations.filter((r) => r.country.toLowerCase() === targetCountry.toLowerCase());
+  // Filtered regulations: show matching country, or Global Baseline fallback, or all if toggled
+  const countryRegulations = regulations.filter((r) => r.country.toLowerCase() === targetCountry.toLowerCase());
+  const baselineRegulations = regulations.filter((r) => r.country.toLowerCase() === 'global baseline');
 
-  const availableRegulations = filteredRegulations.length > 0 ? filteredRegulations : regulations;
+  const rawRegulations = showAllRegulations || selectedOrderId === 'direct'
+    ? regulations
+    : countryRegulations.length > 0
+    ? countryRegulations
+    : baselineRegulations.length > 0
+    ? baselineRegulations
+    : regulations;
+
+  // Make sure defaultRegulationId is always present in availableRegulations
+  const availableRegulations = [...rawRegulations];
+  if (defaultRegulationId) {
+    const targetReg = regulations.find((r) => String(r.id) === String(defaultRegulationId));
+    if (targetReg && !availableRegulations.some((r) => String(r.id) === String(defaultRegulationId))) {
+      availableRegulations.unshift(targetReg);
+    }
+  }
 
   const onSubmit = async (data: UploadFormData) => {
     setIsUploading(true);
@@ -280,10 +329,14 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         formData.append('docNumber', data.docNumber);
       }
 
-      // 1. Send to real Backend API
+      // 1. Send to real Backend API (either Re-upload or Upload new)
       let uploadedDocFromApi: any = null;
       try {
-        uploadedDocFromApi = await documentsApi.uploadDocument(formData);
+        if (reuploadDocId) {
+          uploadedDocFromApi = await documentsApi.reuploadDocument(Number(reuploadDocId), formData);
+        } else {
+          uploadedDocFromApi = await documentsApi.uploadDocument(formData);
+        }
       } catch (apiErr: any) {
         console.warn('API upload encountered error, handling:', apiErr);
         toast.error(apiErr.message || 'API upload error');
@@ -323,7 +376,11 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
 
       setIsUploading(false);
       setIsDone(true);
-      toast.success('Hồ sơ đã được tải lên và chuyển đến Chuyên viên kiểm dịch xét duyệt!');
+      toast.success(
+        reuploadDocId
+          ? 'Đã cập nhật lại hồ sơ thành công! Đang chờ chuyên viên duyệt lại.'
+          : 'Hồ sơ đã được tải lên và chuyển đến Chuyên viên kiểm dịch xét duyệt!'
+      );
       onSuccess(updated);
 
       setTimeout(() => {
@@ -341,11 +398,38 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Tải Lên Hồ Sơ Kiểm Dịch & Pháp Lý"
-      subtitle="Cung cấp các giấy chứng nhận kiểm dịch, hộ chiếu hoặc giấy phép vận chuyển."
+      title={reuploadDocId ? `Cập Nhật / Nộp Lại: ${reuploadTitle || 'Hồ Sơ'}` : 'Tải Lên Hồ Sơ Kiểm Dịch & Pháp Lý'}
+      subtitle={
+        reuploadDocId
+          ? 'Chọn tệp mới để cập nhật và gửi lại cho chuyên viên kiểm duyệt.'
+          : 'Cung cấp các giấy chứng nhận kiểm dịch, hộ chiếu hoặc giấy phép vận chuyển.'
+      }
       maxWidth="620px"
     >
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        {/* Quick Switch to Batch Upload Banner */}
+        {onSwitchToBatch && !reuploadDocId && (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/90 rounded-xl p-3 flex items-center justify-between gap-3 text-xs shadow-xs">
+            <div className="flex items-center gap-2 text-blue-900">
+              <span className="text-base">⚡</span>
+              <div>
+                <strong className="block text-blue-950 font-bold">Nộp cùng lúc trọn bộ hồ sơ?</strong>
+                <span className="text-blue-700">Chuyến đi này có thể đính kèm và nộp tất cả chứng từ trong 1 lần duy nhất.</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onSwitchToBatch();
+              }}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shrink-0 shadow-xs cursor-pointer text-xs"
+            >
+              Nộp cả 4 file
+            </button>
+          </div>
+        )}
+
         {/* Step 1: Select Transport Request */}
         <div>
           <label className="text-sm font-semibold text-slate-800 flex items-center justify-between mb-1.5">

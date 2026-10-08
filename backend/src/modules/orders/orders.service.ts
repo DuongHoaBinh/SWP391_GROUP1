@@ -29,6 +29,18 @@ export class OrdersService {
     if (!created) {
       throw new NotFoundException('Failed to retrieve newly created shipment');
     }
+
+    // 1. Tự động gửi thông báo đến Logistics Manager khi có đơn vận chuyển mới
+    const code = created.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+    const horseCount = dto.horses?.length || dto.requestedHorseCount || 1;
+    await this.notificationsService.notifyRole(
+      'Logistics Manager',
+      `Yêu cầu vận chuyển mới: ${code}`,
+      `Khách hàng (${user.email}) vừa gửi yêu cầu vận chuyển mới #${code} từ "${dto.originLocation}" đến "${dto.destinationLocation}" (${horseCount} ngựa). Vui lòng xem xét và duyệt đơn.`,
+      'status_update',
+      shipmentId,
+    );
+
     return created;
   }
 
@@ -78,12 +90,21 @@ export class OrdersService {
       dto.totalCost ?? 0,
     );
 
-    // Gửi thông báo đến customer
+    // 1. Gửi thông báo đến customer
     const code = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
       'Yêu cầu vận chuyển đã được phê duyệt',
-      `Yêu cầu vận chuyển mã ${code} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được Logistics Manager phê duyệt. Bộ phận điều phối sẽ chuẩn bị phương tiện và lộ trình tiếp theo.`,
+      `Yêu cầu vận chuyển mã ${code} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được Logistics Manager phê duyệt. Chuyên viên kiểm dịch đang rà soát quy định nước đến và sẽ gửi danh mục hồ sơ cần nộp cho quý khách.`,
+      'status_update',
+      orderId,
+    );
+
+    // 2. Chuyển giao sang Flow 2: Gửi thông báo đến Transport Specialist
+    await this.notificationsService.notifyRole(
+      'Transport Specialist',
+      `Đơn hàng mới #${code} cần thiết lập hồ sơ kiểm dịch`,
+      `Đơn vận chuyển mã ${code} đi "${order.destinationLocation}" vừa được phê duyệt. Vui lòng rà soát quy chế nước đến và gửi yêu cầu danh mục hồ sơ cho khách hàng.`,
       'status_update',
       orderId,
     );

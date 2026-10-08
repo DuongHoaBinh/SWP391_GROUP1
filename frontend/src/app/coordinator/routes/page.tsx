@@ -1,18 +1,33 @@
 'use client';
 
 import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { 
   Map, Plus, Search, Filter, Edit, Trash2, MapPin, 
-  Clock, Navigation, ShieldCheck, Flag, CheckCircle2, ChevronRight 
+  Clock, Navigation, ShieldCheck, Flag, CheckCircle2, ChevronRight, Eye, Layers 
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
 import { useFleetRouteStore, RouteItem } from '@/lib/fleet-route-store';
 
+const RoutePlanningMap = dynamic(
+  () => import('@/components/maps/RoutePlanningMap').then((mod) => mod.RoutePlanningMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-64 flex items-center justify-center bg-slate-50 text-slate-400 text-sm rounded-xl">
+        Đang tải bản đồ số hành lang quốc tế...
+      </div>
+    ),
+  }
+);
+
 export default function RoutePlanningPage() {
   const { routes, addRoute, updateRoute, deleteRoute } = useFleetRouteStore();
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeMapRoute, setActiveMapRoute] = useState<RouteItem | null>(null);
+  const [showMap, setShowMap] = useState<boolean>(true);
   
   // Modals
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -117,6 +132,43 @@ export default function RoutePlanningPage() {
         <span className="text-xs font-bold text-slate-500">{filteredRoutes.length} Active Corridors</span>
       </div>
 
+      {/* Interactive Map Visualizer */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Layers className="text-blue-600" size={18} />
+            <span className="font-bold text-sm text-slate-800">
+              {activeMapRoute
+                ? `Bản đồ lộ trình: ${activeMapRoute.name}`
+                : 'Mô phỏng Bản đồ Tuyến đường & Điểm Kiểm dịch Xuyên Quốc gia'}
+            </span>
+            {activeMapRoute && (
+              <span className="text-xs bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-full">
+                {activeMapRoute.distanceKm} km
+              </span>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowMap(!showMap)}
+            className="text-xs h-8"
+          >
+            {showMap ? 'Thu gọn bản đồ' : 'Mở bản đồ số'}
+          </Button>
+        </div>
+
+        {showMap && (
+          <div className="rounded-xl overflow-hidden border border-slate-200">
+            <RoutePlanningMap
+              originText={activeMapRoute?.origin || 'Trang trại Củ Chi, TP.HCM'}
+              destinationText={activeMapRoute?.destination || 'Singapore Turf Club, Kranji, Singapore'}
+              transportType="International"
+            />
+          </div>
+        )}
+      </div>
+
       {/* Routes Cards List */}
       <div className="flex flex-col gap-5">
         {filteredRoutes.map((route) => (
@@ -146,6 +198,18 @@ export default function RoutePlanningPage() {
               </div>
 
               <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    setActiveMapRoute(route);
+                    setShowMap(true);
+                    window.scrollTo({ top: 120, behavior: 'smooth' });
+                  }}
+                  className="text-blue-600 hover:bg-blue-50"
+                >
+                  <Eye size={14} className="mr-1 text-blue-600" /> Xem bản đồ
+                </Button>
                 <Button 
                   variant="outline" 
                   size="sm"
