@@ -19,6 +19,7 @@ import { extname } from 'path';
 import * as fs from 'fs';
 import { DocumentsService } from './documents.service';
 import { CreateRegulationDto } from './dto/create-regulation.dto';
+import { ApplyRegulationTemplateDto } from './dto/apply-regulation-template.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { RecordAuthorityApprovalDto } from './dto/record-authority-approval.dto';
@@ -45,6 +46,12 @@ export class DocumentsController {
     return this.documentsService.getRegulations(country);
   }
 
+  @Get('regulations/templates')
+  @ApiOperation({ summary: 'Lấy danh sách các bộ mẫu quy định khu vực chuẩn (WOAH Global, ASEAN, Đông Á, Trung Đông, v.v.)' })
+  getPresetTemplates() {
+    return this.documentsService.getPresetTemplates();
+  }
+
   @Post('regulations')
   @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
   @ApiOperation({ summary: 'Transport Specialist tạo mới quy định yêu cầu chứng từ cho quốc gia' })
@@ -53,6 +60,26 @@ export class DocumentsController {
     @Body() dto: CreateRegulationDto,
   ) {
     return this.documentsService.createRegulation(user, dto);
+  }
+
+  @Post('regulations/apply-template')
+  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Áp dụng nhanh bộ mẫu quy chế khu vực cho một quốc gia (1 click tạo đầy đủ chứng từ chuẩn)' })
+  applyPresetTemplate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ApplyRegulationTemplateDto,
+  ) {
+    return this.documentsService.applyPresetTemplate(user, dto);
+  }
+
+  @Delete('regulations/:id')
+  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Xóa một quy định kiểm dịch (nếu chưa có hồ sơ của khách hàng liên kết)' })
+  deleteRegulation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.documentsService.deleteRegulation(user, id);
   }
 
   // --- Documents Upload & Viewing ---
@@ -109,6 +136,40 @@ export class DocumentsController {
     return this.documentsService.uploadDocument(user, dto, file);
   }
 
+  @Post(':id/re-upload')
+  @Roles(UserRole.CUSTOMER, UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const uploadPath = './uploads/documents';
+          if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+          }
+          cb(null, uploadPath);
+        },
+        filename: (req, file, cb) => {
+          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+          const ext = extname(file.originalname);
+          cb(null, `${uniqueSuffix}${ext}`);
+        },
+      }),
+      limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Cập nhật / Nộp lại tệp mới cho tài liệu khi được yêu cầu sửa đổi hoặc bổ sung',
+  })
+  reuploadDocument(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { fileUrl?: string; docNumber?: string; notes?: string },
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.documentsService.reuploadDocument(user, id, file, dto);
+  }
+
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách chứng từ (khách hàng xem của mình, chuyên viên xem toàn bộ)' })
   @ApiQuery({ name: 'status', required: false, description: 'Lọc theo trạng thái (submitted, approved, rejected, expired)' })
@@ -123,6 +184,16 @@ export class DocumentsController {
       status,
       horseId ? Number(horseId) : undefined,
     );
+  }
+
+  // --- Compliance Orders List for Specialist ---
+  @Get('compliance-orders')
+  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN, UserRole.LOGISTICS_MANAGER)
+  @ApiOperation({
+    summary: 'Lấy danh sách các đơn hàng đã duyệt cần chuyên viên kiểm dịch rà soát và thiết lập hồ sơ',
+  })
+  getOrdersAwaitingCompliance(@CurrentUser() user: AuthenticatedUser) {
+    return this.documentsService.getOrdersAwaitingCompliance(user);
   }
 
   @Get(':id')
@@ -152,7 +223,8 @@ export class DocumentsController {
     return this.documentsService.getDocumentsByHorse(user, horseId);
   }
 
-  // --- Compliance Checklist for Orders ---
+  // --- Compliance Checklist & Setup for Orders ---
+
   @Get('order/:orderId/checklist')
   @ApiOperation({
     summary: 'Lấy bảng checklist tuân thủ hồ sơ kiểm dịch của toàn bộ các con ngựa trong một đơn hàng',
@@ -162,6 +234,19 @@ export class DocumentsController {
     @Param('orderId', ParseIntPipe) orderId: number,
   ) {
     return this.documentsService.getOrderComplianceChecklist(user, orderId);
+  }
+
+  @Post('order/:orderId/send-requirements')
+  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Chuyên viên kiểm dịch phát lệnh yêu cầu khách hàng nộp hồ sơ kiểm dịch cho đơn hàng',
+  })
+  sendComplianceRequirements(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() body: { customNotes?: string },
+  ) {
+    return this.documentsService.sendComplianceRequirements(user, orderId, body);
   }
 
   // --- Document Review ---

@@ -12,9 +12,10 @@ import toast from 'react-hot-toast';
 import { useFleetRouteStore, Vehicle } from '@/lib/fleet-route-store';
 
 export default function VehicleManagementPage() {
-  const { vehicles, addVehicle, updateVehicle, deleteVehicle } = useFleetRouteStore();
+  const { vehicles, addVehicle, updateVehicle, deleteVehicle, refreshVehicles } = useFleetRouteStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('ALL');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Modal states
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -31,23 +32,30 @@ export default function VehicleManagementPage() {
     location: '',
   });
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.code || !formData.location) {
       toast.error('Please enter vehicle plate/code and current location.');
       return;
     }
-    const created = addVehicle({
-      code: formData.code.trim().toUpperCase(),
-      type: formData.type as any || 'Climate-Controlled Truck',
-      capacity: Number(formData.capacity) || 4,
-      status: (formData.status as any) || 'available',
-      lastInspection: new Date().toISOString().split('T')[0],
-      location: formData.location.trim(),
-    });
-    toast.success(`Vehicle ${created.code} added successfully!`);
-    setIsAddOpen(false);
-    setFormData({ code: '', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', location: '' });
+    setIsSubmitting(true);
+    try {
+      const created = await addVehicle({
+        code: formData.code.trim().toUpperCase(),
+        type: formData.type as any || 'Climate-Controlled Truck',
+        capacity: Number(formData.capacity) || 4,
+        status: (formData.status as any) || 'available',
+        lastInspection: new Date().toISOString().split('T')[0],
+        location: formData.location.trim(),
+      });
+      toast.success(`Vehicle ${created.code} saved to Backend Database!`);
+      setIsAddOpen(false);
+      setFormData({ code: '', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', location: '' });
+    } catch {
+      toast.error('Could not save vehicle');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleEdit = (e: React.FormEvent) => {
@@ -88,16 +96,28 @@ export default function VehicleManagementPage() {
             Manage air-conditioned horse vans, air transport stalls, and international containers.
           </p>
         </div>
-        <Button 
-          variant="primary" 
-          onClick={() => {
-            setFormData({ code: '', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', location: '' });
-            setIsAddOpen(true);
-          }}
-          className="shadow-sm"
-        >
-          <Plus size={18} className="mr-1.5" /> Add New Vehicle
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={async () => {
+              await refreshVehicles();
+              toast.success('Đã làm mới dữ liệu phương tiện từ Database!');
+            }}
+            className="shadow-sm"
+          >
+            <ShieldCheck size={16} className="mr-1.5 text-emerald-600" /> Đồng bộ Database
+          </Button>
+          <Button 
+            variant="primary" 
+            onClick={() => {
+              setFormData({ code: '', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', location: '' });
+              setIsAddOpen(true);
+            }}
+            className="shadow-sm"
+          >
+            <Plus size={18} className="mr-1.5" /> Add New Vehicle
+          </Button>
+        </div>
       </div>
 
       {/* Metrics Banner */}

@@ -72,5 +72,22 @@ export interface OrderComplianceChecklist {
   totalRequiredDocuments: number;
   approvedDocumentsCount: number;
   isFullyCompliant: boolean;
+  isUsingGlobalBaseline?: boolean;
+  complianceNotice?: string;
+  requirementsSent?: boolean;
   horses: HorseComplianceItem[];
+}
+
+export interface RegulationTemplateItem {
+  documentType: string;
+  description: string;
+}
+
+export interface RegulationTemplatePreset {
+  key: string;
+  name: string;
+  region: string;
+  description: string;
+  recommendedCountries: string[];
+  items: RegulationTemplateItem[];
 }

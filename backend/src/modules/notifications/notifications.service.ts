@@ -35,4 +35,17 @@ export class NotificationsService {
     }
     return { success: true };
   }
+
+  async notifyRole(
+    roleName: string,
+    title: string,
+    message: string,
+    notifType: NotificationType = 'status_update',
+    shipmentId: number | null = null,
+  ): Promise<void> {
+    const userIds = await this.notificationsStore.findUserIdsByRole(roleName);
+    for (const uid of userIds) {
+      await this.createNotification(uid, title, message, notifType, shipmentId);
+    }
+  }
 }

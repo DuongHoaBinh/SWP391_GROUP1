@@ -234,9 +234,20 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
           });
 
           setPendingDocs((prev) => {
-            const existingIds = new Set(prev.map((p) => p.id));
-            const newOnes = mapped.filter((m) => !existingIds.has(m.id));
-            return [...newOnes, ...prev];
+            const mappedMap = new Map(mapped.map((m) => [m.id, m]));
+            const updatedExisting = prev.map((p) => {
+              const apiMatch = mappedMap.get(p.id);
+              if (apiMatch) {
+                mappedMap.delete(p.id);
+                return {
+                  ...p,
+                  ...apiMatch,
+                  fileUrl: apiMatch.fileUrl || p.fileUrl,
+                };
+              }
+              return p;
+            });
+            return [...Array.from(mappedMap.values()), ...updatedExisting];
           });
         }
       } catch (err) {

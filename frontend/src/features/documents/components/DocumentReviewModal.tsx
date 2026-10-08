@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { FileText, CheckCircle, XCircle, AlertCircle, Calendar } from 'lucide-react';
+import { FileText, CheckCircle, XCircle, AlertCircle, Calendar, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useDocumentStore } from '@/lib/document-store';
 import { documentsApi } from '../api/documents.api';
@@ -42,6 +42,7 @@ interface DocumentReviewModalProps {
   documentId: string;
   horseName: string;
   docTitle: string;
+  fileUrl?: string;
   onSuccess: (id: string, status: 'APPROVED' | 'REJECTED') => void;
 }
 
@@ -51,6 +52,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   documentId,
   horseName,
   docTitle,
+  fileUrl,
   onSuccess,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -116,23 +118,109 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
     }
   };
 
+  const backendBase = process.env.NEXT_PUBLIC_API_BASE_URL
+    ? process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/api$/, '')
+    : 'http://localhost:5000';
+
+  const fullFileUrl = fileUrl
+    ? fileUrl.startsWith('http')
+      ? fileUrl
+      : `${backendBase}${fileUrl.startsWith('/') ? '' : '/'}${fileUrl}`
+    : null;
+
+  const isPdf = fullFileUrl ? fullFileUrl.toLowerCase().endsWith('.pdf') : false;
+  const isImage = fullFileUrl ? /\.(jpg|jpeg|png|webp|gif)$/i.test(fullFileUrl) : false;
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title="Review Transport Document"
       subtitle={`Reviewing ${docTitle} for ${horseName}`}
-      maxWidth="700px"
+      maxWidth="860px"
     >
       <div className="flex flex-col md:flex-row gap-6">
-        {/* Left Side: Document Preview Mock */}
-        <div className="flex-1 bg-slate-50 border border-slate-200 rounded-xl flex flex-col items-center justify-center p-6 min-h-[300px]">
-          <FileText size={48} className="text-slate-400 mb-4" />
-          <h4 className="text-sm font-semibold text-slate-700">{docTitle}.pdf</h4>
-          <p className="text-xs text-slate-500 mt-1">2.4 MB • Uploaded 2 hours ago</p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={() => toast.success('Downloading preview...')}>
-            View Full Screen
-          </Button>
+        {/* Left Side: Real Document Preview */}
+        <div className="flex-1 bg-slate-50 border border-slate-200 rounded-xl flex flex-col p-4 min-h-[380px] justify-between">
+          <div className="w-full flex-1 flex flex-col items-center justify-center">
+            {fullFileUrl ? (
+              isPdf ? (
+                <div className="w-full h-full flex flex-col gap-2">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5 truncate max-w-[200px]">
+                      <FileText size={15} className="text-red-500 shrink-0" />
+                      {docTitle}.pdf
+                    </span>
+                    <a
+                      href={fullFileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                    >
+                      <ExternalLink size={13} /> Mở tab mới
+                    </a>
+                  </div>
+                  <iframe
+                    src={fullFileUrl}
+                    className="w-full h-[280px] rounded-lg border border-slate-200 bg-white shadow-inner"
+                    title={`Preview ${docTitle}`}
+                  />
+                </div>
+              ) : isImage ? (
+                <div className="w-full flex flex-col items-center gap-2">
+                  <img
+                    src={fullFileUrl}
+                    alt={docTitle}
+                    className="max-h-[280px] max-w-full rounded-lg object-contain border border-slate-200 bg-white"
+                  />
+                  <a
+                    href={fullFileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 mt-1"
+                  >
+                    <ExternalLink size={13} /> Mở ảnh gốc
+                  </a>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center p-6 text-center">
+                  <FileText size={48} className="text-blue-500 mb-3" />
+                  <h4 className="text-sm font-semibold text-slate-800">{docTitle}</h4>
+                  <p className="text-xs text-slate-500 mt-1 mb-4">Tệp tài liệu đã được tải lên máy chủ</p>
+                  <a
+                    href={fullFileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors"
+                  >
+                    <ExternalLink size={14} /> Mở xem tài liệu gốc
+                  </a>
+                </div>
+              )
+            ) : (
+              <div className="flex flex-col items-center justify-center p-6 text-center">
+                <FileText size={48} className="text-slate-400 mb-3" />
+                <h4 className="text-sm font-semibold text-slate-700">{docTitle}</h4>
+                <p className="text-xs text-slate-500 mt-1">Tài liệu mẫu hệ thống (chưa có tệp PDF thực tế được tải lên)</p>
+                <span className="inline-flex items-center gap-1 mt-3 px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 text-xs">
+                  <AlertCircle size={13} /> Tệp mẫu
+                </span>
+              </div>
+            )}
+          </div>
+
+          {fullFileUrl && (
+            <div className="pt-3 border-t border-slate-200 mt-2">
+              <a
+                href={fullFileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-lg border border-slate-300 shadow-sm transition-colors"
+              >
+                <ExternalLink size={14} className="text-blue-600" /> Xem tệp toàn màn hình (View Full Screen)
+              </a>
+            </div>
+          )}
         </div>
 
         {/* Right Side: Review Form */}

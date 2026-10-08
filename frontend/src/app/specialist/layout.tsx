@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
+  ClipboardCheck,
   Scale,
   FolderOpen,
   FileSignature,
@@ -62,6 +63,11 @@ export default function SpecialistLayout({
       icon: <LayoutDashboard size={18} />,
     },
     {
+      label: 'Compliance Orders',
+      href: '/specialist/compliance-orders',
+      icon: <ClipboardCheck size={18} />,
+    },
+    {
       label: 'Regulations',
       href: '/specialist/regulations',
       icon: <Scale size={18} />,
@@ -107,7 +113,7 @@ export default function SpecialistLayout({
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans overflow-x-hidden" style={{ overflowX: 'hidden' }}>
+    <div className="flex h-screen w-full bg-slate-50 font-sans overflow-hidden">
       {/* Logout confirmation modal */}
       <LogoutConfirmModal
         isOpen={showLogoutModal}
@@ -116,7 +122,7 @@ export default function SpecialistLayout({
       />
 
       {/* LEFT SIDEBAR (DESKTOP) */}
-      <aside className="hidden md:flex w-[260px] bg-slate-900 text-slate-400 flex-col h-screen sticky top-0 z-40 border-r border-white/5 shrink-0">
+      <aside className="hidden md:flex w-[260px] bg-slate-900 text-slate-400 flex-col h-full z-40 border-r border-white/5 shrink-0">
         {/* Logo */}
         <div className="h-[72px] flex items-center px-6 border-b border-white/5 shrink-0">
           <div className="w-[34px] h-[34px] rounded-lg bg-blue-600 text-white flex items-center justify-center font-extrabold text-[17px] mr-3 shadow-[0_0_15px_rgba(37,99,235,0.5)]">
@@ -346,9 +352,9 @@ export default function SpecialistLayout({
       )}
 
       {/* MAIN CONTENT AREA */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <main className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
         {/* TOP HEADER */}
-        <header className="h-[72px] bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-30 shrink-0">
+        <header className="h-[72px] bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 z-30">
           {/* Left: Mobile Menu Toggle & Title */}
           <div className="flex items-center gap-3">
             <button

@@ -50,6 +50,20 @@ export interface HorseComplianceItem {
   isCompliant: boolean;
 }
 
+export interface RegulationTemplateItem {
+  documentType: string;
+  description: string;
+}
+
+export interface RegulationTemplatePreset {
+  key: string;
+  name: string;
+  region: string;
+  description: string;
+  recommendedCountries: string[];
+  items: RegulationTemplateItem[];
+}
+
 export interface OrderComplianceChecklist {
   orderId: number;
   destinationLocation: string;
@@ -59,7 +73,30 @@ export interface OrderComplianceChecklist {
   totalRequiredDocuments: number;
   approvedDocumentsCount: number;
   isFullyCompliant: boolean;
+  requirementsSent?: boolean;
+  isUsingGlobalBaseline?: boolean;
+  complianceNotice?: string;
   horses: HorseComplianceItem[];
+}
+
+export interface ComplianceOrderSummary {
+  orderId: number;
+  requestCode: string;
+  customerId: number;
+  customerName: string;
+  customerEmail: string;
+  originLocation: string;
+  destinationLocation: string;
+  destinationCountry: string;
+  status: string;
+  createdAt: string;
+  horsesCount: number;
+  totalRequiredDocs: number;
+  approvedDocsCount: number;
+  isFullyCompliant: boolean;
+  requirementsSent: boolean;
+  isUsingGlobalBaseline?: boolean;
+  complianceNotice?: string;
 }
 
 export const documentsApi = {
@@ -67,6 +104,27 @@ export const documentsApi = {
   getRegulations: async (country?: string): Promise<RegulationItem[]> => {
     const query = country ? `?country=${encodeURIComponent(country)}` : '';
     return apiClient<RegulationItem[]>(`/documents/regulations${query}`);
+  },
+
+  getPresetTemplates: async (): Promise<RegulationTemplatePreset[]> => {
+    return apiClient<RegulationTemplatePreset[]>('/documents/regulations/templates');
+  },
+
+  applyPresetTemplate: async (data: {
+    country: string;
+    templateKey: string;
+    effectiveDate?: string;
+  }): Promise<RegulationItem[]> => {
+    return apiClient<RegulationItem[]>('/documents/regulations/apply-template', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteRegulation: async (id: number): Promise<{ success: boolean; message: string }> => {
+    return apiClient<{ success: boolean; message: string }>(`/documents/regulations/${id}`, {
+      method: 'DELETE',
+    });
   },
 
   createRegulation: async (data: {
@@ -104,6 +162,14 @@ export const documentsApi = {
   // Upload document with multipart/form-data
   uploadDocument: async (formData: FormData): Promise<ApiTransportDocument> => {
     return apiClient<ApiTransportDocument>('/documents/upload', {
+      method: 'POST',
+      body: formData,
+    });
+  },
+
+  // Re-upload / Update document file
+  reuploadDocument: async (id: number, formData: FormData): Promise<ApiTransportDocument> => {
+    return apiClient<ApiTransportDocument>(`/documents/${id}/re-upload`, {
       method: 'POST',
       body: formData,
     });
@@ -164,5 +230,23 @@ export const documentsApi = {
     return apiClient<{ success: boolean; message?: string }>(`/documents/${id}`, {
       method: 'DELETE',
     });
+  },
+
+  // Handover Flow 1 -> Flow 2: Orders awaiting compliance setup
+  getComplianceOrders: async (): Promise<ComplianceOrderSummary[]> => {
+    return apiClient<ComplianceOrderSummary[]>('/documents/compliance-orders');
+  },
+
+  sendComplianceRequirements: async (
+    orderId: number,
+    data?: { customNotes?: string }
+  ): Promise<{ success: boolean; message: string; checklist: OrderComplianceChecklist }> => {
+    return apiClient<{ success: boolean; message: string; checklist: OrderComplianceChecklist }>(
+      `/documents/order/${orderId}/send-requirements`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data || {}),
+      }
+    );
   },
 };

@@ -11,6 +11,8 @@ import { CreateRegulationDto } from './dto/create-regulation.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { RecordAuthorityApprovalDto } from './dto/record-authority-approval.dto';
 
+import { REGULATION_PRESET_TEMPLATES } from './constants/regulation-presets.constant';
+
 interface RegulationRow extends RowDataPacket {
   regulation_id: number;
   country: string;
@@ -66,6 +68,7 @@ interface OrderDestinationRow extends RowDataPacket {
   destination_location: string;
   origin_location: string;
   status: string;
+  request_code?: string;
 }
 
 @Injectable()
@@ -81,6 +84,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       password: process.env.DB_PASSWORD ?? '',
       connectionLimit: 10,
     });
+    await this.seedInitialRegulations();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -136,6 +140,69 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       [dto.country, dto.documentType, dto.description ?? null, effectiveDate],
     );
     return (result as { insertId: number }).insertId;
+  }
+
+  async upsertRegulation(
+    country: string,
+    documentType: string,
+    description: string,
+    effectiveDate?: string | null,
+  ): Promise<number> {
+    const [existing] = await this.pool.execute<RegulationRow[]>(
+      'SELECT regulation_id FROM regulation WHERE LOWER(country) = LOWER(?) AND LOWER(document_type) = LOWER(?) LIMIT 1',
+      [country, documentType],
+    );
+    const effDate = effectiveDate ? new Date(effectiveDate) : new Date();
+    if (existing.length > 0) {
+      const regId = existing[0].regulation_id;
+      await this.pool.execute(
+        'UPDATE regulation SET description = ?, effective_date = ? WHERE regulation_id = ?',
+        [description, effDate, regId],
+      );
+      return regId;
+    } else {
+      const [result] = await this.pool.execute(
+        'INSERT INTO regulation (country, document_type, description, effective_date) VALUES (?, ?, ?, ?)',
+        [country, documentType, description, effDate],
+      );
+      return (result as { insertId: number }).insertId;
+    }
+  }
+
+  async countDocumentsByRegulationId(regulationId: number): Promise<number> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT COUNT(*) as cnt FROM transport_document WHERE regulation_id = ?',
+      [regulationId],
+    );
+    return Number(rows[0]?.cnt ?? 0);
+  }
+
+  async deleteRegulation(regulationId: number): Promise<boolean> {
+    const [result] = await this.pool.execute(
+      'DELETE FROM regulation WHERE regulation_id = ?',
+      [regulationId],
+    );
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async seedInitialRegulations(): Promise<void> {
+    try {
+      for (const preset of REGULATION_PRESET_TEMPLATES) {
+        for (const country of preset.recommendedCountries) {
+          for (const item of preset.items) {
+            await this.upsertRegulation(
+              country,
+              item.documentType,
+              item.description,
+              '2026-01-01',
+            );
+          }
+        }
+      }
+    } catch (err) {
+      // Non-blocking log if DB schema is not ready yet
+      console.warn('[DocumentsStore] Warning while seeding initial regulations:', err);
+    }
   }
 
   // --- Transport Documents ---
@@ -373,7 +440,12 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
   // --- Order & Horse Context Helpers ---
   async findOrderDetails(orderId: number): Promise<OrderDestinationRow | undefined> {
     const [rows] = await this.pool.execute<OrderDestinationRow[]>(
-      'SELECT shipment_id, customer_id, destination_location, origin_location, status FROM shipment WHERE shipment_id = ? LIMIT 1',
+      `SELECT s.shipment_id, s.customer_id, s.destination_location, s.origin_location, s.status,
+              CONCAT('REQ-', LPAD(
+                (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+                3, '0'
+              )) as request_code
+       FROM shipment s WHERE s.shipment_id = ? LIMIT 1`,
       [orderId],
     );
     return rows[0];
@@ -388,5 +460,63 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       [orderId],
     );
     return rows;
+  }
+
+  async hasRequirementsSent(orderId: number, customerId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) as count FROM notification 
+       WHERE shipment_id = ? AND user_id = ? AND (notif_type = 'document_missing' OR title LIKE '%hồ sơ kiểm dịch%')`,
+      [orderId, customerId],
+    );
+    return Number(rows[0]?.count || 0) > 0;
+  }
+
+  async findApprovedShipmentsForSpecialist(): Promise<any[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT s.shipment_id, s.customer_id, u.full_name as customer_name, u.email as customer_email,
+              s.origin_location, s.destination_location, s.status, s.created_at,
+              CONCAT('REQ-', LPAD(
+                (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+                3, '0'
+              )) as request_code,
+              (SELECT COUNT(*) FROM shipment_horse sh WHERE sh.shipment_id = s.shipment_id) as horses_count,
+              (SELECT COUNT(*) FROM notification n WHERE n.shipment_id = s.shipment_id AND n.user_id = s.customer_id AND (n.notif_type = 'document_missing' OR n.title LIKE '%hồ sơ kiểm dịch%')) as req_sent_count
+       FROM shipment s
+       JOIN \`user\` u ON u.user_id = s.customer_id
+       WHERE s.status IN ('approved', 'in_transit', 'completed')
+       ORDER BY s.shipment_id DESC`,
+    );
+
+    return rows.map((r) => ({
+      orderId: r.shipment_id,
+      requestCode: r.request_code || `REQ-${String(r.shipment_id).padStart(3, '0')}`,
+      customerId: r.customer_id,
+      customerName: r.customer_name || 'Khách hàng',
+      customerEmail: r.customer_email || '',
+      originLocation: r.origin_location,
+      destinationLocation: r.destination_location,
+      status: r.status,
+      createdAt: new Date(r.created_at).toISOString(),
+      horsesCount: Number(r.horses_count || 1),
+      requirementsSent: Number(r.req_sent_count || 0) > 0,
+    }));
+  }
+
+  async updateDocumentFile(
+    documentId: number,
+    fileUrl: string,
+    docNumber?: string | null,
+    notes?: string | null,
+  ): Promise<void> {
+    await this.pool.execute(
+      `UPDATE transport_document
+       SET file_url = ?,
+           doc_number = COALESCE(?, doc_number),
+           status = 'submitted',
+           reviewer_notes = ?,
+           created_at = CURRENT_TIMESTAMP
+       WHERE document_id = ?`,
+      [fileUrl, docNumber ?? null, notes ?? null, documentId],
+    );
   }
 }

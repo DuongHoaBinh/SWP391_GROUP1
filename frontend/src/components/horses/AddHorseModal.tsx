@@ -23,7 +23,23 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
 
   const [name, setName] = useState('');
   const [breed, setBreed] = useState('Thoroughbred');
-  const [age, setAge] = useState(5);
+  const defaultDob = new Date(Date.now() - 5 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const [dateOfBirth, setDateOfBirth] = useState<string>(defaultDob);
+  const [age, setAge] = useState<number>(5);
+
+  const handleDobChange = (dobStr: string) => {
+    setDateOfBirth(dobStr);
+    if (!dobStr) return;
+    const birth = new Date(dobStr);
+    const today = new Date();
+    let calculated = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+      calculated--;
+    }
+    const finalAge = Math.max(0, calculated);
+    setAge(finalAge);
+  };
   const [gender, setGender] = useState<'Stallion' | 'Mare' | 'Gelding'>('Stallion');
   const [passportNumber, setPassportNumber] = useState('');
   const [microchipNumber, setMicrochipNumber] = useState('');
@@ -76,7 +92,8 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         body: JSON.stringify({
           name: trimmedName,
           breed,
-          age: Number(age) || 4,
+          age: Number(age) || 1,
+          dateOfBirth: dateOfBirth || undefined,
           quantity: 1,
           gender: gender === 'Stallion' ? 'male' : gender === 'Mare' ? 'female' : 'gelding',
           passportNo: passportNumber.trim() || undefined,
@@ -96,7 +113,8 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         id: backendHorseId,
         name: trimmedName,
         breed,
-        age: Number(age) || 4,
+        age: Number(age) || 1,
+        dateOfBirth: dateOfBirth || undefined,
         quantity: 1,
         gender,
         passportNumber: passportNumber.trim() || undefined,
@@ -106,7 +124,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         weight: weight.trim() || '480 kg',
         photoUrl: resolvedPhoto,
         avatarUrl: resolvedPhoto,
-      });
+      } as any);
 
       await refreshHorses();
 
@@ -275,18 +293,32 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
           </div>
         </div>
 
-        {/* Age and Gender */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+        {/* Date of Birth (Auto Calculate Age) and Gender */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '14px' }}>
           <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Age (years) <span style={{ color: '#dc2626' }}>*</span>
-            </label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)' }}>
+                Date of Birth (Ngày sinh) <span style={{ color: '#dc2626' }}>*</span>
+              </label>
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  color: '#2563eb',
+                  backgroundColor: '#eff6ff',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #bfdbfe',
+                }}
+              >
+                {age} tuổi ({age} yrs)
+              </span>
+            </div>
             <input
-              type="number"
-              min={1}
-              max={30}
-              value={age}
-              onChange={(e) => setAge(Number(e.target.value))}
+              type="date"
+              max={new Date().toISOString().split('T')[0]}
+              value={dateOfBirth}
+              onChange={(e) => handleDobChange(e.target.value)}
               required
               style={{
                 width: '100%',
@@ -297,6 +329,9 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                 outline: 'none',
               }}
             />
+            <p style={{ fontSize: '11px', color: '#64748b', margin: '4px 0 0 0' }}>
+              Hệ thống tự động đối chiếu ngày sinh để tính số tuổi chính xác ({age} tuổi).
+            </p>
           </div>
           <div>
             <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>

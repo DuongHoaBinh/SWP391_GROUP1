@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Filter, Syringe, Stethoscope, FileText, CheckCircle } from 'lucide-react';
+import { Search, Filter, Syringe, Stethoscope, FileText, CheckCircle, ExternalLink } from 'lucide-react';
 import { DocumentReviewModal } from '@/features/documents/components/DocumentReviewModal';
 import { useDocumentStore } from '@/lib/document-store';
 import toast from 'react-hot-toast';
@@ -59,7 +59,15 @@ export default function DocumentApprovalPage() {
     const map = new Map<string, any>();
     realPendingDocs.forEach((d) => map.set(d.id, d));
     pendingDocs.forEach((d) => {
-      if (!map.has(d.id)) map.set(d.id, d);
+      if (!map.has(d.id)) {
+        map.set(d.id, d);
+      } else {
+        const existing = map.get(d.id);
+        map.set(d.id, {
+          ...existing,
+          fileUrl: existing.fileUrl || d.fileUrl,
+        });
+      }
     });
     return Array.from(map.values());
   }, [realPendingDocs, pendingDocs]);
@@ -156,12 +164,24 @@ export default function DocumentApprovalPage() {
                   </td>
                   <td className="p-4 text-slate-600 font-medium">{doc.date}</td>
                   <td className="p-4 text-right">
-                    <button 
-                      onClick={() => { setSelectedDoc(doc); setReviewModalOpen(true); }}
-                      className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm"
-                    >
-                      Review
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      {doc.fileUrl && (
+                        <a
+                          href={doc.fileUrl.startsWith('http') ? doc.fileUrl : `http://localhost:5000${doc.fileUrl}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-blue-600 rounded-lg shadow-sm transition-colors"
+                        >
+                          <ExternalLink size={13} /> Xem tệp
+                        </a>
+                      )}
+                      <button 
+                        onClick={() => { setSelectedDoc(doc); setReviewModalOpen(true); }}
+                        className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm transition-colors"
+                      >
+                        Review
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -185,6 +205,7 @@ export default function DocumentApprovalPage() {
           documentId={selectedDoc.id}
           horseName={selectedDoc.horseName}
           docTitle={selectedDoc.type}
+          fileUrl={selectedDoc.fileUrl}
           onSuccess={handleReviewSuccess}
         />
       )}

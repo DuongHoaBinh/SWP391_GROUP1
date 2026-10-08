@@ -5,6 +5,7 @@ import { Truck, Search, Filter, CheckCircle2, XCircle, AlertCircle, Eye, ArrowRi
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { apiClient } from '@/lib/api-client';
+import { buildEquineRoute } from '@/lib/geo-corridors';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 
@@ -23,12 +24,47 @@ export default function ManagerRequestsPage() {
   const [activeModal, setActiveModal] = useState<'NONE' | 'APPROVE' | 'REJECT' | 'CHANGE'>('NONE');
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [inputValue, setInputValue] = useState('');
+  const [costCurrency, setCostCurrency] = useState<'USD' | 'VND'>('USD');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const openActionModal = (type: 'APPROVE' | 'REJECT' | 'CHANGE', order: any) => {
     setActiveModal(type);
     setSelectedOrder(order);
-    setInputValue(type === 'APPROVE' ? '15000000' : '');
+    if (type === 'APPROVE') {
+      const routeInfo = buildEquineRoute(order.originLocation || '', order.destinationLocation || '');
+      const horseCount = order.requestedHorseCount || 1;
+      // Estimate USD default: e.g. base ~$600 + $1.8/km
+      const estimatedUsd = Math.max(1200, Math.round((600 + routeInfo.distanceKm * 1.6) * Math.sqrt(horseCount)));
+      setCostCurrency('USD');
+      setInputValue(String(estimatedUsd));
+    } else {
+      setInputValue('');
+    }
+  };
+
+  const handleCurrencyToggle = (newCurr: 'USD' | 'VND') => {
+    if (newCurr === costCurrency) return;
+    const val = parseFloat(inputValue);
+    if (!isNaN(val) && val > 0) {
+      if (newCurr === 'VND') {
+        setInputValue(String(Math.round(val * 25400)));
+      } else {
+        setInputValue(String(Math.round(val / 25400)));
+      }
+    }
+    setCostCurrency(newCurr);
+  };
+
+  const formatEquivalent = (valStr: string, curr: 'USD' | 'VND') => {
+    const val = parseFloat(valStr);
+    if (isNaN(val) || val <= 0) return '---';
+    if (curr === 'USD') {
+      const vnd = Math.round(val * 25400);
+      return `≈ ${vnd.toLocaleString('vi-VN')} VND`;
+    } else {
+      const usd = Math.round(val / 25400);
+      return `≈ $${usd.toLocaleString('en-US')} USD`;
+    }
   };
 
   const handleConfirmAction = async () => {
@@ -231,17 +267,95 @@ export default function ManagerRequestsPage() {
           maxWidth="500px"
         >
           <div className="flex flex-col gap-4">
-            {activeModal === 'APPROVE' && (
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Estimated Total Cost (VND / USD) *</label>
-                <input 
-                  type="number" 
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500"
-                />
-              </div>
-            )}
+            {activeModal === 'APPROVE' && selectedOrder && (() => {
+              const routeInfo = buildEquineRoute(selectedOrder.originLocation || '', selectedOrder.destinationLocation || '');
+              const horseCount = selectedOrder.requestedHorseCount || 1;
+              return (
+                <div className="flex flex-col gap-4">
+                  {/* Route & Distance Card */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+                      <span>Lộ trình & Khoảng cách đã xác định:</span>
+                      <span className="font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                        {routeInfo.mode === 'air' ? '✈️ Đường hàng không' : '🚛 Đường bộ liên vận'}
+                      </span>
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                      <span>{selectedOrder.originLocation || 'Vietnam'}</span>
+                      <ArrowRight size={14} className="text-slate-400 shrink-0" />
+                      <span>{selectedOrder.destinationLocation || 'Destination'}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200/80 text-xs">
+                      <div>
+                        <span className="text-slate-400 block text-[11px]">Khoảng cách:</span>
+                        <strong className="text-blue-600 text-sm font-bold">{routeInfo.distanceKm.toLocaleString('vi-VN')} km</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[11px]">Thời gian ước tính:</span>
+                        <strong className="text-slate-800 text-sm font-bold">~{routeInfo.durationHours} giờ</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[11px]">Số lượng ngựa:</span>
+                        <strong className="text-emerald-600 text-sm font-bold">{horseCount} cá thể</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Cost & Currency input */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-slate-700">
+                        Chi phí vận chuyển báo giá (Total Cost) *
+                      </label>
+                      <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => handleCurrencyToggle('USD')}
+                          className={`px-2.5 py-0.5 text-xs font-bold rounded-md transition-all ${
+                            costCurrency === 'USD'
+                              ? 'bg-white text-blue-600 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          USD ($)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCurrencyToggle('VND')}
+                          className={`px-2.5 py-0.5 text-xs font-bold rounded-md transition-all ${
+                            costCurrency === 'VND'
+                              ? 'bg-white text-emerald-600 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          VND (₫)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <input 
+                        type="number" 
+                        min={1}
+                        step={costCurrency === 'USD' ? 50 : 100000}
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        placeholder={costCurrency === 'USD' ? 'e.g. 2500' : 'e.g. 60000000'}
+                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm font-bold text-slate-900 outline-none focus:border-blue-500 pr-16"
+                      />
+                      <span className="absolute right-3.5 top-2.5 text-xs font-bold text-slate-500">
+                        {costCurrency === 'USD' ? 'USD ($)' : 'VND (₫)'}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 text-xs text-slate-500 flex items-center justify-between">
+                      <span>Quy đổi tham khảo (1 USD ≈ 25,400 VND):</span>
+                      <strong className="text-slate-800 font-semibold">{formatEquivalent(inputValue, costCurrency)}</strong>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {activeModal === 'REJECT' && (
               <div>

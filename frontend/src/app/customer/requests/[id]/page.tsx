@@ -19,12 +19,20 @@ import {
   Eye,
   FileText,
   Building,
+  ExternalLink,
+  ShieldCheck,
+  CheckCircle2,
+  Info,
+  Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
+import { BatchDocumentUploadModal } from '@/features/documents/components/BatchDocumentUploadModal';
 import { TripTrackingModal } from '@/features/tracking/components/TripTrackingModal';
 import { apiClient } from '@/lib/api-client';
 import { Modal } from '@/components/ui/Modal';
+import { OrderComplianceChecklist } from '@/features/documents/api/documents.api';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 
@@ -153,6 +161,7 @@ const fetcher = async (url: string) => {
     createdDate: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-GB') : '23 Sep 2026',
     departureDate: data.requestedDate ? new Date(data.requestedDate).toLocaleDateString('en-GB') : 'TBD',
     estimatedArrivalDate: data.expectedArrivalDate ? new Date(data.expectedArrivalDate).toLocaleDateString('en-GB') : 'TBD',
+    totalCost: Number(data.totalCost || data.total_cost || 0),
     notes: data.specialRequirements || 'No special requirements specified.',
   };
 };
@@ -167,8 +176,32 @@ export default function RequestDetailPage() {
     revalidateOnFocus: true,
   });
 
+  const { data: checklist, mutate: mutateChecklist } = useSWR<OrderComplianceChecklist>(
+    request?.id ? `/documents/order/${request.id}/checklist` : null,
+    (url: string) => apiClient<OrderComplianceChecklist>(url),
+    { revalidateOnFocus: true }
+  );
+
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isTrackingOpen, setIsTrackingOpen] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<{
+    horseId?: number | string;
+    regulationId?: number | string;
+  } | null>(null);
+
+  const [isBatchUploadOpen, setIsBatchUploadOpen] = useState(false);
+  const [batchTarget, setBatchTarget] = useState<{
+    horseId: number | string;
+    horseName: string;
+    missingRegulations: any[];
+  } | null>(null);
+
+  const [reuploadTarget, setReuploadTarget] = useState<{
+    docId: number;
+    title: string;
+    horseId?: number | string;
+    regulationId?: number | string;
+  } | null>(null);
   
   // Resubmit Modal States
   const [isResubmitOpen, setIsResubmitOpen] = useState(false);
@@ -191,11 +224,50 @@ export default function RequestDetailPage() {
     );
   }
 
-  const hasMissingDocs = request.documents?.some((d: any) => d.status === 'Missing');
+  const isApproved = String(request?.status || '').toLowerCase() === 'approved';
+  const requirementsSent = Boolean(checklist?.requirementsSent);
+  const totalMissingCount = checklist
+    ? checklist.totalRequiredDocuments - checklist.approvedDocumentsCount
+    : 0;
+  const hasMissingDocs = isApproved && requirementsSent && totalMissingCount > 0;
+
+  const handleOpenUpload = (horseId?: number | string, regulationId?: number | string) => {
+    setReuploadTarget(null);
+    setUploadTarget({ horseId, regulationId });
+    setIsUploadOpen(true);
+  };
+
+  const handleOpenBatchUpload = (horseItem?: any) => {
+    const targetHorse = horseItem || checklist?.horses?.find((h) => h.missingRegulations.length > 0) || checklist?.horses?.[0];
+    if (!targetHorse) return;
+    setBatchTarget({
+      horseId: targetHorse.horseId,
+      horseName: targetHorse.horseName,
+      missingRegulations: targetHorse.missingRegulations || [],
+    });
+    setIsBatchUploadOpen(true);
+  };
+
+  const handleOpenReupload = (doc: any, horseId: number | string) => {
+    setReuploadTarget({
+      docId: doc.id,
+      title: doc.regulationTitle || doc.docType || 'Hồ sơ',
+      horseId,
+      regulationId: doc.regulationId,
+    });
+    setUploadTarget({
+      horseId,
+      regulationId: doc.regulationId,
+    });
+    setIsUploadOpen(true);
+  };
 
   const handleUploadSuccess = (uploadedDoc: any) => {
     uploadDocumentForRequest(request.requestCode, uploadedDoc.title);
+    mutateChecklist();
+    mutate();
     setIsUploadOpen(false);
+    toast.success('Hồ sơ đã được tải lên thành công!');
   };
 
   const handleCancel = () => {
@@ -560,6 +632,16 @@ export default function RequestDetailPage() {
                   {request.requestedHorseCount || request.horses?.length || 1} horses
                 </p>
               </div>
+              <div>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Chi phí vận chuyển (Total Cost)</span>
+                <p style={{ fontSize: '14px', fontWeight: 700, color: '#16a34a', margin: '2px 0 0 0' }}>
+                  {Number(request.totalCost) > 0
+                    ? Number(request.totalCost) < 100000
+                      ? `$${Number(request.totalCost).toLocaleString('en-US')} USD (~${Math.round(request.totalCost * 25400).toLocaleString('vi-VN')} VND)`
+                      : `${Number(request.totalCost).toLocaleString('vi-VN')} VND (~$${Math.round(request.totalCost / 25400).toLocaleString('en-US')} USD)`
+                    : 'Đang chờ báo giá'}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -723,7 +805,7 @@ export default function RequestDetailPage() {
             </table>
           </div>
 
-          {/* 5. TRANSPORT DOCUMENTS */}
+          {/* 5. TRANSPORT COMPLIANCE DOCUMENTS */}
           <div
             style={{
               backgroundColor: '#ffffff',
@@ -733,103 +815,409 @@ export default function RequestDetailPage() {
               boxShadow: 'var(--shadow-sm)',
             }}
           >
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-              <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                Transport Documents
-              </h4>
+            <div
+              style={{
+                padding: '16px 24px',
+                borderBottom: '1px solid var(--border-light)',
+                backgroundColor: '#f8fafc',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldCheck size={18} color="var(--primary)" />
+                <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
+                  Hồ sơ Kiểm dịch & Vận chuyển (Compliance Documents)
+                </h4>
+              </div>
+              {checklist && isApproved && requirementsSent && (
+                <span
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '999px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    backgroundColor: checklist.isFullyCompliant ? '#dcfce7' : '#fef3c7',
+                    color: checklist.isFullyCompliant ? '#15803d' : '#b45309',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  {checklist.isFullyCompliant ? (
+                    <>
+                      <CheckCircle2 size={13} /> Đạt chuẩn 100%
+                    </>
+                  ) : (
+                    <>
+                      <Clock size={13} /> {checklist.approvedDocumentsCount}/{checklist.totalRequiredDocuments} Đã duyệt
+                    </>
+                  )}
+                </span>
+              )}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {request.documents?.map((doc: any) => {
-                const isApproved = doc.status === 'Approved';
-                const isReview = doc.status === 'Under Review';
-                const isMissing = doc.status === 'Missing';
+            {/* CASE 1: Request not yet approved by Manager */}
+            {!isApproved ? (
+              <div style={{ padding: '28px 24px', textAlign: 'center', backgroundColor: '#fcfcfc' }}>
+                <div
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '12px',
+                    backgroundColor: '#fef3c7',
+                    color: '#d97706',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 12px auto',
+                  }}
+                >
+                  <Clock size={24} />
+                </div>
+                <h5 style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 6px 0' }}>
+                  Đang chờ Logistics Manager phê duyệt yêu cầu
+                </h5>
+                <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '480px', margin: '0 auto', lineHeight: 1.5 }}>
+                  Yêu cầu vận chuyển đang được quản lý rà soát. Ngay sau khi đơn được duyệt, Chuyên viên kiểm dịch (Specialist) sẽ tiếp nhận để kiểm tra quy chuẩn điểm đến ({request.destination}) và ban hành danh mục hồ sơ cần nộp.
+                </p>
+              </div>
+            ) : !requirementsSent ? (
+              /* CASE 2: Approved, waiting for Specialist to review destination & send requirements */
+              <div style={{ padding: '28px 24px', textAlign: 'center', backgroundColor: '#f8fafc' }}>
+                <div
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '12px',
+                    backgroundColor: '#e0f2fe',
+                    color: '#0284c7',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 12px auto',
+                  }}
+                >
+                  <Sparkles size={24} />
+                </div>
+                <h5 style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 6px 0' }}>
+                  Đơn đã duyệt — Chuyên viên kiểm dịch đang thiết lập danh mục hồ sơ
+                </h5>
+                <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '520px', margin: '0 auto', lineHeight: 1.5 }}>
+                  Chuyên viên vận tải & kiểm dịch (Specialist) đang rà soát các quy chuẩn y tế, kiểm dịch và hải quan cho điểm đến <strong>{checklist?.destinationCountry || request.destination}</strong>. Quý khách sẽ nhận được thông báo ngay khi danh mục hồ sơ được thiết lập để tiến hành nộp.
+                </p>
+              </div>
+            ) : (
+              /* CASE 3: Specialist has reviewed & sent official requirements checklist */
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {/* Official Notification Header */}
+                <div
+                  style={{
+                    padding: '14px 20px',
+                    backgroundColor: '#f0fdf4',
+                    borderBottom: '1px solid #bbf7d0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '280px' }}>
+                    <CheckCircle2 size={18} color="#16a34a" style={{ flexShrink: 0 }} />
+                    <p style={{ fontSize: '13px', color: '#166534', margin: 0, lineHeight: 1.4 }}>
+                      <strong>Danh mục hồ sơ chính thức do Chuyên viên yêu cầu</strong> cho hành trình đến{' '}
+                      <strong>{checklist?.destinationCountry || request.destination}</strong>
+                      {checklist?.isUsingGlobalBaseline ? ' (Áp dụng Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI)' : ''}.
+                    </p>
+                  </div>
 
-                return (
-                  <div
-                    key={doc.id}
-                    style={{
-                      padding: '16px 24px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      borderBottom: '1px solid var(--border-light)',
-                      backgroundColor: isMissing ? '#fff5f5' : 'transparent',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  {totalMissingCount > 0 && (
+                    <button
+                      onClick={() => handleOpenBatchUpload()}
+                      style={{
+                        padding: '7px 14px',
+                        borderRadius: '8px',
+                        backgroundColor: '#16a34a',
+                        color: '#ffffff',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        border: 'none',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 2px 6px rgba(22, 163, 74, 0.25)',
+                      }}
+                    >
+                      <Upload size={13} /> ⚡ Nộp trọn bộ hồ sơ (Nộp tất cả)
+                    </button>
+                  )}
+                </div>
+
+                {checklist?.horses && checklist.horses.length > 0 ? (
+                  checklist.horses.map((horseItem, hIdx) => {
+                    return (
                       <div
+                        key={horseItem.horseId}
                         style={{
-                          width: '40px',
-                          height: '40px',
-                          borderRadius: '8px',
-                          backgroundColor: isMissing ? '#fee2e2' : '#f1f5f9',
-                          color: isMissing ? '#dc2626' : '#64748b',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          borderBottom: hIdx < (checklist?.horses?.length || 0) - 1 ? '1px solid var(--border-light)' : 'none',
                         }}
                       >
-                        <FileText size={20} />
-                      </div>
-                      <div>
-                        <h5 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
-                          {doc.title}
-                        </h5>
-                        <p
+                        {/* Horse subheader */}
+                        <div
                           style={{
-                            fontSize: '12px',
-                            color: isMissing ? '#dc2626' : '#64748b',
-                            margin: '2px 0 0 0',
+                            padding: '12px 24px',
+                            backgroundColor: '#fafafa',
+                            borderBottom: '1px solid #f1f5f9',
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '4px',
+                            justifyContent: 'space-between',
                           }}
                         >
-                          {isMissing && <AlertTriangle size={12} />}
-                          {doc.uploadedDate ? `Uploaded on ${doc.uploadedDate}` : doc.warning || 'Additional document required.'}
-                        </p>
-                      </div>
-                    </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-heading)' }}>
+                              Ngựa: {horseItem.horseName}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span
+                              style={{
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                backgroundColor: horseItem.isCompliant ? '#dcfce7' : '#fee2e2',
+                                color: horseItem.isCompliant ? '#15803d' : '#b91c1c',
+                              }}
+                            >
+                              {horseItem.isCompliant ? 'Đủ hồ sơ hợp lệ' : `Còn thiếu ${horseItem.missingRegulations.length} giấy tờ`}
+                            </span>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      <span
-                        style={{
-                          padding: '3px 8px',
-                          borderRadius: '6px',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          backgroundColor: isApproved ? '#dcfce7' : isReview ? '#fef3c7' : '#fee2e2',
-                          color: isApproved ? '#15803d' : isReview ? '#b45309' : '#b91c1c',
-                        }}
-                      >
-                        {doc.status}
-                      </span>
-                      {isMissing ? (
-                        <button
-                          onClick={() => setIsUploadOpen(true)}
-                          style={{
-                            padding: '6px 14px',
-                            borderRadius: '6px',
-                            backgroundColor: '#dc2626',
-                            color: '#ffffff',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            border: 'none',
-                          }}
-                        >
-                          Upload Missing Document
-                        </button>
-                      ) : (
-                        <button style={{ color: '#94a3b8', border: 'none', background: 'none' }}>
-                          <Eye size={18} />
-                        </button>
-                      )}
-                    </div>
+                            {!horseItem.isCompliant && horseItem.missingRegulations.length > 0 && (
+                              <button
+                                onClick={() => handleOpenBatchUpload(horseItem)}
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#2563eb',
+                                  color: '#ffffff',
+                                  fontSize: '11.5px',
+                                  fontWeight: 600,
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                }}
+                              >
+                                <Upload size={12} /> Nộp tất cả ({horseItem.missingRegulations.length} mục)
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Missing items for this horse */}
+                        {horseItem.missingRegulations.map((reg) => (
+                          <div
+                            key={`missing-${reg.id}`}
+                            style={{
+                              padding: '14px 24px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              borderBottom: '1px solid #f8fafc',
+                              backgroundColor: '#fff5f5',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                              <div
+                                style={{
+                                  width: '36px',
+                                  height: '36px',
+                                  borderRadius: '8px',
+                                  backgroundColor: '#fee2e2',
+                                  color: '#dc2626',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <AlertTriangle size={18} />
+                              </div>
+                              <div>
+                                <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
+                                  {reg.description || reg.documentType}
+                                </h5>
+                                <p style={{ fontSize: '11.5px', color: '#dc2626', margin: '2px 0 0 0', fontWeight: 500 }}>
+                                  Bắt buộc nộp theo quy định {reg.country}
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => handleOpenUpload(horseItem.horseId, reg.id)}
+                              style={{
+                                padding: '6px 14px',
+                                borderRadius: '6px',
+                                backgroundColor: '#dc2626',
+                                color: '#ffffff',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                border: 'none',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                              }}
+                            >
+                              <Upload size={13} /> Tải lên ngay
+                            </button>
+                          </div>
+                        ))}
+
+                        {/* Uploaded items for this horse */}
+                        {horseItem.documents.map((doc) => {
+                          const isDocApproved = doc.status === 'approved';
+                          const isDocSubmitted = doc.status === 'submitted';
+                          const isDocRejected = doc.status === 'rejected';
+
+                          return (
+                            <div
+                              key={`doc-${doc.id}`}
+                              style={{
+                                padding: '14px 24px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                borderBottom: '1px solid #f8fafc',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                                <div
+                                  style={{
+                                    width: '36px',
+                                    height: '36px',
+                                    borderRadius: '8px',
+                                    backgroundColor: isDocApproved ? '#dcfce7' : isDocRejected ? '#fee2e2' : '#f1f5f9',
+                                    color: isDocApproved ? '#15803d' : isDocRejected ? '#dc2626' : '#64748b',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <FileText size={18} />
+                                </div>
+                                <div>
+                                  <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
+                                    {doc.regulationTitle || doc.docType}
+                                  </h5>
+                                  <p style={{ fontSize: '11.5px', color: '#64748b', margin: '2px 0 0 0' }}>
+                                    {doc.docNumber ? `Số: ${doc.docNumber} • ` : ''}Tải lên:{' '}
+                                    {new Date(doc.createdAt).toLocaleDateString('vi-VN')}
+                                    {doc.reviewerNotes && (
+                                      <span style={{ color: isDocRejected ? '#dc2626' : '#2563eb', marginLeft: '6px' }}>
+                                        (Ghi chú: {doc.reviewerNotes})
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <span
+                                  style={{
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '11.5px',
+                                    fontWeight: 700,
+                                    backgroundColor: isDocApproved
+                                      ? '#dcfce7'
+                                      : isDocSubmitted
+                                      ? '#fef3c7'
+                                      : isDocRejected
+                                      ? '#fee2e2'
+                                      : '#f1f5f9',
+                                    color: isDocApproved
+                                      ? '#15803d'
+                                      : isDocSubmitted
+                                      ? '#b45309'
+                                      : isDocRejected
+                                      ? '#b91c1c'
+                                      : '#64748b',
+                                  }}
+                                >
+                                  {isDocApproved
+                                    ? 'Đã duyệt'
+                                    : isDocSubmitted
+                                    ? 'Chờ chuyên viên duyệt'
+                                    : isDocRejected
+                                    ? 'Từ chối'
+                                    : doc.status}
+                                </span>
+
+                                {doc.fileUrl && (
+                                  <a
+                                    href={doc.fileUrl.startsWith('http') ? doc.fileUrl : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}${doc.fileUrl}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{
+                                      padding: '5px 10px',
+                                      borderRadius: '6px',
+                                      border: '1px solid var(--border-light)',
+                                      color: 'var(--primary)',
+                                      fontSize: '12px',
+                                      fontWeight: 600,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      textDecoration: 'none',
+                                    }}
+                                  >
+                                    <Eye size={13} /> Xem tệp
+                                  </a>
+                                )}
+
+                                {(isDocRejected || isDocSubmitted) && (
+                                  <button
+                                    onClick={() => handleOpenReupload(doc, horseItem.horseId)}
+                                    style={{
+                                      padding: '5px 10px',
+                                      borderRadius: '6px',
+                                      backgroundColor: isDocRejected ? '#dc2626' : '#eff6ff',
+                                      color: isDocRejected ? '#ffffff' : '#2563eb',
+                                      border: isDocRejected ? 'none' : '1px solid #bfdbfe',
+                                      fontSize: '12px',
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                    }}
+                                    title="Chọn tệp mới để cập nhật cho hồ sơ này"
+                                  >
+                                    <RefreshCw size={12} />
+                                    {isDocRejected ? 'Nộp lại (Bị từ chối)' : 'Cập nhật tệp'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                    Chưa có danh mục hồ sơ được khởi tạo.
                   </div>
-                );
-              })}
-            </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 6. REQUEST INFORMATION */}
@@ -904,13 +1292,19 @@ export default function RequestDetailPage() {
                 <AlertTriangle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
                 <div>
                   <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                    Action Required
+                    Hồ sơ cần nộp ({totalMissingCount} mục)
                   </h4>
                   <p style={{ fontSize: '12.5px', color: '#475569', margin: '6px 0 16px 0', lineHeight: 1.4 }}>
-                    Please upload the missing documents to continue the approval process for this transport request.
+                    Chuyên viên kiểm dịch đã phát hành yêu cầu nộp hồ sơ. Còn <strong>{totalMissingCount}</strong> mục tài liệu cần hoàn tất để đảm bảo điều kiện xuất nhập cảnh.
                   </p>
                   <button
-                    onClick={() => setIsUploadOpen(true)}
+                    onClick={() => {
+                      if (totalMissingCount > 1) {
+                        handleOpenBatchUpload();
+                      } else {
+                        handleOpenUpload();
+                      }
+                    }}
                     style={{
                       width: '100%',
                       padding: '10px',
@@ -918,16 +1312,17 @@ export default function RequestDetailPage() {
                       backgroundColor: '#dc2626',
                       color: '#ffffff',
                       fontSize: '13px',
-                      fontWeight: 600,
+                      fontWeight: 700,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: '8px',
                       border: 'none',
+                      cursor: 'pointer',
                       boxShadow: '0 2px 8px rgba(220, 38, 38, 0.25)',
                     }}
                   >
-                    <Upload size={14} /> Upload Missing Documents
+                    <Upload size={14} /> ⚡ Nộp trọn bộ {totalMissingCount} hồ sơ (Nộp tất cả)
                   </button>
                 </div>
               </div>
@@ -981,9 +1376,39 @@ export default function RequestDetailPage() {
       {/* Upload Modal */}
       <DocumentUploadModal
         isOpen={isUploadOpen}
-        onClose={() => setIsUploadOpen(false)}
+        onClose={() => {
+          setIsUploadOpen(false);
+          setUploadTarget(null);
+          setReuploadTarget(null);
+        }}
         onSuccess={handleUploadSuccess}
+        defaultOrderId={request.id}
+        defaultHorseId={uploadTarget?.horseId}
+        defaultRegulationId={uploadTarget?.regulationId}
+        reuploadDocId={reuploadTarget?.docId}
+        reuploadTitle={reuploadTarget?.title}
+        onSwitchToBatch={() => handleOpenBatchUpload()}
       />
+
+      {/* Batch Document Upload Modal */}
+      {batchTarget && (
+        <BatchDocumentUploadModal
+          isOpen={isBatchUploadOpen}
+          onClose={() => {
+            setIsBatchUploadOpen(false);
+            setBatchTarget(null);
+          }}
+          onSuccess={() => {
+            mutateChecklist();
+            mutate();
+          }}
+          orderId={request.id}
+          horseId={batchTarget.horseId}
+          horseName={batchTarget.horseName}
+          destinationCountry={checklist?.destinationCountry || request.destination}
+          missingRegulations={batchTarget.missingRegulations}
+        />
+      )}
 
       {/* Live Tracking Modal */}
       <TripTrackingModal

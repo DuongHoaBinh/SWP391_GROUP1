@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, UploadCloud, FileText, AlertTriangle, CheckCircle, XCircle, Clock, Trash2, ExternalLink } from 'lucide-react';
+import { ArrowLeft, UploadCloud, FileText, AlertTriangle, CheckCircle, XCircle, Clock, Trash2, ExternalLink, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { documentsApi } from '@/features/documents/api/documents.api';
@@ -15,7 +15,18 @@ export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [reuploadTargetDoc, setReuploadTargetDoc] = useState<DocumentItem | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const handleStartReupload = (doc: DocumentItem) => {
+    setReuploadTargetDoc(doc);
+    setIsUploadOpen(true);
+  };
+
+  const handleOpenNewUpload = () => {
+    setReuploadTargetDoc(null);
+    setIsUploadOpen(true);
+  };
 
   const fetchDocs = async () => {
     setIsLoading(true);
@@ -47,6 +58,10 @@ export default function DocumentsPage() {
 
           return {
             id: `DOC-${String(d.id).padStart(3, '0')}`,
+            numericId: Number(d.id),
+            orderId: matchedOrder?.id || d.shipment_id,
+            horseId: Number(d.horseId),
+            regulationId: Number(d.regulationId),
             requestCode,
             horseName: d.horseName || `Horse #${d.horseId}`,
             title: d.regulationTitle || d.regulationDocType || d.docType,
@@ -121,7 +136,7 @@ export default function DocumentsPage() {
         <Button
           variant="primary"
           icon={<UploadCloud size={18} />}
-          onClick={() => setIsUploadOpen(true)}
+          onClick={handleOpenNewUpload}
           className="shadow-md shadow-blue-500/20 bg-blue-600 hover:bg-blue-700"
         >
           Upload Document
@@ -241,16 +256,38 @@ export default function DocumentsPage() {
                           </a>
                         )}
 
-                        {(doc.status === 'PENDING' || doc.status === 'REJECTED') ? (
+                        {doc.status === 'REJECTED' && (
                           <Button
                             variant="primary"
                             size="sm"
-                            onClick={() => setIsUploadOpen(true)}
-                            className="shadow-sm bg-blue-600 hover:bg-blue-700"
+                            onClick={() => handleStartReupload(doc)}
+                            className="shadow-sm bg-red-600 hover:bg-red-700 text-xs flex items-center gap-1"
                           >
-                            {doc.status === 'REJECTED' ? 'Re-upload' : 'Upload Now'}
+                            <RefreshCw size={12} /> Nộp lại (Bị từ chối)
                           </Button>
-                        ) : null}
+                        )}
+
+                        {doc.status === 'SUBMITTED' && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleStartReupload(doc)}
+                            className="shadow-sm text-xs flex items-center gap-1 border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                          >
+                            <RefreshCw size={12} /> Cập nhật tệp mới
+                          </Button>
+                        )}
+
+                        {doc.status === 'PENDING' && (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleStartReupload(doc)}
+                            className="shadow-sm bg-blue-600 hover:bg-blue-700 text-xs"
+                          >
+                            Upload Now
+                          </Button>
+                        )}
 
                         {/* Delete Button */}
                         {numericId ? (
@@ -284,11 +321,19 @@ export default function DocumentsPage() {
       {isUploadOpen && (
         <DocumentUploadModal
           isOpen={isUploadOpen}
-          onClose={() => setIsUploadOpen(false)}
+          onClose={() => {
+            setIsUploadOpen(false);
+            setReuploadTargetDoc(null);
+          }}
           onSuccess={(uploaded) => {
             fetchDocs();
-            toast.success(`${uploaded.title} đã được nộp để chuyên viên xét duyệt!`);
+            toast.success(`${uploaded.title} đã được xử lý thành công!`);
           }}
+          reuploadDocId={reuploadTargetDoc?.numericId}
+          reuploadTitle={reuploadTargetDoc?.title}
+          defaultOrderId={reuploadTargetDoc?.orderId}
+          defaultHorseId={reuploadTargetDoc?.horseId}
+          defaultRegulationId={reuploadTargetDoc?.regulationId}
         />
       )}
     </div>
