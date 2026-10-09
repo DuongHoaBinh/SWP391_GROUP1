@@ -64,13 +64,16 @@ export class NotificationsStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async findByUserId(userId: number): Promise<NotificationItem[]> {
-    const [rows] = await this.pool.execute<NotificationRow[]>(
+    const [rows] = await this.pool.execute<any[]>(
       `SELECT n.notification_id, n.user_id, n.shipment_id, n.horse_id, n.title, n.message, n.notif_type, n.is_read, n.created_at,
+              u.role as user_role,
               (SELECT CONCAT('REQ-', LPAD(
                 (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                 3, '0'
-              )) FROM shipment s WHERE s.shipment_id = n.shipment_id) as actual_request_code
-       FROM notification n 
+              )) FROM shipment s WHERE s.shipment_id = n.shipment_id) as customer_code,
+              (SELECT CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) FROM shipment s WHERE s.shipment_id = n.shipment_id) as global_code
+       FROM notification n
+       JOIN \`user\` u ON u.user_id = n.user_id
        WHERE n.user_id = ? 
        ORDER BY n.created_at DESC`,
       [userId],
@@ -79,11 +82,15 @@ export class NotificationsStore implements OnModuleInit, OnModuleDestroy {
     return rows.map((row) => {
       let title = row.title;
       let message = row.message;
-      if (row.shipment_id && row.actual_request_code) {
-        const rawCode = `REQ-${String(row.shipment_id).padStart(3, '0')}`;
-        if (rawCode !== row.actual_request_code) {
-          title = title.split(rawCode).join(row.actual_request_code);
-          message = message.split(rawCode).join(row.actual_request_code);
+      if (row.shipment_id) {
+        if (row.user_role === 'customer' && row.customer_code && row.global_code) {
+          // Khách hàng luôn thấy mã đơn theo số thứ tự của riêng mình (REQ-001, REQ-002...)
+          title = title.split(row.global_code).join(row.customer_code);
+          message = message.split(row.global_code).join(row.customer_code);
+        } else if (row.user_role !== 'customer' && row.customer_code && row.global_code) {
+          // Nhân viên nội bộ (Manager, Specialist) luôn thấy mã đơn toàn hệ thống (REQ-022...)
+          title = title.split(row.customer_code).join(row.global_code);
+          message = message.split(row.customer_code).join(row.global_code);
         }
       }
       return {

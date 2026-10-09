@@ -649,3 +649,5 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
     </div>
   );
 };
+
+export default RoutePlanningMap;

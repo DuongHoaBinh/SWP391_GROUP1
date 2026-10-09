@@ -22,6 +22,8 @@ import {
   ExternalLink,
   ShieldCheck,
   CheckCircle2,
+  CheckCircle,
+  XCircle,
   Info,
   Sparkles,
   RefreshCw,
@@ -142,8 +144,41 @@ const fetcher = async (url: string) => {
     cancelled: 'Cancelled',
   };
 
+  const originStr = String(data.originLocation || '');
+  const destStr = String(data.destinationLocation || '');
+  const originLower = originStr.toLowerCase();
+  const destLower = destStr.toLowerCase();
+
+  const vnKeywords = ['vietnam', 'việt nam', 'hcm', 'hồ chí minh', 'sài gòn', 'hà nội', 'cần thơ', 'bạc liêu', 'đà nẵng', 'bình dương', 'long an', 'đồng nai', 'củ chi', 'vũng tàu', 'hải phòng', 'huế', 'nha trang', 'quy nhơn', 'buôn ma thuột'];
+  const isOriginVN = vnKeywords.some((k) => originLower.includes(k)) || originLower.includes('vn') || !originLower.includes(',');
+
+  const intlKeywords = ['singapore', 'australia', 'japan', 'hong kong', 'malaysia', 'thailand', 'france', 'usa', 'ireland', 'uk', 'germany', 'dubai', 'uae', 'qatar', 'new zealand', 'china', 'korea'];
+  const isDestIntl = intlKeywords.some((k) => destLower.includes(k));
+  const isDestVN = !isDestIntl && (vnKeywords.some((k) => destLower.includes(k)) || destLower.includes('vn') || !destLower.includes(','));
+
+  let isDomestic = isOriginVN && isDestVN;
+  if (data.transportationType) {
+    isDomestic = String(data.transportationType).toLowerCase() === 'domestic';
+  } else if (data.transportType) {
+    isDomestic = String(data.transportType).toLowerCase() === 'domestic';
+  } else if (String(data.specialRequirements || '').toLowerCase().includes('nội địa') || String(data.specialRequirements || '').toLowerCase().includes('domestic')) {
+    isDomestic = true;
+  }
+
+  const transportationType = isDomestic ? 'Domestic' : 'International';
+  const originCountryCode = isOriginVN ? 'VN' : 'INTL';
+  const destinationCountryCode = isDomestic ? 'VN' : (destLower.includes('singapore') ? 'SG' : destLower.includes('australia') ? 'AU' : destLower.includes('japan') ? 'JP' : destLower.includes('hong kong') ? 'HK' : destLower.includes('malaysia') ? 'MY' : destLower.includes('thailand') ? 'TH' : 'INTL');
+  const destinationCountry = isDomestic ? 'Vietnam' : (destLower.includes('singapore') ? 'Singapore' : destLower.includes('australia') ? 'Australia' : destLower.includes('japan') ? 'Japan' : destLower.includes('hong kong') ? 'Hong Kong' : 'International');
+  const transitName = isDomestic ? 'Trạm kiểm dịch nội địa' : 'Border / Transit Checkpoint';
+
   return {
     ...data,
+    isDomestic,
+    transportationType,
+    originCountryCode,
+    destinationCountryCode,
+    destinationCountry,
+    transitName,
     requestedHorseCount: data.requestedHorseCount || data.requested_horse_count || (normalizedHorses.length || 1),
     requestCode: data.requestCode || `REQ-${String(data.id).padStart(3, '0')}`,
     horse: normalizedHorses[0]?.horse || { name: 'Racehorse' },
@@ -599,7 +634,7 @@ export default function RequestDetailPage() {
               <div>
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Transportation Type</span>
                 <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                  {request.transportationType || 'International'}
+                  {request.transportationType}
                 </p>
               </div>
               <div>
@@ -611,7 +646,7 @@ export default function RequestDetailPage() {
               <div style={{ gridColumn: 'span 2' }}>
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Route</span>
                 <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', margin: '2px 0 0 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {request.origin}, VN <ArrowRight size={14} color="#94a3b8" /> {request.destination}, SG
+                  {request.origin}, {request.originCountryCode || 'VN'} <ArrowRight size={14} color="#94a3b8" /> {request.destination}, {request.destinationCountryCode || 'VN'}
                 </p>
               </div>
               <div>
@@ -700,6 +735,7 @@ export default function RequestDetailPage() {
                   <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', marginBottom: '8px' }}>Destination</span>
                   <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#94a3b8', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #cbd5e1' }} />
                   <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '8px' }}>{request.destination}</span>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>{request.destinationCountry || 'Vietnam'}</span>
                 </div>
               </div>
 
@@ -1032,7 +1068,7 @@ export default function RequestDetailPage() {
                               backgroundColor: '#fff5f5',
                             }}
                           >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0, paddingRight: '16px' }}>
                               <div
                                 style={{
                                   width: '36px',
@@ -1048,7 +1084,7 @@ export default function RequestDetailPage() {
                               >
                                 <AlertTriangle size={18} />
                               </div>
-                              <div>
+                              <div style={{ minWidth: 0 }}>
                                 <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
                                   {reg.description || reg.documentType}
                                 </h5>
@@ -1058,24 +1094,48 @@ export default function RequestDetailPage() {
                               </div>
                             </div>
 
-                            <button
-                              onClick={() => handleOpenUpload(horseItem.horseId, reg.id)}
-                              style={{
-                                padding: '6px 14px',
-                                borderRadius: '6px',
-                                backgroundColor: '#dc2626',
-                                color: '#ffffff',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                border: 'none',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                              }}
-                            >
-                              <Upload size={13} /> Tải lên ngay
-                            </button>
+                            {/* Status Column (Aligned) */}
+                            <div style={{ width: '140px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+                              <span
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  fontSize: '11.5px',
+                                  fontWeight: 700,
+                                  backgroundColor: '#fee2e2',
+                                  color: '#b91c1c',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  minWidth: '96px',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                <AlertTriangle size={12} /> Chưa nộp
+                              </span>
+                            </div>
+
+                            {/* Actions Column (Aligned) */}
+                            <div style={{ width: '200px', flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
+                              <button
+                                onClick={() => handleOpenUpload(horseItem.horseId, reg.id)}
+                                style={{
+                                  padding: '6px 14px',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#dc2626',
+                                  color: '#ffffff',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                }}
+                              >
+                                <Upload size={13} /> Tải lên ngay
+                              </button>
+                            </div>
                           </div>
                         ))}
 
@@ -1096,7 +1156,7 @@ export default function RequestDetailPage() {
                                 borderBottom: '1px solid #f8fafc',
                               }}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0, paddingRight: '16px' }}>
                                 <div
                                   style={{
                                     width: '36px',
@@ -1112,7 +1172,7 @@ export default function RequestDetailPage() {
                                 >
                                   <FileText size={18} />
                                 </div>
-                                <div>
+                                <div style={{ minWidth: 0 }}>
                                   <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
                                     {doc.regulationTitle || doc.docType}
                                   </h5>
@@ -1128,10 +1188,11 @@ export default function RequestDetailPage() {
                                 </div>
                               </div>
 
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              {/* Status Column (Aligned) */}
+                              <div style={{ width: '140px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
                                 <span
                                   style={{
-                                    padding: '3px 8px',
+                                    padding: '4px 10px',
                                     borderRadius: '6px',
                                     fontSize: '11.5px',
                                     fontWeight: 700,
@@ -1149,17 +1210,28 @@ export default function RequestDetailPage() {
                                       : isDocRejected
                                       ? '#b91c1c'
                                       : '#64748b',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    minWidth: '96px',
+                                    justifyContent: 'center',
                                   }}
                                 >
+                                  {isDocApproved && <CheckCircle size={12} />}
+                                  {isDocSubmitted && <Clock size={12} />}
+                                  {isDocRejected && <XCircle size={12} />}
                                   {isDocApproved
                                     ? 'Đã duyệt'
                                     : isDocSubmitted
-                                    ? 'Chờ chuyên viên duyệt'
+                                    ? 'Chờ duyệt'
                                     : isDocRejected
                                     ? 'Từ chối'
                                     : doc.status}
                                 </span>
+                              </div>
 
+                              {/* Actions Column (Aligned) */}
+                              <div style={{ width: '200px', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                                 {doc.fileUrl && (
                                   <a
                                     href={doc.fileUrl.startsWith('http') ? doc.fileUrl : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}${doc.fileUrl}`}
@@ -1176,6 +1248,7 @@ export default function RequestDetailPage() {
                                       alignItems: 'center',
                                       gap: '4px',
                                       textDecoration: 'none',
+                                      backgroundColor: '#ffffff',
                                     }}
                                   >
                                     <Eye size={13} /> Xem tệp
@@ -1201,7 +1274,7 @@ export default function RequestDetailPage() {
                                     title="Chọn tệp mới để cập nhật cho hồ sơ này"
                                   >
                                     <RefreshCw size={12} />
-                                    {isDocRejected ? 'Nộp lại (Bị từ chối)' : 'Cập nhật tệp'}
+                                    {isDocRejected ? 'Nộp lại' : 'Cập nhật'}
                                   </button>
                                 )}
                               </div>
@@ -1240,7 +1313,7 @@ export default function RequestDetailPage() {
                 <div>
                   <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Transportation Type</span>
                   <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                    {request.transportationType || 'International'}
+                    {request.transportationType}
                   </div>
                 </div>
                 <div>

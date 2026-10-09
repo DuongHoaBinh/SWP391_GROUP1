@@ -12,7 +12,7 @@ import toast from 'react-hot-toast';
 import { useFleetRouteStore, RouteItem } from '@/lib/fleet-route-store';
 
 const RoutePlanningMap = dynamic(
-  () => import('@/components/maps/RoutePlanningMap').then((mod) => mod.RoutePlanningMap),
+  () => import('@/components/maps/RoutePlanningMap'),
   {
     ssr: false,
     loading: () => (
