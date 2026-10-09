@@ -119,7 +119,7 @@ export default function ManagerLayout({
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif", overflowX: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', maxHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif", overflow: 'hidden' }}>
       <LogoutConfirmModal
         isOpen={showLogoutModal}
         onClose={() => setShowLogoutModal(false)}
@@ -291,9 +291,7 @@ export default function ManagerLayout({
           backgroundColor: '#0f172a',
           color: '#94a3b8',
           flexDirection: 'column',
-          height: '100vh',
-          position: 'sticky',
-          top: 0,
+          height: '100%',
           zIndex: 40,
           borderRight: '1px solid rgba(255, 255, 255, 0.05)',
           flexShrink: 0,
@@ -585,7 +583,7 @@ export default function ManagerLayout({
       </aside>
 
       {/* MAIN CONTENT AREA */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100%', overflow: 'hidden' }}>
         {/* TOP HEADER */}
         <header
           style={{

@@ -46,12 +46,20 @@ export default function ManagerDashboardPage() {
   // Filter State
   const [requestCostFilter, setRequestCostFilter] = useState<'ALL' | 'NEEDS_COST' | 'HAS_COST'>('ALL');
   const [showRequestFilterDropdown, setShowRequestFilterDropdown] = useState(false);
+  const [requestPage, setRequestPage] = useState(1);
+  const requestPageSize = 5;
 
   const filteredPendingRequests = pendingRequests.filter((req: any) => {
     if (requestCostFilter === 'NEEDS_COST') return req.totalCost === null;
     if (requestCostFilter === 'HAS_COST') return req.totalCost !== null;
     return true;
   });
+
+  const totalRequestPages = Math.ceil(filteredPendingRequests.length / requestPageSize);
+  const paginatedPendingRequests = filteredPendingRequests.slice(
+    (requestPage - 1) * requestPageSize,
+    requestPage * requestPageSize
+  );
 
   // Modal States
   const [activeModal, setActiveModal] = useState<'NONE' | 'APPROVE' | 'REJECT' | 'CHANGE'>('NONE');
@@ -763,6 +771,7 @@ export default function ManagerDashboardPage() {
                           key={item.val}
                           onClick={() => {
                             setRequestCostFilter(item.val as any);
+                            setRequestPage(1);
                             setShowRequestFilterDropdown(false);
                           }}
                           style={{
@@ -841,10 +850,12 @@ export default function ManagerDashboardPage() {
                       </td>
                     </tr>
                   ) : (
-                    filteredPendingRequests.map((req: any) => (
+                    paginatedPendingRequests.map((req: any) => (
                       <tr key={req.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                         <td style={{ padding: '16px 24px' }}>
-                          <span style={{ fontWeight: 700, color: '#111827' }}>{req.id}</span>
+                          <span style={{ fontWeight: 700, color: '#111827' }}>
+                            {req.requestCode || `REQ-${String(req.id).padStart(3, '0')}`}
+                          </span>
                           <br />
                           {req.totalCost === null && (
                             <span
@@ -982,6 +993,80 @@ export default function ManagerDashboardPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls */}
+            {totalRequestPages > 1 && (
+              <div
+                style={{
+                  padding: '12px 24px',
+                  borderTop: '1px solid #e5e7eb',
+                  backgroundColor: '#f9fafb',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '12px',
+                }}
+              >
+                <span style={{ color: '#6b7280', fontWeight: 500 }}>
+                  Showing {(requestPage - 1) * requestPageSize + 1} -{' '}
+                  {Math.min(requestPage * requestPageSize, filteredPendingRequests.length)} of{' '}
+                  {filteredPendingRequests.length} requests
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    onClick={() => setRequestPage((p) => Math.max(1, p - 1))}
+                    disabled={requestPage === 1}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #d1d5db',
+                      backgroundColor: '#ffffff',
+                      color: requestPage === 1 ? '#9ca3af' : '#374151',
+                      cursor: requestPage === 1 ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      fontSize: '12px',
+                    }}
+                  >
+                    Previous
+                  </button>
+                  {Array.from({ length: totalRequestPages }, (_, i) => i + 1).map((pg) => (
+                    <button
+                      key={pg}
+                      onClick={() => setRequestPage(pg)}
+                      style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '6px',
+                        border: pg === requestPage ? 'none' : '1px solid #d1d5db',
+                        backgroundColor: pg === requestPage ? '#2563eb' : '#ffffff',
+                        color: pg === requestPage ? '#ffffff' : '#374151',
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                        fontSize: '12px',
+                      }}
+                    >
+                      {pg}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setRequestPage((p) => Math.min(totalRequestPages, p + 1))}
+                    disabled={requestPage === totalRequestPages}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #d1d5db',
+                      backgroundColor: '#ffffff',
+                      color: requestPage === totalRequestPages ? '#9ca3af' : '#374151',
+                      cursor: requestPage === totalRequestPages ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      fontSize: '12px',
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

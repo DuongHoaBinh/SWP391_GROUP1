@@ -116,6 +116,9 @@ export default function ManagerRequestsPage() {
     }
   };
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
+
   const filteredOrders = orders.filter(o => {
     const matchesStatus = statusFilter === 'ALL' || o.status === statusFilter;
     const matchesSearch = (o.contactName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -123,6 +126,9 @@ export default function ManagerRequestsPage() {
                           (o.destinationLocation || '').toLowerCase().includes(searchTerm.toLowerCase());
     return matchesStatus && matchesSearch;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  const paginatedOrders = filteredOrders.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div className="flex flex-col gap-6 pb-12">
@@ -144,7 +150,10 @@ export default function ManagerRequestsPage() {
               type="text" 
               placeholder="Search customer or city..." 
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
               className="border-none outline-none text-sm w-full bg-transparent" 
             />
           </div>
@@ -153,7 +162,10 @@ export default function ManagerRequestsPage() {
             <Filter size={16} className="text-slate-500 shrink-0" />
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setCurrentPage(1);
+              }}
               className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white font-medium text-slate-700 outline-none"
             >
               <option value="ALL">All Statuses</option>
@@ -170,12 +182,12 @@ export default function ManagerRequestsPage() {
           <table className="w-full text-left text-sm border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-4">Order ID</th>
-                <th className="p-4">Customer</th>
-                <th className="p-4">Origin / Destination</th>
-                <th className="p-4">Horses</th>
-                <th className="p-4">Status</th>
-                <th className="p-4 text-right">Review Action</th>
+                <th className="px-6 py-4 w-32 whitespace-nowrap">Order ID</th>
+                <th className="px-6 py-4 min-w-[180px]">Customer</th>
+                <th className="px-6 py-4 min-w-[240px]">Origin / Destination</th>
+                <th className="px-6 py-4 text-center w-28 whitespace-nowrap">Horses</th>
+                <th className="px-6 py-4 text-center w-44 whitespace-nowrap">Status</th>
+                <th className="px-6 py-4 text-center w-64 whitespace-nowrap">Review Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -183,64 +195,70 @@ export default function ManagerRequestsPage() {
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-slate-500">Loading transport orders...</td>
                 </tr>
-              ) : filteredOrders.map(order => (
-                <tr key={order.id} className="hover:bg-slate-50/70">
-                  <td className="p-4 font-bold text-blue-600">REQ-{String(order.id).padStart(3, '0')}</td>
-                  <td className="p-4">
+              ) : paginatedOrders.map(order => (
+                <tr key={order.id} className="hover:bg-slate-50/70 transition-colors">
+                  <td className="px-6 py-4 font-bold text-blue-600 whitespace-nowrap">
+                    {order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`}
+                  </td>
+                  <td className="px-6 py-4">
                     <p className="font-bold text-slate-900 m-0">{order.contactName || 'Customer'}</p>
                     <p className="text-xs text-slate-500 m-0">{order.contactPhone}</p>
                   </td>
-                  <td className="p-4 text-slate-700 text-xs">
+                  <td className="px-6 py-4 text-xs">
                     <p className="font-semibold text-slate-900 m-0">{order.originLocation}</p>
                     <p className="text-slate-500 m-0">→ {order.destinationLocation}</p>
                   </td>
-                  <td className="p-4 font-semibold text-slate-800">{order.requestedHorseCount} Horse(s)</td>
-                  <td className="p-4">
+                  <td className="px-6 py-4 text-center font-semibold text-slate-800 whitespace-nowrap">
+                    {order.requestedHorseCount} Horse(s)
+                  </td>
+                  <td className="px-6 py-4 text-center whitespace-nowrap">
                     {order.status === 'requested' && (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
                         Pending Review
                       </span>
                     )}
                     {order.status === 'approved' && (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                         Approved
                       </span>
                     )}
                     {order.status === 'rejected' && (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800">
+                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200">
                         Rejected
                       </span>
                     )}
                     {order.status === 'change_requested' && (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-800">
+                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
                         Change Requested
                       </span>
                     )}
                   </td>
-                  <td className="p-4 text-right">
+                  <td className="px-6 py-4 text-center whitespace-nowrap">
                     {order.status === 'requested' ? (
-                      <div className="inline-flex items-center gap-2">
+                      <div className="inline-flex items-center justify-center gap-1.5">
                         <button
                           onClick={() => openActionModal('APPROVE', order)}
-                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm"
+                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-xs transition-colors"
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => openActionModal('CHANGE', order)}
-                          className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg shadow-sm"
+                          className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg shadow-xs transition-colors"
                         >
                           Revise
                         </button>
                         <button
                           onClick={() => openActionModal('REJECT', order)}
-                          className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg shadow-sm"
+                          className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg shadow-xs transition-colors"
                         >
                           Reject
                         </button>
                       </div>
                     ) : (
-                      <span className="text-xs text-slate-400 font-medium">Decided</span>
+                      <span className="inline-flex items-center justify-center min-w-[90px] px-3 py-1 rounded-md text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200">
+                        Decided
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -252,6 +270,49 @@ export default function ManagerRequestsPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination Bar (10 orders per page) */}
+        <div className="p-4 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-xs text-slate-500 font-medium">
+            Hiển thị <span className="font-bold text-slate-700">{filteredOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}</span> -{' '}
+            <span className="font-bold text-slate-700">{Math.min(currentPage * pageSize, filteredOrders.length)}</span> trong tổng số{' '}
+            <span className="font-bold text-slate-700">{filteredOrders.length}</span> đơn hàng
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Trước
+              </button>
+
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${
+                    currentPage === page
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Sau
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

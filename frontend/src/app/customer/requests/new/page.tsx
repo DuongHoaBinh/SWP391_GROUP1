@@ -25,7 +25,7 @@ import { getCurrentUser } from '@/lib/auth';
 import dynamic from 'next/dynamic';
 
 const RoutePlanningMap = dynamic(
-  () => import('@/components/maps/RoutePlanningMap').then((mod) => mod.RoutePlanningMap),
+  () => import('@/components/maps/RoutePlanningMap'),
   {
     ssr: false,
     loading: () => (

@@ -30,6 +30,7 @@ interface ShipmentRow extends RowDataPacket {
   customer_email?: string;
   approver_name?: string;
   request_code?: string;
+  customer_request_code?: string;
 }
 
 interface AttachmentRow extends RowDataPacket {
@@ -227,7 +228,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   async findAllShipments(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
     let query = `
       SELECT s.*, u.email as customer_email, a.full_name as approver_name,
-             CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (PARTITION BY s.customer_id ORDER BY s.shipment_id ASC), 3, '0')) as request_code
+             CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
@@ -251,7 +252,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
               CONCAT('REQ-', LPAD(
                 (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                 3, '0'
-              )) as request_code
+              )) as customer_request_code,
+              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
@@ -449,6 +451,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return {
       id: row.shipment_id,
       requestCode,
+      customerRequestCode: row.customer_request_code,
       customerId: row.customer_id,
       requestedBy: row.requested_by,
       approvedBy: row.approved_by,

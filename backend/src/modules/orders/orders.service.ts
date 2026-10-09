@@ -62,6 +62,13 @@ export class OrdersService {
       throw new ForbiddenException('You can only view your own transport orders');
     }
 
+    if (user.role === UserRole.CUSTOMER && order.customerRequestCode) {
+      return {
+        ...order,
+        requestCode: order.customerRequestCode,
+      };
+    }
+
     return order;
   }
 
@@ -90,21 +97,22 @@ export class OrdersService {
       dto.totalCost ?? 0,
     );
 
-    // 1. Gửi thông báo đến customer
-    const code = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
+    // 1. Gửi thông báo đến customer (dùng mã đơn của riêng khách hàng)
+    const customerCode = order.customerRequestCode || order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
       'Yêu cầu vận chuyển đã được phê duyệt',
-      `Yêu cầu vận chuyển mã ${code} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được Logistics Manager phê duyệt. Chuyên viên kiểm dịch đang rà soát quy định nước đến và sẽ gửi danh mục hồ sơ cần nộp cho quý khách.`,
+      `Yêu cầu vận chuyển mã ${customerCode} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được Logistics Manager phê duyệt. Chuyên viên kiểm dịch đang rà soát quy định nước đến và sẽ gửi danh mục hồ sơ cần nộp cho quý khách.`,
       'status_update',
       orderId,
     );
 
-    // 2. Chuyển giao sang Flow 2: Gửi thông báo đến Transport Specialist
+    // 2. Chuyển giao sang Flow 2: Gửi thông báo đến Transport Specialist (dùng mã hệ thống)
+    const staffCode = `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.notifyRole(
       'Transport Specialist',
-      `Đơn hàng mới #${code} cần thiết lập hồ sơ kiểm dịch`,
-      `Đơn vận chuyển mã ${code} đi "${order.destinationLocation}" vừa được phê duyệt. Vui lòng rà soát quy chế nước đến và gửi yêu cầu danh mục hồ sơ cho khách hàng.`,
+      `Đơn hàng mới #${staffCode} cần thiết lập hồ sơ kiểm dịch`,
+      `Đơn vận chuyển mã ${staffCode} đi "${order.destinationLocation}" vừa được phê duyệt. Vui lòng rà soát quy chế nước đến và gửi yêu cầu danh mục hồ sơ cho khách hàng.`,
       'status_update',
       orderId,
     );
@@ -138,7 +146,7 @@ export class OrdersService {
     );
 
     // Gửi thông báo đến customer kèm lý do
-    const rejectCode = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
+    const rejectCode = order.customerRequestCode || order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
       'Yêu cầu vận chuyển bị từ chối',
@@ -170,7 +178,7 @@ export class OrdersService {
     await this.ordersStore.updateShipmentChangeRequest(orderId, dto.reason);
 
     // Gửi thông báo đến customer kèm lý do cần chỉnh sửa
-    const changeCode = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
+    const changeCode = order.customerRequestCode || order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
       'Yêu cầu chỉnh sửa thông tin vận chuyển',

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, UploadCloud, FileText, AlertTriangle, CheckCircle, XCircle, Clock, Trash2, ExternalLink, RefreshCw } from 'lucide-react';
+import { ArrowLeft, UploadCloud, FileText, AlertTriangle, CheckCircle, XCircle, Clock, Trash2, ExternalLink, RefreshCw, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { documentsApi } from '@/features/documents/api/documents.api';
@@ -161,14 +161,14 @@ export default function DocumentsPage() {
       {/* Documents List */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse table-auto">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Document Title</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Related Order</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Horse</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Status</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 text-right">Actions</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 min-w-[340px]">Document Title</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 w-36 whitespace-nowrap text-center">Related Order</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 w-36 whitespace-nowrap">Horse</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 w-36 whitespace-nowrap text-center">Status</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 min-w-[260px] whitespace-nowrap text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -194,99 +194,102 @@ export default function DocumentsPage() {
                   <tr key={doc.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-5">
                       <div className="flex items-start gap-3">
-                        <div className={`p-2 rounded-lg shrink-0 ${doc.status === 'REJECTED' ? 'bg-red-100 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+                        <div className={`p-2 rounded-lg shrink-0 mt-0.5 ${doc.status === 'REJECTED' ? 'bg-red-100 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
                           <FileText size={20} />
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-slate-900 text-sm">{doc.title}</span>
-                            <span className="text-[11px] font-mono font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                              {doc.id}
-                            </span>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900 text-sm leading-snug">
+                            {doc.title}
                           </div>
-                          {doc.rejectionReason && (
-                            <div className="text-xs text-red-600 font-medium mt-1 bg-red-50 inline-block px-2 py-0.5 rounded">
-                              Reason: {doc.rejectionReason}
-                            </div>
-                          )}
-                          {doc.status === 'PENDING' && (
-                            <div className="text-xs text-slate-500 mt-1">Pending submission</div>
-                          )}
+                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                            <span className="text-[11px] font-mono font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 shrink-0">
+                              Mã: {doc.id}
+                            </span>
+                            {doc.rejectionReason && (
+                              <span className="text-xs text-red-600 font-medium bg-red-50 px-2 py-0.5 rounded border border-red-200">
+                                Lý do: {doc.rejectionReason}
+                              </span>
+                            )}
+                            {doc.status === 'PENDING' && (
+                              <span className="text-xs text-amber-600 font-medium">Chờ tải lên</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-5">
-                      <span className="font-semibold text-blue-700 text-sm bg-blue-50 border border-blue-200/60 px-2.5 py-1 rounded-md">
+                    <td className="px-6 py-5 whitespace-nowrap text-center">
+                      <span className="inline-block whitespace-nowrap font-bold text-blue-700 text-xs tracking-wide bg-blue-50 border border-blue-200/80 px-2.5 py-1 rounded-md">
                         {doc.requestCode}
                       </span>
                     </td>
-                    <td className="px-6 py-5 font-medium text-slate-800 text-sm">{doc.horseName}</td>
-                    <td className="px-6 py-5">
+                    <td className="px-6 py-5 whitespace-nowrap font-medium text-slate-800 text-sm">{doc.horseName}</td>
+                    <td className="px-6 py-5 whitespace-nowrap text-center">
                       {doc.status === 'APPROVED' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                        <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700 min-w-[110px]">
                           <CheckCircle size={14} /> Approved
                         </span>
                       )}
                       {doc.status === 'SUBMITTED' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
+                        <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700 min-w-[110px]">
                           <Clock size={14} /> Under Review
                         </span>
                       )}
                       {doc.status === 'REJECTED' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">
+                        <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700 min-w-[110px]">
                           <XCircle size={14} /> Rejected
                         </span>
                       )}
                       {doc.status === 'PENDING' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
+                        <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700 min-w-[110px]">
                           <AlertTriangle size={14} /> Missing
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-5 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                    <td className="px-6 py-5 whitespace-nowrap text-right">
+                      <div className="flex items-center justify-end gap-2 shrink-0">
                         {doc.fileUrl && (
                           <a
                             href={doc.fileUrl.startsWith('http') ? doc.fileUrl : `http://localhost:5000${doc.fileUrl}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-blue-600 rounded-lg transition-colors shadow-sm"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-blue-600 rounded-lg transition-colors shadow-xs whitespace-nowrap shrink-0"
                           >
-                            <ExternalLink size={13} /> View File
+                            <ExternalLink size={13} className="shrink-0" />
+                            <span>View File</span>
                           </a>
                         )}
 
                         {doc.status === 'REJECTED' && (
-                          <Button
-                            variant="primary"
-                            size="sm"
+                          <button
+                            type="button"
                             onClick={() => handleStartReupload(doc)}
-                            className="shadow-sm bg-red-600 hover:bg-red-700 text-xs flex items-center gap-1"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors shadow-xs whitespace-nowrap shrink-0"
                           >
-                            <RefreshCw size={12} /> Nộp lại (Bị từ chối)
-                          </Button>
+                            <RefreshCw size={12} className="shrink-0" />
+                            <span>Nộp lại tệp</span>
+                          </button>
                         )}
 
                         {doc.status === 'SUBMITTED' && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
+                          <button
+                            type="button"
                             onClick={() => handleStartReupload(doc)}
-                            className="shadow-sm text-xs flex items-center gap-1 border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors shadow-xs whitespace-nowrap shrink-0"
                           >
-                            <RefreshCw size={12} /> Cập nhật tệp mới
-                          </Button>
+                            <RefreshCw size={12} className="shrink-0" />
+                            <span>Cập nhật tệp</span>
+                          </button>
                         )}
 
                         {doc.status === 'PENDING' && (
-                          <Button
-                            variant="primary"
-                            size="sm"
+                          <button
+                            type="button"
                             onClick={() => handleStartReupload(doc)}
-                            className="shadow-sm bg-blue-600 hover:bg-blue-700 text-xs"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-xs whitespace-nowrap shrink-0"
                           >
-                            Upload Now
-                          </Button>
+                            <Upload size={12} className="shrink-0" />
+                            <span>Upload Now</span>
+                          </button>
                         )}
 
                         {/* Delete Button */}
@@ -296,7 +299,7 @@ export default function DocumentsPage() {
                             disabled={isDeleting}
                             onClick={() => handleDelete(doc.id, doc.title)}
                             title="Xóa tài liệu này"
-                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200"
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200 shrink-0"
                           >
                             <Trash2 size={16} className={isDeleting ? 'animate-spin' : ''} />
                           </button>

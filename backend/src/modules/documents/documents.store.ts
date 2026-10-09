@@ -42,6 +42,7 @@ interface DocumentRow extends RowDataPacket {
   uploader_name?: string;
   uploader_email?: string;
   request_code?: string;
+  customer_request_code?: string;
   shipment_id?: number;
 }
 
@@ -315,7 +316,11 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
   }): Promise<TransportDocument[]> {
     let query = `
       SELECT d.*, h.name as horse_name, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
-        (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id
+        (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id,
+        (SELECT CONCAT('REQ-', LPAD(
+          (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+          3, '0'
+        )) FROM shipment s WHERE s.shipment_id = (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1)) as customer_request_code
       FROM transport_document d
       JOIN horse h ON h.horse_id = d.horse_id
       JOIN regulation r ON r.regulation_id = d.regulation_id
@@ -349,7 +354,11 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
         id: r.document_id,
         horseId: r.horse_id,
         horseName: r.horse_name,
-        requestCode: r.shipment_id ? `REQ-${String(r.shipment_id).padStart(3, '0')}` : undefined,
+        requestCode: filter.uploadedBy !== undefined && r.customer_request_code
+          ? r.customer_request_code
+          : r.shipment_id
+            ? `REQ-${String(r.shipment_id).padStart(3, '0')}`
+            : undefined,
         regulationId: r.regulation_id,
         regulationCountry: r.country,
         regulationDocType: r.regulation_doc_type || r.doc_type,
@@ -441,10 +450,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
   async findOrderDetails(orderId: number): Promise<OrderDestinationRow | undefined> {
     const [rows] = await this.pool.execute<OrderDestinationRow[]>(
       `SELECT s.shipment_id, s.customer_id, s.destination_location, s.origin_location, s.status,
-              CONCAT('REQ-', LPAD(
-                (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
-                3, '0'
-              )) as request_code
+              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
        FROM shipment s WHERE s.shipment_id = ? LIMIT 1`,
       [orderId],
     );
@@ -475,10 +481,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT s.shipment_id, s.customer_id, u.full_name as customer_name, u.email as customer_email,
               s.origin_location, s.destination_location, s.status, s.created_at,
-              CONCAT('REQ-', LPAD(
-                (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
-                3, '0'
-              )) as request_code,
+              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
               (SELECT COUNT(*) FROM shipment_horse sh WHERE sh.shipment_id = s.shipment_id) as horses_count,
               (SELECT COUNT(*) FROM notification n WHERE n.shipment_id = s.shipment_id AND n.user_id = s.customer_id AND (n.notif_type = 'document_missing' OR n.title LIKE '%hồ sơ kiểm dịch%')) as req_sent_count
        FROM shipment s
