@@ -62,8 +62,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
       fetchUnread();
     };
     window.addEventListener('auth-user-updated', handleUserUpdate);
+    window.addEventListener('notifications-updated', fetchUnread);
     return () => {
       window.removeEventListener('auth-user-updated', handleUserUpdate);
+      window.removeEventListener('notifications-updated', fetchUnread);
     };
   }, []);
 

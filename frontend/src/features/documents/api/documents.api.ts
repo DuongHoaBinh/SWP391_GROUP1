@@ -91,6 +91,7 @@ export interface ComplianceOrderSummary {
   status: string;
   createdAt: string;
   horsesCount: number;
+  horseNames?: string;
   totalRequiredDocs: number;
   approvedDocsCount: number;
   isFullyCompliant: boolean;

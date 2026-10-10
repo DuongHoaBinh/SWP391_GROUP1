@@ -68,12 +68,25 @@ export default function NotificationsPage() {
 
   const handleMarkAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    for (const notif of notifications.filter((n) => !n.isRead)) {
-      try {
-        await apiClient(`/notifications/${notif.id}/read`, { method: 'PATCH' });
-      } catch {
-        // ignore
+    try {
+      await apiClient('/notifications/read-all', { method: 'PATCH' });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
       }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleMarkSingleRead = async (id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    try {
+      await apiClient(`/notifications/${id}/read`, { method: 'PATCH' });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      }
+    } catch {
+      // ignore
     }
   };
 
@@ -143,6 +156,7 @@ export default function NotificationsPage() {
           notifications.map((notif) => (
             <div
               key={notif.id}
+              onClick={() => !notif.isRead && handleMarkSingleRead(notif.id)}
               style={{
                 display: 'flex',
                 alignItems: 'flex-start',
@@ -154,6 +168,7 @@ export default function NotificationsPage() {
                   notif.type === 'CRITICAL' ? '#ef4444' : notif.type === 'SUCCESS' ? '#22c55e' : '#3b82f6'
                 }`,
                 border: '1px solid var(--border-light)',
+                cursor: notif.isRead ? 'default' : 'pointer',
               }}
             >
               <div>

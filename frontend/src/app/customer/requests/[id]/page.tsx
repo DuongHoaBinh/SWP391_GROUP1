@@ -35,6 +35,7 @@ import { TripTrackingModal } from '@/features/tracking/components/TripTrackingMo
 import { apiClient } from '@/lib/api-client';
 import { Modal } from '@/components/ui/Modal';
 import { OrderComplianceChecklist } from '@/features/documents/api/documents.api';
+import { buildEquineRoute } from '@/lib/geo-corridors';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 
@@ -169,7 +170,18 @@ const fetcher = async (url: string) => {
   const originCountryCode = isOriginVN ? 'VN' : 'INTL';
   const destinationCountryCode = isDomestic ? 'VN' : (destLower.includes('singapore') ? 'SG' : destLower.includes('australia') ? 'AU' : destLower.includes('japan') ? 'JP' : destLower.includes('hong kong') ? 'HK' : destLower.includes('malaysia') ? 'MY' : destLower.includes('thailand') ? 'TH' : 'INTL');
   const destinationCountry = isDomestic ? 'Vietnam' : (destLower.includes('singapore') ? 'Singapore' : destLower.includes('australia') ? 'Australia' : destLower.includes('japan') ? 'Japan' : destLower.includes('hong kong') ? 'Hong Kong' : 'International');
-  const transitName = isDomestic ? 'Trạm kiểm dịch nội địa' : 'Border / Transit Checkpoint';
+  const routeCalc = buildEquineRoute(
+    originStr,
+    destStr,
+    isDomestic ? 'road' : 'air',
+    transportationType as any
+  );
+
+  const estimatedDistance = data.estimatedDistance || `${routeCalc.distanceKm.toLocaleString()} km`;
+  const estimatedDuration = data.estimatedDuration || (isDomestic ? `~${routeCalc.durationHours} hours` : `~${routeCalc.durationHours} hours (${routeCalc.mode === 'air' ? 'Air Flight' : 'Road Transit'})`);
+  const transitName = isDomestic
+    ? (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'rest')?.name || 'Trạm kiểm dịch nội địa')
+    : (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'airport')?.name || 'Border / Transit Checkpoint');
 
   return {
     ...data,
@@ -191,8 +203,8 @@ const fetcher = async (url: string) => {
     originCode: 'SGN, VN',
     destination: data.destinationLocation,
     destinationCode: 'DEST',
-    estimatedDistance: '1,100 km',
-    estimatedDuration: '12 hours',
+    estimatedDistance,
+    estimatedDuration,
     createdDate: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-GB') : '23 Sep 2026',
     departureDate: data.requestedDate ? new Date(data.requestedDate).toLocaleDateString('en-GB') : 'TBD',
     estimatedArrivalDate: data.expectedArrivalDate ? new Date(data.expectedArrivalDate).toLocaleDateString('en-GB') : 'TBD',
@@ -261,9 +273,10 @@ export default function RequestDetailPage() {
 
   const isApproved = String(request?.status || '').toLowerCase() === 'approved';
   const requirementsSent = Boolean(checklist?.requirementsSent);
-  const totalMissingCount = checklist
-    ? checklist.totalRequiredDocuments - checklist.approvedDocumentsCount
-    : 0;
+  const totalMissingCount = checklist?.horses?.reduce(
+    (acc, h) => acc + (h.missingRegulations?.length || 0),
+    0
+  ) ?? 0;
   const hasMissingDocs = isApproved && requirementsSent && totalMissingCount > 0;
 
   const handleOpenUpload = (horseId?: number | string, regulationId?: number | string) => {
@@ -1025,11 +1038,13 @@ export default function RequestDetailPage() {
                                 fontWeight: 700,
                                 padding: '2px 8px',
                                 borderRadius: '4px',
-                                backgroundColor: horseItem.isCompliant ? '#dcfce7' : '#fee2e2',
-                                color: horseItem.isCompliant ? '#15803d' : '#b91c1c',
+                                backgroundColor: horseItem.missingRegulations.length === 0 ? '#dcfce7' : '#fee2e2',
+                                color: horseItem.missingRegulations.length === 0 ? '#15803d' : '#b91c1c',
                               }}
                             >
-                              {horseItem.isCompliant ? 'Đủ hồ sơ hợp lệ' : `Còn thiếu ${horseItem.missingRegulations.length} giấy tờ`}
+                              {horseItem.missingRegulations.length === 0
+                                ? (horseItem.isCompliant ? 'Đủ hồ sơ hợp lệ (Đã duyệt)' : 'Đã nộp đủ hồ sơ (Chờ duyệt)')
+                                : `Còn thiếu ${horseItem.missingRegulations.length} giấy tờ`}
                             </span>
 
                             {!horseItem.isCompliant && horseItem.missingRegulations.length > 0 && (
@@ -1347,7 +1362,7 @@ export default function RequestDetailPage() {
         {/* RIGHT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', position: 'sticky', top: '108px' }}>
           {/* ACTION PANEL (Sticky Missing Documents Warning) */}
-          {hasMissingDocs && (
+          {hasMissingDocs ? (
             <div
               style={{
                 backgroundColor: '#ffffff',
@@ -1397,6 +1412,46 @@ export default function RequestDetailPage() {
                   >
                     <Upload size={14} /> ⚡ Nộp trọn bộ {totalMissingCount} hồ sơ (Nộp tất cả)
                   </button>
+                </div>
+              </div>
+            </div>
+          ) : isApproved && requirementsSent && (
+            <div
+              style={{
+                backgroundColor: checklist?.isFullyCompliant ? '#f0fdf4' : '#eff6ff',
+                borderRadius: '16px',
+                border: checklist?.isFullyCompliant ? '1px solid #bbf7d0' : '1px solid #bfdbfe',
+                padding: '20px',
+                position: 'relative',
+                overflow: 'hidden',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: 0,
+                  width: '6px',
+                  backgroundColor: checklist?.isFullyCompliant ? '#16a34a' : '#2563eb',
+                }}
+              />
+              <div style={{ display: 'flex', gap: '12px' }}>
+                {checklist?.isFullyCompliant ? (
+                  <CheckCircle2 size={20} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                ) : (
+                  <Clock size={20} color="#2563eb" style={{ flexShrink: 0, marginTop: '2px' }} />
+                )}
+                <div>
+                  <h4 style={{ fontSize: '15px', fontWeight: 700, color: checklist?.isFullyCompliant ? '#166534' : '#1e40af', margin: 0 }}>
+                    {checklist?.isFullyCompliant ? 'Hồ sơ đã được phê duyệt 100%' : 'Đã nộp đủ hồ sơ (Chờ duyệt)'}
+                  </h4>
+                  <p style={{ fontSize: '12.5px', color: checklist?.isFullyCompliant ? '#15803d' : '#1e3a8a', margin: '6px 0 0 0', lineHeight: 1.4 }}>
+                    {checklist?.isFullyCompliant
+                      ? 'Tất cả các tài liệu kiểm dịch và pháp lý đã được duyệt hợp lệ. Chuyến đi đã đủ điều kiện xuất phát.'
+                      : 'Quý khách đã nộp đầy đủ các chứng từ theo yêu cầu. Chuyên viên kiểm dịch đang trong quá trình thẩm định hồ sơ.'}
+                  </p>
                 </div>
               </div>
             </div>

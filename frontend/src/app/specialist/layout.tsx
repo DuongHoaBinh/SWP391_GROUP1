@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
+import { apiClient } from '@/lib/api-client';
 
 interface NavItem {
   label: string;
@@ -40,6 +41,18 @@ export default function SpecialistLayout({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+
+  const fetchUnread = async () => {
+    try {
+      const notifs = await apiClient<any[]>('/notifications');
+      if (Array.isArray(notifs)) {
+        setUnreadNotifs(notifs.filter((n) => !n.isRead).length);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     // Ensure active specialist session exists
@@ -54,6 +67,18 @@ export default function SpecialistLayout({
         initials: 'SJ',
       });
     }
+
+    fetchUnread();
+
+    const handleNotificationsUpdated = () => {
+      fetchUnread();
+    };
+    window.addEventListener('notifications-updated', handleNotificationsUpdated);
+    window.addEventListener('auth-user-updated', handleNotificationsUpdated);
+    return () => {
+      window.removeEventListener('notifications-updated', handleNotificationsUpdated);
+      window.removeEventListener('auth-user-updated', handleNotificationsUpdated);
+    };
   }, []);
 
   const navItems: NavItem[] = [
@@ -98,6 +123,7 @@ export default function SpecialistLayout({
       label: 'Notifications',
       href: '/specialist/notifications',
       icon: <Bell size={18} />,
+      badge: unreadNotifs > 0 ? unreadNotifs : undefined,
     },
     {
       label: 'Settings',
@@ -395,11 +421,14 @@ export default function SpecialistLayout({
           {/* Right: Actions & User */}
           <div className="flex items-center gap-4">
             <button
+              onClick={() => router.push('/specialist/notifications')}
               aria-label="Notifications"
               className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 bg-white relative cursor-pointer hover:bg-slate-50 transition-colors"
             >
               <Bell size={16} />
-              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 border border-white" />
+              {unreadNotifs > 0 && (
+                <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 border border-white" />
+              )}
             </button>
 
             <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-full pl-1 pr-3 py-1 cursor-pointer hover:bg-slate-100 transition-colors">

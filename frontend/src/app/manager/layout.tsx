@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
+import { apiClient } from '@/lib/api-client';
 
 interface NavItem {
   label: string;
@@ -42,6 +43,18 @@ export default function ManagerLayout({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+
+  const fetchUnread = async () => {
+    try {
+      const notifs = await apiClient<any[]>('/notifications');
+      if (Array.isArray(notifs)) {
+        setUnreadNotifs(notifs.filter((n) => !n.isRead).length);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     // Ensure active manager session exists
@@ -56,6 +69,18 @@ export default function ManagerLayout({
         initials: 'AM',
       });
     }
+
+    fetchUnread();
+
+    const handleNotificationsUpdated = () => {
+      fetchUnread();
+    };
+    window.addEventListener('notifications-updated', handleNotificationsUpdated);
+    window.addEventListener('auth-user-updated', handleNotificationsUpdated);
+    return () => {
+      window.removeEventListener('notifications-updated', handleNotificationsUpdated);
+      window.removeEventListener('auth-user-updated', handleNotificationsUpdated);
+    };
   }, []);
 
   const navItems: NavItem[] = [
@@ -98,7 +123,7 @@ export default function ManagerLayout({
       label: 'Notifications',
       href: '/manager/notifications',
       icon: <Bell size={18} />,
-      badge: 5,
+      badge: unreadNotifs > 0 ? unreadNotifs : undefined,
       badgeColor: 'brand',
     },
     {
@@ -680,7 +705,7 @@ export default function ManagerLayout({
           {/* Right: Actions & User */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <button
-              onClick={() => setShowNotifications(!showNotifications)}
+              onClick={() => router.push('/manager/notifications')}
               style={{
                 width: '36px',
                 height: '36px',
@@ -695,20 +720,23 @@ export default function ManagerLayout({
                 cursor: 'pointer',
                 boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
               }}
+              title="Notifications"
             >
               <Bell size={16} />
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '8px',
-                  right: '9px',
-                  width: '7px',
-                  height: '7px',
-                  borderRadius: '50%',
-                  backgroundColor: '#ef4444',
-                  border: '1px solid #ffffff',
-                }}
-              />
+              {unreadNotifs > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    right: '9px',
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ef4444',
+                    border: '1px solid #ffffff',
+                  }}
+                />
+              )}
             </button>
 
             <div

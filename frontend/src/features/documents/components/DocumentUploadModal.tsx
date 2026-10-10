@@ -288,6 +288,13 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     }
   }
 
+  const selectedHorseId = watch('horseId') || defaultHorseId;
+  const selectedHorse = currentOrder?.horses?.find((h) => String(h.id) === String(selectedHorseId)) || allHorses.find((h) => String(h.id) === String(selectedHorseId));
+  const selectedHorseName = selectedHorse?.name || 'Ngựa được chọn';
+
+  const selectedRegulationId = watch('regulationId') || defaultRegulationId;
+  const currentRegulation = regulations.find((r) => String(r.id) === String(selectedRegulationId));
+
   const onSubmit = async (data: UploadFormData) => {
     setIsUploading(true);
     try {
@@ -430,139 +437,166 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           </div>
         )}
 
-        {/* Step 1: Select Transport Request */}
-        <div>
-          <label className="text-sm font-semibold text-slate-800 flex items-center justify-between mb-1.5">
-            <span className="flex items-center gap-1.5">
-              <Ship size={16} className="text-blue-600" />
-              1. Chọn Đơn Vận Chuyển (Transport Request) <span className="text-red-500">*</span>
-            </span>
-            <span className="text-xs font-normal text-slate-500">
-              {orders.length} đơn vận chuyển khả dụng
-            </span>
-          </label>
-          <select
-            value={selectedOrderId}
-            onChange={(e) => handleOrderChange(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white font-medium text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-          >
-            {orders.map((ord) => {
-              const horseNames = ord.horses.map((h) => h.name).join(', ') || 'Ngựa đua';
-              const isApproved = String(ord.status).toLowerCase() === 'approved';
-              const statusTag = isApproved ? '✓ Đã duyệt' : '⏳ Chờ duyệt';
-              return (
-                <option key={ord.id} value={ord.id}>
-                  [{ord.requestCode}] {horseNames} — Đi {ord.destination} ({statusTag})
-                </option>
-              );
-            })}
-            <option value="direct">-- Hoặc chọn trực tiếp ngựa trong chuồng (Không theo đơn) --</option>
-          </select>
-        </div>
-
-        {/* Order Status Notice if not yet approved */}
-        {currentOrder && String(currentOrder.status).toLowerCase() !== 'approved' && selectedOrderId !== 'direct' && (
-          <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs flex items-start gap-2.5">
-            <span className="text-amber-600 text-base leading-none">⚠️</span>
-            <div>
-              <strong className="block mb-0.5">Đơn vận chuyển đang chờ Logistics Manager xét duyệt</strong>
-              <span>
-                Bạn có thể nộp trước giấy tờ kiểm dịch. Sau khi Quản lý duyệt đơn (Approved), Chuyên viên vận chuyển mới chính thức thụ lý và gửi hồ sơ cho Hải quan.
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Auto-selected Horse Details */}
-        <input
-          type="hidden"
-          {...register('horseId')}
-          value={currentOrder?.horses?.[0]?.id ? String(currentOrder.horses[0].id) : ''}
-        />
-        {currentOrder && currentOrder.horses.length === 1 ? (
-          <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
-                🐎
+        {defaultOrderId ? (
+          <>
+            <input type="hidden" {...register('horseId')} />
+            <input type="hidden" {...register('regulationId')} />
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-blue-900 bg-blue-100 px-2.5 py-1 rounded-md">
+                  {currentOrder?.requestCode || `Đơn #${defaultOrderId}`}
+                </span>
+                <span className="text-xs text-slate-500 font-medium">
+                  Điểm đến: <strong className="text-slate-800">{currentOrder?.destination || 'Điểm đến'}</strong>
+                </span>
               </div>
-              <div>
-                <div className="text-xs font-bold text-blue-900 uppercase tracking-wider">
-                  Ngựa vận chuyển mục tiêu
-                </div>
-                <div className="text-sm font-bold text-slate-900">
-                  {currentOrder.horses[0].name}{' '}
-                  {currentOrder.horses[0].id && !isNaN(Number(currentOrder.horses[0].id)) ? (
-                    <span className="text-xs font-medium text-slate-500">(Mã ID: #{currentOrder.horses[0].id})</span>
-                  ) : null}
-                </div>
+              <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-200/80">
+                <span className="text-slate-600 font-medium">
+                  Ngựa vận chuyển: <strong className="text-slate-900">{selectedHorseName}</strong>
+                </span>
+                <span className="text-slate-600 font-medium">
+                  Loại giấy tờ: <strong className="text-blue-700">{reuploadTitle || currentRegulation?.description || 'Hồ sơ kiểm dịch'}</strong>
+                </span>
               </div>
             </div>
-            <div className="text-right">
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
-                <Compass size={12} /> {currentOrder.destinationCountry}
-              </span>
-            </div>
-          </div>
+          </>
         ) : (
-          <div>
-            <label className="text-sm font-semibold text-slate-800 block mb-1">
-              2. Chọn Ngựa Đua Mục Tiêu <span className="text-red-500">*</span>
-            </label>
-            <select
-              {...register('horseId')}
-              className={`w-full px-3 py-2 rounded-lg border text-sm bg-white outline-none transition-colors ${
-                errors.horseId ? 'border-red-500' : 'border-slate-300 focus:border-blue-500'
-              }`}
-            >
-              {(currentOrder ? currentOrder.horses : allHorses).map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.name} (Mã ID: #{h.id}) {h.breed ? `— Giống: ${h.breed}` : ''}
-                </option>
-              ))}
-            </select>
-            {errors.horseId && (
-              <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                <AlertCircle size={12} /> {errors.horseId.message as string}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Step 3: Document Requirement Selection */}
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-              <ShieldCheck size={16} className="text-emerald-600" />
-              3. Loại Giấy Tờ Cần Tải Lên <span className="text-red-500">*</span>
-            </label>
-            {currentOrder && (
-              <button
-                type="button"
-                onClick={() => setShowAllRegulations(!showAllRegulations)}
-                className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
+          <>
+            {/* Step 1: Select Transport Request */}
+            <div>
+              <label className="text-sm font-semibold text-slate-800 flex items-center justify-between mb-1.5">
+                <span className="flex items-center gap-1.5">
+                  <Ship size={16} className="text-blue-600" />
+                  1. Chọn Đơn Vận Chuyển (Transport Request) <span className="text-red-500">*</span>
+                </span>
+                <span className="text-xs font-normal text-slate-500">
+                  {orders.length} đơn vận chuyển khả dụng
+                </span>
+              </label>
+              <select
+                value={selectedOrderId}
+                onChange={(e) => handleOrderChange(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white font-medium text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
               >
-                {showAllRegulations ? 'Chỉ hiện hồ sơ nước đến' : 'Hiện tất cả các nước'}
-              </button>
+                {orders.map((ord) => {
+                  const horseNames = ord.horses.map((h) => h.name).join(', ') || 'Ngựa đua';
+                  const isApproved = String(ord.status).toLowerCase() === 'approved';
+                  const statusTag = isApproved ? '✓ Đã duyệt' : '⏳ Chờ duyệt';
+                  return (
+                    <option key={ord.id} value={ord.id}>
+                      [{ord.requestCode}] {horseNames} — Đi {ord.destination} ({statusTag})
+                    </option>
+                  );
+                })}
+                <option value="direct">-- Hoặc chọn trực tiếp ngựa trong chuồng (Không theo đơn) --</option>
+              </select>
+            </div>
+
+            {/* Order Status Notice if not yet approved */}
+            {currentOrder && String(currentOrder.status).toLowerCase() !== 'approved' && selectedOrderId !== 'direct' && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs flex items-start gap-2.5">
+                <span className="text-amber-600 text-base leading-none">⚠️</span>
+                <div>
+                  <strong className="block mb-0.5">Đơn vận chuyển đang chờ Logistics Manager xét duyệt</strong>
+                  <span>
+                    Bạn có thể nộp trước giấy tờ kiểm dịch. Sau khi Quản lý duyệt đơn (Approved), Chuyên viên vận chuyển mới chính thức thụ lý và gửi hồ sơ cho Hải quan.
+                  </span>
+                </div>
+              </div>
             )}
-          </div>
-          <select
-            {...register('regulationId')}
-            className={`w-full px-3 py-2.5 rounded-lg border text-sm bg-white font-medium outline-none transition-colors ${
-              errors.regulationId ? 'border-red-500' : 'border-slate-300 focus:border-blue-500'
-            }`}
-          >
-            {availableRegulations.map((reg) => (
-              <option key={reg.id} value={reg.id}>
-                [{reg.country}] {reg.description || reg.documentType} ({reg.documentType})
-              </option>
-            ))}
-          </select>
-          {errors.regulationId && (
-            <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
-              <AlertCircle size={12} /> {errors.regulationId.message as string}
-            </span>
-          )}
-        </div>
+
+            {/* Step 2: Auto-selected Horse Details */}
+            <input
+              type="hidden"
+              {...register('horseId')}
+              value={currentOrder?.horses?.[0]?.id ? String(currentOrder.horses[0].id) : ''}
+            />
+            {currentOrder && currentOrder.horses.length === 1 ? (
+              <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                    🐎
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-blue-900 uppercase tracking-wider">
+                      Ngựa vận chuyển mục tiêu
+                    </div>
+                    <div className="text-sm font-bold text-slate-900">
+                      {currentOrder.horses[0].name}{' '}
+                      {currentOrder.horses[0].id && !isNaN(Number(currentOrder.horses[0].id)) ? (
+                        <span className="text-xs font-medium text-slate-500">(Mã ID: #{currentOrder.horses[0].id})</span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                    <Compass size={12} /> {currentOrder.destinationCountry}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="text-sm font-semibold text-slate-800 block mb-1">
+                  2. Chọn Ngựa Đua Mục Tiêu <span className="text-red-500">*</span>
+                </label>
+                <select
+                  {...register('horseId')}
+                  className={`w-full px-3 py-2 rounded-lg border text-sm bg-white outline-none transition-colors ${
+                    errors.horseId ? 'border-red-500' : 'border-slate-300 focus:border-blue-500'
+                  }`}
+                >
+                  {(currentOrder ? currentOrder.horses : allHorses).map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name} (Mã ID: #{h.id}) {h.breed ? `— Giống: ${h.breed}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {errors.horseId && (
+                  <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                    <AlertCircle size={12} /> {errors.horseId.message as string}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Step 3: Document Requirement Selection */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                  <ShieldCheck size={16} className="text-emerald-600" />
+                  3. Loại Giấy Tờ Cần Tải Lên <span className="text-red-500">*</span>
+                </label>
+                {currentOrder && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllRegulations(!showAllRegulations)}
+                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                  >
+                    {showAllRegulations ? 'Chỉ hiện hồ sơ nước đến' : 'Hiện tất cả các nước'}
+                  </button>
+                )}
+              </div>
+              <select
+                {...register('regulationId')}
+                className={`w-full px-3 py-2.5 rounded-lg border text-sm bg-white font-medium outline-none transition-colors ${
+                  errors.regulationId ? 'border-red-500' : 'border-slate-300 focus:border-blue-500'
+                }`}
+              >
+                {availableRegulations.map((reg) => (
+                  <option key={reg.id} value={reg.id}>
+                    [{reg.country}] {reg.description || reg.documentType} ({reg.documentType})
+                  </option>
+                ))}
+              </select>
+              {errors.regulationId && (
+                <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                  <AlertCircle size={12} /> {errors.regulationId.message as string}
+                </span>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Step 4: Document / Passport Number */}
         <div>
