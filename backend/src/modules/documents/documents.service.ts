@@ -235,10 +235,17 @@ export class DocumentsService {
         docs.filter((d) => d.status === DocumentStatus.APPROVED).map((d) => d.regulationId),
       );
 
+      // Tìm những quy định đã có tài liệu nộp hợp lệ (approved hoặc đang submitted chờ duyệt)
+      const submittedOrApprovedRegIds = new Set(
+        docs
+          .filter((d) => d.status === DocumentStatus.APPROVED || d.status === DocumentStatus.SUBMITTED)
+          .map((d) => d.regulationId),
+      );
+
       totalApprovedDocs += approvedRegIds.size;
 
-      // Danh sách quy định còn thiếu hoặc chưa được approved
-      const missingRegs = applicableRegulations.filter((reg) => !approvedRegIds.has(reg.id));
+      // Danh sách quy định thực sự còn thiếu (chưa tải lên hoặc bị từ chối)
+      const missingRegs = applicableRegulations.filter((reg) => !submittedOrApprovedRegIds.has(reg.id));
 
       const isCompliant = missingRegs.length === 0;
 

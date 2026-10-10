@@ -483,6 +483,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
               s.origin_location, s.destination_location, s.status, s.created_at,
               CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
               (SELECT COUNT(*) FROM shipment_horse sh WHERE sh.shipment_id = s.shipment_id) as horses_count,
+              (SELECT GROUP_CONCAT(h.name SEPARATOR ', ') FROM shipment_horse sh JOIN horse h ON h.horse_id = sh.horse_id WHERE sh.shipment_id = s.shipment_id) as horse_names,
               (SELECT COUNT(*) FROM notification n WHERE n.shipment_id = s.shipment_id AND n.user_id = s.customer_id AND (n.notif_type = 'document_missing' OR n.title LIKE '%hồ sơ kiểm dịch%')) as req_sent_count
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
@@ -501,6 +502,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       status: r.status,
       createdAt: new Date(r.created_at).toISOString(),
       horsesCount: Number(r.horses_count || 1),
+      horseNames: r.horse_names || 'Ngựa vận chuyển',
       requirementsSent: Number(r.req_sent_count || 0) > 0,
     }));
   }

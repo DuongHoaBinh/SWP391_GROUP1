@@ -408,12 +408,28 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  const markAllNotificationsRead = () => {
+  const markAllNotificationsRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    try {
+      await apiClient('/notifications/read-all', { method: 'PATCH' });
+    } catch {
+      // ignore
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('notifications-updated'));
+    }
   };
 
-  const markNotificationRead = (id: string) => {
+  const markNotificationRead = async (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    try {
+      await apiClient(`/notifications/${id}/read`, { method: 'PATCH' });
+    } catch {
+      // ignore
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('notifications-updated'));
+    }
   };
 
   const addHorse = (horseData: Partial<Horse>): Horse => {

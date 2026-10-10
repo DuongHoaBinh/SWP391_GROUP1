@@ -36,6 +36,11 @@ export class NotificationsService {
     return { success: true };
   }
 
+  async markAllAsRead(userId: number): Promise<{ success: boolean }> {
+    await this.notificationsStore.markAllAsRead(userId);
+    return { success: true };
+  }
+
   async notifyRole(
     roleName: string,
     title: string,

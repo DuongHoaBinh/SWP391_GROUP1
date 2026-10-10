@@ -46,7 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   const fetchNotifications = async () => {
     try {
       const data = await apiClient<any[]>('/notifications');
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         const mapped: NotificationItem[] = data.map((item) => ({
           id: String(item.id),
           type: item.notifType === 'health_alert' ? 'CRITICAL' : 'INFO',
@@ -59,10 +59,10 @@ export const Header: React.FC<HeaderProps> = ({
         }));
         setNotifications(mapped);
       } else {
-        setNotifications(mockNotifications);
+        setNotifications([]);
       }
     } catch {
-      setNotifications(mockNotifications);
+      setNotifications([]);
     }
   };
 
@@ -75,8 +75,10 @@ export const Header: React.FC<HeaderProps> = ({
       fetchNotifications();
     };
     window.addEventListener('auth-user-updated', handleUserUpdate);
+    window.addEventListener('notifications-updated', fetchNotifications);
     return () => {
       window.removeEventListener('auth-user-updated', handleUserUpdate);
+      window.removeEventListener('notifications-updated', fetchNotifications);
     };
   }, []);
 
@@ -84,12 +86,11 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleMarkAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    for (const notif of notifications.filter((n) => !n.isRead)) {
-      try {
-        await apiClient(`/notifications/${notif.id}/read`, { method: 'PATCH' });
-      } catch {
-        // ignore
-      }
+    try {
+      await apiClient('/notifications/read-all', { method: 'PATCH' });
+      window.dispatchEvent(new CustomEvent('notifications-updated'));
+    } catch {
+      // ignore
     }
   };
 

@@ -43,13 +43,11 @@ export default function SpecialistNotificationsPage() {
 
   const markAllRead = async () => {
     try {
-      const unread = notifications.filter((n) => !n.isRead);
-      await Promise.all(
-        unread.map((n) =>
-          apiClient(`/notifications/${n.id}/read`, { method: 'PATCH' }).catch(() => {})
-        )
-      );
+      await apiClient('/notifications/read-all', { method: 'PATCH' });
       await mutate();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      }
       toast.success('Đã đánh dấu tất cả là đã đọc');
     } catch {
       toast.error('Có lỗi xảy ra khi cập nhật thông báo');
@@ -60,6 +58,9 @@ export default function SpecialistNotificationsPage() {
     try {
       await apiClient(`/notifications/${id}/read`, { method: 'PATCH' });
       await mutate();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      }
     } catch {
       // ignore
     }
@@ -76,11 +77,17 @@ export default function SpecialistNotificationsPage() {
             Thông báo các đơn hàng vừa được duyệt cần thiết lập hồ sơ kiểm dịch và giấy tờ khách hàng nộp.
           </p>
         </div>
-        {unreadCount > 0 && (
-          <Button variant="outline" size="sm" onClick={markAllRead} className="shadow-sm">
-            <Check size={16} className="mr-1.5" /> Đánh dấu tất cả đã đọc ({unreadCount})
-          </Button>
-        )}
+        <div>
+          {unreadCount > 0 ? (
+            <Button variant="outline" size="sm" onClick={markAllRead} className="shadow-sm">
+              <Check size={16} className="mr-1.5" /> Đánh dấu tất cả đã đọc ({unreadCount})
+            </Button>
+          ) : (
+            <span className="text-xs text-slate-400 flex items-center gap-1.5 font-medium bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm">
+              <CheckCircle2 size={14} className="text-emerald-500" /> Tất cả thông báo đã đọc
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden shadow-sm">
