@@ -146,7 +146,7 @@ export default function ManagerNotificationsPage() {
                         className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        Xem yêu cầu vận chuyển #{n.shipmentId} <ArrowRight size={13} />
+                        Xem yêu cầu vận chuyển REQ-{String(n.shipmentId).padStart(3, '0')} <ArrowRight size={13} />
                       </Link>
                     </div>
                   )}

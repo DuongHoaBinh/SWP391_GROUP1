@@ -147,7 +147,7 @@ export default function SpecialistNotificationsPage() {
                         className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        Mở đơn hàng Compliance Orders #{n.shipmentId} <ArrowRight size={13} />
+                        Mở đơn hàng Compliance Orders REQ-{String(n.shipmentId).padStart(3, '0')} <ArrowRight size={13} />
                       </Link>
                     </div>
                   )}

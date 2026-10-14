@@ -53,5 +53,6 @@ export interface TransportOrder {
   attachments?: ShipmentAttachment[];
   horses?: OrderHorse[];
   customerEmail?: string;
+  customerName?: string;
   approverName?: string;
 }

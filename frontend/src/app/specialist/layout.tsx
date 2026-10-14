@@ -106,15 +106,11 @@ export default function SpecialistLayout({
       label: 'Document Approval',
       href: '/specialist/approval',
       icon: <FileSignature size={18} />,
-      badge: 12,
-      badgeColor: 'brand',
     },
     {
       label: 'Missing Documents',
       href: '/specialist/missing',
       icon: <FileX size={18} />,
-      badge: 5,
-      badgeColor: 'danger',
     },
   ];
 

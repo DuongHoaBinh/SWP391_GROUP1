@@ -322,8 +322,9 @@ export default function ManagerRequestsPage() {
           isOpen={true} 
           onClose={() => setActiveModal('NONE')} 
           title={
-            activeModal === 'APPROVE' ? `Approve Transport Order #${selectedOrder.id}` :
-            activeModal === 'REJECT' ? `Reject Order #${selectedOrder.id}` : `Request Changes on Order #${selectedOrder.id}`
+            activeModal === 'APPROVE' ? `Phê duyệt đơn vận chuyển ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}` :
+            activeModal === 'REJECT' ? `Từ chối đơn vận chuyển ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}` : 
+            `Yêu cầu chỉnh sửa đơn ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}`
           } 
           maxWidth="500px"
         >

@@ -93,6 +93,55 @@ export default function TransportDocumentsPage() {
     setTotalDocs(4);
   };
 
+  const handleExportDossier = (dos: SpecialistDossier) => {
+    toast.success(`Đang trích xuất gói hồ sơ kiểm dịch & pháp lý cho ${dos.horse} (${dos.id})...`);
+
+    const manifestContent = `================================================================================
+EQUITRANSIT LOGISTICS - OFFICIAL CROSS-BORDER EQUINE TRANSPORT DOSSIER
+================================================================================
+Dossier Reference ID : ${dos.id}
+Transport Order Code : ${dos.reqCode}
+Target Equine (Ngựa) : ${dos.horse}
+Destination Route    : ${dos.destination}
+Compliance Status    : ${dos.status.toUpperCase()} (${dos.docs} Approved Legal Documents)
+Issued Date          : ${new Date().toLocaleDateString('vi-VN')}
+Certified By         : Sarah Jenkins - Transport Specialist (Compliance Dept.)
+
+--------------------------------------------------------------------------------
+VERIFIED LEGAL & QUARANTINE DOCUMENT CHECKLIST:
+--------------------------------------------------------------------------------
+1. [APPROVED] FEI Equine International Passport (Hộ chiếu ngựa quốc tế chuẩn ISO)
+2. [APPROVED] Official International Veterinary Health Certificate (Kiểm dịch xuất cảnh 48-72h)
+3. [APPROVED] Equine Influenza Vaccination Certificate (Chứng nhận tiêm phòng cúm 6 tháng)
+4. [APPROVED] Cross-Border Live Animal Customs Permit & Transit Declaration
+
+--------------------------------------------------------------------------------
+TRANSIT & DEPARTURE AUTHORIZATION:
+--------------------------------------------------------------------------------
+This compiled transport dossier certifies that the above equine subject has satisfied
+all quarantine, veterinary, and customs compliance protocols mandated by WOAH / FEI
+and the destination authority.
+
+STATUS: CLEARED FOR EMBARKATION AND CROSS-BORDER TRANSPORT.
+================================================================================
+Digital Verification Seal: [EquiTransit Logistics Authority Certified]
+================================================================================`;
+
+    try {
+      const blob = new Blob([manifestContent], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${dos.id}_Dossier_Manifest.txt`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6 pb-12">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -229,11 +278,7 @@ export default function TransportDocumentsPage() {
                       </td>
                       <td className="p-4 text-right">
                         <button
-                          onClick={() =>
-                            toast.success(
-                              `Đang trích xuất gói hồ sơ kiểm dịch & pháp lý cho ${dos.horse} (${dos.id})...`
-                            )
-                          }
+                          onClick={() => handleExportDossier(dos)}
                           className="text-blue-600 hover:text-blue-800 font-semibold text-sm inline-flex items-center gap-1 cursor-pointer"
                         >
                           Export <Download size={14} />

@@ -235,19 +235,21 @@ export class DocumentsService {
         docs.filter((d) => d.status === DocumentStatus.APPROVED).map((d) => d.regulationId),
       );
 
-      // Tìm những quy định đã có tài liệu nộp hợp lệ (approved hoặc đang submitted chờ duyệt)
-      const submittedOrApprovedRegIds = new Set(
-        docs
-          .filter((d) => d.status === DocumentStatus.APPROVED || d.status === DocumentStatus.SUBMITTED)
-          .map((d) => d.regulationId),
+      // Tìm những quy định đã có bất kỳ tài liệu nào được nộp (approved, submitted hoặc rejected)
+      const uploadedRegIds = new Set(
+        docs.filter((d) => d.regulationId).map((d) => d.regulationId),
       );
 
       totalApprovedDocs += approvedRegIds.size;
 
-      // Danh sách quy định thực sự còn thiếu (chưa tải lên hoặc bị từ chối)
-      const missingRegs = applicableRegulations.filter((reg) => !submittedOrApprovedRegIds.has(reg.id));
+      // Danh sách quy định thực sự CHƯA TỪNG ĐƯỢC TẢI LÊN lần nào
+      // (Nếu tài liệu đã tải lên mà bị từ chối, nó sẽ nằm trong `docs` với trạng thái 'rejected' để khách hàng xem lý do và bấm 'Nộp lại', không bị nhân đôi dòng 'Tải lên ngay')
+      const missingRegs = applicableRegulations.filter((reg) => !uploadedRegIds.has(reg.id));
 
-      const isCompliant = missingRegs.length === 0;
+      // Một con ngựa CHỈ ĐẠT CHUẨN (isCompliant) khi TẤT CẢ các quy định đều ĐÃ ĐƯỢC PHÊ DUYỆT (DocumentStatus.APPROVED)
+      const isCompliant =
+        applicableRegulations.length > 0 &&
+        applicableRegulations.every((reg) => approvedRegIds.has(reg.id));
 
       horseItems.push({
         horseId: h.horse_id,
@@ -260,7 +262,15 @@ export class DocumentsService {
 
     const totalRequiredDocs = applicableRegulations.length * horsesInOrder.length;
     const compliantHorsesCount = horseItems.filter((item) => item.isCompliant).length;
-    const isFullyCompliant = compliantHorsesCount === horsesInOrder.length && horsesInOrder.length > 0;
+    
+    // Đơn hàng CHỈ ĐẠT CHUẨN 100% (isFullyCompliant) khi TẤT CẢ các con ngựa đều isCompliant
+    // và toàn bộ tài liệu bắt buộc đã được chuyên viên phê duyệt (approvedDocumentsCount === totalRequiredDocuments)
+    const isFullyCompliant =
+      horsesInOrder.length > 0 &&
+      totalRequiredDocs > 0 &&
+      totalApprovedDocs >= totalRequiredDocs &&
+      compliantHorsesCount === horsesInOrder.length;
+
     const requirementsSent = await this.documentsStore.hasRequirementsSent(orderId, order.customer_id);
 
     return {
@@ -470,13 +480,19 @@ export class DocumentsService {
       };
     }
 
-    // Tổng hợp danh sách tài liệu thiếu theo từng con ngựa
+    // Tổng hợp danh sách tài liệu thiếu hoặc bị từ chối theo từng con ngựa
     const missingItemsText = checklist.horses
-      .filter((h) => h.missingRegulations.length > 0)
-      .map(
-        (h) =>
-          `• Ngựa ${h.horseName}: thiếu [${h.missingRegulations.map((r) => r.documentType).join(', ')}]`,
-      )
+      .map((h) => {
+        const unsubmittedNames = h.missingRegulations.map((r) => r.documentType);
+        const rejectedNames = h.documents
+          .filter((d) => d.status === DocumentStatus.REJECTED)
+          .map((d) => `${d.regulationDocType || d.docType} (bị từ chối)`);
+        const allItems = [...unsubmittedNames, ...rejectedNames];
+        return allItems.length > 0
+          ? `• Ngựa ${h.horseName}: thiếu hoặc cần nộp lại [${allItems.join(', ')}]`
+          : '';
+      })
+      .filter(Boolean)
       .join('\n');
 
     const customMsg = dto.customMessage ? `\nLời nhắn từ chuyên viên: "${dto.customMessage}"` : '';

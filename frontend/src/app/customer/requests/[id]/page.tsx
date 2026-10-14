@@ -207,7 +207,11 @@ const fetcher = async (url: string) => {
     estimatedDuration,
     createdDate: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-GB') : '23 Sep 2026',
     departureDate: data.requestedDate ? new Date(data.requestedDate).toLocaleDateString('en-GB') : 'TBD',
-    estimatedArrivalDate: data.expectedArrivalDate ? new Date(data.expectedArrivalDate).toLocaleDateString('en-GB') : 'TBD',
+    estimatedArrivalDate: data.expectedArrivalDate
+      ? new Date(data.expectedArrivalDate).toLocaleDateString('en-GB')
+      : data.requestedDate
+      ? new Date(new Date(data.requestedDate).getTime() + (routeCalc.durationHours || 12) * 3600 * 1000).toLocaleDateString('en-GB')
+      : 'TBD',
     totalCost: Number(data.totalCost || data.total_cost || 0),
     notes: data.specialRequirements || 'No special requirements specified.',
   };
@@ -277,7 +281,12 @@ export default function RequestDetailPage() {
     (acc, h) => acc + (h.missingRegulations?.length || 0),
     0
   ) ?? 0;
+  const totalRejectedCount = checklist?.horses?.reduce(
+    (acc, h) => acc + (h.documents?.filter((d: any) => d.status === 'rejected')?.length || 0),
+    0
+  ) ?? 0;
   const hasMissingDocs = isApproved && requirementsSent && totalMissingCount > 0;
+  const hasRejectedDocs = isApproved && requirementsSent && totalRejectedCount > 0;
 
   const handleOpenUpload = (horseId?: number | string, regulationId?: number | string) => {
     setReuploadTarget(null);
@@ -825,19 +834,103 @@ export default function RequestDetailPage() {
                         </span>
                       </td>
                       <td style={{ padding: '16px 20px' }}>
-                        <span
-                          style={{
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            color: item.isComplete ? '#15803d' : '#dc2626',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                          }}
-                        >
-                          {item.isComplete ? <Check size={14} /> : <AlertTriangle size={14} />}
-                          {item.docsSummary || '4/4 Complete'}
-                        </span>
+                        {(() => {
+                          const horseChecklist = checklist?.horses?.find(
+                            (h) => String(h.horseId) === String(horse.id || horse.horseId)
+                          );
+                          if (!checklist || !isApproved || !requirementsSent) {
+                            return (
+                              <span
+                                style={{
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: '#64748b',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                }}
+                              >
+                                <Clock size={14} /> Chờ duyệt yêu cầu
+                              </span>
+                            );
+                          }
+                          const approvedDocs =
+                            horseChecklist?.documents?.filter((d: any) => d.status === 'approved')?.length || 0;
+                          const totalDocs =
+                            (horseChecklist?.missingRegulations?.length || 0) +
+                            (horseChecklist?.documents?.length || 0);
+                          const isCompliant = Boolean(horseChecklist?.isCompliant);
+                          const hasRejected = Boolean(
+                            horseChecklist?.documents?.some((d: any) => d.status === 'rejected')
+                          );
+                          const hasMissing = (horseChecklist?.missingRegulations?.length || 0) > 0;
+
+                          if (isCompliant) {
+                            return (
+                              <span
+                                style={{
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: '#15803d',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                }}
+                              >
+                                <Check size={14} /> {approvedDocs}/{totalDocs} Đã duyệt
+                              </span>
+                            );
+                          }
+
+                          if (hasRejected) {
+                            return (
+                              <span
+                                style={{
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: '#dc2626',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                }}
+                              >
+                                <AlertTriangle size={14} /> {approvedDocs}/{totalDocs} Đã duyệt (Cần nộp lại)
+                              </span>
+                            );
+                          }
+
+                          if (hasMissing) {
+                            return (
+                              <span
+                                style={{
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: '#dc2626',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                }}
+                              >
+                                <AlertTriangle size={14} /> {approvedDocs}/{totalDocs} Đã duyệt (Thiếu {horseChecklist?.missingRegulations?.length})
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <span
+                              style={{
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                color: '#d97706',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                              }}
+                            >
+                              <Clock size={14} /> {approvedDocs}/{totalDocs} Đã duyệt (Chờ duyệt)
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td style={{ padding: '16px 20px', textAlign: 'right' }}>
                         <Link
@@ -1032,20 +1125,47 @@ export default function RequestDetailPage() {
                             </span>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span
-                              style={{
-                                fontSize: '11.5px',
-                                fontWeight: 700,
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                backgroundColor: horseItem.missingRegulations.length === 0 ? '#dcfce7' : '#fee2e2',
-                                color: horseItem.missingRegulations.length === 0 ? '#15803d' : '#b91c1c',
-                              }}
-                            >
-                              {horseItem.missingRegulations.length === 0
-                                ? (horseItem.isCompliant ? 'Đủ hồ sơ hợp lệ (Đã duyệt)' : 'Đã nộp đủ hồ sơ (Chờ duyệt)')
-                                : `Còn thiếu ${horseItem.missingRegulations.length} giấy tờ`}
-                            </span>
+                            {(() => {
+                              const hasRejected = horseItem.documents?.some((d: any) => d.status === 'rejected');
+                              const hasMissing = horseItem.missingRegulations.length > 0;
+
+                              let badgeBg = '#dcfce7';
+                              let badgeColor = '#15803d';
+                              let badgeText = 'Đủ hồ sơ hợp lệ (Đã duyệt)';
+
+                              if (horseItem.isCompliant) {
+                                badgeBg = '#dcfce7';
+                                badgeColor = '#15803d';
+                                badgeText = 'Đủ hồ sơ hợp lệ (Đã duyệt)';
+                              } else if (hasRejected) {
+                                badgeBg = '#fee2e2';
+                                badgeColor = '#b91c1c';
+                                badgeText = 'Có hồ sơ bị từ chối (Cần nộp lại)';
+                              } else if (hasMissing) {
+                                badgeBg = '#fee2e2';
+                                badgeColor = '#b91c1c';
+                                badgeText = `Còn thiếu ${horseItem.missingRegulations.length} giấy tờ`;
+                              } else {
+                                badgeBg = '#fef3c7';
+                                badgeColor = '#b45309';
+                                badgeText = 'Đã nộp đủ hồ sơ (Chờ duyệt)';
+                              }
+
+                              return (
+                                <span
+                                  style={{
+                                    fontSize: '11.5px',
+                                    fontWeight: 700,
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    backgroundColor: badgeBg,
+                                    color: badgeColor,
+                                  }}
+                                >
+                                  {badgeText}
+                                </span>
+                              );
+                            })()}
 
                             {!horseItem.isCompliant && horseItem.missingRegulations.length > 0 && (
                               <button
@@ -1415,6 +1535,40 @@ export default function RequestDetailPage() {
                 </div>
               </div>
             </div>
+          ) : hasRejectedDocs ? (
+            <div
+              style={{
+                backgroundColor: '#ffffff',
+                borderRadius: '16px',
+                border: '1px solid #fecaca',
+                padding: '20px',
+                position: 'relative',
+                overflow: 'hidden',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: 0,
+                  width: '6px',
+                  backgroundColor: '#dc2626',
+                }}
+              />
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <AlertTriangle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <div>
+                  <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
+                    Hồ sơ cần nộp lại ({totalRejectedCount} mục bị từ chối)
+                  </h4>
+                  <p style={{ fontSize: '12.5px', color: '#475569', margin: '6px 0 0 0', lineHeight: 1.4 }}>
+                    Chuyên viên kiểm dịch yêu cầu nộp lại {totalRejectedCount} tài liệu chưa đạt chuẩn. Vui lòng bấm <strong>"Nộp lại"</strong> tại dòng tài liệu bị từ chối bên dưới để tải lên tệp mới.
+                  </p>
+                </div>
+              </div>
+            </div>
           ) : isApproved && requirementsSent && (
             <div
               style={{
@@ -1450,7 +1604,7 @@ export default function RequestDetailPage() {
                   <p style={{ fontSize: '12.5px', color: checklist?.isFullyCompliant ? '#15803d' : '#1e3a8a', margin: '6px 0 0 0', lineHeight: 1.4 }}>
                     {checklist?.isFullyCompliant
                       ? 'Tất cả các tài liệu kiểm dịch và pháp lý đã được duyệt hợp lệ. Chuyến đi đã đủ điều kiện xuất phát.'
-                      : 'Quý khách đã nộp đầy đủ các chứng từ theo yêu cầu. Chuyên viên kiểm dịch đang trong quá trình thẩm định hồ sơ.'}
+                      : `Quý khách đã nộp đầy đủ các chứng từ theo yêu cầu (${checklist?.approvedDocumentsCount || 0}/${checklist?.totalRequiredDocuments || 0} đã duyệt). Chuyên viên kiểm dịch đang trong quá trình thẩm định hồ sơ.`}
                   </p>
                 </div>
               </div>
