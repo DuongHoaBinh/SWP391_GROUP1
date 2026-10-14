@@ -144,31 +144,7 @@ const INITIAL_DOSSIERS: SpecialistDossier[] = [
   },
 ];
 
-const INITIAL_MISSING_DOCS: SpecialistMissingDoc[] = [
-  {
-    id: 'MISS-1',
-    reqCode: 'TR-2026-002',
-    horseName: 'Royal Star',
-    type: 'Quarantine Certificate',
-    due: 'Sep 29, 2026',
-    customer: 'Alex Morgan',
-    status: 'MISSING',
-    remindersSent: 1,
-    lastReminderDate: 'Sep 25, 2026',
-  },
-  {
-    id: 'MISS-2',
-    reqCode: 'TR-2026-008',
-    horseName: 'Midnight',
-    type: 'Export Permit (UAE)',
-    due: 'Oct 01, 2026',
-    customer: 'Emily Chen',
-    status: 'REJECTED',
-    rejectionReason: 'Illegible official stamp and missing transit veterinary authorization.',
-    remindersSent: 2,
-    lastReminderDate: 'Sep 26, 2026',
-  },
-];
+const INITIAL_MISSING_DOCS: SpecialistMissingDoc[] = [];
 
 const STORAGE_KEYS = {
   PENDING: 'equitransit_spec_pending_docs_v1',
@@ -198,7 +174,17 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
         setDossiers(JSON.parse(savedDossiers));
       }
       if (savedMissing) {
-        setMissingDocs(JSON.parse(savedMissing));
+        const parsed = JSON.parse(savedMissing);
+        const cleaned = Array.isArray(parsed)
+          ? parsed.filter(
+              (d: any) =>
+                d.id !== 'MISS-1' &&
+                d.id !== 'MISS-2' &&
+                d.horseName !== 'Royal Star' &&
+                d.horseName !== 'Midnight'
+            )
+          : [];
+        setMissingDocs(cleaned);
       }
     } catch (e) {
       console.error('Error loading documents from localStorage:', e);

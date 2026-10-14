@@ -33,10 +33,11 @@ export class OrdersService {
     // 1. Tự động gửi thông báo đến Logistics Manager khi có đơn vận chuyển mới
     const code = created.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
     const horseCount = dto.horses?.length || dto.requestedHorseCount || 1;
+    const customerDisplayName = created.customerName || created.contactName || (user as any).fullName || user.email;
     await this.notificationsService.notifyRole(
       'Logistics Manager',
       `Yêu cầu vận chuyển mới: ${code}`,
-      `Khách hàng (${user.email}) vừa gửi yêu cầu vận chuyển mới #${code} từ "${dto.originLocation}" đến "${dto.destinationLocation}" (${horseCount} ngựa). Vui lòng xem xét và duyệt đơn.`,
+      `Khách hàng ${customerDisplayName} (${user.email}) vừa gửi yêu cầu vận chuyển mới ${code} từ "${dto.originLocation}" đến "${dto.destinationLocation}" (${horseCount} ngựa). Vui lòng xem xét và duyệt đơn.`,
       'status_update',
       shipmentId,
     );
@@ -101,18 +102,19 @@ export class OrdersService {
     const customerCode = order.customerRequestCode || order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
-      'Yêu cầu vận chuyển đã được phê duyệt',
-      `Yêu cầu vận chuyển mã ${customerCode} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được Logistics Manager phê duyệt. Chuyên viên kiểm dịch đang rà soát quy định nước đến và sẽ gửi danh mục hồ sơ cần nộp cho quý khách.`,
+      `Đơn vận chuyển ${customerCode} đã được phê duyệt`,
+      `Yêu cầu vận chuyển ${customerCode} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được Logistics Manager phê duyệt. Chuyên viên kiểm dịch đang rà soát quy chế nước đến và sẽ gửi danh mục hồ sơ cần nộp cho quý khách.`,
       'status_update',
       orderId,
     );
 
     // 2. Chuyển giao sang Flow 2: Gửi thông báo đến Transport Specialist (dùng mã hệ thống)
     const staffCode = `REQ-${String(orderId).padStart(3, '0')}`;
+    const customerName = order.customerName || order.contactName || 'Khách hàng';
     await this.notificationsService.notifyRole(
       'Transport Specialist',
-      `Đơn hàng mới #${staffCode} cần thiết lập hồ sơ kiểm dịch`,
-      `Đơn vận chuyển mã ${staffCode} đi "${order.destinationLocation}" vừa được phê duyệt. Vui lòng rà soát quy chế nước đến và gửi yêu cầu danh mục hồ sơ cho khách hàng.`,
+      `Đơn hàng mới ${staffCode} cần thiết lập hồ sơ kiểm dịch`,
+      `Đơn vận chuyển ${staffCode} của ${customerName} đi "${order.destinationLocation}" vừa được phê duyệt. Vui lòng rà soát quy chế nước đến và gửi yêu cầu danh mục hồ sơ cho khách hàng.`,
       'status_update',
       orderId,
     );

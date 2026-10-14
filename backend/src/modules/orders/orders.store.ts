@@ -212,7 +212,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findShipmentsByCustomer(customerId: number): Promise<TransportOrder[]> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.email as customer_email, a.full_name as approver_name,
+      `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
               CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
@@ -227,7 +227,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findAllShipments(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
     let query = `
-      SELECT s.*, u.email as customer_email, a.full_name as approver_name,
+      SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id
@@ -248,7 +248,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findShipmentById(shipmentId: number): Promise<TransportOrder | undefined> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.email as customer_email, a.full_name as approver_name,
+      `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
               CONCAT('REQ-', LPAD(
                 (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                 3, '0'
@@ -474,6 +474,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       customerEmail: row.customer_email,
+      customerName: (row as any).customer_name || row.contact_name || undefined,
       approverName: row.approver_name,
       attachments: attachments.map((att) => ({
         id: att.attachment_id,

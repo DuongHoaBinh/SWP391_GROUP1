@@ -67,6 +67,8 @@ export class NotificationsStore implements OnModuleInit, OnModuleDestroy {
     const [rows] = await this.pool.execute<any[]>(
       `SELECT n.notification_id, n.user_id, n.shipment_id, n.horse_id, n.title, n.message, n.notif_type, n.is_read, n.created_at,
               COALESCE(LOWER(r.role_name), 'customer') as user_role,
+              (SELECT cu.full_name FROM shipment s JOIN \`user\` cu ON cu.user_id = s.customer_id WHERE s.shipment_id = n.shipment_id) as shipment_customer_name,
+              (SELECT cu.email FROM shipment s JOIN \`user\` cu ON cu.user_id = s.customer_id WHERE s.shipment_id = n.shipment_id) as shipment_customer_email,
               (SELECT CONCAT('REQ-', LPAD(
                 (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                 3, '0'
@@ -93,7 +95,17 @@ export class NotificationsStore implements OnModuleInit, OnModuleDestroy {
           title = title.split(row.customer_code).join(row.global_code);
           message = message.split(row.customer_code).join(row.global_code);
         }
+
+        // Thay thế hiển thị tên khách hàng nếu có
+        if (row.shipment_customer_name && row.shipment_customer_email) {
+          message = message.split(`Khách hàng (${row.shipment_customer_email})`).join(`Khách hàng ${row.shipment_customer_name}`);
+        }
       }
+
+      // Xóa bỏ các ký tự dấu '#' đứng trước mã đơn (ví dụ: #REQ-024 -> REQ-024)
+      title = title.replaceAll('#REQ-', 'REQ-');
+      message = message.replaceAll('#REQ-', 'REQ-');
+
       return {
         id: row.notification_id,
         userId: row.user_id,
