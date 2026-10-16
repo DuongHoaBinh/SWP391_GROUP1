@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -18,6 +18,7 @@ import {
   ArrowUpRight,
   MoreHorizontal,
   FileCheck2,
+  RefreshCw,
 } from 'lucide-react';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { TripTrackingModal } from '@/features/tracking/components/TripTrackingModal';
@@ -25,26 +26,126 @@ import { useCustomerStore } from '@/lib/customer-store';
 import { TransportRequest, UserProfile } from '@/lib/types';
 import { getCurrentUser } from '@/lib/auth';
 import { mockCurrentUser } from '@/lib/mock-data';
+import { apiClient } from '@/lib/api-client';
+import { documentsApi } from '@/features/documents/api/documents.api';
+
+const getStatusBadge = (status: string) => {
+  const s = (status || '').toLowerCase();
+  if (s === 'requested' || s === 'under_review') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fffbeb', color: '#d97706' }}>
+        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#d97706' }} />
+        Pending Review
+      </span>
+    );
+  }
+  if (s === 'approved') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#ecfdf5', color: '#16a34a' }}>
+        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
+        Approved
+      </span>
+    );
+  }
+  if (s === 'planning') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#eff6ff', color: '#2563eb' }}>
+        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
+        In Planning
+      </span>
+    );
+  }
+  if (s === 'in_transit') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
+        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} />
+        In Transit
+      </span>
+    );
+  }
+  if (s === 'completed') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f0fdf4', color: '#15803d' }}>
+        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
+        Completed
+      </span>
+    );
+  }
+  if (s === 'change_requested') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fff7ed', color: '#c2410c' }}>
+        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ea580c' }} />
+        Change Requested
+      </span>
+    );
+  }
+  if (s === 'rejected') {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fef2f2', color: '#dc2626' }}>
+        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#dc2626' }} />
+        Rejected
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f1f5f9', color: '#475569' }}>
+      {status}
+    </span>
+  );
+};
 
 export default function CustomerDashboardPage() {
   const router = useRouter();
 
   const {
-    requests,
-    metrics,
+    horses,
     notifications,
     uploadDocumentForRequest,
     markAllNotificationsRead,
+    refreshHorses,
   } = useCustomerStore();
 
   const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
+  const [myOrders, setMyOrders] = useState<any[]>([]);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(true);
+  const [docCount, setDocCount] = useState({ pending: 0, missing: 0 });
 
-  React.useEffect(() => {
+  const loadData = async () => {
+    try {
+      setIsLoadingOrders(true);
+      const [ordersRes, docsRes] = await Promise.all([
+        apiClient<any[]>('/orders/my-orders').catch(() => []),
+        documentsApi.getDocuments().catch(() => []),
+      ]);
+      if (Array.isArray(ordersRes)) {
+        setMyOrders(ordersRes);
+      }
+      if (Array.isArray(docsRes)) {
+        const pending = docsRes.filter(
+          (d: any) =>
+            (d.status || '').toUpperCase() === 'PENDING' ||
+            (d.status || '').toUpperCase() === 'UNDER_REVIEW'
+        ).length;
+        const missing = docsRes.filter(
+          (d: any) => (d.status || '').toUpperCase() === 'MISSING'
+        ).length;
+        setDocCount({ pending, missing });
+      }
+    } catch (err) {
+      console.warn('Customer dashboard load error:', err);
+    } finally {
+      setIsLoadingOrders(false);
+    }
+  };
+
+  useEffect(() => {
     setCurrentUser(getCurrentUser());
     const handleUserUpdate = () => {
       setCurrentUser(getCurrentUser());
     };
     window.addEventListener('auth-user-updated', handleUserUpdate);
+    loadData();
+    refreshHorses();
     return () => {
       window.removeEventListener('auth-user-updated', handleUserUpdate);
     };
@@ -52,13 +153,39 @@ export default function CustomerDashboardPage() {
 
   // Modals state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [activeRequestForUpload, setActiveRequestForUpload] = useState<string>('TR-2026-002');
+  const [activeRequestForUpload, setActiveRequestForUpload] = useState<string>('');
   const [trackingRequest, setTrackingRequest] = useState<TransportRequest | null>(null);
 
   const handleDocumentUploadSuccess = (uploadedDoc: any) => {
-    uploadDocumentForRequest(activeRequestForUpload, uploadedDoc.title);
+    if (activeRequestForUpload) {
+      uploadDocumentForRequest(activeRequestForUpload, uploadedDoc.title);
+    }
     setIsUploadModalOpen(false);
+    loadData();
   };
+
+  // Metrics
+  const activeShipments = myOrders.filter(
+    (o) => o.status !== 'completed' && o.status !== 'cancelled' && o.status !== 'rejected'
+  );
+  const inTransitCount = myOrders.filter(
+    (o) => o.status === 'in_transit' || o.status === 'planning' || o.status === 'IN_TRANSIT'
+  ).length;
+  const completedCount = myOrders.filter(
+    (o) => o.status === 'completed' || o.status === 'COMPLETED'
+  ).length;
+  const pendingDocsCount = docCount.pending + docCount.missing;
+
+  // Featured shipment for banner and upcoming trip card
+  const upcomingTrip =
+    myOrders.find((o) => o.status === 'in_transit') ||
+    myOrders.find((o) => o.status === 'planning') ||
+    myOrders.find((o) => o.status === 'approved') ||
+    myOrders[0];
+
+  const upcomingHorseName = upcomingTrip?.horses?.[0]?.name || 'Chiến mã';
+  const upcomingOrigin = upcomingTrip?.originLocation?.split(',')?.[0]?.trim() || 'Điểm xuất phát';
+  const upcomingDest = upcomingTrip?.destinationLocation?.split(',')?.[0]?.trim() || 'Điểm đến';
 
   return (
     <div
@@ -99,7 +226,7 @@ export default function CustomerDashboardPage() {
               textTransform: 'uppercase',
             }}
           >
-            Saturday, September 26
+            {new Date().toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </div>
           <h2
             suppressHydrationWarning
@@ -112,7 +239,7 @@ export default function CustomerDashboardPage() {
               margin: 0,
             }}
           >
-            Good morning, {currentUser.fullName || currentUser.name || 'Customer'}
+            Xin chào, {currentUser.fullName || currentUser.name || 'Quý khách'}
           </h2>
           <p
             style={{
@@ -121,28 +248,32 @@ export default function CustomerDashboardPage() {
               margin: 0,
             }}
           >
-            Here is an overview of your transportation activities.
+            Tổng quan các chuyến vận chuyển ngựa đua và hồ sơ pháp lý của bạn.
           </p>
 
           {/* Badges in Hero */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px', flexWrap: 'wrap' }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '7px',
-                backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                border: '1px solid rgba(255, 255, 255, 0.14)',
-                borderRadius: '999px',
-                padding: '5px 12px',
-                fontSize: '12px',
-                color: '#f1f5f9',
-                fontWeight: 500,
-              }}
-            >
-              <Plane size={13} color="#60a5fa" />
-              <span>Thunder is in transit - DXB · SGN</span>
-            </div>
+            {upcomingTrip ? (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.14)',
+                  borderRadius: '999px',
+                  padding: '5px 12px',
+                  fontSize: '12px',
+                  color: '#f1f5f9',
+                  fontWeight: 500,
+                }}
+              >
+                <Plane size={13} color="#60a5fa" />
+                <span>
+                  {upcomingHorseName} · {upcomingOrigin} → {upcomingDest}
+                </span>
+              </div>
+            ) : null}
 
             <div
               style={{
@@ -158,8 +289,12 @@ export default function CustomerDashboardPage() {
                 fontWeight: 500,
               }}
             >
-              <FileText size={13} color="#fbbf24" />
-              <span>2 documents due this week</span>
+              <FileText size={13} color={pendingDocsCount > 0 ? '#fbbf24' : '#34d399'} />
+              <span>
+                {pendingDocsCount > 0
+                  ? `${pendingDocsCount} hồ sơ cần bổ sung / kiểm tra`
+                  : 'Hồ sơ pháp lý hợp lệ'}
+              </span>
             </div>
           </div>
         </div>
@@ -235,10 +370,12 @@ export default function CustomerDashboardPage() {
               <FileCheck2 size={20} />
             </div>
             <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '3px' }}>
-              <span>↗</span> +1 this week
+              <span>●</span> Active
             </div>
           </div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>03</div>
+          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
+            {activeShipments.length.toString().padStart(2, '0')}
+          </div>
           <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 500 }}>Active Requests</div>
         </div>
 
@@ -283,7 +420,9 @@ export default function CustomerDashboardPage() {
               On schedule
             </div>
           </div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>01</div>
+          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
+            {inTransitCount.toString().padStart(2, '0')}
+          </div>
           <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 500 }}>In Transit</div>
         </div>
 
@@ -323,11 +462,13 @@ export default function CustomerDashboardPage() {
             >
               <FileText size={20} />
             </div>
-            <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#ea580c' }}>
-              Due in 3 days
+            <div style={{ fontSize: '11.5px', fontWeight: 600, color: pendingDocsCount > 0 ? '#ea580c' : '#16a34a' }}>
+              {pendingDocsCount > 0 ? 'Needs attention' : 'All clear'}
             </div>
           </div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>02</div>
+          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
+            {pendingDocsCount.toString().padStart(2, '0')}
+          </div>
           <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 500 }}>Pending Documents</div>
         </div>
 
@@ -357,10 +498,12 @@ export default function CustomerDashboardPage() {
               <CheckCircle2 size={20} />
             </div>
             <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '3px' }}>
-              <span>↗</span> +18% vs last year
+              <span>✓</span> Delivered
             </div>
           </div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>12</div>
+          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
+            {completedCount.toString().padStart(2, '0')}
+          </div>
           <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 500 }}>Completed Trips</div>
         </div>
       </div>
@@ -390,12 +533,14 @@ export default function CustomerDashboardPage() {
               Active Transport
             </h3>
             <p style={{ fontSize: '12.5px', color: '#64748b', margin: '2px 0 0 0' }}>
-              4 shipments currently being managed
+              {activeShipments.length} shipment(s) currently being managed
             </p>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
+              onClick={loadData}
+              title="Làm mới danh sách"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -410,8 +555,8 @@ export default function CustomerDashboardPage() {
                 cursor: 'pointer',
               }}
             >
-              <Filter size={14} />
-              Filter
+              <RefreshCw size={14} className={isLoadingOrders ? 'animate-spin' : ''} />
+              Refresh
             </button>
             <Link
               href="/customer/requests"
@@ -445,205 +590,122 @@ export default function CustomerDashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {/* Row 1: TR-2026-001 */}
-              <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-001</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>DXB</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Dubai</div>
-                    </div>
-                    <span style={{ color: '#94a3b8' }}>→</span>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SGN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Ho Chi Minh City</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
-                      T
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>Thunder</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Thoroughbred · 4y</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Sep 28, 2026</td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 02, 2026</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#eff6ff', color: '#2563eb' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
-                    In Transit
-                  </span>
-                </td>
-                <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button
-                      onClick={() => router.push('/customer/requests/tr-2026-001')}
-                      style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
-                    >
-                      View
-                    </button>
-                    <button style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
-                      <MoreHorizontal size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
+              {myOrders.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
+                    {isLoadingOrders ? (
+                      'Đang tải danh sách yêu cầu vận chuyển...'
+                    ) : (
+                      <div>
+                        <p style={{ margin: '0 0 12px 0', fontSize: '14px' }}>
+                          Bạn chưa có yêu cầu vận chuyển nào.
+                        </p>
+                        <button
+                          onClick={() => router.push('/customer/requests/new')}
+                          style={{
+                            padding: '8px 16px',
+                            backgroundColor: '#2563eb',
+                            color: '#ffffff',
+                            borderRadius: '8px',
+                            border: 'none',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Tạo đơn vận chuyển mới
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                myOrders.slice(0, 6).map((order) => {
+                  const reqCode = order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`;
+                  const horseNames =
+                    order.horses && order.horses.length > 0
+                      ? order.horses.map((h: any) => h.name).join(', ')
+                      : `${order.requestedHorseCount || 1} chiến mã`;
+                  const depDate = order.requestedDate
+                    ? new Date(order.requestedDate).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })
+                    : '—';
+                  const arrDate = order.arrivalDate
+                    ? new Date(order.arrivalDate).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })
+                    : 'TBD';
 
-              {/* Row 2: TR-2026-002 */}
-              <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-002</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SIN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Singapore</div>
-                    </div>
-                    <span style={{ color: '#94a3b8' }}>→</span>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SGN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Ho Chi Minh City</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
-                      RS
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>Royal Star</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Arabian · 5y</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 05, 2026</td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 07, 2026</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fffbeb', color: '#d97706' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#d97706' }} />
-                    Pending Documents
-                  </span>
-                </td>
-                <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button
-                      onClick={() => router.push('/customer/requests/tr-2026-002')}
-                      style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
-                    >
-                      View
-                    </button>
-                    <button style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
-                      <MoreHorizontal size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-
-              {/* Row 3: TR-2026-003 */}
-              <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-003</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>HKG</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Hong Kong</div>
-                    </div>
-                    <span style={{ color: '#94a3b8' }}>→</span>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SGN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Ho Chi Minh City</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
-                      GM
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>Golden Mile</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Thoroughbred · 3y</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 12, 2026</td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 13, 2026</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#ecfdf5', color: '#16a34a' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
-                    Approved
-                  </span>
-                </td>
-                <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button
-                      onClick={() => router.push('/customer/requests/tr-2026-003')}
-                      style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
-                    >
-                      View
-                    </button>
-                    <button style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
-                      <MoreHorizontal size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-
-              {/* Row 4: TR-2026-004 */}
-              <tr>
-                <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>TR-2026-004</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SYD</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Sydney</div>
-                    </div>
-                    <span style={{ color: '#94a3b8' }}>→</span>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>SIN</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Singapore</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '11px', color: '#475569' }}>
-                      SA
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#0f172a' }}>Silver Arrow</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Standardbred · 6y</div>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 18, 2026</td>
-                <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>Oct 20, 2026</td>
-                <td style={{ padding: '16px 20px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fef2f2', color: '#dc2626' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#dc2626' }} />
-                    Action Required
-                  </span>
-                </td>
-                <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                    <button
-                      onClick={() => router.push('/customer/requests/tr-2026-004')}
-                      style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#fff', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}
-                    >
-                      View
-                    </button>
-                    <button style={{ color: '#94a3b8', border: 'none', background: 'none', cursor: 'pointer' }}>
-                      <MoreHorizontal size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                  return (
+                    <tr key={order.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>
+                        {reqCode}
+                      </td>
+                      <td style={{ padding: '16px 20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div>
+                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{order.originLocation}</div>
+                          </div>
+                          <span style={{ color: '#94a3b8' }}>→</span>
+                          <div>
+                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{order.destinationLocation}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ padding: '16px 20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div
+                            style={{
+                              width: '28px',
+                              height: '28px',
+                              borderRadius: '50%',
+                              backgroundColor: '#eff6ff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: '11px',
+                              color: '#2563eb',
+                            }}
+                          >
+                            {horseNames[0] || 'H'}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#0f172a' }}>{horseNames}</div>
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>
+                              {order.horses?.length || order.requestedHorseCount || 1} con ngựa
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>{depDate}</td>
+                      <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>{arrDate}</td>
+                      <td style={{ padding: '16px 20px' }}>{getStatusBadge(order.status)}</td>
+                      <td style={{ padding: '16px 24px', textAlign: 'right' }}>
+                        <button
+                          onClick={() => router.push(`/customer/requests/${reqCode.toLowerCase()}`)}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: '6px',
+                            border: '1px solid #cbd5e1',
+                            backgroundColor: '#fff',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            color: '#2563eb',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -671,166 +733,167 @@ export default function CustomerDashboardPage() {
             justifyContent: 'space-between',
           }}
         >
-          <div>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <div>
-                <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: 0 }}>Upcoming Trip</h4>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>TR-2026-001</div>
+          {upcomingTrip ? (
+            <div>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <div>
+                  <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: 0 }}>Upcoming Trip</h4>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                    {upcomingTrip.requestCode || `REQ-${String(upcomingTrip.id).padStart(3, '0')}`}
+                  </div>
+                </div>
+                {getStatusBadge(upcomingTrip.status)}
               </div>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '11.5px', fontWeight: 600, backgroundColor: '#eff6ff', color: '#2563eb' }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
-                In Transit
-              </span>
-            </div>
 
-            {/* Horse Profile Card */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px' }}>
-              <div
-                style={{
-                  width: '42px',
-                  height: '42px',
-                  borderRadius: '10px',
-                  backgroundColor: '#0f172a',
-                  color: '#ffffff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 800,
-                  fontSize: '13px',
-                }}
-              >
-                TH
-              </div>
-              <div>
-                <div style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>Thunder</div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>Thoroughbred · 4y · Bay</div>
-              </div>
-            </div>
-
-            {/* Dates Bar */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '12px',
-                backgroundColor: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                borderRadius: '10px',
-                padding: '12px 14px',
-                marginBottom: '20px',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '11px', color: '#64748b' }}>Departure</div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', marginTop: '2px' }}>Sep 28, 2026</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '11px', color: '#64748b' }}>Est. arrival</div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', marginTop: '2px' }}>Oct 02, 2026</div>
-              </div>
-            </div>
-
-            {/* Vertical Route Milestones */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', position: 'relative' }}>
-              {/* Milestone 1: Dubai */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+              {/* Horse Profile Card */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px' }}>
                 <div
                   style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#2563eb',
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    backgroundColor: '#0f172a',
                     color: '#ffffff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    flexShrink: 0,
-                    marginTop: '2px',
+                    fontWeight: 800,
+                    fontSize: '13px',
                   }}
                 >
-                  ✓
+                  {upcomingHorseName.slice(0, 2).toUpperCase()}
                 </div>
-                <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#0f172a' }}>Dubai</div>
-                    <div style={{ fontSize: '11.5px', color: '#64748b' }}>Departed · Sep 28, 08:40</div>
+                <div>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>{upcomingHorseName}</div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>
+                    {upcomingTrip.horses?.length || upcomingTrip.requestedHorseCount || 1} con ngựa đăng ký
                   </div>
-                  <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>DXB</span>
                 </div>
               </div>
 
-              {/* Milestone 2: Singapore (Active) */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                <div
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#eff6ff',
-                    border: '2px solid #2563eb',
-                    color: '#2563eb',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    marginTop: '2px',
-                  }}
-                >
-                  <Shield size={12} />
-                </div>
-                <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#0f172a' }}>Singapore</div>
-                    <div style={{ fontSize: '11.5px', color: '#64748b' }}>Quarantine checkpoint · 48h</div>
+              {/* Dates Bar */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '12px',
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '10px',
+                  padding: '12px 14px',
+                  marginBottom: '20px',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>Departure</div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', marginTop: '2px' }}>
+                    {upcomingTrip.requestedDate
+                      ? new Date(upcomingTrip.requestedDate).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      : '—'}
                   </div>
-                  <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#2563eb', backgroundColor: '#eff6ff', padding: '2px 6px', borderRadius: '4px' }}>SIN</span>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>Est. arrival</div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', marginTop: '2px' }}>
+                    {upcomingTrip.arrivalDate
+                      ? new Date(upcomingTrip.arrivalDate).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      : 'TBD'}
+                  </div>
                 </div>
               </div>
 
-              {/* Milestone 3: Ho Chi Minh City */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                <div
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    border: '1.5px solid #cbd5e1',
-                    color: '#64748b',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    marginTop: '2px',
-                  }}
-                >
-                  <Plane size={12} />
-                </div>
-                <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#0f172a' }}>Ho Chi Minh City</div>
-                    <div style={{ fontSize: '11.5px', color: '#64748b' }}>ETA - Oct 02, 14:15</div>
+              {/* Milestones / Route */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', position: 'relative' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                  <div
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      borderRadius: '50%',
+                      backgroundColor: '#2563eb',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    1
                   </div>
-                  <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>SGN</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Điểm đón ngựa</div>
+                    <div style={{ fontSize: '11.5px', color: '#64748b' }}>{upcomingTrip.originLocation}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                  <div
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      borderRadius: '50%',
+                      backgroundColor: '#eff6ff',
+                      border: '2px solid #2563eb',
+                      color: '#2563eb',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    2
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Điểm bàn giao cuối</div>
+                    <div style={{ fontSize: '11.5px', color: '#64748b' }}>{upcomingTrip.destinationLocation}</div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '40px 10px', color: '#64748b' }}>
+              <Plane size={36} color="#94a3b8" style={{ margin: '0 auto 12px auto' }} />
+              <h5 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: '0 0 6px 0' }}>Chưa có chuyến đi</h5>
+              <p style={{ fontSize: '12.5px', margin: 0 }}>Tạo yêu cầu vận chuyển để xem hành trình tại đây.</p>
+            </div>
+          )}
 
-          {/* Journey Progress */}
           <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #f1f5f9' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
-              <span style={{ color: '#0f172a' }}>Journey progress</span>
-              <span style={{ color: '#2563eb' }}>62%</span>
-            </div>
-            <div style={{ width: '100%', height: '6px', borderRadius: '999px', backgroundColor: '#e2e8f0', overflow: 'hidden' }}>
-              <div style={{ width: '62%', height: '100%', backgroundColor: '#2563eb', borderRadius: '999px' }} />
-            </div>
-            <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '6px' }}>
-              Currently: <strong style={{ color: '#334155' }}>Clearing quarantine in Singapore</strong>
-            </div>
+            <button
+              onClick={() => {
+                if (upcomingTrip) {
+                  router.push(`/customer/requests/${(upcomingTrip.requestCode || `req-${upcomingTrip.id}`).toLowerCase()}`);
+                } else {
+                  router.push('/customer/requests/new');
+                }
+              }}
+              style={{
+                width: '100%',
+                padding: '9px',
+                borderRadius: '8px',
+                backgroundColor: '#eff6ff',
+                color: '#2563eb',
+                border: '1px solid #bfdbfe',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              {upcomingTrip ? 'Xem chi tiết chuyến đi' : 'Tạo đơn mới ngay'}
+            </button>
           </div>
         </div>
 
@@ -861,140 +924,59 @@ export default function CustomerDashboardPage() {
 
             {/* List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {/* Item 1 */}
-              <div
-                onClick={() => router.push('/customer/requests/tr-2026-004')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 14px',
-                  borderRadius: '10px',
-                  border: '1px solid #f1f5f9',
-                  backgroundColor: '#ffffff',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.15s',
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f8fafc')}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
-                    <FileText size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>TR-2026-004</div>
-                    <div style={{ fontSize: '11px', color: '#64748b' }}>SYD → SIN · Sep 24, 2026</div>
-                  </div>
+              {myOrders.length === 0 ? (
+                <div style={{ padding: '24px 0', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                  Chưa có đơn nào gần đây
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '11px', fontWeight: 600, backgroundColor: '#fef2f2', color: '#dc2626' }}>
-                    ● Action Required
-                  </span>
-                  <ChevronRight size={14} color="#94a3b8" />
-                </div>
-              </div>
+              ) : (
+                myOrders.slice(0, 4).map((req) => {
+                  const code = req.requestCode || `REQ-${String(req.id).padStart(3, '0')}`;
+                  const orig = req.originLocation?.split(',')?.[0]?.trim() || 'Origin';
+                  const dest = req.destinationLocation?.split(',')?.[0]?.trim() || 'Destination';
+                  const dateStr = req.requestedDate
+                    ? new Date(req.requestedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : 'Recent';
 
-              {/* Item 2 */}
-              <div
-                onClick={() => router.push('/customer/requests/tr-2026-003')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 14px',
-                  borderRadius: '10px',
-                  border: '1px solid #f1f5f9',
-                  backgroundColor: '#ffffff',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.15s',
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f8fafc')}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
-                    <FileText size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>TR-2026-003</div>
-                    <div style={{ fontSize: '11px', color: '#64748b' }}>HKG → SGN · Sep 21, 2026</div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '11px', fontWeight: 600, backgroundColor: '#ecfdf5', color: '#16a34a' }}>
-                    ● Approved
-                  </span>
-                  <ChevronRight size={14} color="#94a3b8" />
-                </div>
-              </div>
-
-              {/* Item 3 */}
-              <div
-                onClick={() => router.push('/customer/requests/tr-2026-002')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 14px',
-                  borderRadius: '10px',
-                  border: '1px solid #f1f5f9',
-                  backgroundColor: '#ffffff',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.15s',
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f8fafc')}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
-                    <FileText size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>TR-2026-002</div>
-                    <div style={{ fontSize: '11px', color: '#64748b' }}>SIN → SGN · Sep 18, 2026</div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '11px', fontWeight: 600, backgroundColor: '#fffbeb', color: '#d97706' }}>
-                    ● Pending
-                  </span>
-                  <ChevronRight size={14} color="#94a3b8" />
-                </div>
-              </div>
-
-              {/* Item 4 */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 14px',
-                  borderRadius: '10px',
-                  border: '1px solid #f1f5f9',
-                  backgroundColor: '#ffffff',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
-                    <FileText size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>TR-2025-118</div>
-                    <div style={{ fontSize: '11px', color: '#64748b' }}>DXB → SIN · Aug 30, 2026</div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '11px', fontWeight: 600, backgroundColor: '#f1f5f9', color: '#64748b' }}>
-                    ● Completed
-                  </span>
-                  <ChevronRight size={14} color="#94a3b8" />
-                </div>
-              </div>
+                  return (
+                    <div
+                      key={req.id}
+                      onClick={() => router.push(`/customer/requests/${code.toLowerCase()}`)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        border: '1px solid #f1f5f9',
+                        backgroundColor: '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s',
+                      }}
+                      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f8fafc')}
+                      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
+                          <FileText size={16} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{code}</div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>
+                            {orig} → {dest} · {dateStr}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {getStatusBadge(req.status)}
+                        <ChevronRight size={14} color="#94a3b8" />
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
-          {/* Footer View Details button */}
           <button
             onClick={() => router.push('/customer/requests')}
             style={{
@@ -1035,7 +1017,9 @@ export default function CustomerDashboardPage() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
               <div>
                 <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: 0 }}>Notifications</h4>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>2 unread</div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                  {notifications.filter((n) => !n.isRead).length} unread
+                </div>
               </div>
               <button
                 onClick={markAllNotificationsRead}
@@ -1056,154 +1040,63 @@ export default function CustomerDashboardPage() {
 
             {/* Notifications List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {/* Notif 1 */}
-              <div
-                onClick={() => {
-                  setActiveRequestForUpload('TR-2026-002');
-                  setIsUploadModalOpen(true);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '12px',
-                  padding: '10px 12px',
-                  borderRadius: '10px',
-                  backgroundColor: '#fafbfc',
-                  cursor: 'pointer',
-                  position: 'relative',
-                }}
-              >
+              {notifications.slice(0, 3).map((notif) => (
                 <div
+                  key={notif.id}
+                  onClick={() => router.push('/customer/notifications')}
                   style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '8px',
-                    backgroundColor: '#fffbeb',
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#d97706',
-                    flexShrink: 0,
-                    marginTop: '2px',
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: '#fafbfc',
+                    cursor: 'pointer',
+                    position: 'relative',
                   }}
                 >
-                  <AlertTriangle size={16} />
-                </div>
-                <div style={{ flex: 1, paddingRight: '12px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
-                    Medical certificate requires additional information.
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      backgroundColor: notif.type === 'CRITICAL' ? '#fef2f2' : '#eff6ff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: notif.type === 'CRITICAL' ? '#dc2626' : '#2563eb',
+                      flexShrink: 0,
+                      marginTop: '2px',
+                    }}
+                  >
+                    {notif.type === 'CRITICAL' ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
                   </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '3px' }}>
-                    Royal Star · TR-2026-002 · 12 min ago
+                  <div style={{ flex: 1, paddingRight: '12px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
+                      {notif.title}
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '3px' }}>
+                      {notif.message || notif.timeAgo}
+                    </div>
                   </div>
+                  {!notif.isRead && (
+                    <span
+                      style={{
+                        width: '7px',
+                        height: '7px',
+                        borderRadius: '50%',
+                        backgroundColor: '#2563eb',
+                        position: 'absolute',
+                        top: '14px',
+                        right: '12px',
+                      }}
+                    />
+                  )}
                 </div>
-                <span
-                  style={{
-                    width: '7px',
-                    height: '7px',
-                    borderRadius: '50%',
-                    backgroundColor: '#2563eb',
-                    position: 'absolute',
-                    top: '14px',
-                    right: '12px',
-                  }}
-                />
-              </div>
-
-              {/* Notif 2 */}
-              <div
-                onClick={() => router.push('/customer/requests/tr-2026-001')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '12px',
-                  padding: '10px 12px',
-                  borderRadius: '10px',
-                  backgroundColor: '#fafbfc',
-                  cursor: 'pointer',
-                  position: 'relative',
-                }}
-              >
-                <div
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '8px',
-                    backgroundColor: '#ecfdf5',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#16a34a',
-                    flexShrink: 0,
-                    marginTop: '2px',
-                  }}
-                >
-                  <CheckCircle2 size={16} />
-                </div>
-                <div style={{ flex: 1, paddingRight: '12px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
-                    Transport request TR-2026-001 has been approved.
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '3px' }}>
-                    Thunder · DXB → SGN · 2 hours ago
-                  </div>
-                </div>
-                <span
-                  style={{
-                    width: '7px',
-                    height: '7px',
-                    borderRadius: '50%',
-                    backgroundColor: '#2563eb',
-                    position: 'absolute',
-                    top: '14px',
-                    right: '12px',
-                  }}
-                />
-              </div>
-
-              {/* Notif 3 */}
-              <div
-                onClick={() => router.push('/customer/tracking')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '12px',
-                  padding: '10px 12px',
-                  borderRadius: '10px',
-                  backgroundColor: '#fafbfc',
-                  cursor: 'pointer',
-                  position: 'relative',
-                }}
-              >
-                <div
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '8px',
-                    backgroundColor: '#eff6ff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#2563eb',
-                    flexShrink: 0,
-                    marginTop: '2px',
-                  }}
-                >
-                  <MapPin size={16} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
-                    Your horse has arrived at the quarantine checkpoint.
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '3px' }}>
-                    Thunder · Singapore Changi · Yesterday
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
-          {/* Footer View All Notifications link */}
           <Link
             href="/customer/notifications"
             style={{
@@ -1237,7 +1130,7 @@ export default function CustomerDashboardPage() {
             gap: '16px',
           }}
         >
-          {/* Card 1: Create Transport Request (Solid Blue Highlight) */}
+          {/* Card 1: Create Transport Request */}
           <div
             onClick={() => router.push('/customer/requests/new')}
             style={{
@@ -1289,7 +1182,9 @@ export default function CustomerDashboardPage() {
           {/* Card 2: Upload Documents */}
           <div
             onClick={() => {
-              setActiveRequestForUpload('TR-2026-002');
+              if (upcomingTrip) {
+                setActiveRequestForUpload(upcomingTrip.requestCode || `REQ-${upcomingTrip.id}`);
+              }
               setIsUploadModalOpen(true);
             }}
             style={{
@@ -1400,7 +1295,7 @@ export default function CustomerDashboardPage() {
             <div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>View My Horses</div>
               <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
-                8 horses registered
+                {horses.length} horses registered
               </div>
             </div>
           </div>
@@ -1451,7 +1346,7 @@ export default function CustomerDashboardPage() {
             <div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>Track Trip</div>
               <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
-                Live status of TR-2026-001
+                Live status of {upcomingTrip?.requestCode || 'current shipments'}
               </div>
             </div>
           </div>

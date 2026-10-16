@@ -37,6 +37,31 @@ SELECT role_id, 'Driver Escort', 'driver@example.com', '$2a$12$quGJF8AqfNcYhzz7S
 FROM `role` WHERE role_name = 'Vehicle Driver / Escort'
 ON DUPLICATE KEY UPDATE full_name = VALUES(full_name);
 
+INSERT INTO `user` (role_id, full_name, email, phone, password_hash, account_origin, auth_provider, email_verified, status)
+SELECT role_id, 'Trần Văn Lái (Tài xế chuyên dụng 1)', 'driver1@example.com', '0901234561', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'system_created', 'local', TRUE, 'active'
+FROM `role` WHERE role_name = 'Vehicle Driver / Escort'
+ON DUPLICATE KEY UPDATE full_name = VALUES(full_name);
+
+INSERT INTO `user` (role_id, full_name, email, phone, password_hash, account_origin, auth_provider, email_verified, status)
+SELECT role_id, 'Lê Hoàng Nam (Tài xế đường trường 2)', 'driver2@example.com', '0901234562', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'system_created', 'local', TRUE, 'active'
+FROM `role` WHERE role_name = 'Vehicle Driver / Escort'
+ON DUPLICATE KEY UPDATE full_name = VALUES(full_name);
+
+INSERT INTO `user` (role_id, full_name, email, phone, password_hash, account_origin, auth_provider, email_verified, status)
+SELECT role_id, 'Phạm Minh Tuấn (Tài xế container lạnh 3)', 'driver3@example.com', '0901234563', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'system_created', 'local', TRUE, 'active'
+FROM `role` WHERE role_name = 'Vehicle Driver / Escort'
+ON DUPLICATE KEY UPDATE full_name = VALUES(full_name);
+
+INSERT INTO `user` (role_id, full_name, email, phone, password_hash, account_origin, auth_provider, email_verified, status)
+SELECT role_id, 'BS. Hoàng Văn Y (Bác sĩ thú y hộ tống)', 'escort1@example.com', '0909876541', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'system_created', 'local', TRUE, 'active'
+FROM `role` WHERE role_name = 'Vehicle Driver / Escort'
+ON DUPLICATE KEY UPDATE full_name = VALUES(full_name);
+
+INSERT INTO `user` (role_id, full_name, email, phone, password_hash, account_origin, auth_provider, email_verified, status)
+SELECT role_id, 'Đặng Quốc Hưng (Chuyên viên hộ tống bay)', 'escort2@example.com', '0909876542', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'system_created', 'local', TRUE, 'active'
+FROM `role` WHERE role_name = 'Vehicle Driver / Escort'
+ON DUPLICATE KEY UPDATE full_name = VALUES(full_name);
+
 -- 6. Sample Customer
 INSERT INTO `user` (role_id, full_name, email, password_hash, account_origin, auth_provider, email_verified, status)
 SELECT role_id, 'Nguyễn Văn Chủ Ngựa', 'customer@example.com', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'self_registered', 'local', TRUE, 'active'

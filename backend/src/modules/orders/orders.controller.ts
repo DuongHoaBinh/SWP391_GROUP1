@@ -50,8 +50,8 @@ export class OrdersController {
   }
 
   @Get()
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR)
-  @ApiOperation({ summary: 'Logistics Manager views all transport requests with optional status filter' })
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.DRIVER_ESCORT)
+  @ApiOperation({ summary: 'Logistics Manager, Coordinator and Driver view transport requests' })
   @ApiQuery({ name: 'status', enum: ShipmentStatus, required: false })
   getAllOrders(@Query('status') status?: ShipmentStatus) {
     return this.ordersService.getAllOrders(status);

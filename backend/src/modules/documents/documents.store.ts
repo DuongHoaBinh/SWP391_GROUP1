@@ -487,7 +487,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
               (SELECT COUNT(*) FROM notification n WHERE n.shipment_id = s.shipment_id AND n.user_id = s.customer_id AND (n.notif_type = 'document_missing' OR n.title LIKE '%hồ sơ kiểm dịch%')) as req_sent_count
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
-       WHERE s.status IN ('approved', 'in_transit', 'completed')
+       WHERE s.status IN ('approved', 'planning', 'in_transit', 'completed')
        ORDER BY s.shipment_id DESC`,
     );
 

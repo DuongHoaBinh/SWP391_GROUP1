@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Truck,
@@ -18,9 +18,60 @@ import {
   FileEdit,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { apiClient } from '@/lib/api-client';
+import { getCurrentUser } from '@/lib/auth';
 
 export default function DriverDashboardPage() {
   const router = useRouter();
+  const [activeTrip, setActiveTrip] = useState<any>(null);
+  const [todayTripsCount, setTodayTripsCount] = useState(1);
+  const [assignedHorsesCount, setAssignedHorsesCount] = useState(1);
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+
+  const isEscort = currentUser?.persona === 'escort' || currentUser?.email?.includes('escort');
+
+  useEffect(() => {
+    const user = getCurrentUser();
+    setCurrentUser(user);
+    const loadDashboard = async () => {
+      try {
+        const orders = await apiClient<any[]>('/orders');
+        if (Array.isArray(orders) && orders.length > 0) {
+          const userEmail = (user?.email || '').toLowerCase().trim();
+          const userId = String(user?.id || '');
+
+          const enriched = await Promise.all(
+            orders.map(async (ord) => {
+              try {
+                const assignRes = await apiClient<any>(`/fleet/shipments/${ord.id}/assignments`);
+                const staffList = assignRes?.staff || [];
+                const isAssigned = staffList.some((s: any) => {
+                  const sUserId = String(s.userId || s.user?.id || '');
+                  const sEmail = (s.user?.email || '').toLowerCase().trim();
+                  return (userId && sUserId === userId) || (userEmail && sEmail === userEmail);
+                });
+                return { ...ord, isAssigned };
+              } catch {
+                return { ...ord, isAssigned: false };
+              }
+            })
+          );
+
+          const myTrips = enriched.filter((o) => o.isAssigned);
+          const targetList = myTrips.length > 0 ? myTrips : enriched;
+          const target = targetList.find((o) => o.status === 'in_transit' || o.status === 'planning' || o.status === 'approved') || targetList[0];
+
+          setActiveTrip(target);
+          setTodayTripsCount(myTrips.length);
+          const totalHorses = targetList.reduce((sum, o) => sum + (Number(o.requestedHorseCount) || 1), 0);
+          setAssignedHorsesCount(totalHorses);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    loadDashboard();
+  }, []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -48,14 +99,35 @@ export default function DriverDashboardPage() {
             Saturday, September 26
           </p>
           <h2 style={{ fontSize: '26px', fontWeight: 700, color: '#ffffff', margin: '0 0 4px 0', lineHeight: 1.2 }}>
-            Good morning, John
+            Good morning, {currentUser?.name || (isEscort ? 'BS. Hoàng Văn Y' : 'Trần Văn Lái')}
           </h2>
           <p style={{ fontSize: '13.5px', color: '#94a3b8', margin: 0, fontWeight: 500 }}>
-            Here is your assigned transportation schedule.
+            {isEscort 
+              ? '🩺 Chuyên viên Hộ Tống / Bác Sĩ Thú Y — Theo dõi sinh hiệu và phúc lợi ngựa đua'
+              : '🚚 Tài Xế Vận Chuyển — Phụ trách hành trình đường bộ và an toàn phương tiện'}
           </p>
 
           {/* Chips */}
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px', marginTop: '16px' }}>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                backgroundColor: isEscort ? 'rgba(16, 185, 129, 0.2)' : 'rgba(37, 99, 235, 0.2)',
+                border: isEscort ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(37, 99, 235, 0.3)',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: isEscort ? '#34d399' : '#60a5fa',
+                backdropFilter: 'blur(4px)',
+              }}
+            >
+              {isEscort ? <Stethoscope size={14} /> : <Truck size={14} />}
+              <span>{isEscort ? 'Escort / Vet Active' : 'Driver Active'}</span>
+            </div>
+
             <div
               style={{
                 display: 'inline-flex',
@@ -93,50 +165,56 @@ export default function DriverDashboardPage() {
               <span style={{ fontSize: '14px' }}>♞</span>
               <span>04 horses assigned</span>
             </div>
-
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                border: '1px solid rgba(245, 158, 11, 0.3)',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: '#ffffff',
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              <FileEdit size={14} color="#fbbf24" />
-              <span>01 report pending</span>
-            </div>
           </div>
         </div>
 
-        <button
-          onClick={() => router.push('/driver/status')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: '#2563eb',
-            color: '#ffffff',
-            padding: '14px 24px',
-            borderRadius: '12px',
-            fontSize: '14px',
-            fontWeight: 700,
-            border: '1px solid rgba(96, 165, 250, 0.3)',
-            boxShadow: '0 0 20px rgba(37, 99, 235, 0.4)',
-            cursor: 'pointer',
-            transition: 'background-color 0.15s',
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#1d4ed8')}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#2563eb')}
-        >
-          <Crosshair size={16} /> Update Trip Status
-        </button>
+        {isEscort ? (
+          <button
+            onClick={() => router.push('/driver/health')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              backgroundColor: '#059669',
+              color: '#ffffff',
+              padding: '14px 24px',
+              borderRadius: '12px',
+              fontSize: '14px',
+              fontWeight: 700,
+              border: '1px solid rgba(52, 211, 153, 0.3)',
+              boxShadow: '0 0 20px rgba(5, 150, 105, 0.4)',
+              cursor: 'pointer',
+              transition: 'background-color 0.15s',
+            }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#047857')}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#059669')}
+          >
+            <Stethoscope size={16} /> Ghi Nhật Ký Sức Khỏe
+          </button>
+        ) : (
+          <button
+            onClick={() => router.push('/driver/status')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              backgroundColor: '#2563eb',
+              color: '#ffffff',
+              padding: '14px 24px',
+              borderRadius: '12px',
+              fontSize: '14px',
+              fontWeight: 700,
+              border: '1px solid rgba(96, 165, 250, 0.3)',
+              boxShadow: '0 0 20px rgba(37, 99, 235, 0.4)',
+              cursor: 'pointer',
+              transition: 'background-color 0.15s',
+            }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#1d4ed8')}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#2563eb')}
+          >
+            <Crosshair size={16} /> Update Trip Status
+          </button>
+        )}
       </div>
 
       {/* 2. KPI CARDS (4 Columns) */}
@@ -228,29 +306,41 @@ export default function DriverDashboardPage() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '18px', marginBottom: '24px' }}>
                 <div>
                   <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Trip ID</p>
-                  <p style={{ fontSize: '16px', fontWeight: 800, color: '#111827', margin: 0 }}>TR-2026-001</p>
+                  <p style={{ fontSize: '16px', fontWeight: 800, color: '#111827', margin: 0 }}>
+                    {activeTrip?.requestCode || 'REQ-027'}
+                  </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Route</p>
                   <p style={{ fontSize: '15px', fontWeight: 800, color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    Dubai <span style={{ color: '#9ca3af' }}>→</span> Ho Chi Minh City
+                    {activeTrip?.originLocation?.split(',')[0] || 'Ho Chi Minh City'}{' '}
+                    <span style={{ color: '#9ca3af' }}>→</span>{' '}
+                    {activeTrip?.destinationLocation?.split(',')[0] || 'Singapore Turf Club'}
                   </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Horse</p>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>Thunder (+3 others)</p>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>
+                    {activeTrip?.horses?.[0]?.name || 'Chiến Mã'} ({activeTrip?.requestedHorseCount || 1} con)
+                  </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Vehicle</p>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>VH-024</p>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>
+                    TRK-VN-089 (Climate 18°C)
+                  </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Departure</p>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>Sep 28, 2026</p>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>
+                    {activeTrip?.requestedDate ? new Date(activeTrip.requestedDate).toLocaleDateString('vi-VN', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Oct 16, 2026'}
+                  </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Est. Arrival</p>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>Oct 02, 2026</p>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>
+                    Oct 18, 2026
+                  </p>
                 </div>
               </div>
 
@@ -475,15 +565,15 @@ export default function DriverDashboardPage() {
                     width: '100%',
                     padding: '10px',
                     borderRadius: '8px',
-                    border: '1px solid #2563eb',
-                    backgroundColor: '#ffffff',
-                    color: '#2563eb',
+                    border: isEscort ? '1px solid #059669' : '1px solid #cbd5e1',
+                    backgroundColor: isEscort ? '#ecfdf5' : '#ffffff',
+                    color: isEscort ? '#059669' : '#475569',
                     fontWeight: 700,
                     fontSize: '13px',
                     cursor: 'pointer',
                   }}
                 >
-                  Update Health
+                  {isEscort ? '🩺 Ghi Khám Sức Khỏe' : '👁️ Xem Nhật Ký Sức Khỏe'}
                 </button>
               </div>
             </div>
@@ -586,26 +676,41 @@ export default function DriverDashboardPage() {
       <div>
         <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', marginBottom: '12px' }}>Quick Actions</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
-          <div
-            onClick={() => router.push('/driver/status')}
-            style={{ backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-              <Crosshair size={18} />
+          {/* Action 1: Status for Driver, Health for Escort */}
+          {isEscort ? (
+            <div
+              onClick={() => router.push('/driver/health')}
+              style={{ backgroundColor: '#059669', color: '#ffffff', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(5, 150, 105, 0.2)' }}
+            >
+              <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
+                <Stethoscope size={18} />
+              </div>
+              <h4 style={{ fontSize: '14px', fontWeight: 700, margin: 0 }}>Ghi Sức Khỏe Ngựa</h4>
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, margin: 0 }}>Update Status</h4>
-          </div>
+          ) : (
+            <div
+              onClick={() => router.push('/driver/status')}
+              style={{ backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(37, 99, 235, 0.2)' }}
+            >
+              <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
+                <Crosshair size={18} />
+              </div>
+              <h4 style={{ fontSize: '14px', fontWeight: 700, margin: 0 }}>Cập Nhật Mốc Hành Trình</h4>
+            </div>
+          )}
 
+          {/* Action 2: Trips list */}
           <div
-            onClick={() => router.push('/driver/health')}
+            onClick={() => router.push('/driver/trips')}
             style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
           >
-            <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-              <Stethoscope size={18} />
+            <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
+              <Truck size={18} />
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>Update Health</h4>
+            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>My Trips (Lịch Trình)</h4>
           </div>
 
+          {/* Action 3: Route map or check */}
           <div
             onClick={() => router.push('/driver/status')}
             style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
@@ -613,7 +718,7 @@ export default function DriverDashboardPage() {
             <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
               <Map size={18} />
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>View Route</h4>
+            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>Xem Bản Đồ Tuyến</h4>
           </div>
 
           <div

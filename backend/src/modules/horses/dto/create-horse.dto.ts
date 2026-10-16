@@ -55,4 +55,24 @@ export class CreateHorseDto {
   @IsString()
   @IsOptional()
   photoUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Màu lông', example: 'Bay' })
+  @IsString()
+  @IsOptional()
+  color?: string;
+
+  @ApiPropertyOptional({ description: 'Cân nặng', example: '480 kg' })
+  @IsString()
+  @IsOptional()
+  weight?: string;
+
+  @ApiPropertyOptional({ description: 'Tình trạng sức khỏe', example: 'Healthy' })
+  @IsString()
+  @IsOptional()
+  medicalStatus?: string;
+
+  @ApiPropertyOptional({ description: 'Yêu cầu y tế / chăm sóc đặc biệt', example: 'Kiểm tra nhiệt độ định kỳ' })
+  @IsString()
+  @IsOptional()
+  specialRequirements?: string;
 }

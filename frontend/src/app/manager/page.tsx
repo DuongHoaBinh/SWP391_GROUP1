@@ -43,6 +43,16 @@ export default function ManagerDashboardPage() {
     revalidateOnFocus: true,
   });
 
+  // Fetch All Orders for global dashboard statistics
+  const { data: allOrders = [], mutate: mutateAllOrders } = useSWR('/orders', fetcher, {
+    refreshInterval: 30000,
+    revalidateOnFocus: true,
+  });
+
+  const pendingApprovalsCount = pendingRequests.length;
+  const activeTripsCount = allOrders.filter((o: any) => o.status === 'in_transit' || o.status === 'planning' || o.status === 'approved').length;
+  const upcomingDeparturesCount = allOrders.filter((o: any) => o.status === 'approved' || o.status === 'planning').length;
+
   // Filter State
   const [requestCostFilter, setRequestCostFilter] = useState<'ALL' | 'NEEDS_COST' | 'HAS_COST'>('ALL');
   const [showRequestFilterDropdown, setShowRequestFilterDropdown] = useState(false);
@@ -195,7 +205,7 @@ export default function ManagerDashboardPage() {
               }}
             >
               <FileCheck2 size={14} color="#60a5fa" />
-              <span>08 requests awaiting approval</span>
+              <span>{pendingApprovalsCount.toString().padStart(2, '0')} requests awaiting approval</span>
             </div>
 
             <div
@@ -214,7 +224,7 @@ export default function ManagerDashboardPage() {
               }}
             >
               <Plane size={14} color="#34d399" />
-              <span>14 active trips</span>
+              <span>{activeTripsCount.toString().padStart(2, '0')} active trips</span>
             </div>
 
             <div
@@ -316,7 +326,9 @@ export default function ManagerDashboardPage() {
               <TrendingUp size={12} /> +3 today
             </div>
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>08</h3>
+          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>
+            {pendingApprovalsCount.toString().padStart(2, '0')}
+          </h3>
           <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
             Pending Approvals
           </p>
@@ -363,7 +375,9 @@ export default function ManagerDashboardPage() {
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} /> On schedule
             </div>
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>14</h3>
+          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>
+            {activeTripsCount.toString().padStart(2, '0')}
+          </h3>
           <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
             Active Trips
           </p>
@@ -404,10 +418,12 @@ export default function ManagerDashboardPage() {
                 borderRadius: '4px',
               }}
             >
-              Next 48h
+              Scheduled
             </div>
           </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>06</h3>
+          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>
+            {upcomingDeparturesCount.toString().padStart(2, '0')}
+          </h3>
           <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
             Upcoming Departures
           </p>
