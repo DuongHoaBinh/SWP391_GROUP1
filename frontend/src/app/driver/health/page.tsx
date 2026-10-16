@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Stethoscope, Plus, Thermometer, Heart, AlertTriangle, CheckCircle2, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Stethoscope, Plus, Thermometer, Heart, AlertTriangle, CheckCircle2, Trash2, Info, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
+import { getCurrentUser } from '@/lib/auth';
 
 interface HealthLog {
   id: string;
@@ -26,6 +27,7 @@ const INITIAL_LOGS: HealthLog[] = [
 export default function HorseHealthPage() {
   const [logs, setLogs] = useState<HealthLog[]>(INITIAL_LOGS);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
   const [formData, setFormData] = useState({
     horseName: 'Silver Star',
     tempC: 38.0,
@@ -34,8 +36,18 @@ export default function HorseHealthPage() {
     notes: '',
   });
 
+  useEffect(() => {
+    setCurrentUser(getCurrentUser());
+  }, []);
+
+  const isEscort = currentUser?.persona === 'escort' || currentUser?.email?.includes('escort');
+
   const handleCreateLog = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isEscort) {
+      toast.error('Chỉ Bác sĩ thú y / Hộ tống (Escort/Vet) mới có quyền ghi nhật ký sức khỏe!');
+      return;
+    }
     const newLog: HealthLog = {
       id: `hl-${Date.now()}`,
       horseName: formData.horseName,
@@ -47,28 +59,63 @@ export default function HorseHealthPage() {
       loggedAt: `Today at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
     };
     setLogs([newLog, ...logs]);
-    toast.success(`Health observation logged for ${newLog.horseName}!`);
+    toast.success(`Đã ghi nhận nhật ký sức khỏe cho ${newLog.horseName}!`);
     setIsAddOpen(false);
     setFormData({ horseName: 'Silver Star', tempC: 38.0, heartRateBpm: 40, condition: 'Stable', notes: '' });
   };
 
   const handleDeleteLog = (id: string) => {
+    if (!isEscort) {
+      toast.error('Chỉ Escort/Vet mới có quyền xóa bản ghi kiểm tra lâm sàng.');
+      return;
+    }
     setLogs(logs.filter(l => l.id !== id));
     toast.success('Log entry removed.');
   };
 
   return (
     <div className="flex flex-col gap-6 pb-12">
+      {/* Role Notice Banner */}
+      <div className={`p-4 rounded-xl border flex items-center justify-between text-xs transition-all ${
+        isEscort ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'
+      }`}>
+        <div className="flex items-center gap-2.5">
+          {isEscort ? (
+            <Stethoscope size={20} className="text-emerald-600 shrink-0" />
+          ) : (
+            <Lock size={20} className="text-amber-600 shrink-0" />
+          )}
+          <div>
+            <span className="font-bold block text-sm">
+              {isEscort ? '🩺 Quyền ghi chép lâm sàng: Bác Sĩ Thú Y / Hộ Tống (Escort/Vet)' : '🔒 Chế độ xem: Tài Xế Lái Xe (Driver View)'}
+            </span>
+            <p className="m-0 mt-0.5 opacity-90 text-xs">
+              {isEscort 
+                ? 'Bạn có quyền hạn ghi nhật ký thăm khám, đo thân nhiệt, nhịp tim và báo cáo tình trạng ngựa lên hệ thống.' 
+                : 'Bạn đang đăng nhập với tư cách Tài xế. Bạn có thể theo dõi tình trạng ngựa nhưng nút ghi chép chuyên môn chỉ hiển thị cho Bác sĩ thú y / Hộ tống viên.'}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 m-0">Equine Health Observation Logs</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Trip: <strong className="text-blue-600">REQ-002</strong> • Monitored by Driver & Medical Escort
+            Trip: <strong className="text-blue-600">REQ-002</strong> • Giám sát y tế &amp; phúc lợi động vật
           </p>
         </div>
-        <Button variant="primary" onClick={() => setIsAddOpen(true)}>
-          <Plus size={18} className="mr-1.5" /> Record Health Observation
-        </Button>
+        
+        {/* ONLY Escort/Vet sees and can click this button! */}
+        {isEscort && (
+          <Button 
+            variant="primary" 
+            onClick={() => setIsAddOpen(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md"
+          >
+            <Plus size={18} className="mr-1.5" /> Ghi Nhật Ký Thăm Khám Ngựa
+          </Button>
+        )}
       </div>
 
       {/* Metrics Banner */}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -25,36 +25,80 @@ import { HorseDocument } from '@/lib/types';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { EditHorseModal } from '@/components/horses/EditHorseModal';
 import { DeleteHorseModal } from '@/components/horses/DeleteHorseModal';
+import { apiClient } from '@/lib/api-client';
+import { getFullPhotoUrl } from '@/lib/customer-store';
 
 export default function HorseDetailPage() {
   const params = useParams();
   const router = useRouter();
   const horseId = params?.id as string;
 
-  const { getHorseById, uploadDocumentForHorse, uploadDocumentForRequest, uploadHorseAvatar } = useCustomerStore();
+  const { getHorseById, uploadDocumentForHorse, uploadDocumentForRequest, uploadHorseAvatar, refreshHorses } = useCustomerStore();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [apiHorse, setApiHorse] = useState<any>(null);
 
-  const horse = getHorseById(horseId) || getHorseById('hrs-001') || {
-    id: 'hrs-001',
-    code: 'HOR-2026-001',
-    name: 'Thunder',
-    breed: 'Thoroughbred',
-    age: 6,
-    gender: 'Male (Stallion)',
-    dob: '12 May 2020',
-    color: 'Bay',
-    weight: '520 kg',
-    microchipNumber: '985141000123456',
-    passportNumber: 'HP-2026-001',
-    ownerName: 'John Doe',
-    medicalStatus: 'Healthy',
-    vaccinationStatus: 'Up to date',
-    quarantineStatus: 'Pending',
-    lastExamDate: '20 Sep 2026',
-    veterinarian: 'Dr. Nguyen',
-    specialRequirements: 'Temperature-controlled transportation recommended.',
-  };
+  useEffect(() => {
+    if (horseId) {
+      apiClient<any>(`/horses/${horseId}`)
+        .then((data) => {
+          if (data && (data.id || data.name)) {
+            setApiHorse({
+              id: String(data.id || horseId),
+              backendId: data.id,
+              code: data.passportNo || `HR-${String(data.id || horseId).padStart(5, '0')}`,
+              name: data.name,
+              breed: data.breed || 'Thoroughbred',
+              age: Number(data.age) || 4,
+              gender:
+                data.gender === 'female'
+                  ? 'Mare'
+                  : data.gender === 'gelding'
+                  ? 'Gelding'
+                  : 'Stallion',
+              dob: data.dateOfBirth
+                ? new Date(data.dateOfBirth).toISOString().split('T')[0]
+                : '',
+              color: data.color || '',
+              weight: data.weight || '',
+              microchipNumber: data.microchipNo || '',
+              passportNumber: data.passportNo || '',
+              ownerName: 'You',
+              medicalStatus: data.medicalStatus || 'Healthy',
+              specialRequirements: data.specialRequirements || '',
+              photoUrl: getFullPhotoUrl(data.photoUrl),
+              avatarUrl: getFullPhotoUrl(data.photoUrl),
+              status: data.status || 'active',
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [horseId]);
+
+  const storeHorse = getHorseById(horseId);
+  const horse = apiHorse
+    ? { ...storeHorse, ...apiHorse }
+    : storeHorse || {
+        id: horseId || 'hrs-001',
+        code: `HR-${String(horseId || 1).padStart(5, '0')}`,
+        name: 'Horse',
+        breed: 'Thoroughbred',
+        age: 4,
+        gender: 'Stallion',
+        dob: '2022-01-15',
+        color: '',
+        weight: '',
+        microchipNumber: '',
+        passportNumber: '',
+        ownerName: 'You',
+        medicalStatus: 'Healthy',
+        vaccinationStatus: 'Up to date',
+        quarantineStatus: 'Pending',
+        lastExamDate: '20 Sep 2026',
+        veterinarian: 'Dr. Nguyen',
+        specialRequirements: '',
+      };
 
   const [previewDoc, setPreviewDoc] = useState<HorseDocument | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -62,7 +106,7 @@ export default function HorseDetailPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
 
-  const hasMissingDoc = horse.documents?.some((d) => d.status === 'Missing');
+  const hasMissingDoc = horse.documents?.some((d: any) => d.status === 'Missing');
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -494,13 +538,13 @@ export default function HorseDetailPage() {
             <div>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Color</span>
               <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.color || 'Bay'}
+                {horse.color || '—'}
               </div>
             </div>
             <div>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Weight</span>
               <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.weight || '520 kg'}
+                {horse.weight || '—'}
               </div>
             </div>
             <div>
@@ -583,7 +627,7 @@ export default function HorseDetailPage() {
                 Special Medical Requirements
               </div>
               <div style={{ fontSize: '13.5px', color: '#1e3a8a', fontWeight: 500, marginTop: '4px' }}>
-                "{horse.specialRequirements || 'Temperature-controlled transportation recommended.'}"
+                "{horse.specialRequirements || 'Không có yêu cầu chăm sóc đặc biệt.'}"
               </div>
             </div>
           </div>
@@ -683,7 +727,7 @@ export default function HorseDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {horse.documents?.map((doc) => (
+              {horse.documents?.map((doc: any) => (
                 <tr
                   key={doc.id}
                   style={{
@@ -798,7 +842,7 @@ export default function HorseDetailPage() {
             }}
           />
 
-          {horse.medicalHistory?.map((item, idx) => (
+          {horse.medicalHistory?.map((item: any, idx: number) => (
             <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
               <div
                 style={{
@@ -1020,6 +1064,7 @@ export default function HorseDetailPage() {
           onClose={() => setIsEditModalOpen(false)}
           horse={horse}
           onHorseUpdated={(updated) => {
+            setApiHorse(updated);
             setFeedbackSuccess(`Đã cập nhật thông tin con ngựa "${updated.name}" thành công!`);
             setTimeout(() => setFeedbackSuccess(null), 5000);
           }}

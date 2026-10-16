@@ -99,6 +99,9 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
           passportNo: passportNumber.trim() || undefined,
           microchipNo: microchipNumber.trim() || undefined,
           status: 'active',
+          color: color.trim() || undefined,
+          weight: weight.trim() || undefined,
+          medicalStatus: medicalStatus || undefined,
           photoUrl: photoUrl || undefined,
         }),
       });

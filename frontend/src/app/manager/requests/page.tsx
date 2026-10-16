@@ -171,6 +171,9 @@ export default function ManagerRequestsPage() {
               <option value="ALL">All Statuses</option>
               <option value="requested">Pending Review (requested)</option>
               <option value="approved">Approved</option>
+              <option value="planning">In Planning</option>
+              <option value="in_transit">In Transit</option>
+              <option value="completed">Completed</option>
               <option value="change_requested">Change Requested</option>
               <option value="rejected">Rejected</option>
             </select>
@@ -222,6 +225,21 @@ export default function ManagerRequestsPage() {
                         Approved
                       </span>
                     )}
+                    {order.status === 'planning' && (
+                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                        In Planning
+                      </span>
+                    )}
+                    {order.status === 'in_transit' && (
+                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-teal-100 text-teal-800 border border-teal-200">
+                        In Transit
+                      </span>
+                    )}
+                    {order.status === 'completed' && (
+                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-800 border border-slate-200">
+                        Completed
+                      </span>
+                    )}
                     {order.status === 'rejected' && (
                       <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200">
                         Rejected
@@ -255,6 +273,10 @@ export default function ManagerRequestsPage() {
                           Reject
                         </button>
                       </div>
+                    ) : order.status === 'planning' ? (
+                      <span className="inline-flex items-center justify-center min-w-[90px] px-3 py-1 rounded-md text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200">
+                        In Planning
+                      </span>
                     ) : (
                       <span className="inline-flex items-center justify-center min-w-[90px] px-3 py-1 rounded-md text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200">
                         Decided

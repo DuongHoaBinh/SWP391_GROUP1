@@ -19,7 +19,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
+import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { apiClient } from '@/lib/api-client';
 
@@ -59,9 +59,10 @@ export default function ManagerLayout({
   useEffect(() => {
     // Ensure active manager session exists
     const token = getAuthToken();
-    if (!token) {
+    const user = getCurrentUser();
+    if (!token || (user.role !== 'LOGISTICS_MANAGER' && user.role !== 'ADMIN')) {
       setAuthSession('mock-jwt-token-manager', {
-        id: 'usr-mgr-01',
+        id: '2',
         name: 'Alex Morgan',
         email: 'alex.m@racehorse.logistics',
         role: 'LOGISTICS_MANAGER',

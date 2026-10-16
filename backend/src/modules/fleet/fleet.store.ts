@@ -39,6 +39,9 @@ interface ShipmentStaffRow extends RowDataPacket {
   user_id: number;
   role_in_shipment: ShipmentStaffRole;
   assigned_date: Date;
+  is_confirmed: boolean | number;
+  confirmed_at: Date | null;
+  confirmation_notes: string | null;
   full_name: string;
   email: string;
   phone: string | null;
@@ -174,6 +177,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   async findAssignedStaff(shipmentId: number): Promise<ShipmentStaffAssignment[]> {
     const [rows] = await this.pool.execute<ShipmentStaffRow[]>(
       `SELECT sa.assignment_id, sa.shipment_id, sa.user_id, sa.role_in_shipment, sa.assigned_date,
+              sa.is_confirmed, sa.confirmed_at, sa.confirmation_notes,
               u.full_name, u.email, u.phone, r.role_name
        FROM shipment_assignment sa
        JOIN \`user\` u ON sa.user_id = u.user_id
@@ -189,6 +193,9 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       userId: r.user_id,
       roleInShipment: r.role_in_shipment,
       assignedDate: new Date(r.assigned_date).toISOString(),
+      isConfirmed: Boolean(r.is_confirmed),
+      confirmedAt: r.confirmed_at ? new Date(r.confirmed_at).toISOString() : null,
+      confirmationNotes: r.confirmation_notes,
       user: {
         id: r.user_id,
         fullName: r.full_name,

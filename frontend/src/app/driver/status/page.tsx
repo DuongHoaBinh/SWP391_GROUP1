@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Crosshair, CheckCircle2, Clock, MapPin, AlertCircle, Plus, Send } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Crosshair, CheckCircle2, Clock, MapPin, AlertCircle, Plus, Send, Truck, Stethoscope, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
+import { getCurrentUser } from '@/lib/auth';
 
 interface Milestone {
   id: string;
@@ -28,8 +29,19 @@ export default function DriverStatusPage() {
   const [isCheckInOpen, setIsCheckInOpen] = useState(false);
   const [checkInNotes, setCheckInNotes] = useState('');
   const [currentWaypoint, setCurrentWaypoint] = useState('Cau Treo Border Gate Inspection');
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+
+  useEffect(() => {
+    setCurrentUser(getCurrentUser());
+  }, []);
+
+  const isEscort = currentUser?.persona === 'escort' || currentUser?.email?.includes('escort');
 
   const handleConfirmCheckin = () => {
+    if (isEscort) {
+      toast.error('Chỉ Tài xế lái xe (Driver) mới được cập nhật mốc lộ trình của phương tiện.');
+      return;
+    }
     setMilestones(milestones.map(m => {
       if (m.title === currentWaypoint) {
         return {
@@ -48,6 +60,29 @@ export default function DriverStatusPage() {
 
   return (
     <div className="flex flex-col gap-6 pb-12">
+      {/* Role Banner */}
+      <div className={`p-4 rounded-xl border flex items-center justify-between text-xs transition-all ${
+        !isEscort ? 'bg-blue-50 border-blue-200 text-blue-900' : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+      }`}>
+        <div className="flex items-center gap-2.5">
+          {!isEscort ? (
+            <Truck size={20} className="text-blue-600 shrink-0" />
+          ) : (
+            <Stethoscope size={20} className="text-emerald-600 shrink-0" />
+          )}
+          <div>
+            <span className="font-bold block text-sm">
+              {!isEscort ? '🚚 Quyền cập nhật mốc lộ trình: Tài Xế Lái Xe (Driver)' : '👁️ Chế độ theo dõi: Bác Sĩ Thú Y / Hộ Tống (Escort/Vet)'}
+            </span>
+            <p className="m-0 mt-0.5 opacity-90 text-xs">
+              {!isEscort
+                ? 'Bạn trực tiếp điều khiển xe vận tải và xác nhận các trạm dừng, mốc kiểm tra thực địa.'
+                : 'Bạn đang đăng nhập với tư cách Bác sĩ thú y / Hộ tống viên. Bạn có thể theo dõi tiến độ hành trình nhưng quyền xác nhận mốc di chuyển thuộc về Tài xế.'}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 m-0">Trip Milestone Check-in</h1>
@@ -55,9 +90,13 @@ export default function DriverStatusPage() {
             Trip: <strong className="text-blue-600">REQ-002 (Hanoi to Bangkok)</strong> • Vehicle TRK-VN-102
           </p>
         </div>
-        <Button variant="primary" onClick={() => setIsCheckInOpen(true)}>
-          <CheckCircle2 size={18} className="mr-1.5" /> Submit Next Milestone
-        </Button>
+        
+        {/* Only Driver can submit milestones */}
+        {!isEscort && (
+          <Button variant="primary" onClick={() => setIsCheckInOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold">
+            <CheckCircle2 size={18} className="mr-1.5" /> Submit Next Milestone
+          </Button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">

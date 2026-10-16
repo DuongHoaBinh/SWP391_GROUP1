@@ -17,8 +17,10 @@ import {
   X,
   Plus,
 } from 'lucide-react';
-import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
+import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
+import { apiClient } from '@/lib/api-client';
+import toast from 'react-hot-toast';
 
 interface NavItem {
   label: string;
@@ -36,21 +38,92 @@ export default function DriverLayout({
   const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const [activeUser, setActiveUser] = useState(() => getCurrentUser());
+
+  const currentPersona = activeUser?.persona || (activeUser?.email?.includes('escort') ? 'escort' : 'driver');
+
+  const fetchUnread = async () => {
+    try {
+      const notifs = await apiClient<any[]>('/notifications');
+      if (Array.isArray(notifs)) {
+        setUnreadNotifs(notifs.filter((n) => !n.isRead).length);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
-    // Ensure active driver session exists
+    // Preserve logged in driver session if exists
     const token = getAuthToken();
-    if (!token) {
+    const user = getCurrentUser();
+
+    if (!token || !user || (user.role !== 'DRIVER_ESCORT' && !user.email?.includes('driver') && !user.email?.includes('escort'))) {
       setAuthSession('mock-jwt-token-driver', {
-        id: 'usr-drv-01',
-        name: 'John Smith',
-        email: 'john.s@racehorse.logistics',
+        id: '10',
+        name: 'Trần Văn Lái (Tài xế 1)',
+        email: 'driver1@example.com',
         role: 'DRIVER_ESCORT',
         organization: 'RaceHorse Logistics',
-        initials: 'JS',
+        initials: 'TL',
+        persona: 'driver',
       });
+      setActiveUser(getCurrentUser());
+    } else {
+      if (!user.persona) {
+        user.persona = user.email?.includes('escort') ? 'escort' : 'driver';
+        setAuthSession(token, user);
+      }
+      setActiveUser(user);
     }
-  }, []);
+    fetchUnread();
+  }, [pathname]);
+
+  const handleSwitchPersona = (target: 'driver' | 'escort') => {
+    const existing = getCurrentUser();
+    if (target === 'driver') {
+      const isAlreadyDriver = existing?.email?.includes('driver');
+      if (isAlreadyDriver && existing) {
+        setAuthSession(getAuthToken() || 'mock-jwt-token-driver', {
+          ...existing,
+          persona: 'driver',
+        });
+      } else {
+        setAuthSession('mock-jwt-token-driver', {
+          id: '10',
+          name: 'Trần Văn Lái (Tài xế 1)',
+          email: 'driver1@example.com',
+          role: 'DRIVER_ESCORT',
+          organization: 'RaceHorse Logistics',
+          initials: 'TL',
+          persona: 'driver',
+        });
+      }
+      toast.success('Đã chuyển sang vai trò: Tài xế lái xe (Driver)');
+    } else {
+      const isAlreadyEscort = existing?.email?.includes('escort');
+      if (isAlreadyEscort && existing) {
+        setAuthSession(getAuthToken() || 'mock-jwt-token-driver', {
+          ...existing,
+          persona: 'escort',
+        });
+      } else {
+        setAuthSession('mock-jwt-token-driver', {
+          id: '13',
+          name: 'BS. Hoàng Văn Y (Bác sĩ thú y)',
+          email: 'escort1@example.com',
+          role: 'DRIVER_ESCORT',
+          organization: 'RaceHorse Logistics',
+          initials: 'HY',
+          persona: 'escort',
+        });
+      }
+      toast.success('Đã chuyển sang vai trò: Bác sĩ thú y / Hộ tống (Escort/Vet)');
+    }
+    setActiveUser(getCurrentUser());
+    window.location.reload();
+  };
 
   const navItems: NavItem[] = [
     {
@@ -85,7 +158,7 @@ export default function DriverLayout({
       label: 'Notifications',
       href: '/driver/notifications',
       icon: <Bell size={18} />,
-      badge: 1,
+      badge: unreadNotifs > 0 ? unreadNotifs : undefined,
     },
     {
       label: 'Profile',
@@ -101,7 +174,7 @@ export default function DriverLayout({
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif", overflowX: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', maxHeight: '100vh', overflow: 'hidden', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif" }}>
       {/* Logout confirmation modal */}
       <LogoutConfirmModal
         isOpen={showLogoutModal}
@@ -323,7 +396,7 @@ export default function DriverLayout({
                   width: '34px',
                   height: '34px',
                   borderRadius: '50%',
-                  backgroundColor: '#2563eb',
+                  backgroundColor: currentPersona === 'escort' ? '#059669' : '#2563eb',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -333,14 +406,14 @@ export default function DriverLayout({
                   flexShrink: 0,
                 }}
               >
-                JS
+                {activeUser?.initials || activeUser?.name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || 'DR'}
               </div>
               <div style={{ minWidth: 0 }}>
-                <p style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  John Smith
+                <p style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={activeUser?.name}>
+                  {activeUser?.name || 'Tài xế'}
                 </p>
                 <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  Driver / Escort
+                  {currentPersona === 'escort' ? 'Bác sĩ thú y / Hộ tống' : 'Tài xế lái xe'}
                 </p>
               </div>
             </div>
@@ -537,7 +610,7 @@ export default function DriverLayout({
       )}
 
       {/* MAIN CONTENT AREA */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100%', overflow: 'hidden' }}>
         {/* TOP HEADER */}
         <header
           style={{
@@ -582,9 +655,11 @@ export default function DriverLayout({
             </div>
           </div>
 
-          {/* Right: Notification & User */}
+          {/* Right: Notification & User Profile */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+
             <button
+              onClick={() => router.push('/driver/notifications')}
               style={{
                 width: '36px',
                 height: '36px',
@@ -600,18 +675,20 @@ export default function DriverLayout({
               }}
             >
               <Bell size={16} />
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '8px',
-                  right: '9px',
-                  width: '7px',
-                  height: '7px',
-                  borderRadius: '50%',
-                  backgroundColor: '#ef4444',
-                  border: '1px solid #ffffff',
-                }}
-              />
+              {unreadNotifs > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    right: '9px',
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ef4444',
+                    border: '1px solid #ffffff',
+                  }}
+                />
+              )}
             </button>
 
             <div
@@ -630,7 +707,7 @@ export default function DriverLayout({
                   width: '30px',
                   height: '30px',
                   borderRadius: '50%',
-                  backgroundColor: '#2563eb',
+                  backgroundColor: currentPersona === 'escort' ? '#059669' : '#2563eb',
                   color: '#ffffff',
                   display: 'flex',
                   alignItems: 'center',
@@ -639,79 +716,23 @@ export default function DriverLayout({
                   fontWeight: 700,
                 }}
               >
-                JS
+                {activeUser?.initials || (currentPersona === 'escort' ? 'HY' : 'TL')}
               </div>
               <div style={{ textAlign: 'left', lineHeight: 1.2 }}>
-                <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0 }}>John Smith</p>
-                <p style={{ fontSize: '10px', color: '#6b7280', margin: 0, fontWeight: 500 }}>Driver / Escort</p>
+                <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0 }}>
+                  {activeUser?.name || (currentPersona === 'escort' ? 'BS. Hoàng Văn Y' : 'Trần Văn Lái')}
+                </p>
+                <p style={{ fontSize: '10px', color: currentPersona === 'escort' ? '#059669' : '#2563eb', margin: 0, fontWeight: 700 }}>
+                  {currentPersona === 'escort' ? 'Bác sĩ Thú y / Hộ tống' : 'Tài xế Lái xe'}
+                </p>
               </div>
             </div>
           </div>
         </header>
 
         {/* Content Container */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 80px 24px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 40px 24px' }}>
           <div style={{ maxWidth: '1200px', margin: '0 auto' }}>{children}</div>
-        </div>
-
-        {/* MOBILE BOTTOM NAVIGATION (App-like feel for drivers) */}
-        <div
-          className="lg:hidden"
-          style={{
-            position: 'fixed',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            backgroundColor: '#ffffff',
-            borderTop: '1px solid #e5e7eb',
-            zIndex: 50,
-            display: 'flex',
-            justifyContent: 'space-around',
-            alignItems: 'center',
-            height: '64px',
-            paddingBottom: 'env(safe-area-inset-bottom)',
-          }}
-        >
-          <Link href="/driver" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: '#2563eb', textDecoration: 'none' }}>
-            <LayoutDashboard size={18} />
-            <span style={{ fontSize: '10px', fontWeight: 600, marginTop: '2px' }}>Home</span>
-          </Link>
-          <Link href="/driver/trips" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: '#6b7280', textDecoration: 'none' }}>
-            <Truck size={18} />
-            <span style={{ fontSize: '10px', fontWeight: 600, marginTop: '2px' }}>Trips</span>
-          </Link>
-
-          {/* Floating Action Button */}
-          <div style={{ position: 'relative', marginTop: '-24px' }}>
-            <button
-              onClick={() => router.push('/driver/status')}
-              aria-label="Quick Action: Update Trip Milestone or Health Status"
-              style={{
-                width: '52px',
-                height: '52px',
-                borderRadius: '50%',
-                backgroundColor: '#2563eb',
-                color: '#ffffff',
-                border: '4px solid #f9fafb',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 8px 16px rgba(37, 99, 235, 0.4)',
-                cursor: 'pointer',
-              }}
-            >
-              <Plus size={24} />
-            </button>
-          </div>
-
-          <Link href="/driver/health" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: '#6b7280', textDecoration: 'none' }}>
-            <Stethoscope size={18} />
-            <span style={{ fontSize: '10px', fontWeight: 600, marginTop: '2px' }}>Health</span>
-          </Link>
-          <Link href="/driver/profile" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: '#6b7280', textDecoration: 'none' }}>
-            <User size={18} />
-            <span style={{ fontSize: '10px', fontWeight: 600, marginTop: '2px' }}>Profile</span>
-          </Link>
         </div>
       </main>
     </div>

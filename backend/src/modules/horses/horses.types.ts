@@ -22,6 +22,10 @@ export interface HorseEntity {
   age: number | null;
   microchipNo: string | null;
   passportNo: string | null;
+  color: string | null;
+  weight: string | null;
+  medicalStatus: string | null;
+  specialRequirements: string | null;
   status: HorseStatus;
   quantity: number;
   photoUrl: string | null;

@@ -40,6 +40,9 @@ export interface ShipmentStaffAssignment {
   userId: number;
   roleInShipment: ShipmentStaffRole;
   assignedDate: string;
+  isConfirmed: boolean;
+  confirmedAt: string | null;
+  confirmationNotes: string | null;
   user: {
     id: number;
     fullName: string;

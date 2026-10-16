@@ -102,6 +102,10 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               dateOfBirth: dob || undefined,
               passportNo: passportNumber.trim() || undefined,
               microchipNo: microchipNumber.trim() || undefined,
+              color: color.trim() || undefined,
+              weight: weight.trim() || undefined,
+              medicalStatus: medicalStatus || undefined,
+              specialRequirements: specialRequirements.trim() || undefined,
               status: 'active',
             }),
           });

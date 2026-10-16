@@ -19,7 +19,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
+import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
@@ -46,11 +46,12 @@ export default function CoordinatorLayout({
   useEffect(() => {
     // Ensure active coordinator session exists
     const token = getAuthToken();
-    if (!token) {
+    const user = getCurrentUser();
+    if (!token || (user.role !== 'FLEET_ROUTE_COORDINATOR' && user.role !== 'ADMIN')) {
       setAuthSession('mock-jwt-token-coordinator', {
-        id: 'usr-coord-01',
+        id: '4',
         name: 'Alex Morgan',
-        email: 'alex.m@racehorse.logistics',
+        email: 'coordinator@example.com',
         role: 'FLEET_ROUTE_COORDINATOR',
         organization: 'RaceHorse Logistics',
         initials: 'AM',
@@ -112,7 +113,7 @@ export default function CoordinatorLayout({
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif", overflowX: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', maxHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: "'Inter', sans-serif", overflow: 'hidden' }}>
       {/* Logout confirmation modal */}
       <LogoutConfirmModal
         isOpen={showLogoutModal}
@@ -129,9 +130,7 @@ export default function CoordinatorLayout({
           color: '#94a3b8',
           display: 'flex',
           flexDirection: 'column',
-          height: '100vh',
-          position: 'sticky',
-          top: 0,
+          height: '100%',
           zIndex: 40,
           borderRight: '1px solid rgba(255, 255, 255, 0.05)',
           flexShrink: 0,
@@ -529,7 +528,7 @@ export default function CoordinatorLayout({
       )}
 
       {/* MAIN CONTENT AREA */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100%', overflow: 'hidden' }}>
         {/* TOP HEADER */}
         <header
           style={{

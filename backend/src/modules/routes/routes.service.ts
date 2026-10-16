@@ -1,25 +1,36 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { RoutesStore } from './routes.store';
 import { OrdersStore } from '../orders/orders.store';
 import { FleetStore } from '../fleet/fleet.store';
+import { DocumentsService } from '../documents/documents.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
+import { UserRole } from '../auth/auth.types';
 import {
+  AirlineEntity,
+  AirportEntity,
   FullTripPlan,
+  MasterStopEntity,
+  PlanStatus,
   RouteEntity,
   RouteStatus,
   RouteStopEntity,
   RouteStopType,
-  RouteStopUpdateEntity,
+  TripPlanReadiness,
 } from './routes.types';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { RecordStopProgressDto } from './dto/record-stop-progress.dto';
 import { PublishTripDto } from './dto/publish-trip.dto';
+import { SetStrategicFrameworkDto } from './dto/set-strategic-framework.dto';
+import { BuildDetailedPlanDto } from './dto/build-detailed-plan.dto';
+import { ReviewPlanDto } from './dto/review-plan.dto';
+import { ConfirmAssignmentDto } from './dto/confirm-assignment.dto';
 import { ShipmentStatus } from '../orders/orders.types';
 
 @Injectable()
@@ -28,8 +39,23 @@ export class RoutesService {
     private readonly routesStore: RoutesStore,
     private readonly ordersStore: OrdersStore,
     private readonly fleetStore: FleetStore,
+    private readonly documentsService: DocumentsService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  // --- Master Data for Flow 3 ---
+  async getMasterData(): Promise<{
+    airlines: AirlineEntity[];
+    airports: AirportEntity[];
+    masterStops: MasterStopEntity[];
+  }> {
+    const [airlines, airports, masterStops] = await Promise.all([
+      this.routesStore.findAllAirlines(),
+      this.routesStore.findAllAirports(),
+      this.routesStore.findAllMasterStops(),
+    ]);
+    return { airlines, airports, masterStops };
+  }
 
   async getRouteByShipmentId(shipmentId: number): Promise<RouteEntity> {
     const route = await this.routesStore.findRouteByShipmentId(shipmentId);
@@ -51,20 +77,24 @@ export class RoutesService {
 
     const totalCapacity = assignedVehicles.reduce((sum, v) => sum + v.vehicle.capacity, 0);
 
-    // Evaluate readiness to publish according to Flow 3 rules:
     const missingRequirements: string[] = [];
 
-    if (order.status !== ShipmentStatus.APPROVED && order.status !== ShipmentStatus.PLANNING) {
-      missingRequirements.push('Đơn vận chuyển phải được phê duyệt trước khi xuất bản lịch trình');
+    if (
+      order.status !== ShipmentStatus.APPROVED &&
+      order.status !== ShipmentStatus.PLANNING &&
+      (order.status as any) !== 'confirmed' &&
+      (order.status as any) !== 'ready_to_depart'
+    ) {
+      missingRequirements.push('Đơn vận chuyển phải được phê duyệt trước khi lập và xuất bản lịch trình');
     }
 
-    if (!route || !route.stops || route.stops.length < 2) {
-      missingRequirements.push('Cần lập lộ trình di chuyển với tối thiểu 2 điểm dừng (Điểm đi và Điểm đến)');
+    if (!route || (!route.legs || route.legs.length === 0)) {
+      missingRequirements.push('Cần dựng ít nhất 1 chặng vận chuyển cho kế hoạch');
     }
 
-    if (assignedVehicles.length === 0) {
-      missingRequirements.push('Chưa phân công phương tiện vận chuyển cho chuyến đi');
-    } else if (totalCapacity < order.requestedHorseCount) {
+    if (assignedVehicles.length === 0 && (!route?.legs || route.legs.some((l) => l.legType === 'road'))) {
+      missingRequirements.push('Chưa phân công phương tiện vận chuyển cho các chặng đường bộ');
+    } else if (totalCapacity < order.requestedHorseCount && totalCapacity > 0) {
       missingRequirements.push(
         `Sức chứa của phương tiện (${totalCapacity} con) chưa đủ cho số lượng ngựa của đơn (${order.requestedHorseCount} con)`,
       );
@@ -88,6 +118,324 @@ export class RoutesService {
     };
   }
 
+  // --- Step 1a: Manager Sets Strategic Framework ---
+  async setStrategicFramework(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    dto: SetStrategicFrameworkDto,
+  ): Promise<RouteEntity> {
+    const order = await this.ordersStore.findById(shipmentId);
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    const routeId = await this.routesStore.saveStrategicFramework(shipmentId, dto);
+
+    // Cập nhật trạng thái shipment sang planning nếu đang là approved
+    if (order.status === ShipmentStatus.APPROVED) {
+      await this.ordersStore.updateStatus(shipmentId, ShipmentStatus.PLANNING);
+    }
+
+    // Thông báo cho Coordinator được chỉ định
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+    if (dto.assignedCoordinatorId) {
+      await this.notificationsService.createNotification(
+        dto.assignedCoordinatorId,
+        `Giao nhiệm vụ lập chi tiết lộ trình - Đơn ${code}`,
+        `Quản lý đã thiết lập khung chiến lược cho chuyến đi ${code} (${dto.managerVehicleType}${dto.managerMainCorridor ? ` qua ${dto.managerMainCorridor}` : ''}). Vui lòng dựng các chặng và điểm dừng chi tiết.`,
+        'status_update',
+        shipmentId,
+      );
+    }
+
+    return (await this.routesStore.findRouteById(routeId))!;
+  }
+
+  // --- Step 1b: Coordinator Builds Detailed Plan ---
+  async buildDetailedPlan(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    dto: BuildDetailedPlanDto,
+  ): Promise<RouteEntity> {
+    const order = await this.ordersStore.findById(shipmentId);
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    let route = await this.routesStore.findRouteByShipmentId(shipmentId);
+    let routeId: number;
+    if (!route) {
+      routeId = await this.routesStore.createRoute(shipmentId, dto.routeName, dto.totalDistanceKm);
+    } else {
+      routeId = route.id;
+    }
+
+    if (dto.legs.length === 0) {
+      throw new BadRequestException('Kế hoạch chuyến đi phải có ít nhất 1 chặng vận chuyển (Leg)');
+    }
+
+    await this.routesStore.saveDetailedPlan(routeId, dto);
+
+    // Gán phương tiện từ các chặng đường bộ vào shipment_vehicle nếu có
+    const vehicleIds = dto.legs
+      .filter((l) => l.legType === 'road' && l.vehicleId)
+      .map((l) => l.vehicleId as number);
+    if (vehicleIds.length > 0) {
+      const uniqueVehicles = Array.from(new Set(vehicleIds));
+      await this.fleetStore.assignVehicles(shipmentId, uniqueVehicles);
+    }
+
+    return (await this.routesStore.findRouteById(routeId))!;
+  }
+
+  // --- Coordinator Submits Plan For Manager Approval ---
+  async submitPlanForApproval(
+    user: AuthenticatedUser,
+    shipmentId: number,
+  ): Promise<RouteEntity> {
+    const order = await this.ordersStore.findById(shipmentId);
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    const route = await this.routesStore.findRouteByShipmentId(shipmentId);
+    if (!route) {
+      throw new BadRequestException('Chưa có kế hoạch lộ trình nào được lập cho đơn hàng này');
+    }
+
+    if (!route.legs || route.legs.length === 0) {
+      throw new BadRequestException('Vui lòng dựng đầy đủ các chặng vận chuyển trước khi gửi duyệt');
+    }
+
+    await this.routesStore.updatePlanStatus(route.id, PlanStatus.PENDING_APPROVAL);
+
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+    // Gửi thông báo đến Logistics Manager
+    const staffList = await this.fleetStore.findAvailableStaff();
+    const managers = staffList.filter((s) => s.roleName.toLowerCase().includes('manager'));
+    for (const m of managers) {
+      await this.notificationsService.createNotification(
+        m.id,
+        `Yêu cầu phê duyệt kế hoạch chuyến đi - Đơn ${code}`,
+        `Coordinator ${user.email} đã hoàn thiện kế hoạch chi tiết cho đơn ${code} gồm ${route.legs.length} chặng. Vui lòng xem xét và phê duyệt.`,
+        'status_update',
+        shipmentId,
+      );
+    }
+
+    return (await this.routesStore.findRouteById(route.id))!;
+  }
+
+  // --- Step 2: Manager Reviews Plan ---
+  async reviewTripPlan(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    dto: ReviewPlanDto,
+  ): Promise<RouteEntity> {
+    const order = await this.ordersStore.findById(shipmentId);
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    const route = await this.routesStore.findRouteByShipmentId(shipmentId);
+    if (!route) {
+      throw new NotFoundException(`Không tìm thấy kế hoạch chuyến đi #${shipmentId}`);
+    }
+
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+
+    if (dto.status === 'approved') {
+      await this.routesStore.updatePlanStatus(
+        route.id,
+        PlanStatus.APPROVED,
+        undefined,
+        Number(user.id),
+      );
+
+      // Thông báo cho Coordinator phụ trách
+      if (route.assignedCoordinatorId) {
+        await this.notificationsService.createNotification(
+          route.assignedCoordinatorId,
+          `Kế hoạch lộ trình đơn ${code} ĐÃ ĐƯỢC DUYỆT`,
+          `Quản lý ${user.email} đã phê duyệt kế hoạch chi tiết của chuyến đi ${code}. Kế hoạch sẵn sàng để phân công nhân sự.`,
+          'status_update',
+          shipmentId,
+        );
+      }
+    } else {
+      if (!dto.rejectionReason || dto.rejectionReason.trim().length === 0) {
+        throw new BadRequestException('Bắt buộc phải nhập lý do trả về để Coordinator điều chỉnh');
+      }
+
+      await this.routesStore.updatePlanStatus(
+        route.id,
+        PlanStatus.DRAFT,
+        dto.rejectionReason,
+        Number(user.id),
+      );
+
+      // Thông báo trả về cho Coordinator
+      if (route.assignedCoordinatorId) {
+        await this.notificationsService.createNotification(
+          route.assignedCoordinatorId,
+          `Kế hoạch chuyến đi ${code} yêu cầu điều chỉnh`,
+          `Quản lý đã trả về kế hoạch chuyến đi ${code} với lý do: "${dto.rejectionReason}". Vui lòng cập nhật lại.`,
+          'status_update',
+          shipmentId,
+        );
+      }
+    }
+
+    return (await this.routesStore.findRouteById(route.id))!;
+  }
+
+  // --- Step 3: Driver / Escort Confirms Assignment ---
+  async confirmTripAssignment(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    dto: ConfirmAssignmentDto,
+  ): Promise<{ success: boolean; message: string; isFullyConfirmed: boolean }> {
+    const order = await this.ordersStore.findById(shipmentId);
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    let targetUserId = Number(user.id);
+    if (isNaN(targetUserId) || user.role === UserRole.ADMIN) {
+      if (dto.driverUserId) {
+        targetUserId = Number(dto.driverUserId);
+      } else {
+        const staff = await this.fleetStore.findAssignedStaff(shipmentId);
+        const driverOrEscort = staff.find((s) => !s.isConfirmed);
+        if (driverOrEscort) {
+          targetUserId = driverOrEscort.userId;
+        }
+      }
+    }
+
+    const success = await this.routesStore.confirmStaffAssignment(
+      shipmentId,
+      targetUserId,
+      dto.confirmationNotes,
+    );
+    if (!success) {
+      throw new BadRequestException('Bạn không nằm trong danh sách nhân sự được phân công cho chuyến đi này');
+    }
+
+    const route = await this.routesStore.findRouteByShipmentId(shipmentId);
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+
+    // Kiểm tra xem tất cả tài xế/hộ tống đã xác nhận chưa
+    const allConfirmed = await this.routesStore.checkAllDriversConfirmed(shipmentId);
+    if (allConfirmed && route) {
+      await this.routesStore.updatePlanStatus(route.id, PlanStatus.CONFIRMED);
+      await this.ordersStore.updateStatus(shipmentId, 'confirmed' as any);
+
+      // Thông báo cho khách hàng lịch trình dự kiến đã chốt
+      await this.notificationsService.createNotification(
+        order.customerId,
+        `Lịch trình vận chuyển đơn ${code} đã được xác nhận`,
+        `Đội ngũ điều phối và tài xế đã hoàn tất việc xác nhận lịch trình chuyến đi ${code}.`,
+        'status_update',
+        shipmentId,
+      );
+
+      // Tự động kiểm tra cổng Ready to depart
+      await this.evaluateReadyToDepartGate(user, shipmentId);
+    }
+
+    return {
+      success: true,
+      message: 'Đã xác nhận nhận nhiệm vụ chuyến đi thành công.',
+      isFullyConfirmed: allConfirmed,
+    };
+  }
+
+  // --- Step 4: Ready to Depart Gate Evaluation ---
+  async getTripPlanReadiness(
+    user: AuthenticatedUser,
+    shipmentId: number,
+  ): Promise<TripPlanReadiness> {
+    return this.evaluateReadyToDepartGate(user, shipmentId);
+  }
+
+  private async evaluateReadyToDepartGate(
+    user: AuthenticatedUser,
+    shipmentId: number,
+  ): Promise<TripPlanReadiness> {
+    const order = await this.ordersStore.findById(shipmentId);
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    const route = await this.routesStore.findRouteByShipmentId(shipmentId);
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+
+    const isPlanConfirmed =
+      route?.planStatus === PlanStatus.CONFIRMED ||
+      route?.planStatus === PlanStatus.READY_TO_DEPART ||
+      route?.planStatus === PlanStatus.IN_TRANSIT;
+
+    let isLegalCompliant = false;
+    try {
+      const checklist = await this.documentsService.getOrderComplianceChecklist(user, shipmentId);
+      isLegalCompliant = Boolean(checklist.isFullyCompliant);
+    } catch {
+      isLegalCompliant = false;
+    }
+
+    const pendingConditions: string[] = [];
+    if (!isPlanConfirmed) {
+      if (route?.planStatus === PlanStatus.DRAFT) {
+        pendingConditions.push('Kế hoạch chuyến đi đang ở trạng thái Nháp (Draft), chưa hoàn tất gửi duyệt.');
+      } else if (route?.planStatus === PlanStatus.PENDING_APPROVAL) {
+        pendingConditions.push('Kế hoạch lộ trình đang chờ Logistics Manager phê duyệt.');
+      } else if (route?.planStatus === PlanStatus.APPROVED) {
+        pendingConditions.push('Kế hoạch đã duyệt nhưng đang chờ toàn bộ tài xế (Driver/Escort) bấm xác nhận nhận chuyến.');
+      } else {
+        pendingConditions.push('Kế hoạch vận chuyển chưa được xác nhận đầy đủ.');
+      }
+    }
+
+    if (!isLegalCompliant) {
+      pendingConditions.push('Hồ sơ pháp lý, xét nghiệm và kiểm dịch (Flow 2) chưa được duyệt hoàn tất 100%.');
+    }
+
+    const isReadyToDepart = isPlanConfirmed && isLegalCompliant;
+
+    // Tự động chuyển trạng thái khi cả 2 điều kiện thỏa mãn
+    if (
+      isReadyToDepart &&
+      route &&
+      route.planStatus !== PlanStatus.READY_TO_DEPART &&
+      route.planStatus !== PlanStatus.IN_TRANSIT
+    ) {
+      await this.routesStore.updatePlanStatus(route.id, PlanStatus.READY_TO_DEPART);
+      await this.ordersStore.updateStatus(shipmentId, 'ready_to_depart' as any);
+
+      // Thông báo chính thức cho khách hàng và tài xế
+      await this.notificationsService.createNotification(
+        order.customerId,
+        `Chuyến đi ${code} ĐÃ ĐỦ ĐIỀU KIỆN XUẤT PHÁT (Ready to depart)`,
+        `Hồ sơ kiểm dịch đã đạt chuẩn 100% và kế hoạch lộ trình phương tiện đã hoàn tất. Đoàn vận chuyển sẵn sàng khởi hành.`,
+        'status_update',
+        shipmentId,
+      );
+    }
+
+    return {
+      shipmentId,
+      orderCode: code,
+      isPlanConfirmed,
+      isLegalCompliant,
+      isReadyToDepart,
+      currentShipmentStatus: order.status,
+      currentPlanStatus: route?.planStatus || PlanStatus.DRAFT,
+      pendingConditions,
+    };
+  }
+
+  // --- Legacy Compatibility Methods ---
   async createOrUpdateRoute(
     user: AuthenticatedUser,
     shipmentId: number,
@@ -98,38 +446,8 @@ export class RoutesService {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
 
-    if (
-      order.status !== ShipmentStatus.APPROVED &&
-      order.status !== ShipmentStatus.PLANNING &&
-      order.status !== ShipmentStatus.IN_TRANSIT
-    ) {
-      throw new BadRequestException(
-        `Không thể lập lộ trình cho đơn hàng đang ở trạng thái "${order.status}"`,
-      );
-    }
-
     if (dto.stops.length < 2) {
       throw new BadRequestException('Lộ trình phải có ít nhất 2 điểm dừng (Điểm xuất phát và Điểm kết thúc)');
-    }
-
-    // Key rule Flow 3: A route must identify required border, quarantine, and handover stops for international orders.
-    const isCrossBorder =
-      order.originLocation.toLowerCase().includes('singapore') ||
-      order.originLocation.toLowerCase().includes('malaysia') ||
-      order.originLocation.toLowerCase().includes('thailand') ||
-      order.destinationLocation.toLowerCase().includes('singapore') ||
-      order.destinationLocation.toLowerCase().includes('malaysia') ||
-      order.destinationLocation.toLowerCase().includes('thailand');
-
-    if (isCrossBorder) {
-      const hasBorderOrQuarantine = dto.stops.some(
-        (s) => s.stopType === RouteStopType.BORDER_CHECK || s.stopType === RouteStopType.QUARANTINE,
-      );
-      if (!hasBorderOrQuarantine) {
-        throw new BadRequestException(
-          'Đơn vận chuyển xuyên quốc gia bắt buộc phải có ít nhất 1 điểm dừng Cửa khẩu (border_check) hoặc Trạm kiểm dịch (quarantine)',
-        );
-      }
     }
 
     let route = await this.routesStore.findRouteByShipmentId(shipmentId);
@@ -161,7 +479,6 @@ export class RoutesService {
       throw new NotFoundException(`Không tìm thấy lộ trình #${routeId}`);
     }
 
-    // Key rule Flow 3: Schedule changes after publication must preserve the old schedule and record a reason.
     if (!dto.reason || dto.reason.trim().length === 0) {
       throw new BadRequestException('Bắt buộc phải cung cấp lý do điều chỉnh lịch trình (reason)');
     }
@@ -191,32 +508,29 @@ export class RoutesService {
   ): Promise<FullTripPlan> {
     const plan = await this.getFullTripPlan(shipmentId);
 
-    // Key rule Flow 3: A trip cannot be published without an approved order, assigned capacity, route, and responsible staff.
     if (!plan.isReadyToPublish) {
       throw new BadRequestException(
         `Không thể xuất bản kế hoạch chuyến đi do chưa đủ điều kiện: ${plan.missingRequirements.join('; ')}`,
       );
     }
 
-    // Xuất bản chuyến đi: đổi status sang in_transit, route sang active
     await this.ordersStore.updateStatus(shipmentId, ShipmentStatus.IN_TRANSIT);
     await this.routesStore.updateRouteStatus(plan.route!.id, RouteStatus.ACTIVE);
+    await this.routesStore.updatePlanStatus(plan.route!.id, PlanStatus.IN_TRANSIT);
 
-    // Thông báo cho khách hàng
     await this.notificationsService.createNotification(
       plan.order.customerId,
-      'Kế hoạch chuyến đi đã chính thức phát hành',
-      `Lịch trình vận chuyển cho ${plan.order.requestedHorseCount} con ngựa của bạn đã được xuất bản. Chuyến đi sẵn sàng xuất phát.`,
+      'Kế hoạch chuyến đi đã chính thức xuất phát',
+      `Lịch trình vận chuyển cho ${plan.order.requestedHorseCount} con ngựa của bạn đã bắt đầu hành trình.`,
       'status_update',
       shipmentId,
     );
 
-    // Thông báo cho toàn bộ nhân sự được phân công
     for (const staff of plan.assignedStaff) {
       await this.notificationsService.createNotification(
         staff.userId,
-        'Lịch trình chuyến đi đã được xuất bản',
-        `Kế hoạch chuyến đi #${plan.order.requestCode || shipmentId} đã phát hành chính thức. Vui lòng kiểm tra lộ trình và sẵn sàng thực hiện nhiệm vụ.`,
+        'Lịch trình chuyến đi đã xuất phát',
+        `Chuyến đi #${plan.order.requestCode || shipmentId} đã chính thức lăn bánh. Vui lòng cập nhật nhật ký hành trình tại các trạm dừng.`,
         'status_update',
         shipmentId,
       );

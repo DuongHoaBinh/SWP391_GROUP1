@@ -17,6 +17,7 @@ export interface UserProfile {
   organization?: string;
   avatarUrl?: string;
   initials: string;
+  persona?: 'driver' | 'escort';
 }
 
 export type TransportStatus =

@@ -14,6 +14,10 @@ interface HorseRow extends RowDataPacket {
   age: number | null;
   microchip_no: string | null;
   passport_no: string | null;
+  color: string | null;
+  weight: string | null;
+  medical_status: string | null;
+  special_requirements: string | null;
   photo_url: string | null;
   status: HorseStatus;
   quantity: number;
@@ -43,7 +47,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findByOwnerId(ownerId: number): Promise<HorseEntity[]> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse
        WHERE owner_id = ? AND (status IS NULL OR status NOT IN ('retired', 'deleted'))
        ORDER BY horse_id DESC`,
@@ -55,7 +59,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findById(horseId: number): Promise<HorseEntity | undefined> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse
        WHERE horse_id = ?
        LIMIT 1`,
@@ -68,8 +72,8 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async create(ownerId: number, dto: CreateHorseDto): Promise<number> {
     const [result] = await this.pool.execute(
-      `INSERT INTO horse (owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, photo_url, status, quantity)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO horse (owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         ownerId,
         dto.name,
@@ -79,6 +83,10 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
         dto.age ?? null,
         dto.microchipNo ?? null,
         dto.passportNo ?? null,
+        dto.color ?? null,
+        dto.weight ?? null,
+        dto.medicalStatus ?? null,
+        dto.specialRequirements ?? null,
         dto.photoUrl ?? null,
         dto.status ?? HorseStatus.ACTIVE,
         dto.quantity ?? 1,
@@ -99,6 +107,10 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
          age = COALESCE(?, age),
          microchip_no = COALESCE(?, microchip_no),
          passport_no = COALESCE(?, passport_no),
+         color = COALESCE(?, color),
+         weight = COALESCE(?, weight),
+         medical_status = COALESCE(?, medical_status),
+         special_requirements = COALESCE(?, special_requirements),
          photo_url = COALESCE(?, photo_url),
          status = COALESCE(?, status),
          quantity = COALESCE(?, quantity)
@@ -111,6 +123,10 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
         dto.age ?? null,
         dto.microchipNo ?? null,
         dto.passportNo ?? null,
+        dto.color ?? null,
+        dto.weight ?? null,
+        dto.medicalStatus ?? null,
+        dto.specialRequirements ?? null,
         dto.photoUrl ?? null,
         dto.status ?? null,
         dto.quantity !== undefined ? dto.quantity : null,
@@ -158,6 +174,10 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
       age: row.age !== null ? Number(row.age) : null,
       microchipNo: row.microchip_no,
       passportNo: row.passport_no,
+      color: row.color ?? null,
+      weight: row.weight ?? null,
+      medicalStatus: row.medical_status ?? null,
+      specialRequirements: row.special_requirements ?? null,
       photoUrl: row.photo_url ?? null,
       status: row.status,
       quantity: row.quantity !== null && row.quantity !== undefined ? Number(row.quantity) : 1,
