@@ -531,6 +531,96 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
       country: 'Úc',
     },
   },
+
+  // --- QUỐC TẾ: ẤN ĐỘ (INDIA) ---
+  {
+    id: 'intl-india-mumbai',
+    name: 'Mahalaxmi Racecourse (Mumbai, Ấn Độ)',
+    country: 'Ấn Độ',
+    isVietnam: false,
+    coords: [18.9827, 72.8223],
+    keywords: ['india', 'an do', 'mumbai', 'delhi', 'bangalore', 'mahalaxmi', 'kolkata', 'hyderabad', 'chennai', 'pune', 'new delhi'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Chhatrapati Shivaji (BOM Live Animal Facility)',
+      coords: [19.0896, 72.8656],
+      country: 'Ấn Độ',
+    },
+  },
+
+  // --- QUỐC TẾ: BỈ (BELGIUM) ---
+  {
+    id: 'intl-belgium-brussels',
+    name: 'Brussels Hippodrome / Wellington (Bỉ)',
+    country: 'Bỉ',
+    isVietnam: false,
+    coords: [50.8503, 4.3517],
+    keywords: ['belgium', 'bi', 'brussels', 'bruxelles', 'ostend', 'waregem', 'gent', 'antwerp'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Brussels (BRU Live Animal Cargo Hub)',
+      coords: [50.901, 4.4856],
+      country: 'Bỉ',
+    },
+  },
+
+  // --- QUỐC TẾ: PHÁP (FRANCE) ---
+  {
+    id: 'intl-france-paris',
+    name: 'Hippodrome de Longchamp (Paris, Pháp)',
+    country: 'Pháp',
+    isVietnam: false,
+    coords: [48.8584, 2.2355],
+    keywords: ['france', 'phap', 'paris', 'longchamp', 'chantilly', 'deauville'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Charles de Gaulle (CDG Animal Station)',
+      coords: [49.0097, 2.5479],
+      country: 'Pháp',
+    },
+  },
+
+  // --- QUỐC TẾ: ANH QUỐC (UK) ---
+  {
+    id: 'intl-uk-newmarket',
+    name: 'Newmarket Racecourse (Anh Quốc)',
+    country: 'Anh',
+    isVietnam: false,
+    coords: [52.2458, 0.4037],
+    keywords: ['uk', 'england', 'britain', 'anh', 'london', 'newmarket', 'ascot', 'heathrow', 'stansted'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế London Stansted (STN Equine Hub)',
+      coords: [51.886, 0.2389],
+      country: 'Anh',
+    },
+  },
+
+  // --- QUỐC TẾ: MỸ (USA) ---
+  {
+    id: 'intl-usa-kentucky',
+    name: 'Churchill Downs (Louisville, Kentucky, Mỹ)',
+    country: 'Mỹ',
+    isVietnam: false,
+    coords: [38.2031, -85.7699],
+    keywords: ['usa', 'my', 'united states', 'america', 'kentucky', 'louisville', 'lexington', 'california', 'new york'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Louisville (SDF Worldport Live Cargo)',
+      coords: [38.1744, -85.736],
+      country: 'Mỹ',
+    },
+  },
+
+  // --- QUỐC TẾ: TRUNG QUỐC (CHINA) ---
+  {
+    id: 'intl-china-shanghai',
+    name: 'Trung tâm Đua ngựa Quốc tế Thượng Hải (Trung Quốc)',
+    country: 'Trung Quốc',
+    isVietnam: false,
+    coords: [31.2304, 121.4737],
+    keywords: ['china', 'trung quoc', 'shanghai', 'beijing', 'guangzhou', 'congshua', 'hong kong border'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Phố Đông Thượng Hải (PVG Cargo Hub)',
+      coords: [31.1443, 121.8083],
+      country: 'Trung Quốc',
+    },
+  },
 ];
 
 /**

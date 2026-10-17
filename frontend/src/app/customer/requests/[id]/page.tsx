@@ -108,21 +108,19 @@ const fetcher = async (url: string) => {
   const statusStepMap: Record<string, number> = {
     requested: 2,
     under_review: 2,
-    IN_REVIEW: 2,
+    in_review: 2,
     change_requested: 2,
     rejected: 2,
     approved: 3,
-    APPROVED: 3,
     planning: 4,
-    PLANNING: 4,
+    confirmed: 4,
+    ready_to_depart: 5,
+    ready: 5,
     in_transit: 5,
-    IN_TRANSIT: 5,
     completed: 6,
-    COMPLETED: 6,
     cancelled: 1,
-    CANCELLED: 1,
   };
-  const activeStepIndex = statusStepMap[data.status] || 2;
+  const activeStepIndex = statusStepMap[String(data.status || '').toLowerCase()] || 2;
 
   const timeline = [
     { stage: 1, name: 'Request Created', status: 'completed' },
@@ -130,14 +128,18 @@ const fetcher = async (url: string) => {
     { stage: 3, name: 'Quarantine & Docs', status: activeStepIndex === 3 ? 'active' : activeStepIndex > 3 ? 'completed' : 'pending' },
     { stage: 4, name: 'Trip Planned', status: activeStepIndex === 4 ? 'active' : activeStepIndex > 4 ? 'completed' : 'pending' },
     { stage: 5, name: 'In Transit', status: activeStepIndex === 5 ? 'active' : activeStepIndex > 5 ? 'completed' : 'pending' },
-    { stage: 6, name: 'Handover Completed', status: activeStepIndex === 6 ? (data.status === 'completed' || data.status === 'COMPLETED' ? 'completed' : 'active') : activeStepIndex > 6 ? 'completed' : 'pending' },
+    { stage: 6, name: 'Handover Completed', status: activeStepIndex === 6 ? (String(data.status || '').toLowerCase() === 'completed' ? 'completed' : 'active') : activeStepIndex > 6 ? 'completed' : 'pending' },
   ];
 
   const statusLabels: Record<string, string> = {
     requested: 'Pending Approval',
     under_review: 'Under Review',
-    IN_REVIEW: 'Under Review',
+    in_review: 'Under Review',
     approved: 'Approved',
+    planning: 'In Planning',
+    confirmed: 'Confirmed Plan',
+    ready_to_depart: 'Ready to Depart',
+    ready: 'Ready to Depart',
     change_requested: 'Change Requested',
     rejected: 'Rejected',
     in_transit: 'In Transit',
@@ -153,7 +155,7 @@ const fetcher = async (url: string) => {
   const vnKeywords = ['vietnam', 'việt nam', 'hcm', 'hồ chí minh', 'sài gòn', 'hà nội', 'cần thơ', 'bạc liêu', 'đà nẵng', 'bình dương', 'long an', 'đồng nai', 'củ chi', 'vũng tàu', 'hải phòng', 'huế', 'nha trang', 'quy nhơn', 'buôn ma thuột'];
   const isOriginVN = vnKeywords.some((k) => originLower.includes(k)) || originLower.includes('vn') || !originLower.includes(',');
 
-  const intlKeywords = ['singapore', 'australia', 'japan', 'hong kong', 'malaysia', 'thailand', 'france', 'usa', 'ireland', 'uk', 'germany', 'dubai', 'uae', 'qatar', 'new zealand', 'china', 'korea'];
+  const intlKeywords = ['singapore', 'australia', 'japan', 'hong kong', 'malaysia', 'thailand', 'france', 'usa', 'ireland', 'uk', 'germany', 'dubai', 'uae', 'qatar', 'new zealand', 'china', 'korea', 'india', 'belgium'];
   const isDestIntl = intlKeywords.some((k) => destLower.includes(k));
   const isDestVN = !isDestIntl && (vnKeywords.some((k) => destLower.includes(k)) || destLower.includes('vn') || !destLower.includes(','));
 
@@ -168,8 +170,40 @@ const fetcher = async (url: string) => {
 
   const transportationType = isDomestic ? 'Domestic' : 'International';
   const originCountryCode = isOriginVN ? 'VN' : 'INTL';
-  const destinationCountryCode = isDomestic ? 'VN' : (destLower.includes('singapore') ? 'SG' : destLower.includes('australia') ? 'AU' : destLower.includes('japan') ? 'JP' : destLower.includes('hong kong') ? 'HK' : destLower.includes('malaysia') ? 'MY' : destLower.includes('thailand') ? 'TH' : 'INTL');
-  const destinationCountry = isDomestic ? 'Vietnam' : (destLower.includes('singapore') ? 'Singapore' : destLower.includes('australia') ? 'Australia' : destLower.includes('japan') ? 'Japan' : destLower.includes('hong kong') ? 'Hong Kong' : 'International');
+  const destinationCountryCode = isDomestic
+    ? 'VN'
+    : destLower.includes('singapore')
+    ? 'SG'
+    : destLower.includes('australia')
+    ? 'AU'
+    : destLower.includes('japan')
+    ? 'JP'
+    : destLower.includes('hong kong')
+    ? 'HK'
+    : destLower.includes('malaysia')
+    ? 'MY'
+    : destLower.includes('thailand')
+    ? 'TH'
+    : destLower.includes('india')
+    ? 'IN'
+    : destLower.includes('belgium')
+    ? 'BE'
+    : 'INTL';
+  const destinationCountry = isDomestic
+    ? 'Vietnam'
+    : destLower.includes('singapore')
+    ? 'Singapore'
+    : destLower.includes('australia')
+    ? 'Australia'
+    : destLower.includes('japan')
+    ? 'Japan'
+    : destLower.includes('hong kong')
+    ? 'Hong Kong'
+    : destLower.includes('india')
+    ? 'Ấn Độ'
+    : destLower.includes('belgium')
+    ? 'Bỉ'
+    : 'International';
   const routeCalc = buildEquineRoute(
     originStr,
     destStr,
@@ -198,7 +232,7 @@ const fetcher = async (url: string) => {
     documents,
     timeline,
     activeStepIndex,
-    statusLabel: statusLabels[data.status] || data.status || 'Under Review',
+    statusLabel: statusLabels[String(data.status || '').toLowerCase()] || data.status || 'Under Review',
     origin: data.originLocation,
     originCode: 'SGN, VN',
     destination: data.destinationLocation,
@@ -275,7 +309,10 @@ export default function RequestDetailPage() {
     );
   }
 
-  const isApproved = String(request?.status || '').toLowerCase() === 'approved';
+  const statusLower = String(request?.status || '').toLowerCase();
+  const isPendingReview = statusLower === 'requested' || statusLower === 'under_review';
+  const isRejected = statusLower === 'rejected' || statusLower === 'cancelled';
+  const isApproved = ['approved', 'planning', 'confirmed', 'ready_to_depart', 'ready', 'in_transit', 'completed'].includes(statusLower);
   const requirementsSent = Boolean(checklist?.requirementsSent);
   const totalMissingCount = checklist?.horses?.reduce(
     (acc, h) => acc + (h.missingRegulations?.length || 0),
@@ -287,6 +324,70 @@ export default function RequestDetailPage() {
   ) ?? 0;
   const hasMissingDocs = isApproved && requirementsSent && totalMissingCount > 0;
   const hasRejectedDocs = isApproved && requirementsSent && totalRejectedCount > 0;
+
+  // Compute dynamic timeline stepper that reflects both order status and quarantine compliance
+  let computedStep = 2;
+  if (['requested', 'under_review', 'change_requested', 'rejected', 'cancelled'].includes(statusLower)) {
+    computedStep = 2;
+  } else if (statusLower === 'approved') {
+    computedStep = 3;
+  } else if (statusLower === 'planning') {
+    computedStep = checklist?.isFullyCompliant ? 4 : 3;
+  } else if (statusLower === 'confirmed') {
+    computedStep = 4;
+  } else if (statusLower === 'ready_to_depart' || statusLower === 'ready') {
+    computedStep = 5;
+  } else if (statusLower === 'in_transit') {
+    computedStep = 5;
+  } else if (statusLower === 'completed') {
+    computedStep = 6;
+  }
+
+  const effectiveStep = Math.max(computedStep, request.activeStepIndex || 2);
+
+  const displayTimeline = [
+    { stage: 1, name: 'Request Created', status: 'completed' },
+    {
+      stage: 2,
+      name: 'Manager Approval',
+      status: effectiveStep === 2 ? 'active' : effectiveStep > 2 ? 'completed' : 'pending',
+    },
+    {
+      stage: 3,
+      name: 'Quarantine & Docs',
+      status:
+        checklist?.isFullyCompliant || effectiveStep > 3
+          ? 'completed'
+          : effectiveStep === 3
+          ? 'active'
+          : 'pending',
+    },
+    {
+      stage: 4,
+      name: 'Trip Planned',
+      status:
+        statusLower === 'ready_to_depart' || statusLower === 'ready' || statusLower === 'in_transit' || statusLower === 'completed' || effectiveStep > 4
+          ? 'completed'
+          : effectiveStep === 4
+          ? 'active'
+          : 'pending',
+    },
+    {
+      stage: 5,
+      name: 'In Transit',
+      status:
+        statusLower === 'completed'
+          ? 'completed'
+          : effectiveStep === 5
+          ? 'active'
+          : 'pending',
+    },
+    {
+      stage: 6,
+      name: 'Handover Completed',
+      status: statusLower === 'completed' ? 'completed' : 'pending',
+    },
+  ];
 
   const handleOpenUpload = (horseId?: number | string, regulationId?: number | string) => {
     setReuploadTarget(null);
@@ -403,9 +504,36 @@ export default function RequestDetailPage() {
                 borderRadius: '6px',
                 fontSize: '12px',
                 fontWeight: 600,
-                backgroundColor: request.status === 'CANCELLED' ? '#fee2e2' : '#fef3c7',
-                color: request.status === 'CANCELLED' ? '#dc2626' : '#b45309',
-                border: request.status === 'CANCELLED' ? '1px solid #fecaca' : '1px solid #fde68a',
+                backgroundColor:
+                  request.status === 'CANCELLED' || request.status === 'rejected'
+                    ? '#fee2e2'
+                    : request.status === 'ready_to_depart' || request.status === 'ready'
+                    ? '#dcfce7'
+                    : request.status === 'in_transit'
+                    ? '#e0f2fe'
+                    : request.status === 'approved' || request.status === 'planning' || request.status === 'confirmed'
+                    ? '#dbeafe'
+                    : '#fef3c7',
+                color:
+                  request.status === 'CANCELLED' || request.status === 'rejected'
+                    ? '#dc2626'
+                    : request.status === 'ready_to_depart' || request.status === 'ready'
+                    ? '#15803d'
+                    : request.status === 'in_transit'
+                    ? '#0369a1'
+                    : request.status === 'approved' || request.status === 'planning' || request.status === 'confirmed'
+                    ? '#1d4ed8'
+                    : '#b45309',
+                border:
+                  request.status === 'CANCELLED' || request.status === 'rejected'
+                    ? '1px solid #fecaca'
+                    : request.status === 'ready_to_depart' || request.status === 'ready'
+                    ? '1px solid #86efac'
+                    : request.status === 'in_transit'
+                    ? '1px solid #bae6fd'
+                    : request.status === 'approved' || request.status === 'planning' || request.status === 'confirmed'
+                    ? '1px solid #bfdbfe'
+                    : '1px solid #fde68a',
               }}
             >
               <Clock size={13} />
@@ -544,7 +672,7 @@ export default function RequestDetailPage() {
                   position: 'absolute',
                   top: '18px',
                   left: '30px',
-                  width: `${((Math.max(1, request.activeStepIndex) - 1) / 5) * 88}%`,
+                  width: `${((Math.max(1, effectiveStep) - 1) / 5) * 88}%`,
                   height: '4px',
                   backgroundColor: '#16a34a',
                   zIndex: 0,
@@ -555,7 +683,7 @@ export default function RequestDetailPage() {
 
               {/* 6 Stages */}
               <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-                {request.timeline?.map((stage: any) => {
+                {displayTimeline.map((stage: any) => {
                   const isCompleted = stage.status === 'completed';
                   const isActive = stage.status === 'active';
 
@@ -838,7 +966,7 @@ export default function RequestDetailPage() {
                           const horseChecklist = checklist?.horses?.find(
                             (h) => String(h.horseId) === String(horse.id || horse.horseId)
                           );
-                          if (!checklist || !isApproved || !requirementsSent) {
+                          if (isPendingReview) {
                             return (
                               <span
                                 style={{
@@ -851,6 +979,22 @@ export default function RequestDetailPage() {
                                 }}
                               >
                                 <Clock size={14} /> Chờ duyệt yêu cầu
+                              </span>
+                            );
+                          }
+                          if (!checklist || !requirementsSent) {
+                            return (
+                              <span
+                                style={{
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: '#2563eb',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                }}
+                              >
+                                <Clock size={14} /> Chờ ban hành danh mục hồ sơ
                               </span>
                             );
                           }
@@ -1001,7 +1145,7 @@ export default function RequestDetailPage() {
             </div>
 
             {/* CASE 1: Request not yet approved by Manager */}
-            {!isApproved ? (
+            {isPendingReview ? (
               <div style={{ padding: '28px 24px', textAlign: 'center', backgroundColor: '#fcfcfc' }}>
                 <div
                   style={{

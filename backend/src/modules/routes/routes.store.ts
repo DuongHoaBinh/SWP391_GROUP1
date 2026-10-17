@@ -298,6 +298,21 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     await this.pool.execute('DELETE FROM route_leg WHERE route_id = ?', [routeId]);
 
     for (const leg of legs) {
+      let vehicleId = leg.vehicleId ?? null;
+      if (!vehicleId && leg.vehiclePlate) {
+        try {
+          const [vRows] = await this.pool.execute<any[]>(
+            'SELECT vehicle_id FROM vehicle WHERE plate_or_code = ? LIMIT 1',
+            [leg.vehiclePlate],
+          );
+          if (vRows.length > 0) {
+            vehicleId = vRows[0].vehicle_id;
+          }
+        } catch {
+          // ignore lookup error
+        }
+      }
+
       await this.pool.execute(
         `INSERT INTO route_leg (
           route_id, sequence_no, leg_type, origin_location, destination_location,
@@ -316,7 +331,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           leg.durationHours ?? null,
           leg.plannedDeparture ? new Date(leg.plannedDeparture) : null,
           leg.plannedArrival ? new Date(leg.plannedArrival) : null,
-          leg.vehicleId ?? null,
+          vehicleId,
           leg.airlineId ?? null,
           leg.airlineName ?? null,
           leg.flightNumber ?? null,

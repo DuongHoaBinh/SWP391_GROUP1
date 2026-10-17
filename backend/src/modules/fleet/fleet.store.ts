@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
+import { createPool, Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import {
   AvailableStaff,
   ShipmentStaffAssignment,
@@ -69,6 +69,31 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       password: process.env.DB_PASSWORD ?? '',
       connectionLimit: 10,
     });
+
+    try {
+      const [cols] = await this.pool.query<any[]>(
+        "SHOW COLUMNS FROM `user` LIKE 'specialization'",
+      );
+      if (cols.length === 0) {
+        await this.pool.execute(
+          'ALTER TABLE `user` ADD COLUMN `specialization` VARCHAR(50) NULL DEFAULT NULL',
+        );
+      }
+      await this.pool.execute(
+        `UPDATE \`user\` SET \`specialization\` = 'driver'
+         WHERE \`role_id\` = 5 AND \`specialization\` IS NULL AND (\`full_name\` LIKE '%Tài xế%' OR \`full_name\` LIKE '%Driver%' OR \`email\` LIKE '%driver%')`,
+      );
+      await this.pool.execute(
+        `UPDATE \`user\` SET \`specialization\` = 'escort'
+         WHERE \`role_id\` = 5 AND \`specialization\` IS NULL AND (\`full_name\` LIKE '%Thú y%' OR \`full_name\` LIKE '%Escort%' OR \`full_name\` LIKE '%Vet%' OR \`email\` LIKE '%escort%')`,
+      );
+      await this.pool.execute(
+        `UPDATE \`user\` SET \`specialization\` = 'driver'
+         WHERE \`role_id\` = 5 AND \`specialization\` IS NULL`,
+      );
+    } catch (e: any) {
+      // Ignore migration errors on init
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -218,12 +243,18 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async findAvailableStaff(): Promise<AvailableStaff[]> {
-    const [rows] = await this.pool.execute<UserStaffRow[]>(
-      `SELECT u.user_id, u.full_name, u.email, u.phone, r.role_name
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT u.user_id, u.full_name, u.email, u.phone, u.status, u.specialization, r.role_id, r.role_name,
+              (
+                SELECT COUNT(*)
+                FROM shipment_assignment sa
+                JOIN shipment s ON sa.shipment_id = s.shipment_id
+                WHERE sa.user_id = u.user_id
+                  AND s.status NOT IN ('completed', 'cancelled')
+              ) AS active_trips_count
        FROM \`user\` u
        JOIN \`role\` r ON u.role_id = r.role_id
-       WHERE r.role_name IN ('Vehicle Driver / Escort', 'Driver', 'Escort', 'Fleet & Route Coordinator', 'Logistics Manager')
-         AND u.status = 'active'
+       WHERE r.role_name != 'Customer' AND u.role_id != 6
        ORDER BY r.role_name ASC, u.full_name ASC`,
     );
 
@@ -232,8 +263,61 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       fullName: r.full_name,
       email: r.email,
       phone: r.phone,
+      roleId: r.role_id,
       roleName: r.role_name,
+      specialization: r.specialization || (r.role_id === 5 ? (r.email?.includes('escort') ? 'escort' : 'driver') : null),
+      activeTrips: Number(r.active_trips_count || 0),
+      status: r.status,
     }));
+  }
+
+  async findUserByEmail(email: string): Promise<any | null> {
+    const [rows] = await this.pool.execute<any[]>(
+      'SELECT user_id, email FROM `user` WHERE email = ? LIMIT 1',
+      [email],
+    );
+    return rows[0] || null;
+  }
+
+  async createStaffUser(dto: {
+    fullName: string;
+    email: string;
+    phone?: string;
+    roleId: number;
+    specialization?: string;
+    passwordHash: string;
+  }): Promise<AvailableStaff> {
+    const resolvedSpec = dto.specialization || (dto.roleId === 5 ? 'driver' : null);
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `INSERT INTO \`user\` (role_id, specialization, full_name, email, phone, password_hash, account_origin, auth_provider, email_verified, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'system_created', 'local', 1, 'active')`,
+      [
+        dto.roleId,
+        resolvedSpec,
+        dto.fullName,
+        dto.email,
+        dto.phone || null,
+        dto.passwordHash,
+      ],
+    );
+
+    const [roleRows] = await this.pool.execute<any[]>(
+      'SELECT role_name FROM `role` WHERE role_id = ?',
+      [dto.roleId],
+    );
+    const roleName = roleRows[0]?.role_name || 'Staff';
+
+    return {
+      id: result.insertId,
+      fullName: dto.fullName,
+      email: dto.email,
+      phone: dto.phone || null,
+      roleId: dto.roleId,
+      roleName,
+      specialization: resolvedSpec,
+      activeTrips: 0,
+      status: 'active',
+    };
   }
 
   private mapVehicleRow(r: VehicleRow): VehicleEntity {

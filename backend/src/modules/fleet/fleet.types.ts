@@ -57,5 +57,9 @@ export interface AvailableStaff {
   fullName: string;
   email: string;
   phone: string | null;
+  roleId?: number;
   roleName: string;
+  specialization?: string | null;
+  activeTrips?: number;
+  status?: string;
 }

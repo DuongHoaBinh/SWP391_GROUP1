@@ -120,10 +120,16 @@ export default function ManagerRequestsPage() {
   const pageSize = 10;
 
   const filteredOrders = orders.filter(o => {
-    const matchesStatus = statusFilter === 'ALL' || o.status === statusFilter;
+    const s = String(o.status || '').toLowerCase();
+    const filterLower = statusFilter.toLowerCase();
+    const matchesStatus =
+      statusFilter === 'ALL' ||
+      s === filterLower ||
+      (filterLower === 'ready_to_depart' && (s === 'ready_to_depart' || s === 'ready'));
     const matchesSearch = (o.contactName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (o.originLocation || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (o.destinationLocation || '').toLowerCase().includes(searchTerm.toLowerCase());
+                          (o.destinationLocation || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (o.requestCode || '').toLowerCase().includes(searchTerm.toLowerCase());
     return matchesStatus && matchesSearch;
   });
 
@@ -172,6 +178,8 @@ export default function ManagerRequestsPage() {
               <option value="requested">Pending Review (requested)</option>
               <option value="approved">Approved</option>
               <option value="planning">In Planning</option>
+              <option value="confirmed">Confirmed Plan</option>
+              <option value="ready_to_depart">Ready to Depart</option>
               <option value="in_transit">In Transit</option>
               <option value="completed">Completed</option>
               <option value="change_requested">Change Requested</option>
@@ -216,38 +224,53 @@ export default function ManagerRequestsPage() {
                   </td>
                   <td className="px-6 py-4 text-center whitespace-nowrap">
                     {order.status === 'requested' && (
-                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
                         Pending Review
                       </span>
                     )}
                     {order.status === 'approved' && (
-                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs">
                         Approved
                       </span>
                     )}
                     {order.status === 'planning' && (
-                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200 shadow-2xs">
                         In Planning
                       </span>
                     )}
+                    {order.status === 'confirmed' && (
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-cyan-100 text-cyan-800 border border-cyan-200 shadow-2xs">
+                        Confirmed Plan
+                      </span>
+                    )}
+                    {(order.status === 'ready_to_depart' || order.status === 'ready') && (
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                        Ready to Depart
+                      </span>
+                    )}
                     {order.status === 'in_transit' && (
-                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-teal-100 text-teal-800 border border-teal-200">
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-teal-100 text-teal-800 border border-teal-200 shadow-2xs">
                         In Transit
                       </span>
                     )}
                     {order.status === 'completed' && (
-                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-800 border border-slate-200">
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-slate-100 text-slate-800 border border-slate-200 shadow-2xs">
                         Completed
                       </span>
                     )}
                     {order.status === 'rejected' && (
-                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200">
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200 shadow-2xs">
                         Rejected
                       </span>
                     )}
                     {order.status === 'change_requested' && (
-                      <span className="inline-flex items-center justify-center min-w-[125px] px-3 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200 shadow-2xs">
                         Change Requested
+                      </span>
+                    )}
+                    {!['requested', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'ready', 'in_transit', 'completed', 'rejected', 'change_requested'].includes(order.status) && (
+                      <span className="inline-flex items-center justify-center w-[136px] h-[28px] rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 shadow-2xs">
+                        {order.status}
                       </span>
                     )}
                   </td>
@@ -274,11 +297,15 @@ export default function ManagerRequestsPage() {
                         </button>
                       </div>
                     ) : order.status === 'planning' ? (
-                      <span className="inline-flex items-center justify-center min-w-[90px] px-3 py-1 rounded-md text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200">
+                      <span className="inline-flex items-center justify-center w-[96px] h-[28px] rounded-md text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200">
                         In Planning
                       </span>
+                    ) : order.status === 'ready_to_depart' || order.status === 'ready' ? (
+                      <span className="inline-flex items-center justify-center w-[96px] h-[28px] rounded-md text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200">
+                        Ready
+                      </span>
                     ) : (
-                      <span className="inline-flex items-center justify-center min-w-[90px] px-3 py-1 rounded-md text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200">
+                      <span className="inline-flex items-center justify-center w-[96px] h-[28px] rounded-md text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200">
                         Decided
                       </span>
                     )}
