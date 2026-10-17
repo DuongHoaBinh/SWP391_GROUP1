@@ -166,9 +166,14 @@ export default function TripSchedulePage() {
       setSelectedRouteTitle(routes[0].name);
     }
     if (availableStaff.length > 0) {
-      const driverStaff = availableStaff.find((s) => s.roleName.toLowerCase().includes('driver')) || availableStaff[0];
+      const driverStaff = availableStaff.find(
+        (s) => s.specialization === 'driver' || s.fullName.toLowerCase().includes('tài xế') || s.roleName.toLowerCase().includes('driver')
+      ) || availableStaff[0];
       setDriverName(driverStaff.fullName);
-      const escortStaff = availableStaff.find((s) => s.id !== driverStaff.id);
+
+      const escortStaff = availableStaff.find(
+        (s) => (s.specialization === 'escort' || s.fullName.toLowerCase().includes('thú y') || s.email?.includes('escort')) && s.id !== driverStaff.id
+      ) || availableStaff.find((s) => s.id !== driverStaff.id);
       if (escortStaff) {
         setEscortName(escortStaff.fullName);
       }
@@ -603,14 +608,17 @@ export default function TripSchedulePage() {
                   <select
                     value={driverName}
                     onChange={(e) => setDriverName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white font-medium"
                     required
                   >
-                    {availableStaff.map((st) => (
-                      <option key={st.id} value={st.fullName}>
-                        {st.fullName} ({st.roleName})
-                      </option>
-                    ))}
+                    {availableStaff.map((st) => {
+                      const isDriver = st.specialization === 'driver' || (!st.specialization && !st.fullName.toLowerCase().includes('thú y') && !st.email.includes('escort'));
+                      return (
+                        <option key={st.id} value={st.fullName}>
+                          {isDriver ? '🚚 ' : ''}{st.fullName} {isDriver ? '(Tài xế chuyên dụng)' : `(${st.roleName})`}
+                        </option>
+                      );
+                    })}
                     <option value="Other Driver">Nhập tên tài xế khác...</option>
                   </select>
                   {driverName === 'Other Driver' && (
@@ -643,15 +651,18 @@ export default function TripSchedulePage() {
                   <select
                     value={escortName}
                     onChange={(e) => setEscortName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white font-medium"
                     required
                   >
-                    {availableStaff.map((st) => (
-                      <option key={st.id} value={st.fullName}>
-                        {st.fullName} ({st.roleName})
-                      </option>
-                    ))}
-                    <option value="Dr. Sarah (FEI Vet)">Dr. Sarah (FEI Vet)</option>
+                    {availableStaff.map((st) => {
+                      const isEscort = st.specialization === 'escort' || (!st.specialization && (st.fullName.toLowerCase().includes('thú y') || st.email.includes('escort')));
+                      return (
+                        <option key={st.id} value={st.fullName}>
+                          {isEscort ? '🩺 ' : ''}{st.fullName} {isEscort ? '(Bác sĩ thú y / Hộ tống)' : `(${st.roleName})`}
+                        </option>
+                      );
+                    })}
+                    <option value="Dr. Sarah (FEI Vet)">🩺 Dr. Sarah (FEI Vet)</option>
                     <option value="Other Escort">Nhập tên hộ tống khác...</option>
                   </select>
                   {escortName === 'Other Escort' && (

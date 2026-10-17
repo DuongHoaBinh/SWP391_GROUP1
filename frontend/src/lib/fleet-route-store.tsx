@@ -9,6 +9,7 @@ export interface AvailableStaff {
   email: string;
   phone: string | null;
   roleName: string;
+  specialization?: string | null;
 }
 
 export interface Vehicle {

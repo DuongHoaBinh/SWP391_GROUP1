@@ -28,6 +28,9 @@ export default function RequestsPage() {
           rejected: { label: 'Rejected', variant: 'danger' },
           REJECTED: { label: 'Rejected', variant: 'danger' },
           planning: { label: 'Planning', variant: 'neutral' },
+          confirmed: { label: 'Confirmed Plan', variant: 'neutral' },
+          ready_to_depart: { label: 'Ready to Depart', variant: 'success' },
+          ready: { label: 'Ready to Depart', variant: 'success' },
           in_transit: { label: 'In Transit', variant: 'transit' },
           IN_TRANSIT: { label: 'In Transit', variant: 'transit' },
           completed: { label: 'Completed', variant: 'success' },
@@ -37,7 +40,8 @@ export default function RequestsPage() {
         };
 
         const mappedData = data.map((item) => {
-          const statusInfo = statusMap[item.status] || { label: item.status || 'Pending', variant: 'pending' as const };
+          const statusKey = String(item.status || '').toLowerCase();
+          const statusInfo = statusMap[statusKey] || statusMap[item.status] || { label: item.status || 'Pending', variant: 'pending' as const };
           return {
             ...item,
             requestCode: item.requestCode || `REQ-${String(item.id).padStart(3, '0')}`,
@@ -75,6 +79,7 @@ export default function RequestsPage() {
     const s = String(r.status || '').toLowerCase();
     if (filterStatus === 'SUBMITTED') return s === 'requested' || s === 'submitted';
     if (filterStatus === 'IN_REVIEW') return s === 'under_review' || s === 'change_requested';
+    if (filterStatus === 'READY_TO_DEPART') return s === 'ready_to_depart' || s === 'ready';
     if (filterStatus === 'IN_TRANSIT') return s === 'in_transit';
     if (filterStatus === 'CANCELLED') return s === 'cancelled' || s === 'rejected';
 
@@ -163,9 +168,9 @@ export default function RequestsPage() {
           />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>Filter by:</span>
-          {['ALL', 'IN_TRANSIT', 'IN_REVIEW', 'SUBMITTED', 'CANCELLED'].map((status) => (
+          {['ALL', 'READY_TO_DEPART', 'IN_TRANSIT', 'IN_REVIEW', 'SUBMITTED', 'CANCELLED'].map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
@@ -179,7 +184,7 @@ export default function RequestsPage() {
                 color: filterStatus === status ? 'var(--primary)' : 'var(--text-muted)',
               }}
             >
-              {status.replace('_', ' ')}
+              {status === 'READY_TO_DEPART' ? 'Ready to Depart' : status.replace('_', ' ')}
             </button>
           ))}
         </div>

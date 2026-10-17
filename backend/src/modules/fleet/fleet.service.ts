@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
 import { FleetStore } from './fleet.store';
 import { OrdersStore } from '../orders/orders.store';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -18,6 +20,7 @@ import {
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { AssignVehiclesDto } from './dto/assign-vehicles.dto';
 import { AssignStaffDto } from './dto/assign-staff.dto';
+import { CreateStaffDto } from './dto/create-staff.dto';
 import { ShipmentStatus } from '../orders/orders.types';
 
 @Injectable()
@@ -55,6 +58,25 @@ export class FleetService {
 
   async getAvailableStaff(): Promise<AvailableStaff[]> {
     return this.fleetStore.findAvailableStaff();
+  }
+
+  async provisionStaff(dto: CreateStaffDto): Promise<AvailableStaff> {
+    const existing = await this.fleetStore.findUserByEmail(dto.email);
+    if (existing) {
+      throw new ConflictException(`Email "${dto.email}" đã tồn tại trong hệ thống!`);
+    }
+
+    const plainPassword = dto.password?.trim() || 'Password123';
+    const passwordHash = await bcrypt.hash(plainPassword, 10);
+
+    return this.fleetStore.createStaffUser({
+      fullName: dto.fullName,
+      email: dto.email,
+      phone: dto.phone,
+      roleId: dto.roleId,
+      specialization: dto.specialization,
+      passwordHash,
+    });
   }
 
   async getShipmentAssignments(shipmentId: number): Promise<{

@@ -581,28 +581,28 @@ export default function ManagerPlanningPage() {
                       {/* Plan Status */}
                       <td className="p-4 align-middle">
                         {planStatus === 'draft' && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
                             <Clock size={12} /> Bản nháp (Draft)
                           </span>
                         )}
                         {planStatus === 'pending_approval' && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
+                          <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
                             <Clock size={12} /> Chờ phê duyệt
                           </span>
                         )}
                         {planStatus === 'approved' && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                             <Check size={12} /> Đã duyệt (Chờ tài xế)
                           </span>
                         )}
                         {planStatus === 'confirmed' && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            <CheckCircle2 size={12} /> Đã xác nhận nhận chuyến
+                          <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <CheckCircle2 size={12} /> Đã nhận chuyến
                           </span>
                         )}
                         {planStatus === 'ready_to_depart' && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-600 text-white shadow-sm">
-                            <CheckCircle2 size={12} /> Sẵn sàng xuất phát ⚡
+                          <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-emerald-600 text-white shadow-xs">
+                            <CheckCircle2 size={12} /> Ready to Depart ⚡
                           </span>
                         )}
                       </td>
@@ -615,7 +615,7 @@ export default function ManagerPlanningPage() {
                               setCurrentReadiness(order.readiness || null);
                               setIsReadinessModalOpen(true);
                             }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200 transition-colors shadow-2xs"
+                            className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200 transition-colors shadow-2xs"
                           >
                             <ShieldCheck size={13} /> 100% Đủ điều kiện
                           </button>
@@ -625,7 +625,7 @@ export default function ManagerPlanningPage() {
                               setCurrentReadiness(order.readiness || null);
                               setIsReadinessModalOpen(true);
                             }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition-colors"
+                            className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition-colors"
                           >
                             <AlertCircle size={12} className="text-amber-500" />
                             Đang chờ ({order.readiness?.pendingConditions?.length || 1} điều kiện)
@@ -969,37 +969,41 @@ export default function ManagerPlanningPage() {
           </div>
 
           <div>
-            <label className="font-bold text-slate-700 block mb-1">Tài xế lái xe chính (Driver) *</label>
+            <label className="font-bold text-slate-700 block mb-1">
+              🚚 Tài xế chuyên dụng chính (Driver) <span className="text-red-500">*</span>
+            </label>
             <select
               value={selectedDriverId}
               onChange={(e) => setSelectedDriverId(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg outline-none font-medium text-xs bg-white"
               required
             >
-              <option value="">-- Chọn tài xế --</option>
+              <option value="">-- Chọn tài xế điều khiển phương tiện --</option>
               {availableDrivers
-                .filter((d) => d.roleName.toLowerCase().includes('driver'))
+                .filter((d) => d.specialization === 'driver' || (!d.specialization && !d.fullName?.toLowerCase().includes('thú y') && !d.email?.includes('escort')))
                 .map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.fullName} ({d.email})
+                    🚚 {d.fullName} ({d.phone || d.email})
                   </option>
                 ))}
             </select>
           </div>
 
           <div>
-            <label className="font-bold text-slate-700 block mb-1">Người hộ tống / Bác sĩ thú y (Escort/Vet) (Tùy chọn)</label>
+            <label className="font-bold text-slate-700 block mb-1">
+              🩺 Chuyên viên y tế / Bác sĩ thú y hộ tống (Equine Escort/Vet) (Tùy chọn)
+            </label>
             <select
               value={selectedEscortId}
               onChange={(e) => setSelectedEscortId(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg outline-none font-medium text-xs bg-white"
             >
-              <option value="">-- Chọn người hộ tống đi kèm --</option>
+              <option value="">-- Chọn chuyên viên y tế / hộ tống đi kèm --</option>
               {availableDrivers
-                .filter((d) => d.roleName.toLowerCase().includes('escort'))
+                .filter((d) => d.specialization === 'escort' || (!d.specialization && (d.fullName?.toLowerCase().includes('thú y') || d.email?.includes('escort'))))
                 .map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.fullName} ({d.email})
+                    🩺 {d.fullName} ({d.phone || d.email})
                   </option>
                 ))}
             </select>

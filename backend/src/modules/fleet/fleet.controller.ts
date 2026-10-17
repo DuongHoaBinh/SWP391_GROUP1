@@ -13,6 +13,7 @@ import { FleetService } from './fleet.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { AssignVehiclesDto } from './dto/assign-vehicles.dto';
 import { AssignStaffDto } from './dto/assign-staff.dto';
+import { CreateStaffDto } from './dto/create-staff.dto';
 import { VehicleStatus, VehicleType } from './fleet.types';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -57,6 +58,13 @@ export class FleetController {
   @ApiOperation({ summary: 'Lấy danh sách tài xế, hộ tống và nhân sự vận hành sẵn sàng' })
   getAvailableStaff() {
     return this.fleetService.getAvailableStaff();
+  }
+
+  @Post('staff')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Logistics Manager khởi tạo tài khoản nhân sự vận hành mới (Provision Staff)' })
+  provisionStaff(@Body() dto: CreateStaffDto) {
+    return this.fleetService.provisionStaff(dto);
   }
 
   @Get('shipments/:id/assignments')

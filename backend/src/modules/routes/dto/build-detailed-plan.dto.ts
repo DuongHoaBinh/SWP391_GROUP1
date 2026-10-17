@@ -56,6 +56,11 @@ export class RouteLegDto {
   @IsInt()
   vehicleId?: number;
 
+  @ApiPropertyOptional({ description: 'Biển số hoặc mã xe' })
+  @IsOptional()
+  @IsString()
+  vehiclePlate?: string;
+
   // Dành cho chặng bay:
   @ApiPropertyOptional({ description: 'ID hãng hàng không' })
   @IsOptional()

@@ -146,11 +146,31 @@ export default function RoutePlanningPage() {
       if (Array.isArray(rawOrders)) {
         const enriched: PlanningOrder[] = [];
         for (const o of rawOrders) {
+          // Chỉ xét các đơn đã được duyệt hoặc đang lên kế hoạch
+          const s = String(o.status || '').toLowerCase();
+          if (s === 'requested' || s === 'under_review' || s === 'rejected' || s === 'cancelled') {
+            continue;
+          }
+
           // Fetch route detail for each order
           let routeDetail: RouteDetail | undefined;
           try {
             routeDetail = await routesApi.getRouteByShipmentId(o.id);
           } catch {}
+
+          // Ẩn những đơn mà Manager chưa thiết lập kế hoạch định hướng (Framework)
+          const hasManagerFramework = Boolean(
+            routeDetail?.managerVehicleType ||
+            routeDetail?.assignedCoordinatorId ||
+            routeDetail?.managerAirlineId ||
+            s === 'planning' ||
+            s === 'confirmed' ||
+            s === 'ready_to_depart'
+          );
+
+          if (!hasManagerFramework) {
+            continue;
+          }
 
           enriched.push({
             id: o.id,
@@ -898,20 +918,41 @@ export default function RoutePlanningPage() {
                           <select
                             value={leg.vehiclePlate || ''}
                             onChange={(e) => {
+                              const selectedPlate = e.target.value;
+                              const plateToIdMap: Record<string, number> = {
+                                '51C-888.99': 1,
+                                '51D-777.22': 2,
+                                '29B-999.11': 3,
+                                '60C-555.33': 4,
+                                'TRK-VN-089': 3,
+                                'TRK-VN-102': 4,
+                              };
+                              const matchedVehicle = vehicles.find((v) => v.code === selectedPlate);
+                              let resolvedVehicleId = plateToIdMap[selectedPlate];
+                              if (!resolvedVehicleId && matchedVehicle) {
+                                const parsed = Number(String(matchedVehicle.id).replace(/\D/g, ''));
+                                if (!isNaN(parsed) && parsed > 0) resolvedVehicleId = parsed;
+                              }
+
                               const updated = [...legs];
-                              updated[idx].vehiclePlate = e.target.value;
+                              updated[idx].vehiclePlate = selectedPlate;
+                              updated[idx].vehicleId = resolvedVehicleId || null;
                               setLegs(updated);
                             }}
                             className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800"
                           >
                             <option value="">-- Chọn xe chuyên dụng --</option>
-                            {vehicles.map((v) => (
-                              <option key={v.id} value={v.code}>
-                                {v.code} — {v.type} ({v.capacity} stall, Vị trí: {v.location})
-                              </option>
-                            ))}
-                            <option value="TRK-VN-089">TRK-VN-089 (Climate-Controlled 4-Stall)</option>
-                            <option value="TRK-VN-102">TRK-VN-102 (Specialized 6-Stall)</option>
+                            <option value="29B-999.11">29B-999.11 — Climate-Controlled Truck (6 stall, Vị trí: Củ Chi)</option>
+                            <option value="51D-777.22">51D-777.22 — Climate-Controlled Truck (2 stall, Vị trí: Tân Sơn Nhất)</option>
+                            <option value="60C-555.33">60C-555.33 — Specialized Truck (4 stall, Vị trí: Bình Dương)</option>
+                            <option value="51C-888.99">51C-888.99 — Climate-Controlled Truck (4 stall, Vị trí: Long An)</option>
+                            {vehicles
+                              .filter((v) => !['29B-999.11', '51D-777.22', '60C-555.33', '51C-888.99'].includes(v.code))
+                              .map((v) => (
+                                <option key={v.id} value={v.code}>
+                                  {v.code} — {v.type} ({v.capacity} stall, Vị trí: {v.location})
+                                </option>
+                              ))}
                           </select>
                         </div>
                         <div>
