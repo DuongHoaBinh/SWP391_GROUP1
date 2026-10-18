@@ -28,7 +28,10 @@ export default function DriverDashboardPage() {
   const [assignedHorsesCount, setAssignedHorsesCount] = useState(1);
   const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
 
-  const isEscort = currentUser?.persona === 'escort' || currentUser?.email?.includes('escort');
+  const isEscort =
+    currentUser?.persona === 'escort' ||
+    currentUser?.specialization === 'escort' ||
+    currentUser?.email?.toLowerCase().includes('escort');
 
   useEffect(() => {
     const user = getCurrentUser();

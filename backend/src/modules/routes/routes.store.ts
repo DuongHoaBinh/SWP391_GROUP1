@@ -590,6 +590,22 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
+  async declineStaffAssignment(
+    shipmentId: number,
+    userId: number,
+    reason: string,
+  ): Promise<boolean> {
+    const [result] = await this.pool.execute(
+      `UPDATE shipment_assignment
+       SET is_confirmed = FALSE,
+           confirmed_at = NOW(),
+           confirmation_notes = ?
+       WHERE shipment_id = ? AND user_id = ?`,
+      [`TỪ CHỐI: ${reason}`, shipmentId, userId],
+    );
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
   async checkAllDriversConfirmed(shipmentId: number): Promise<boolean> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT COUNT(*) AS total_drivers,

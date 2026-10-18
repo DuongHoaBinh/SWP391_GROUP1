@@ -119,6 +119,8 @@ export class AuthService {
         phone: user.phone || '',
         address: user.address || '',
         avatarUrl: user.avatarUrl || '',
+        specialization: user.specialization ?? null,
+        persona: user.specialization || (user.email.includes('escort') ? 'escort' : 'driver'),
       },
     };
   }
@@ -137,6 +139,8 @@ export class AuthService {
       phone: user.phone || '',
       address: user.address || '',
       avatarUrl: user.avatarUrl || '',
+      specialization: user.specialization ?? null,
+      persona: user.specialization || (user.email.includes('escort') ? 'escort' : 'driver'),
       createdAt: user.createdAt,
     };
   }

@@ -46,6 +46,12 @@ interface HorseRow extends RowDataPacket {
   breed: string | null;
   gender: 'male' | 'female' | 'gelding' | null;
   age: number | null;
+  color?: string | null;
+  weight?: string | null;
+  medical_status?: string | null;
+  microchip_no?: string | null;
+  passport_no?: string | null;
+  special_requirements?: string | null;
 }
 
 @Injectable()
@@ -439,7 +445,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     );
 
     const [horses] = await this.pool.execute<HorseRow[]>(
-      `SELECT h.horse_id, h.name, h.breed, h.gender, h.age, sh.quantity
+      `SELECT h.horse_id, h.name, h.breed, h.gender, h.age, h.color, h.weight,
+              h.medical_status, h.microchip_no, h.passport_no, h.special_requirements, sh.quantity
        FROM shipment_horse sh
        JOIN horse h ON h.horse_id = sh.horse_id
        WHERE sh.shipment_id = ?`,
@@ -489,6 +496,12 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         gender: h.gender,
         age: h.age !== null ? Number(h.age) : null,
         quantity: h.quantity !== null && h.quantity !== undefined ? Number(h.quantity) : 1,
+        color: h.color ?? null,
+        weight: h.weight ?? null,
+        medicalStatus: h.medical_status ?? null,
+        microchipNo: h.microchip_no ?? null,
+        passportNo: h.passport_no ?? null,
+        specialRequirements: h.special_requirements ?? null,
       })),
     };
   }

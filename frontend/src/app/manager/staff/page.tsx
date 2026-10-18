@@ -536,11 +536,11 @@ export default function ManagerStaffPage() {
             <Button type="submit" variant="primary" disabled={isSubmitting}>
               {isSubmitting ? (
                 <>
-                  <Loader2 size={15} className="animate-spin mr-1.5" /> Đang lưu vào DB...
+                  <Loader2 size={15} className="animate-spin mr-1.5" /> Đang tạo tài khoản...
                 </>
               ) : (
                 <>
-                  <CheckCircle2 size={15} className="mr-1.5" /> Tạo & Lưu vào Database
+                  <CheckCircle2 size={15} className="mr-1.5" /> Tạo tài khoản
                 </>
               )}
             </Button>

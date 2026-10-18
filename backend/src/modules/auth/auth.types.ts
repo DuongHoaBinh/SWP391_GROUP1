@@ -17,6 +17,7 @@ export interface AuthUser {
   passwordHash: string;
   role: UserRole;
   emailVerified: boolean;
+  specialization?: string | null;
   createdAt: string;
 }
 

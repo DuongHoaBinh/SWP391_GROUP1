@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { 
   Truck, MapPin, Calendar, Clock, ChevronRight, CheckCircle2, Navigation, 
   ShieldCheck, AlertCircle, RefreshCw, Send, Check, Plane, Info, Stethoscope,
-  UserCheck, Layers
+  UserCheck, Layers, X
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -42,13 +42,23 @@ export default function DriverTripsPage() {
   const [viewMode, setViewMode] = useState<'assigned' | 'all'>('assigned');
   const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
 
-  const isEscort = currentUser?.persona === 'escort' || currentUser?.email?.includes('escort');
+  const isEscort =
+    currentUser?.persona === 'escort' ||
+    currentUser?.specialization === 'escort' ||
+    currentUser?.email?.toLowerCase().includes('escort');
 
   // Confirmation Modal
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [selectedTripToConfirm, setSelectedTripToConfirm] = useState<DriverTripItem | null>(null);
   const [confirmationNotes, setConfirmationNotes] = useState('Đã nhận lệnh vận chuyển, kiểm tra xe hoàn tất và sẵn sàng xuất phát.');
   const [isConfirming, setIsConfirming] = useState(false);
+
+  // Decline Modal
+  const [declineModalOpen, setDeclineModalOpen] = useState(false);
+  const [selectedTripToDecline, setSelectedTripToDecline] = useState<DriverTripItem | null>(null);
+  const [declineReason, setDeclineReason] = useState('Sốt cao đột xuất / Sức khỏe không đảm bảo');
+  const [customDeclineReason, setCustomDeclineReason] = useState('');
+  const [isDeclining, setIsDeclining] = useState(false);
 
   const loadDriverTrips = async () => {
     setIsLoading(true);
@@ -181,6 +191,37 @@ export default function DriverTripsPage() {
       setConfirmModalOpen(false);
     } finally {
       setIsConfirming(false);
+    }
+  };
+
+  const handleOpenDeclineModal = (trip: DriverTripItem) => {
+    setSelectedTripToDecline(trip);
+    setDeclineReason('Sốt cao đột xuất / Sức khỏe không đảm bảo');
+    setCustomDeclineReason('');
+    setDeclineModalOpen(true);
+  };
+
+  const handleDeclineAssignment = async () => {
+    if (!selectedTripToDecline) return;
+    const finalReason = declineReason === 'Khác' ? customDeclineReason.trim() : declineReason;
+    if (!finalReason) {
+      toast.error('Vui lòng cung cấp lý do từ chối chuyến đi');
+      return;
+    }
+    setIsDeclining(true);
+
+    try {
+      await routesApi.declineTripAssignment(selectedTripToDecline.id, {
+        reason: finalReason,
+      });
+
+      toast.success('Đã gửi thông báo từ chối nhận chuyến đến Quản lý vận hành!');
+      setDeclineModalOpen(false);
+      await loadDriverTrips();
+    } catch (err: any) {
+      toast.error(err?.message || 'Không thể gửi phản hồi từ chối');
+    } finally {
+      setIsDeclining(false);
     }
   };
 
@@ -353,16 +394,26 @@ export default function DriverTripsPage() {
 
                 {/* Main Action Buttons: ROLE-BASED VISIBILITY */}
                 <div className="flex items-center gap-2.5">
-                  {/* CONFIRMATION BUTTON */}
+                  {/* CONFIRMATION & DECLINE BUTTONS */}
                   {isAwaitingConfirmation && (
-                    <Button
-                      variant="primary"
-                      onClick={() => handleOpenConfirmModal(trip)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md text-xs py-2 px-3.5"
-                    >
-                      <CheckCircle2 size={15} className="mr-1.5" />
-                      {isEscort ? 'Xác Nhận Hộ Tống Chuyến Đi' : 'Xác Nhận Lái Xe Chuyến Đi'}
-                    </Button>
+                    <>
+                      <Button
+                        variant="primary"
+                        onClick={() => handleOpenConfirmModal(trip)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md text-xs py-2 px-3.5"
+                      >
+                        <CheckCircle2 size={15} className="mr-1.5" />
+                        {isEscort ? 'Xác Nhận Hộ Tống Chuyến Đi' : 'Xác Nhận Lái Xe Chuyến Đi'}
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDeclineModal(trip)}
+                        className="inline-flex items-center justify-center bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-2 px-3.5 rounded-lg border border-rose-700 shadow-sm transition-all"
+                      >
+                        <X size={14} className="mr-1 stroke-[2.5]" />
+                        Từ chối
+                      </button>
+                    </>
                   )}
 
                   {/* Driver gets prominent Journey Update; Escort gets outline view button */}
@@ -545,6 +596,94 @@ export default function DriverTripsPage() {
               >
                 <CheckCircle2 size={16} className="mr-1.5" />
                 {isConfirming ? 'Đang xác nhận...' : 'Tôi Xác Nhận Nhận Chuyến'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* DECLINE TRIP MODAL */}
+      {declineModalOpen && selectedTripToDecline && (
+        <Modal
+          isOpen={declineModalOpen}
+          onClose={() => setDeclineModalOpen(false)}
+          title="Từ Chối Nhận Nhiệm Vụ Chuyến Đi"
+          subtitle={`Đơn hàng: ${selectedTripToDecline.orderCode} • Tuyến: ${selectedTripToDecline.origin} → ${selectedTripToDecline.destination}`}
+          maxWidth="560px"
+        >
+          <div className="flex flex-col gap-4 text-xs">
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 leading-relaxed">
+              <p className="font-bold m-0 flex items-center gap-1.5 text-rose-800">
+                <AlertCircle size={16} className="text-rose-600 shrink-0" />
+                Lưu ý quan trọng khi từ chối nhận chuyến
+              </p>
+              <p className="m-0 mt-1">
+                Khi bạn từ chối, hệ thống sẽ gỡ bạn khỏi nhiệm vụ chuyến đi này và tự động gửi thông báo khẩn cấp tới <strong>Logistics Manager</strong> để phân công nhân sự thay thế kịp thời.
+              </p>
+            </div>
+
+            <div>
+              <label className="font-bold text-slate-700 block mb-1.5 uppercase tracking-wider text-[11px]">
+                Chọn lý do từ chối nhanh:
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  'Sốt cao đột xuất / Sức khỏe không đảm bảo',
+                  'Xe gặp sự cố kỹ thuật chưa kiểm định kịp',
+                  'Bận việc gia đình đột xuất',
+                  'Trùng lịch kiểm tra thú y định kỳ',
+                  'Khác',
+                ].map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    onClick={() => setDeclineReason(reason)}
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                      declineReason === reason
+                        ? 'border-rose-500 bg-rose-50 text-rose-800'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {declineReason === 'Khác' && (
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">
+                  Nhập lý do chi tiết <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={customDeclineReason}
+                  onChange={(e) => setCustomDeclineReason(e.target.value)}
+                  placeholder="Ghi rõ lý do không thể nhận chuyến..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:border-rose-500 text-xs font-medium"
+                />
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 mt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDeclineModalOpen(false)}
+                disabled={isDeclining}
+              >
+                Quay lại
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleDeclineAssignment}
+                disabled={isDeclining}
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-sm"
+              >
+                <X size={15} className="mr-1.5" />
+                {isDeclining ? 'Đang gửi từ chối...' : 'Xác Nhận Từ Chối Chuyến Đi'}
               </Button>
             </div>
           </div>

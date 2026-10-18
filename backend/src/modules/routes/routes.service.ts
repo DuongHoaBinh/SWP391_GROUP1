@@ -351,6 +351,59 @@ export class RoutesService {
     };
   }
 
+  async declineTripAssignment(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    dto: { reason: string; driverUserId?: number },
+  ): Promise<{ success: boolean; message: string }> {
+    const order = await this.ordersStore.findById(shipmentId);
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    let targetUserId = Number(user.id);
+    if (isNaN(targetUserId) || user.role === UserRole.ADMIN) {
+      if (dto.driverUserId) {
+        targetUserId = Number(dto.driverUserId);
+      } else {
+        const staff = await this.fleetStore.findAssignedStaff(shipmentId);
+        const driverOrEscort = staff.find((s) => !s.isConfirmed);
+        if (driverOrEscort) {
+          targetUserId = driverOrEscort.userId;
+        }
+      }
+    }
+
+    const success = await this.routesStore.declineStaffAssignment(
+      shipmentId,
+      targetUserId,
+      dto.reason || 'Lý do sức khỏe / việc đột xuất',
+    );
+    if (!success) {
+      throw new BadRequestException('Bạn không nằm trong danh sách nhân sự được phân công cho chuyến đi này');
+    }
+
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+
+    // Bắn thông báo khẩn cấp đến các Logistics Manager
+    const managers = await this.fleetStore.findAvailableStaff();
+    const logisticsManagers = managers.filter((m) => m.roleName.toLowerCase().includes('manager'));
+    for (const lm of logisticsManagers) {
+      await this.notificationsService.createNotification(
+        lm.id,
+        `⚠️ Nhân sự TỪ CHỐI chuyến ${code}`,
+        `Tài xế/Hộ tống phụ trách chuyến đi ${code} đã TỪ CHỐI nhận nhiệm vụ. Lý do: "${dto.reason}". Vui lòng chỉ định nhân sự thay thế.`,
+        'incident',
+        shipmentId,
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Đã từ chối nhận chuyến và thông báo khẩn tới Logistics Manager.',
+    };
+  }
+
   // --- Step 4: Ready to Depart Gate Evaluation ---
   async getTripPlanReadiness(
     user: AuthenticatedUser,

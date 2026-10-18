@@ -205,6 +205,17 @@ export const routesApi = {
     });
   },
 
+  // Step 3 (Decline): Driver / Escort declines assignment with reason
+  declineTripAssignment: async (
+    shipmentId: number,
+    data: { reason: string }
+  ): Promise<{ success: boolean; message: string }> => {
+    return apiClient(`/routes/plan/${shipmentId}/driver-decline`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
   // Step 4: Ready to Depart Gate
   getTripPlanReadiness: async (shipmentId: number): Promise<TripPlanReadiness> => {
     return apiClient(`/routes/plan/${shipmentId}/readiness`);
