@@ -41,7 +41,12 @@ export default function DriverLayout({
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [activeUser, setActiveUser] = useState(() => getCurrentUser());
 
-  const currentPersona = activeUser?.persona || (activeUser?.email?.includes('escort') ? 'escort' : 'driver');
+  const currentPersona =
+    activeUser?.persona === 'escort' ||
+    activeUser?.specialization === 'escort' ||
+    activeUser?.email?.toLowerCase().includes('escort')
+      ? 'escort'
+      : 'driver';
 
   const fetchUnread = async () => {
     try {

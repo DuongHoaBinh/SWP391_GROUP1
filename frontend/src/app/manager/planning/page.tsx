@@ -38,6 +38,7 @@ interface OrderItem {
   requestedHorseCount: number;
   requestedDate: string;
   status: string;
+  transportType?: string;
   routePlan?: RouteDetail | null;
   readiness?: TripPlanReadiness | null;
 }
@@ -184,6 +185,7 @@ export default function ManagerPlanningPage() {
             requestedHorseCount: Number(o.requestedHorseCount || o.horseCount || 1),
             requestedDate: o.requestedDate || o.departureDate || '2026-10-20',
             status: o.status,
+            transportType: o.transportType || o.transportationType,
             routePlan,
             readiness,
           };
@@ -377,16 +379,39 @@ export default function ManagerPlanningPage() {
     }
   };
 
-  // Helper
+  // Helper: Detect whether an order is international multi-modal
   const isInternational = (order: OrderItem) => {
-    const o = order.originLocation.toLowerCase();
-    const d = order.destinationLocation.toLowerCase();
-    return o.includes('singapore') || d.includes('singapore') ||
-      o.includes('australia') || d.includes('australia') ||
-      o.includes('japan') || d.includes('japan') ||
-      o.includes('hong kong') || d.includes('hong kong') ||
-      o.includes('malaysia') || d.includes('malaysia') ||
-      o.includes('thailand') || d.includes('thailand');
+    // 1. Check direct transportType field
+    const t = (order.transportType || '').toLowerCase();
+    if (t.includes('international') || t.includes('quốc tế') || t.includes('air')) return true;
+
+    // 2. Check route plan has airline or air leg
+    if (order.routePlan?.managerAirlineId || order.routePlan?.legs?.some((l) => l.legType === 'flight' || (l as any).mode === 'air')) return true;
+
+    // 3. Check origin / destination for international countries
+    const o = (order.originLocation || '').toLowerCase();
+    const d = (order.destinationLocation || '').toLowerCase();
+    const intlKeywords = [
+      'singapore', 'australia', 'japan', 'hong kong', 'malaysia', 'thailand',
+      'india', 'belgium', 'france', 'germany', 'usa', 'united states', 'uk',
+      'china', 'korea', 'cambodia', 'laos', 'dubai', 'uae', 'qatar', 'netherlands'
+    ];
+    if (intlKeywords.some((k) => d.includes(k) || o.includes(k))) return true;
+
+    // 4. If destination does not mention Vietnam or typical Vietnamese provinces
+    const isDomesticVietnam = (loc: string) => {
+      const l = loc.toLowerCase();
+      return (
+        l.includes('vietnam') || l.includes('việt nam') || l.includes('hồ chí minh') ||
+        l.includes('hcm') || l.includes('hà nội') || l.includes('đà lạt') ||
+        l.includes('bình dương') || l.includes('cà mau') || l.includes('sóc sơn') ||
+        l.includes('đà nẵng') || l.includes('cần thơ') || l.includes('hải phòng')
+      );
+    };
+
+    if (!isDomesticVietnam(d)) return true;
+
+    return false;
   };
 
   return (
@@ -1024,14 +1049,27 @@ export default function ManagerPlanningPage() {
                       <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
                         <Check size={11} /> Đã xác nhận
                       </span>
+                    ) : s.confirmationNotes?.includes('TỪ CHỐI') ? (
+                      <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200 flex items-center gap-1" title={s.confirmationNotes}>
+                        <X size={11} /> Đã từ chối: {s.confirmationNotes.replace('TỪ CHỐI: ', '')}
+                      </span>
                     ) : (
                       <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 flex items-center gap-1">
-                        <Clock size={11} /> Chờ tài xế xác nhận
+                        <Clock size={11} /> Chờ xác nhận
                       </span>
                     )}
                   </div>
                 ))}
               </div>
+
+              {assignmentStaffList.some((s: any) => s.confirmationNotes?.includes('TỪ CHỐI')) && (
+                <div className="mt-2.5 p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
+                  <AlertCircle size={15} className="shrink-0 mt-0.5 text-rose-600" />
+                  <span>
+                    <strong>Cảnh báo:</strong> Có nhân sự đã từ chối nhận chuyến. Vui lòng chọn nhân sự thay thế ở danh sách bên trên và bấm <strong>&quot;Lưu phân công &amp; Gửi thông báo&quot;</strong>.
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

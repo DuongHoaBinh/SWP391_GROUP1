@@ -28,6 +28,9 @@ export function getCurrentUser(): UserProfile {
       }
     }
 
+    const specialization = parsed.specialization || (parsed.email && parsed.email.includes('escort') ? 'escort' : null);
+    const persona = parsed.persona || (specialization === 'escort' || (parsed.email && parsed.email.includes('escort')) ? 'escort' : 'driver');
+
     return {
       id: parsed.id || mockCurrentUser.id,
       name,
@@ -39,6 +42,8 @@ export function getCurrentUser(): UserProfile {
       organization: parsed.organization || 'Al Fares Stud',
       avatarUrl: parsed.avatarUrl || '',
       initials,
+      persona,
+      specialization,
     };
   } catch {
     return mockCurrentUser;

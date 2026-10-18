@@ -25,20 +25,47 @@ export default function ManagerRequestsPage() {
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [inputValue, setInputValue] = useState('');
   const [costCurrency, setCostCurrency] = useState<'USD' | 'VND'>('USD');
+  const [selectedTransportMode, setSelectedTransportMode] = useState<'road' | 'air'>('road');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const openActionModal = (type: 'APPROVE' | 'REJECT' | 'CHANGE', order: any) => {
     setActiveModal(type);
     setSelectedOrder(order);
     if (type === 'APPROVE') {
-      const routeInfo = buildEquineRoute(order.originLocation || '', order.destinationLocation || '');
-      const horseCount = order.requestedHorseCount || 1;
-      // Estimate USD default: e.g. base ~$600 + $1.8/km
-      const estimatedUsd = Math.max(1200, Math.round((600 + routeInfo.distanceKm * 1.6) * Math.sqrt(horseCount)));
+      const originStr = (order.originLocation || '').toLowerCase();
+      const destStr = (order.destinationLocation || '').toLowerCase();
+      const reqNotes = (order.specialRequirements || order.special_requirements || '').toLowerCase();
+
+      const isDomestic =
+        (originStr.includes('vietnam') || originStr.includes('việt nam') || originStr.includes('hồ chí minh') || originStr.includes('ho chi minh')) &&
+        (destStr.includes('vietnam') || destStr.includes('việt nam') || destStr.includes('hà nội') || destStr.includes('ha noi'));
+      const isRoadRequested = reqNotes.includes('đường bộ') || reqNotes.includes('road') || isDomestic;
+
+      const initialMode: 'road' | 'air' = isRoadRequested ? 'road' : 'air';
+      setSelectedTransportMode(initialMode);
+
+      const routeInfo = buildEquineRoute(order.originLocation || '', order.destinationLocation || '', initialMode);
+      const horseCount = order.requestedHorseCount || (order.horses?.length || 1);
+      const baseCost = initialMode === 'air' ? 600 + routeInfo.distanceKm * 1.6 : 300 + routeInfo.distanceKm * 1.1;
+      const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
       setCostCurrency('USD');
       setInputValue(String(estimatedUsd));
     } else {
       setInputValue('');
+    }
+  };
+
+  const handleModeToggle = (newMode: 'road' | 'air') => {
+    if (!selectedOrder || newMode === selectedTransportMode) return;
+    setSelectedTransportMode(newMode);
+    const routeInfo = buildEquineRoute(selectedOrder.originLocation || '', selectedOrder.destinationLocation || '', newMode);
+    const horseCount = selectedOrder.requestedHorseCount || (selectedOrder.horses?.length || 1);
+    const baseCost = newMode === 'air' ? 600 + routeInfo.distanceKm * 1.6 : 300 + routeInfo.distanceKm * 1.1;
+    const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
+    if (costCurrency === 'USD') {
+      setInputValue(String(estimatedUsd));
+    } else {
+      setInputValue(String(Math.round(estimatedUsd * 25400)));
     }
   };
 
@@ -375,21 +402,42 @@ export default function ManagerRequestsPage() {
             activeModal === 'REJECT' ? `Từ chối đơn vận chuyển ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}` : 
             `Yêu cầu chỉnh sửa đơn ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}`
           } 
-          maxWidth="500px"
+          maxWidth="560px"
         >
           <div className="flex flex-col gap-4">
             {activeModal === 'APPROVE' && selectedOrder && (() => {
-              const routeInfo = buildEquineRoute(selectedOrder.originLocation || '', selectedOrder.destinationLocation || '');
-              const horseCount = selectedOrder.requestedHorseCount || 1;
+              const routeInfo = buildEquineRoute(selectedOrder.originLocation || '', selectedOrder.destinationLocation || '', selectedTransportMode);
+              const horseCount = selectedOrder.requestedHorseCount || (selectedOrder.horses?.length || 1);
               return (
                 <div className="flex flex-col gap-4">
                   {/* Route & Distance Card */}
                   <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-2">
                     <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-                      <span>Lộ trình & Khoảng cách đã xác định:</span>
-                      <span className="font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
-                        {routeInfo.mode === 'air' ? '✈️ Đường hàng không' : '🚛 Đường bộ liên vận'}
-                      </span>
+                      <span>Lộ trình & Khoảng cách:</span>
+                      <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => handleModeToggle('road')}
+                          className={`px-2 py-0.5 text-xs font-bold rounded-md transition-all ${
+                            selectedTransportMode === 'road'
+                              ? 'bg-white text-emerald-700 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          🚛 Đường bộ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleModeToggle('air')}
+                          className={`px-2 py-0.5 text-xs font-bold rounded-md transition-all ${
+                            selectedTransportMode === 'air'
+                              ? 'bg-white text-blue-600 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          ✈️ Hàng không
+                        </button>
+                      </div>
                     </div>
                     <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
                       <span>{selectedOrder.originLocation || 'Vietnam'}</span>
@@ -410,6 +458,78 @@ export default function ManagerRequestsPage() {
                         <strong className="text-emerald-600 text-sm font-bold">{horseCount} cá thể</strong>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Horse Details Card */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+                      <span className="flex items-center gap-1 font-bold text-slate-700">
+                        🐎 Thông tin cá thể ngựa vận chuyển ({selectedOrder.horses?.length || horseCount} con):
+                      </span>
+                      {selectedOrder.horses && selectedOrder.horses.length > 0 && (
+                        <span className="text-[10px] text-slate-400 bg-white px-2 py-0.5 rounded border">
+                          Mã định danh thú y
+                        </span>
+                      )}
+                    </div>
+
+                    {selectedOrder.horses && selectedOrder.horses.length > 0 ? (
+                      <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
+                        {selectedOrder.horses.map((horse: any, idx: number) => (
+                          <div
+                            key={horse.horseId || idx}
+                            className="p-2.5 bg-white border border-slate-200/90 rounded-lg text-xs flex flex-col gap-1.5 shadow-2xs"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-slate-900 text-[13px]">
+                                #{idx + 1}. {horse.name || 'Chiến mã'}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                {horse.breed || 'Ngựa đua'}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-600">
+                              <div>
+                                <span className="text-slate-400">Tuổi / Giới tính:</span>{' '}
+                                <strong className="text-slate-800">
+                                  {horse.age ? `${horse.age} tuổi` : 'N/A'} • {horse.gender === 'male' ? 'Đực' : horse.gender === 'female' ? 'Cái' : horse.gender || 'N/A'}
+                                </strong>
+                              </div>
+                              <div>
+                                <span className="text-slate-400">Màu / Cân nặng:</span>{' '}
+                                <strong className="text-slate-800">
+                                  {horse.color || '---'} {horse.weight ? `• ${horse.weight}` : ''}
+                                </strong>
+                              </div>
+                              <div>
+                                <span className="text-slate-400">Microchip/Passport:</span>{' '}
+                                <strong className="text-slate-800 font-mono text-[10px]">
+                                  {horse.microchipNo || horse.passportNo || 'Chờ cấp'}
+                                </strong>
+                              </div>
+                            </div>
+
+                            {(horse.medicalStatus || horse.specialRequirements) && (
+                              <div className="text-[11px] text-amber-800 bg-amber-50/70 p-1.5 rounded border border-amber-200/60 flex items-center gap-1">
+                                <span>🩺</span>
+                                <span>
+                                  {horse.medicalStatus ? `Sức khỏe: ${horse.medicalStatus}. ` : ''}
+                                  {horse.specialRequirements ? `Lưu ý: ${horse.specialRequirements}` : ''}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-white rounded-lg border text-xs text-slate-600">
+                        <p className="font-bold text-slate-800 m-0">Số lượng: {horseCount} cá thể ngựa</p>
+                        <p className="text-slate-500 m-0 mt-0.5 text-[11px]">
+                          Khách hàng: <strong>{selectedOrder.contactName || selectedOrder.customerName || 'N/A'}</strong> ({selectedOrder.contactPhone || selectedOrder.contactEmail || ''})
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Cost & Currency input */}

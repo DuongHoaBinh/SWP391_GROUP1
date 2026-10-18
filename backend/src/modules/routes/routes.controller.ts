@@ -18,6 +18,7 @@ import { SetStrategicFrameworkDto } from './dto/set-strategic-framework.dto';
 import { BuildDetailedPlanDto } from './dto/build-detailed-plan.dto';
 import { ReviewPlanDto } from './dto/review-plan.dto';
 import { ConfirmAssignmentDto } from './dto/confirm-assignment.dto';
+import { DeclineAssignmentDto } from './dto/decline-assignment.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -119,6 +120,19 @@ export class RoutesController {
     @Body() dto: ConfirmAssignmentDto,
   ) {
     return this.routesService.confirmTripAssignment(user, shipmentId, dto);
+  }
+
+  @Post('plan/:shipmentId/driver-decline')
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Bước 3 (Từ chối): Tài xế / Hộ tống viên từ chối nhận chuyến kèm lý do',
+  })
+  declineTripAssignment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('shipmentId', ParseIntPipe) shipmentId: number,
+    @Body() dto: DeclineAssignmentDto,
+  ) {
+    return this.routesService.declineTripAssignment(user, shipmentId, dto);
   }
 
   // --- Step 4: Ready to Depart Gate ---

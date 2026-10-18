@@ -18,6 +18,7 @@ export interface UserProfile {
   avatarUrl?: string;
   initials: string;
   persona?: 'driver' | 'escort';
+  specialization?: 'driver' | 'escort' | string | null;
 }
 
 export type TransportStatus =

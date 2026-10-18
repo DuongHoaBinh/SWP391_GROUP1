@@ -22,6 +22,7 @@ interface UserRow extends RowDataPacket {
   role_name: string;
   email_verified: number;
   created_at: Date;
+  specialization?: string | null;
 }
 
 interface PendingRow extends RowDataPacket {
@@ -120,7 +121,7 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
 
   async findUser(email: string): Promise<AuthUser | undefined> {
     const [rows] = await this.pool.execute<UserRow[]>(
-      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.created_at, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.email = ? LIMIT 1',
+      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.email = ? LIMIT 1',
       [email.trim().toLowerCase()],
     );
     const row = rows[0];
@@ -135,13 +136,14 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       passwordHash: row.password_hash,
       role: this.userRole(row.role_name),
       emailVerified: Boolean(row.email_verified),
+      specialization: row.specialization ?? null,
       createdAt: new Date(row.created_at).toISOString(),
     };
   }
 
   async findUserById(userId: string | number): Promise<AuthUser | undefined> {
     const [rows] = await this.pool.execute<UserRow[]>(
-      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.created_at, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.user_id = ? LIMIT 1',
+      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.user_id = ? LIMIT 1',
       [Number(userId)],
     );
     const row = rows[0];
@@ -156,6 +158,7 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       passwordHash: row.password_hash,
       role: this.userRole(row.role_name),
       emailVerified: Boolean(row.email_verified),
+      specialization: row.specialization ?? null,
       createdAt: new Date(row.created_at).toISOString(),
     };
   }
