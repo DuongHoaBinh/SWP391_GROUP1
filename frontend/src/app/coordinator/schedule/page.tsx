@@ -1,349 +1,225 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { CalendarDays, Plus, Clock, Truck, User, CheckCircle2, ChevronRight, Search, Filter, ShieldCheck, MapPin, AlertTriangle, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  CalendarDays,
+  Clock,
+  Truck,
+  User,
+  ShieldCheck,
+  MapPin,
+  Search,
+  RefreshCw,
+  Play,
+  CheckCircle2,
+  Calendar,
+  AlertCircle,
+  Plane,
+} from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Modal } from '@/components/ui/Modal';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useTranslation } from '@/lib/i18n/LanguageContext';
-import { useFleetRouteStore, TripSchedule } from '@/lib/fleet-route-store';
-import { apiClient } from '@/lib/api-client';
+import { trackingApi, TripTrackingDetails } from '@/features/tracking/api/tracking.api';
 import toast from 'react-hot-toast';
 
 export default function TripSchedulePage() {
-  const { schedules, vehicles, routes, dispatchTrip, updateTripStatus, availableStaff, refreshVehicles, refreshStaff } = useFleetRouteStore();
-  const { t } = useTranslation();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [isDispatching, setIsDispatching] = useState(false);
+  const { t, translateStatus } = useTranslation();
 
-  // Form State
-  const [orderCode, setOrderCode] = useState('TR-2026-004');
-  const [horseName, setHorseName] = useState('Thunder');
-  const [horseCount, setHorseCount] = useState(2);
-  const [departureTime, setDepartureTime] = useState('');
-  const [estimatedArrival, setEstimatedArrival] = useState('');
-  const [selectedVehicleCode, setSelectedVehicleCode] = useState('');
-  const [driverName, setDriverName] = useState('John Smith');
-  const [escortName, setEscortName] = useState('Dr. Sarah (FEI Vet)');
-  const [selectedRouteTitle, setSelectedRouteTitle] = useState('');
-  const [notes, setNotes] = useState('Climate-controlled chamber set to 18°C. Standard timothy hay feed.');
+  const [trips, setTrips] = useState<TripTrackingDetails[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('ready_to_depart'); // Default: Chờ xuất phát
+  const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
 
-  // Approved Orders from Flow 1 & Flow 2 (MySQL Backend + LocalStorage)
-  const [approvedOrders, setApprovedOrders] = useState<any[]>([]);
-  const [selectedOrderId, setSelectedOrderId] = useState<string>('');
-
-  const loadBackendOrders = async () => {
+  // Load real trips from Tracking API
+  const loadScheduleData = useCallback(async () => {
     try {
-      const orders = await apiClient<any[]>('/orders');
-      if (Array.isArray(orders)) {
-        const approved = orders
-          .filter((o) => o.status === 'approved' || o.status === 'planning')
-          .map((o) => ({
-            id: o.id,
-            requestCode: o.requestCode || `REQ-${o.id}`,
-            horseName: o.horses?.[0]?.name || 'Racehorse',
-            horseCount: Number(o.requestedHorseCount || o.horses?.length || 1),
-            origin: o.originLocation || 'Cu Chi Stables, HCMC',
-            destination: o.destinationLocation || 'Singapore Turf Club',
-            departureDate: o.requestedDate
-              ? new Date(o.requestedDate).toLocaleDateString('vi-VN', { year: 'numeric', month: 'short', day: 'numeric' })
-              : 'Oct 20, 2026',
-            statusLabel: o.status === 'approved' ? 'Approved (Ready to Dispatch)' : 'Planning Route',
-            backendOrder: o,
-          }));
+      setRefreshing(true);
+      const summaryList = await trackingApi.getMyTrips();
 
-        if (approved.length > 0) {
-          setApprovedOrders(approved);
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn('Backend /orders failed, falling back to local storage:', err);
+      // Fetch tracking details for each trip in parallel to get full vehicle, staff, horse and leg times
+      const detailsList = await Promise.all(
+        summaryList.map(async (item) => {
+          try {
+            return await trackingApi.getTrackingDetails(item.shipment_id);
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const validDetails = detailsList.filter((d): d is TripTrackingDetails => d !== null);
+      setTrips(validDetails);
+    } catch (err: any) {
+      console.error('Error loading schedule trips:', err);
+      toast.error('Không thể tải danh sách lịch trình chuyến đi');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-
-    try {
-      const raw = localStorage.getItem('equitransit_store_requests');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        const filtered = parsed.filter((r: any) =>
-          !schedules.some((s) => s.orderCode.toLowerCase() === (r.requestCode || '').toLowerCase())
-        );
-        if (filtered.length > 0) {
-          setApprovedOrders(filtered);
-          return;
-        }
-      }
-    } catch {}
-
-    setApprovedOrders([
-      {
-        id: 7,
-        requestCode: 'TR-2026-001',
-        horseName: 'Tia Chớp',
-        horseCount: 1,
-        origin: 'Câu lạc bộ Cưỡi ngựa Sài Gòn, TP. Thủ Đức, TP.HCM',
-        destination: 'Trường đua Happy Valley, Hồng Kông',
-        departureDate: 'Oct 15, 2026 • 08:00 AM',
-        statusLabel: 'Approved & Verified',
-      },
-      {
-        id: 6,
-        requestCode: 'TR-2026-006',
-        horseName: 'Xích Thố',
-        horseCount: 1,
-        origin: 'Trang trại ngựa Củ Chi, TP.HCM',
-        destination: 'Trường đua ngựa Singapore Turf Club',
-        departureDate: 'Oct 18, 2026 • 09:00 AM',
-        statusLabel: 'Approved (Awaiting Dispatch)',
-      },
-      {
-        id: 9,
-        requestCode: 'TR-2026-003',
-        horseName: 'Silver Star',
-        horseCount: 2,
-        origin: 'Trại giống Thể thao Long Thành, Đồng Nai',
-        destination: 'Trung tâm Huấn luyện Miho (JRA), Nhật Bản',
-        departureDate: 'Oct 22, 2026 • 06:00 AM',
-        statusLabel: 'Approved (Awaiting Dispatch)',
-      },
-    ]);
-  };
+  }, []);
 
   useEffect(() => {
-    loadBackendOrders();
-  }, [schedules]);
+    loadScheduleData();
+  }, [loadScheduleData]);
 
-  const handleSelectOrder = (orderId: string) => {
-    setSelectedOrderId(orderId);
-    const found = approvedOrders.find((o) => String(o.id) === String(orderId) || o.requestCode === orderId);
-    if (found) {
-      setOrderCode(found.requestCode || 'TR-2026-005');
-      setHorseName(found.horse?.name || found.horseName || 'Racehorse');
-      const count = Number(found.horseCount || (found.horses ? found.horses.length : 1)) || 1;
-      setHorseCount(count);
-      setDepartureTime(found.departureDate || 'Oct 20, 2026 • 08:00 AM');
+  // Handle Start Trip (Khởi hành chặng 1)
+  const handleStartTrip = async (trip: TripTrackingDetails) => {
+    const firstLeg = trip.milestones.find((m) => m.itemType === 'leg_start');
+    if (!firstLeg) {
+      toast.error('Không tìm thấy chặng đầu tiên để xuất phát');
+      return;
+    }
 
-      // Auto-match route if possible
-      const matched = routes.find(
-        (r) =>
-          (found.destination && r.destination.toLowerCase().includes(found.destination.toLowerCase())) ||
-          (found.origin && r.origin.toLowerCase().includes(found.origin.toLowerCase()))
-      );
-      if (matched) {
-        setSelectedRouteTitle(matched.name);
-      }
+    if (!confirm(`Xác nhận bắt đầu chuyến đi #${trip.requestCode}? Hệ thống sẽ thông báo cho khách hàng và đội xe.`)) {
+      return;
+    }
 
-      // Auto-select compliant vehicle with capacity >= count
-      const compliantVehicle = availableVehicles.find((v) => v.capacity >= count);
-      if (compliantVehicle) {
-        setSelectedVehicleCode(compliantVehicle.code);
-      }
+    try {
+      setActionLoadingId(trip.shipmentId);
+      await trackingApi.checkInLegStart(trip.shipmentId, firstLeg.legId, {
+        notes: 'Điều phối viên phát lệnh xuất bến chặng 1',
+      });
+      toast.success(`Chuyến đi ${trip.requestCode} đã chính thức xuất phát!`);
+      await loadScheduleData();
+    } catch (err: any) {
+      toast.error(err?.message || 'Không thể bắt đầu chuyến đi');
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
-  // Available vehicles (for selection)
-  const availableVehicles = vehicles.filter((v) => v.status === 'available');
+  // Handle Complete Trip (Kết thúc chuyến đi khi nhân viên y tế / tài xế báo hoàn thành)
+  const handleCompleteTrip = async (trip: TripTrackingDetails) => {
+    if (!confirm(`Xác nhận hoàn tất chuyến đi #${trip.requestCode} sau khi nhân viên y tế và tài xế đã bàn giao ngựa an toàn?`)) {
+      return;
+    }
 
-  const filteredSchedules = schedules.filter((s) => {
+    try {
+      setActionLoadingId(trip.shipmentId);
+      await trackingApi.completeShipment(trip.shipmentId, {
+        notes: 'Điều phối viên xác nhận kết thúc chuyến đi sau khi nhận báo cáo bàn giao ngựa an toàn.',
+      });
+      toast.success(`Chuyến đi ${trip.requestCode} đã hoàn thành an toàn!`);
+      await loadScheduleData();
+    } catch (err: any) {
+      toast.error(err?.message || 'Không thể hoàn tất chuyến đi');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  // Helper format Departure: Ngày + Giờ cụ thể của chặng 1
+  const formatDeparture = (trip: TripTrackingDetails) => {
+    const firstLeg = trip.milestones.find((m) => m.itemType === 'leg_start');
+    if (firstLeg?.actualTime) {
+      const act = new Date(firstLeg.actualTime);
+      return {
+        date: act.toLocaleDateString('vi-VN'),
+        time: act.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        isActual: true,
+      };
+    }
+    if (firstLeg?.plannedTime) {
+      const plan = new Date(firstLeg.plannedTime);
+      return {
+        date: plan.toLocaleDateString('vi-VN'),
+        time: plan.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        isActual: false,
+      };
+    }
+    return {
+      date: 'Chưa xếp lịch',
+      time: '--:--',
+      isActual: false,
+    };
+  };
+
+  // Helper format Arrival: Chỉ Ngày dự kiến (không kèm giờ theo đề xuất)
+  const formatEstimatedArrivalDate = (trip: TripTrackingDetails) => {
+    // Nếu có ETA dạng chuỗi hoặc ngày kế hoạch chặng cuối
+    const lastLeg = [...trip.milestones].reverse().find((m) => m.itemType === 'leg_end');
+    if (lastLeg?.actualTime) {
+      const act = new Date(lastLeg.actualTime);
+      return `Đã đến: ${act.toLocaleDateString('vi-VN')}`;
+    }
+    if (lastLeg?.plannedTime) {
+      const plan = new Date(lastLeg.plannedTime);
+      return `Dự kiến: ${plan.toLocaleDateString('vi-VN')}`;
+    }
+    if (trip.eta) {
+      // Trích xuất phần ngày từ chuỗi ETA nếu có
+      const parts = trip.eta.split(' ');
+      const datePart = parts.find((p) => p.includes('/') || p.includes('-')) || trip.eta;
+      return `Dự kiến: ${datePart}`;
+    }
+    return 'Dự kiến: Theo tiến độ';
+  };
+
+  // Filter trips by search and status
+  const filteredTrips = trips.filter((trip) => {
     const q = searchTerm.toLowerCase().trim();
     const matchesSearch =
       !q ||
-      s.orderCode.toLowerCase().includes(q) ||
-      s.driverName.toLowerCase().includes(q) ||
-      s.horseName.toLowerCase().includes(q) ||
-      s.vehicleCode.toLowerCase().includes(q) ||
-      s.routeTitle.toLowerCase().includes(q);
-    const matchesStatus = statusFilter === 'ALL' || s.status === statusFilter;
+      trip.requestCode.toLowerCase().includes(q) ||
+      (trip.assignedDriver && trip.assignedDriver.toLowerCase().includes(q)) ||
+      (trip.assignedVehicle && trip.assignedVehicle.toLowerCase().includes(q)) ||
+      trip.assignedHorses.some((h) => h.name.toLowerCase().includes(q)) ||
+      trip.origin.toLowerCase().includes(q) ||
+      trip.destination.toLowerCase().includes(q);
+
+    const matchesStatus =
+      statusFilter === 'ALL' ||
+      trip.shipmentStatus === statusFilter ||
+      (statusFilter === 'in_transit' && (trip.shipmentStatus === 'in_transit' || trip.shipmentStatus === 'arrived'));
+
     return matchesSearch && matchesStatus;
   });
 
-  const handleOpenModal = () => {
-    if (availableVehicles.length > 0) {
-      setSelectedVehicleCode(availableVehicles[0].code);
-    }
-    if (routes.length > 0) {
-      setSelectedRouteTitle(routes[0].name);
-    }
-    if (availableStaff.length > 0) {
-      const driverStaff = availableStaff.find(
-        (s) => s.specialization === 'driver' || s.fullName.toLowerCase().includes('tài xế') || s.roleName.toLowerCase().includes('driver')
-      ) || availableStaff[0];
-      setDriverName(driverStaff.fullName);
-
-      const escortStaff = availableStaff.find(
-        (s) => (s.specialization === 'escort' || s.fullName.toLowerCase().includes('thú y') || s.email?.includes('escort')) && s.id !== driverStaff.id
-      ) || availableStaff.find((s) => s.id !== driverStaff.id);
-      if (escortStaff) {
-        setEscortName(escortStaff.fullName);
-      }
-    }
-    setIsAddOpen(true);
-  };
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!departureTime || !driverName || !selectedVehicleCode || !selectedRouteTitle) {
-      toast.error('Please complete all required dispatch assignments.');
-      return;
-    }
-
-    const selectedVehicle = vehicles.find((v) => v.code === selectedVehicleCode);
-    if (selectedVehicle && selectedVehicle.capacity < horseCount) {
-      toast.error(`Vehicle ${selectedVehicle.code} only has capacity for ${selectedVehicle.capacity} horses (Order requires ${horseCount}).`);
-      return;
-    }
-
-    setIsDispatching(true);
-    const matchedRoute = routes.find((r) => r.name === selectedRouteTitle);
-
-    // Backend Integration (Flow 3: vehicle assignment, staff assignment, route stops, and publish)
-    const selectedOrder = approvedOrders.find((o) => String(o.id) === String(selectedOrderId) || o.requestCode === selectedOrderId);
-    const backendOrderId = selectedOrder && typeof selectedOrder.id === 'number' ? selectedOrder.id : null;
-
-    if (backendOrderId) {
-      try {
-        // 1. Assign Vehicles
-        const vehicleDbId = Number(selectedVehicle?.id);
-        if (vehicleDbId && !isNaN(vehicleDbId)) {
-          await apiClient(`/fleet/shipments/${backendOrderId}/assign-vehicles`, {
-            method: 'POST',
-            body: JSON.stringify({ vehicleIds: [vehicleDbId] }),
-          });
-        }
-
-        // 2. Assign Staff
-        const driverStaffObj = availableStaff.find(
-          (s) => s.fullName.toLowerCase().includes(driverName.toLowerCase()) || s.roleName.toLowerCase().includes('driver')
-        ) || availableStaff[0];
-
-        const escortStaffObj = availableStaff.find(
-          (s) => s.fullName.toLowerCase().includes(escortName.toLowerCase())
-        );
-
-        const assignments: any[] = [];
-        if (driverStaffObj) {
-          assignments.push({ userId: driverStaffObj.id, roleInShipment: 'driver' });
-        }
-        if (escortStaffObj && escortStaffObj.id !== driverStaffObj?.id) {
-          assignments.push({ userId: escortStaffObj.id, roleInShipment: 'escort' });
-        } else if (availableStaff.length > 1) {
-          const secondStaff = availableStaff.find((s) => s.id !== driverStaffObj?.id);
-          if (secondStaff) {
-            assignments.push({ userId: secondStaff.id, roleInShipment: 'escort' });
-          }
-        }
-
-        if (assignments.length > 0) {
-          await apiClient(`/fleet/shipments/${backendOrderId}/assign-staff`, {
-            method: 'POST',
-            body: JSON.stringify({ assignments }),
-          });
-        }
-
-        // 3. Create / Link Route
-        const stopsPayload = matchedRoute?.stops?.length
-          ? matchedRoute.stops.map((s, idx) => ({
-              sequenceNo: idx + 1,
-              stopType: s.type === 'Border Gate' ? 'border_check' : s.type === 'Quarantine' ? 'quarantine' : 'rest',
-              locationName: s.name,
-              country: s.country,
-            }))
-          : [
-              { sequenceNo: 1, stopType: 'rest', locationName: selectedOrder.origin || 'Cu Chi Depot', country: 'Vietnam' },
-              { sequenceNo: 2, stopType: 'border_check', locationName: 'Tan Son Nhat / Moc Bai Border Gate', country: 'Vietnam' },
-              { sequenceNo: 3, stopType: 'quarantine', locationName: selectedOrder.destination || 'Destination Quarantine', country: 'International' },
-            ];
-
-        await apiClient(`/routes/shipment/${backendOrderId}`, {
-          method: 'POST',
-          body: JSON.stringify({
-            routeName: selectedRouteTitle,
-            totalDistanceKm: matchedRoute?.distanceKm || 1200,
-            stops: stopsPayload,
-          }),
-        });
-
-        // 4. Publish Trip Plan
-        await apiClient(`/routes/shipment/${backendOrderId}/publish`, {
-          method: 'POST',
-          body: JSON.stringify({ notes }),
-        });
-
-        toast.success(`Đã xuất bản chuyến đi #${selectedOrder.requestCode || backendOrderId} lên Backend! Trạng thái: In Transit.`);
-      } catch (backendErr: any) {
-        console.warn('Backend dispatch warning (fallback to local store dispatch):', backendErr?.message || backendErr);
-        toast((t) => (
-          <span>
-            Đã đồng bộ cục bộ ({backendErr?.message || 'Backend đã lưu'}).
-          </span>
-        ));
-      }
-    }
-
-    // Update frontend state & reactive views
-    dispatchTrip({
-      orderCode: orderCode.trim().toUpperCase(),
-      horseName: horseName.trim(),
-      horseCount: Number(horseCount) || 1,
-      departureTime,
-      estimatedArrival: estimatedArrival || 'Within 24h of departure',
-      vehicleCode: selectedVehicleCode,
-      driverName: driverName.trim(),
-      escortName: escortName.trim(),
-      routeTitle: selectedRouteTitle,
-      origin: matchedRoute?.origin || 'HCMC Logistics Hub',
-      destination: matchedRoute?.destination || 'Singapore Turf Club',
-      notes,
-    });
-
-    setIsDispatching(false);
-    toast.success(`Trip ${orderCode.toUpperCase()} dispatched! Vehicle ${selectedVehicleCode} assigned.`);
-    setIsAddOpen(false);
-  };
+  const readyToDepartCount = trips.filter((t) => t.shipmentStatus === 'ready_to_depart').length;
+  const inTransitCount = trips.filter((t) => t.shipmentStatus === 'in_transit' || t.shipmentStatus === 'arrived').length;
+  const completedCount = trips.filter((t) => t.shipmentStatus === 'completed').length;
 
   return (
     <div className="flex flex-col gap-6 pb-12">
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-slate-900 m-0">
-              {t('coordinator.schedule.title', 'Trip Dispatch Schedule')}
+              {t('coordinator.schedule.title', 'Lịch Điều độ & Xuất bến Chuyến đi')}
             </h1>
-            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800">
-              {schedules.length} {t('coordinator.schedule.tripsScheduled', 'Trips Scheduled')}
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-800">
+              {readyToDepartCount} Chuyến chờ xuất phát
             </span>
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            {t('coordinator.schedule.subtitle', 'Assign specialized vehicles, licensed drivers, equine veterinarians, and departure timetables.')}
+            Quản lý giờ xuất bến chặng 1, phát lệnh khởi hành và kết thúc chuyến khi nhân viên y tế báo hoàn thành.
           </p>
         </div>
+
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            onClick={async () => {
-              await loadBackendOrders();
-              await refreshVehicles();
-              await refreshStaff();
-              toast.success('Đã làm mới danh sách đơn và đội xe từ Database!');
-            }}
-            className="shadow-sm"
+            size="sm"
+            onClick={loadScheduleData}
+            disabled={refreshing}
+            className="shadow-sm flex items-center gap-1.5"
           >
-            <RefreshCw size={15} className="mr-1.5 text-blue-600" /> Đồng bộ Đơn & Xe
-          </Button>
-          <Button variant="primary" onClick={handleOpenModal}>
-            <Plus size={18} className="mr-1.5" /> {t('coordinator.dispatchTrip', 'Dispatch New Trip')}
+            <RefreshCw size={14} className={refreshing ? 'animate-spin text-blue-600' : 'text-slate-600'} />
+            <span>{refreshing ? 'Đang đồng bộ...' : 'Làm mới'}</span>
           </Button>
         </div>
       </div>
 
-      {/* SEARCH AND FILTERS */}
+      {/* Search & Filter Tabs */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-4 items-center justify-between">
         <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 w-80">
-          <Search size={16} className="text-slate-400 mr-2" />
+          <Search size={16} className="text-slate-400 mr-2 shrink-0" />
           <input
             type="text"
-            placeholder={t('coordinator.schedule.searchPlaceholder', 'Search trip, driver, horse, or vehicle...')}
+            placeholder="Tìm theo mã đơn, tài xế, ngựa, xe..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="bg-transparent border-none outline-none text-sm w-full"
@@ -351,393 +227,206 @@ export default function TripSchedulePage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {['ALL', 'Scheduled', 'In Transit', 'Completed'].map((status) => (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                statusFilter === status
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {status === 'ALL'
-                ? t('coordinator.schedule.allStatuses', 'All Statuses')
-                : status === 'In Transit'
-                ? t('status.inTransit', 'In Transit')
-                : status === 'Scheduled'
-                ? t('status.scheduled', 'Scheduled')
-                : t('status.completed', 'Completed')}
-            </button>
-          ))}
+          <button
+            onClick={() => setStatusFilter('ready_to_depart')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              statusFilter === 'ready_to_depart'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            Chờ xuất phát ({readyToDepartCount})
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('in_transit')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              statusFilter === 'in_transit'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            Đang di chuyển ({inTransitCount})
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('completed')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              statusFilter === 'completed'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            Đã hoàn thành ({completedCount})
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+              statusFilter === 'ALL'
+                ? 'bg-slate-800 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            Tất cả ({trips.length})
+          </button>
         </div>
       </div>
 
-      {/* SCHEDULE TABLE */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-4">{t('coordinator.schedule.tripOrderCode', 'Trip / Order Code')}</th>
-                <th className="p-4">Horse(s)</th>
-                <th className="p-4">{t('coordinator.table.departure', 'Departure')} &amp; {t('coordinator.table.arrival', 'Arrival')}</th>
-                <th className="p-4">{t('coordinator.selectVehicle', 'Assigned Vehicle')}</th>
-                <th className="p-4">{t('coordinator.table.vehicleDriver', 'Driver')} &amp; {t('coordinator.assignEscort', 'Escort')}</th>
-                <th className="p-4">{t('coordinator.schedule.routeTitle', 'Route Title')}</th>
-                <th className="p-4">{t('coordinator.table.status', 'Status')}</th>
-                <th className="p-4 text-right">{t('common.actions', 'Action')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredSchedules.map((s) => (
-                <tr key={s.id} className="hover:bg-slate-50/70">
-                  <td className="p-4">
-                    <p className="font-bold text-blue-600 m-0">{s.orderCode}</p>
-                    <p className="text-[11px] text-slate-400 m-0">ID: {s.id}</p>
-                  </td>
-                  <td className="p-4">
-                    <p className="font-bold text-slate-900 m-0">{s.horseName}</p>
-                    <p className="text-xs text-slate-500 m-0">{s.horseCount} horse{s.horseCount > 1 ? 's' : ''}</p>
-                  </td>
-                  <td className="p-4 text-slate-800">
-                    <div className="flex items-center gap-1.5 font-semibold text-xs text-slate-900">
-                      <Clock size={13} className="text-slate-400" /> {s.departureTime}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-1 m-0">ETA: {s.estimatedArrival}</p>
-                  </td>
-                  <td className="p-4 font-medium text-slate-700">
-                    <span className="inline-flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded text-xs font-bold text-slate-800">
-                      <Truck size={13} className="text-slate-500" /> {s.vehicleCode}
-                    </span>
-                  </td>
-                  <td className="p-4 text-slate-700">
-                    <p className="font-semibold text-slate-900 m-0 flex items-center gap-1">
-                      <User size={13} className="text-blue-600" /> {s.driverName}
-                    </p>
-                    <p className="text-xs text-emerald-700 font-medium m-0 flex items-center gap-1">
-                      <ShieldCheck size={12} /> {s.escortName}
-                    </p>
-                  </td>
-                  <td className="p-4">
-                    <p className="font-semibold text-slate-800 text-xs m-0 max-w-[220px] truncate" title={s.routeTitle}>
-                      {s.routeTitle}
-                    </p>
-                    <p className="text-[11px] text-slate-400 mt-0.5 m-0 flex items-center gap-1">
-                      <MapPin size={11} /> {s.origin} → {s.destination}
-                    </p>
-                  </td>
-                  <td className="p-4">
-                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold ${
-                      s.status === 'In Transit' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                      s.status === 'Scheduled' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                      s.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                      'bg-slate-100 text-slate-700'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        s.status === 'In Transit' ? 'bg-blue-600 animate-pulse' :
-                        s.status === 'Scheduled' ? 'bg-amber-500' : 'bg-emerald-600'
-                      }`} />
-                      {s.status}
-                    </span>
-                  </td>
-                  <td className="p-4 text-right">
-                    {s.status === 'Scheduled' && (
-                      <button
-                        onClick={() => {
-                          updateTripStatus(s.id, 'In Transit');
-                          toast.success(`Trip ${s.orderCode} marked as In Transit!`);
-                        }}
-                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm"
-                      >
-                        Start Trip
-                      </button>
-                    )}
-                    {s.status === 'In Transit' && (
-                      <button
-                        onClick={() => {
-                          updateTripStatus(s.id, 'Completed');
-                          toast.success(`Trip ${s.orderCode} completed safely!`);
-                        }}
-                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm"
-                      >
-                        Complete
-                      </button>
-                    )}
-                    {s.status === 'Completed' && (
-                      <span className="text-xs text-slate-400 font-medium">Archived</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {filteredSchedules.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-500 font-medium">
-                    No trips match your search or filter.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+      {/* Schedule Table */}
+      {loading ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-sm">
+          <RefreshCw size={32} className="animate-spin text-blue-600 mx-auto mb-3" />
+          <p className="text-slate-600 font-semibold text-sm">Đang tải lịch điều độ từ cơ sở dữ liệu...</p>
         </div>
-      </div>
+      ) : filteredTrips.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-sm flex flex-col items-center">
+          <Truck size={40} className="text-slate-300 mb-3" />
+          <h3 className="text-base font-bold text-slate-800 m-0">Không có chuyến đi nào phù hợp</h3>
+          <p className="text-xs text-slate-500 mt-1 max-w-sm">
+            Hiện tại không có chuyến đi nào trong mục lọc này. Các chuyến đã hoàn thành Flow 3 (Route Planning) sẽ xuất hiện tại đây.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  <th className="p-4">Mã đơn / Chuyến</th>
+                  <th className="p-4">Chiến mã</th>
+                  <th className="p-4">Khởi hành (Có Giờ) &amp; Đến đích</th>
+                  <th className="p-4">Phương tiện</th>
+                  <th className="p-4">Tài xế &amp; Bác sĩ thú y</th>
+                  <th className="p-4">Lộ trình vận chuyển</th>
+                  <th className="p-4">Trạng thái</th>
+                  <th className="p-4 text-right">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredTrips.map((trip) => {
+                  const dep = formatDeparture(trip);
+                  const arrDateStr = formatEstimatedArrivalDate(trip);
+                  const isActionLoading = actionLoadingId === trip.shipmentId;
+                  const isReady = trip.shipmentStatus === 'ready_to_depart';
+                  const isInTransit = trip.shipmentStatus === 'in_transit' || trip.shipmentStatus === 'arrived';
+                  const isCompleted = trip.shipmentStatus === 'completed';
 
-      {/* DISPATCH NEW TRIP MODAL */}
-      <Modal
-        isOpen={isAddOpen}
-        onClose={() => setIsAddOpen(false)}
-        title={t('coordinator.dispatchTrip', 'Dispatch Transport Trip')}
-        subtitle={t('coordinator.schedule.subtitle', 'Assign compliant vehicle stalls, licensed drivers, equine vets, and departure timetable.')}
-        maxWidth="680px"
-      >
-        <form onSubmit={handleCreate} className="flex flex-col gap-4">
-          {/* Select Approved Request from Flow 1/2 */}
-          <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl">
-            <label className="text-xs font-extrabold text-blue-900 uppercase tracking-wider block mb-1">
-              Select Approved Order awaiting Dispatch (Flow 1 & 2)
-            </label>
-            <select
-              value={selectedOrderId}
-              onChange={(e) => handleSelectOrder(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-blue-300 text-sm font-semibold bg-white text-slate-800 outline-none focus:border-blue-500 shadow-xs"
-            >
-              <option value="">-- Choose an approved transport request --</option>
-              {approvedOrders.map((ord) => (
-                <option key={ord.id || ord.requestCode} value={ord.id || ord.requestCode}>
-                  {ord.requestCode} • {ord.horse?.name || ord.horseName || 'Racehorse'} ({ord.origin || 'Depot'} → {ord.destination || 'Destination'})
-                </option>
-              ))}
-            </select>
-            <span className="text-[11px] text-blue-700 mt-1 block">
-              Auto-fills horse manifest, route destination, and selects compliant vehicle capacity.
-            </span>
-          </div>
+                  return (
+                    <tr key={trip.shipmentId} className="hover:bg-slate-50/70 transition-colors">
+                      {/* Code */}
+                      <td className="p-4">
+                        <p className="font-extrabold text-blue-600 m-0">{trip.requestCode}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5 m-0">Khách: {trip.customerName}</p>
+                      </td>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                {t('coordinator.selectOrder', 'Transport Order Code')} <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                placeholder="E.g., TR-2026-004"
-                value={orderCode}
-                onChange={(e) => setOrderCode(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none font-semibold"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                {t('coordinator.schedule.primaryHorseCount', 'Primary Horse & Count')} <span className="text-red-500">*</span>
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Horse Name"
-                  value={horseName}
-                  onChange={(e) => setHorseName(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none"
-                  required
-                />
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  value={horseCount}
-                  onChange={(e) => setHorseCount(Number(e.target.value))}
-                  className="w-16 px-2 py-2 rounded-lg border border-slate-300 text-sm text-center focus:border-blue-500 outline-none"
-                  required
-                />
-              </div>
-            </div>
-          </div>
+                      {/* Horses */}
+                      <td className="p-4">
+                        {trip.assignedHorses.length > 0 ? (
+                          <div>
+                            <p className="font-bold text-slate-900 m-0">
+                              {trip.assignedHorses.map((h) => h.name).join(', ')}
+                            </p>
+                            <p className="text-xs text-slate-500 mt-0.5 m-0">
+                              {trip.assignedHorses.length} con ngựa thi đấu
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400 italic">Đã gán hồ sơ</span>
+                        )}
+                      </td>
 
-          {/* Vehicle Assignment */}
-          <div>
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-              {t('coordinator.selectVehicle', 'Select Available Vehicle / Air Cargo Stall')} <span className="text-red-500">*</span>
-            </label>
-            {availableVehicles.length === 0 ? (
-              <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
-                <AlertTriangle size={16} /> {t('coordinator.schedule.allVehiclesBusy', 'All vehicles are currently in use or maintenance. Please release a vehicle or add one in Fleet Management.')}
-              </div>
-            ) : (
-              <select
-                value={selectedVehicleCode}
-                onChange={(e) => setSelectedVehicleCode(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white"
-                required
-              >
-                {availableVehicles.map(v => (
-                  <option key={v.id} value={v.code}>
-                    {v.code} — {v.type} ({v.capacity} Stalls, Currently at {v.location})
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
+                      {/* Departure (Date + Time) & Arrival (Date only) */}
+                      <td className="p-4 text-slate-800">
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-slate-900">
+                          <Clock size={13} className="text-blue-600 shrink-0" />
+                          <span>{dep.date} • {dep.time}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1 m-0 flex items-center gap-1">
+                          <Calendar size={11} className="text-slate-400 shrink-0" />
+                          <span>{arrDateStr}</span>
+                        </p>
+                      </td>
 
-          {/* Route Assignment */}
-          <div>
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-              {t('coordinator.schedule.routeTitle', 'Assigned Cross-Border Route')} <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={selectedRouteTitle}
-              onChange={(e) => setSelectedRouteTitle(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white"
-              required
-            >
-              {routes.map(r => (
-                <option key={r.id} value={r.name}>
-                  {r.name} ({r.distanceKm} km • {r.stops.length} stops: {r.origin} → {r.destination})
-                </option>
-              ))}
-            </select>
-          </div>
+                      {/* Vehicle */}
+                      <td className="p-4">
+                        <span className="inline-flex items-center gap-1.5 bg-slate-100 px-2.5 py-1 rounded text-xs font-bold text-slate-800">
+                          <Truck size={13} className="text-slate-500" />
+                          <span>{trip.assignedVehicle || 'Xe chuyên dụng'}</span>
+                        </span>
+                      </td>
 
-          {/* Staff Assignment */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                {t('coordinator.assignDriver', 'Licensed Heavy Driver')} <span className="text-red-500">*</span>
-              </label>
-              {availableStaff.length > 0 ? (
-                <div className="flex flex-col gap-1.5">
-                  <select
-                    value={driverName}
-                    onChange={(e) => setDriverName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white font-medium"
-                    required
-                  >
-                    {availableStaff.map((st) => {
-                      const isDriver = st.specialization === 'driver' || (!st.specialization && !st.fullName.toLowerCase().includes('thú y') && !st.email.includes('escort'));
-                      return (
-                        <option key={st.id} value={st.fullName}>
-                          {isDriver ? '🚚 ' : ''}{st.fullName} {isDriver ? '(Tài xế chuyên dụng)' : `(${st.roleName})`}
-                        </option>
-                      );
-                    })}
-                    <option value="Other Driver">Nhập tên tài xế khác...</option>
-                  </select>
-                  {driverName === 'Other Driver' && (
-                    <input
-                      type="text"
-                      placeholder="Nhập họ tên tài xế"
-                      onChange={(e) => setDriverName(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs focus:border-blue-500 outline-none"
-                      required
-                    />
-                  )}
-                </div>
-              ) : (
-                <input
-                  type="text"
-                  placeholder="E.g., John Smith"
-                  value={driverName}
-                  onChange={(e) => setDriverName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none"
-                  required
-                />
-              )}
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                {t('coordinator.assignEscort', 'Equine Veterinary Escort')} <span className="text-red-500">*</span>
-              </label>
-              {availableStaff.length > 0 ? (
-                <div className="flex flex-col gap-1.5">
-                  <select
-                    value={escortName}
-                    onChange={(e) => setEscortName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white font-medium"
-                    required
-                  >
-                    {availableStaff.map((st) => {
-                      const isEscort = st.specialization === 'escort' || (!st.specialization && (st.fullName.toLowerCase().includes('thú y') || st.email.includes('escort')));
-                      return (
-                        <option key={st.id} value={st.fullName}>
-                          {isEscort ? '🩺 ' : ''}{st.fullName} {isEscort ? '(Bác sĩ thú y / Hộ tống)' : `(${st.roleName})`}
-                        </option>
-                      );
-                    })}
-                    <option value="Dr. Sarah (FEI Vet)">🩺 Dr. Sarah (FEI Vet)</option>
-                    <option value="Other Escort">Nhập tên hộ tống khác...</option>
-                  </select>
-                  {escortName === 'Other Escort' && (
-                    <input
-                      type="text"
-                      placeholder="Nhập họ tên bác sĩ thú y / hộ tống"
-                      onChange={(e) => setEscortName(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs focus:border-blue-500 outline-none"
-                      required
-                    />
-                  )}
-                </div>
-              ) : (
-                <input
-                  type="text"
-                  placeholder="E.g., Dr. Sarah (FEI Vet)"
-                  value={escortName}
-                  onChange={(e) => setEscortName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none"
-                  required
-                />
-              )}
-            </div>
-          </div>
+                      {/* Driver & Escort */}
+                      <td className="p-4 text-slate-700">
+                        <p className="font-semibold text-xs text-slate-900 m-0 flex items-center gap-1">
+                          <User size={13} className="text-blue-600 shrink-0" />
+                          <span className="truncate max-w-[160px]">{trip.assignedDriver || 'Đã chỉ định tài xế'}</span>
+                        </p>
+                        <p className="text-xs text-emerald-700 font-medium mt-0.5 m-0 flex items-center gap-1">
+                          <ShieldCheck size={12} className="shrink-0" />
+                          <span className="truncate max-w-[160px]">{trip.assignedEscort || 'Bác sĩ thú y áp tải'}</span>
+                        </p>
+                      </td>
 
-          {/* Timetable */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                {t('coordinator.departureTime', 'Departure Time')} <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="datetime-local"
-                value={departureTime}
-                onChange={(e) => setDepartureTime(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                {t('coordinator.arrivalTime', 'Estimated Arrival')}
-              </label>
-              <input
-                type="datetime-local"
-                value={estimatedArrival}
-                onChange={(e) => setEstimatedArrival(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none"
-              />
-            </div>
-          </div>
+                      {/* Route */}
+                      <td className="p-4">
+                        <p className="font-semibold text-slate-800 text-xs m-0 max-w-[200px] truncate" title={`${trip.origin} → ${trip.destination}`}>
+                          {trip.origin.split(',')[0]} → {trip.destination.split(',')[0]}
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-0.5 m-0 flex items-center gap-1">
+                          <MapPin size={11} /> {trip.totalDistanceKm || 0} km
+                        </p>
+                      </td>
 
-          <div>
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-              {t('coordinator.schedule.instructions', 'Dispatch & Climate Instructions')}
-            </label>
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="E.g., Temperature set to 18°C, water checks every 3 hours..."
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none resize-none"
-            />
-          </div>
+                      {/* Status */}
+                      <td className="p-4">
+                        <StatusBadge
+                          label={translateStatus(trip.shipmentStatus)}
+                          variant={
+                            isInTransit ? 'transit' : isCompleted ? 'success' : 'pending'
+                          }
+                          hasDot={isInTransit}
+                        />
+                      </td>
 
-          <div className="flex justify-end gap-3 mt-3">
-            <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>
-              {t('common.cancel', 'Cancel')}
-            </Button>
-            <Button type="submit" variant="primary" disabled={availableVehicles.length === 0 || isDispatching}>
-              {isDispatching ? 'Đang xuất bản chuyến đi...' : t('coordinator.confirmDispatch', 'Confirm Dispatch Trip')}
-            </Button>
+                      {/* Actions */}
+                      <td className="p-4 text-right">
+                        {isReady && (
+                          <button
+                            onClick={() => handleStartTrip(trip)}
+                            disabled={isActionLoading}
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                          >
+                            <Play size={13} fill="currentColor" />
+                            <span>{isActionLoading ? 'Đang gửi...' : 'Bắt đầu chuyến đi'}</span>
+                          </button>
+                        )}
+
+                        {isInTransit && (
+                          <button
+                            onClick={() => handleCompleteTrip(trip)}
+                            disabled={isActionLoading}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                          >
+                            <CheckCircle2 size={14} />
+                            <span>{isActionLoading ? 'Đang lưu...' : 'Kết thúc chuyến đi'}</span>
+                          </button>
+                        )}
+
+                        {isCompleted && (
+                          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md inline-flex items-center gap-1">
+                            <CheckCircle2 size={13} /> Đã cập bến
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        </form>
-      </Modal>
+        </div>
+      )}
     </div>
   );
 }
