@@ -131,6 +131,188 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
     },
   },
   {
+    id: 'vn-tiengiang',
+    name: 'Tiền Giang (Mỹ Tho / Cai Lậy / Trại thực nghiệm)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [10.3544, 106.3653],
+    keywords: ['tien giang', 'my tho', 'cai lay', 'cai be', 'go cong', 'cho gao', 'chau thanh tien giang', 'trai thuc nghiem'],
+    nearestAirport: {
+      name: 'Sân bay Tân Sơn Nhất (SGN Cargo)',
+      coords: [10.8185, 106.6588],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-longan',
+    name: 'Long An (Tân An / Bến Lức / Đức Hòa)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [10.5333, 106.4167],
+    keywords: ['long an', 'tan an', 'duc hoa', 'ben luc', 'can giuoc', 'can duoc'],
+    nearestAirport: {
+      name: 'Sân bay Tân Sơn Nhất (SGN Cargo)',
+      coords: [10.8185, 106.6588],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-bentre',
+    name: 'Bến Tre (Mỏ Cày / Ba Tri)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [10.2415, 106.3758],
+    keywords: ['ben tre', 'mo cay', 'ba tri', 'binh dai', 'giong trom'],
+    nearestAirport: {
+      name: 'Sân bay Tân Sơn Nhất (SGN Cargo)',
+      coords: [10.8185, 106.6588],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-dongthap',
+    name: 'Đồng Tháp (Cao Lãnh / Sa Đéc)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [10.4578, 105.6328],
+    keywords: ['dong thap', 'cao lanh', 'sa dec', 'hong ngu', 'thap muoi'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Cần Thơ (VCA Cargo)',
+      coords: [10.0851, 105.7119],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-vinhlong',
+    name: 'Vĩnh Long',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [10.2537, 105.9722],
+    keywords: ['vinh long', 'binh minh', 'tra on'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Cần Thơ (VCA Cargo)',
+      coords: [10.0851, 105.7119],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-travinh',
+    name: 'Trà Vinh',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [9.9348, 106.3455],
+    keywords: ['tra vinh', 'cau ke', 'duyen hai'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Cần Thơ (VCA Cargo)',
+      coords: [10.0851, 105.7119],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-haugiang',
+    name: 'Hậu Giang (Vị Thanh)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [9.7844, 105.4701],
+    keywords: ['hau giang', 'vi thanh', 'nga bay'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Cần Thơ (VCA Cargo)',
+      coords: [10.0851, 105.7119],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-soctrang',
+    name: 'Sóc Trăng',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [9.6035, 105.9724],
+    keywords: ['soc trang', 'nga nam', 'vinh chau'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Cần Thơ (VCA Cargo)',
+      coords: [10.0851, 105.7119],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-baclieu',
+    name: 'Bạc Liêu',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [9.2941, 105.7278],
+    keywords: ['bac lieu', 'gia rai'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Cần Thơ (VCA Cargo)',
+      coords: [10.0851, 105.7119],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-binhphuoc',
+    name: 'Bình Phước (Đồng Xoài / Chơn Thành)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [11.5333, 106.8833],
+    keywords: ['binh phuoc', 'dong xoai', 'chon thanh', 'binh long'],
+    nearestAirport: {
+      name: 'Sân bay Tân Sơn Nhất (SGN Cargo)',
+      coords: [10.8185, 106.6588],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-binhthuan',
+    name: 'Bình Thuận (Phan Thiết / La Gi)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [10.9274, 108.0995],
+    keywords: ['binh thuan', 'phan thiet', 'la gi', 'ham thuan'],
+    nearestAirport: {
+      name: 'Sân bay Cam Ranh (CXR Cargo)',
+      coords: [11.9982, 109.2194],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-ninhthuan',
+    name: 'Ninh Thuận (Phan Rang - Tháp Chàm)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [11.5683, 108.9858],
+    keywords: ['ninh thuan', 'phan rang', 'thap cham'],
+    nearestAirport: {
+      name: 'Sân bay Cam Ranh (CXR Cargo)',
+      coords: [11.9982, 109.2194],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-quangnam',
+    name: 'Quảng Nam (Hội An / Tam Kỳ)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [15.5847, 108.4754],
+    keywords: ['quang nam', 'hoi an', 'tam ky', 'chu lai'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Đà Nẵng (DAD Cargo Hub)',
+      coords: [16.0439, 108.1994],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-thanhhoa',
+    name: 'Thanh Hóa (Thọ Xuân)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [19.8067, 105.7852],
+    keywords: ['thanh hoa', 'tho xuan', 'sam son', 'bim son'],
+    nearestAirport: {
+      name: 'Sân bay Thọ Xuân (THD)',
+      coords: [19.9015, 105.4674],
+      country: 'Việt Nam',
+    },
+  },
+  {
     id: 'vn-cantho',
     name: 'Cần Thơ (Đồng bằng Sông Cửu Long)',
     country: 'Việt Nam',
@@ -449,7 +631,7 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
     country: 'Lào',
     isVietnam: false,
     coords: [17.9757, 102.6331],
-    keywords: ['lao', 'laos', 'vientiane', 'vieng chan'],
+    keywords: ['nuoc lao', 'laos', 'vientiane', 'vieng chan'],
     nearestAirport: {
       name: 'Sân bay Quốc tế Wattay (VTE Cargo)',
       coords: [17.9883, 102.5633],
@@ -524,7 +706,7 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
     country: 'Úc',
     isVietnam: false,
     coords: [-37.7892, 144.9125],
-    keywords: ['uc', 'australia', 'melbourne', 'sydney', 'flemington'],
+    keywords: ['nuoc uc', 'chau uc', 'australia', 'melbourne', 'sydney', 'flemington', 'perth', 'brisbane'],
     nearestAirport: {
       name: 'Sân bay Quốc tế Melbourne (MEL Equine Terminal)',
       coords: [-37.669, 144.841],
@@ -554,7 +736,7 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
     country: 'Bỉ',
     isVietnam: false,
     coords: [50.8503, 4.3517],
-    keywords: ['belgium', 'bi', 'brussels', 'bruxelles', 'ostend', 'waregem', 'gent', 'antwerp'],
+    keywords: ['belgium', 'nuoc bi', 'brussels', 'bruxelles', 'ostend', 'waregem', 'gent', 'antwerp'],
     nearestAirport: {
       name: 'Sân bay Quốc tế Brussels (BRU Live Animal Cargo Hub)',
       coords: [50.901, 4.4856],
@@ -584,7 +766,7 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
     country: 'Anh',
     isVietnam: false,
     coords: [52.2458, 0.4037],
-    keywords: ['uk', 'england', 'britain', 'anh', 'london', 'newmarket', 'ascot', 'heathrow', 'stansted'],
+    keywords: ['uk', 'england', 'britain', 'nuoc anh', 'vuong quoc anh', 'london', 'newmarket', 'ascot', 'heathrow', 'stansted'],
     nearestAirport: {
       name: 'Sân bay Quốc tế London Stansted (STN Equine Hub)',
       coords: [51.886, 0.2389],
@@ -599,7 +781,7 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
     country: 'Mỹ',
     isVietnam: false,
     coords: [38.2031, -85.7699],
-    keywords: ['usa', 'my', 'united states', 'america', 'kentucky', 'louisville', 'lexington', 'california', 'new york'],
+    keywords: ['usa', 'nuoc my', 'hoa ky', 'united states', 'america', 'kentucky', 'louisville', 'lexington', 'california', 'new york'],
     nearestAirport: {
       name: 'Sân bay Quốc tế Louisville (SDF Worldport Live Cargo)',
       coords: [38.1744, -85.736],
@@ -624,22 +806,47 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
 ];
 
 /**
+ * Helper to match keyword with whole-word boundary check for short terms (<= 4 chars)
+ * Prevents "thực nghiệm" matching "uc", "mỹ tho" matching "my" (Mỹ), "biên hòa" matching "bi" (Bỉ)
+ */
+function matchesKeyword(text: string, kw: string): boolean {
+  if (kw.length <= 4) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(^|[\\s.,;/-])${escaped}([\\s.,;/-]|$)`, 'i');
+    return regex.test(text);
+  }
+  return text.includes(kw);
+}
+
+/**
  * Resolve any arbitrary input text to a KnownLocation using fuzzy keyword matching
  */
-export function resolveLocation(rawText: string, fallbackDefaultId = 'vn-hcm-cuchi'): KnownLocation {
+export function resolveLocation(
+  rawText: string,
+  fallbackDefaultId = 'vn-hcm-cuchi',
+  forceDomesticOnly = false,
+  forceInternationalOnly = false
+): KnownLocation {
   if (!rawText || !rawText.trim()) {
     return KNOWN_LOCATIONS.find((l) => l.id === fallbackDefaultId)!;
   }
 
   const normalized = normalizeVietnamese(rawText);
 
-  // 1. Direct keyword score matching
+  // If user selected domestic scope, only search among Vietnam locations
+  const candidateLocations = KNOWN_LOCATIONS.filter((loc) => {
+    if (forceDomesticOnly) return loc.isVietnam;
+    if (forceInternationalOnly) return !loc.isVietnam;
+    return true;
+  });
+
+  // 1. Direct keyword score matching with boundary check
   let bestMatch: KnownLocation | null = null;
   let highestScore = 0;
 
-  for (const loc of KNOWN_LOCATIONS) {
+  for (const loc of candidateLocations) {
     for (const kw of loc.keywords) {
-      if (normalized.includes(kw)) {
+      if (matchesKeyword(normalized, kw)) {
         const score = kw.length; // Longer matching keywords take priority
         if (score > highestScore) {
           highestScore = score;
@@ -656,26 +863,32 @@ export function resolveLocation(rawText: string, fallbackDefaultId = 'vn-hcm-cuc
     };
   }
 
-  // 2. Fallback heuristic: check if contains country words
-  const isForeign =
-    normalized.includes('international') ||
-    normalized.includes('nuoc ngoai') ||
-    normalized.includes('air') ||
-    normalized.includes('flight');
+  // 2. Fallback heuristic: check if contains country words (only when not forced domestic)
+  if (!forceDomesticOnly) {
+    const isForeign =
+      normalized.includes('international') ||
+      normalized.includes('nuoc ngoai') ||
+      normalized.includes('air') ||
+      normalized.includes('flight');
 
-  if (isForeign) {
-    const defaultForeign = KNOWN_LOCATIONS.find((l) => l.id === 'intl-singapore')!;
-    return {
-      ...defaultForeign,
-      name: rawText,
-    };
+    if (isForeign) {
+      const defaultForeign = KNOWN_LOCATIONS.find((l) => l.id === 'intl-singapore')!;
+      return {
+        ...defaultForeign,
+        name: rawText,
+      };
+    }
   }
 
-  // Default to Vietnam HCM Stable with custom label
-  const defaultVn = KNOWN_LOCATIONS.find((l) => l.id === fallbackDefaultId)!;
+  // Default to Vietnam Stable with custom label
+  const defaultVn =
+    candidateLocations.find((l) => l.id === fallbackDefaultId) ||
+    candidateLocations[0] ||
+    KNOWN_LOCATIONS.find((l) => l.id === 'vn-hcm-cuchi')!;
+
   return {
     ...defaultVn,
-    name: rawText,
+    name: `${rawText} (${defaultVn.country})`,
   };
 }
 
@@ -689,8 +902,16 @@ export function buildEquineRoute(
   preferredMode: 'air' | 'road' = 'air',
   explicitTransportType?: 'International' | 'Domestic'
 ): RouteCalculationResult {
-  const origin = resolveLocation(originText, 'vn-hcm-cuchi');
-  const destination = resolveLocation(destinationText, 'intl-singapore');
+  const isForcedDomestic = explicitTransportType === 'Domestic';
+  const isForcedInternational = explicitTransportType === 'International';
+
+  const origin = resolveLocation(originText, 'vn-hcm-cuchi', isForcedDomestic, isForcedInternational);
+  const destination = resolveLocation(
+    destinationText,
+    isForcedDomestic ? 'vn-tiengiang' : 'intl-singapore',
+    isForcedDomestic,
+    isForcedInternational
+  );
 
   const isDomestic =
     explicitTransportType === 'Domestic' ||
