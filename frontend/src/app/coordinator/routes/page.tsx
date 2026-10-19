@@ -120,6 +120,7 @@ export default function RoutePlanningPage() {
   const [searchOrigin, setSearchOrigin] = useState<string>('Trang trại Củ Chi, TP.HCM');
   const [searchDestination, setSearchDestination] = useState<string>('Singapore Turf Club, Kranji, Singapore');
   const [searchMode, setSearchMode] = useState<'air' | 'road'>('air');
+  const [transportTypeChoice, setTransportTypeChoice] = useState<'auto' | 'Domestic' | 'International'>('auto');
   const [simulatedKm, setSimulatedKm] = useState<number>(1450);
   const [simulatedHours, setSimulatedHours] = useState<number>(6);
   const [catalogSearchTerm, setCatalogSearchTerm] = useState<string>('');
@@ -835,30 +836,74 @@ export default function RoutePlanningPage() {
               </div>
             </div>
 
-            {/* Quick Suggestion Chips */}
-            <div className="flex items-center gap-2 flex-wrap pt-0.5">
-              <span className="text-[11px] font-bold text-slate-400 uppercase">Gợi ý nhanh:</span>
-              {[
-                { label: '🇸🇬 TP.HCM ➔ Singapore', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Singapore Turf Club, Kranji, Singapore' },
-                { label: '🇹🇭 TP.HCM ➔ Bangkok (Đường bộ)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Royal Bangkok Sports Club, Bangkok, Thái Lan' },
-                { label: '🇲🇾 TP.HCM ➔ Malaysia (Selangor)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Selangor Turf Club, Kuala Lumpur, Malaysia' },
-                { label: '🇻🇳 TP.HCM ➔ Hà Nội (Nội địa)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Trang trại Ngựa Thể thao Sóc Sơn, Hà Nội' },
-                { label: '⛰️ Đà Lạt ➔ TP.HCM', orig: 'Trang trại Ngựa Cao nguyên Đà Lạt, Lâm Đồng', dest: 'Trang trại Củ Chi, TP.HCM' },
-                { label: '🏖️ Đà Nẵng ➔ TP.HCM', orig: 'Trung tâm Huấn luyện Ngựa Đà Nẵng', dest: 'Trang trại Củ Chi, TP.HCM' },
-              ].map((chip, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => {
-                    setSearchOrigin(chip.orig);
-                    setSearchDestination(chip.dest);
-                    toast.success(`Đã nạp hành lang: ${chip.label}`);
-                  }}
-                  className="text-[11px] px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 font-semibold border border-slate-200 transition-colors"
-                >
-                  {chip.label}
-                </button>
-              ))}
+            {/* Quick Suggestion Chips & Scope Selector */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-0.5 border-t border-slate-100 mt-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-bold text-slate-400 uppercase">Gợi ý nhanh:</span>
+                {[
+                  { label: '🇸🇬 TP.HCM ➔ Singapore', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Singapore Turf Club, Kranji, Singapore' },
+                  { label: '🇹🇭 TP.HCM ➔ Bangkok (Đường bộ)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Royal Bangkok Sports Club, Bangkok, Thái Lan' },
+                  { label: '🇲🇾 TP.HCM ➔ Malaysia (Selangor)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Selangor Turf Club, Kuala Lumpur, Malaysia' },
+                  { label: '🇻🇳 TP.HCM ➔ Hà Nội (Nội địa)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Trang trại Ngựa Thể thao Sóc Sơn, Hà Nội' },
+                  { label: '⛰️ Đà Lạt ➔ TP.HCM (Nội địa)', orig: 'Trang trại Ngựa Cao nguyên Đà Lạt, Lâm Đồng', dest: 'Trang trại Củ Chi, TP.HCM' },
+                  { label: '🏖️ Đà Nẵng ➔ TP.HCM (Nội địa)', orig: 'Trung tâm Huấn luyện Ngựa Đà Nẵng', dest: 'Trang trại Củ Chi, TP.HCM' },
+                ].map((chip, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setSearchOrigin(chip.orig);
+                      setSearchDestination(chip.dest);
+                      setTransportTypeChoice('auto');
+                      toast.success(`Đã nạp hành lang: ${chip.label}`);
+                    }}
+                    className="text-[11px] px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 font-semibold border border-slate-200 transition-colors"
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Scope Segmented Pill */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">Phạm vi:</span>
+                <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setTransportTypeChoice('auto')}
+                    className={`px-2 py-0.5 rounded text-[11.5px] font-semibold transition-all ${
+                      transportTypeChoice === 'auto'
+                        ? 'bg-white text-blue-700 shadow-2xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Tự động kiểm tra: Nếu 2 điểm cùng trong Việt Nam là Nội địa, khác quốc gia là Quốc tế"
+                  >
+                    ⚡ Tự động
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTransportTypeChoice('Domestic')}
+                    className={`px-2 py-0.5 rounded text-[11.5px] font-semibold transition-all ${
+                      transportTypeChoice === 'Domestic'
+                        ? 'bg-white text-emerald-700 shadow-2xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    🇻🇳 Nội địa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTransportTypeChoice('International')}
+                    className={`px-2 py-0.5 rounded text-[11.5px] font-semibold transition-all ${
+                      transportTypeChoice === 'International'
+                        ? 'bg-white text-purple-700 shadow-2xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    🌐 Quốc tế
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Map Canvas */}
@@ -867,11 +912,7 @@ export default function RoutePlanningPage() {
                 <RoutePlanningMap
                   originText={searchOrigin}
                   destinationText={searchDestination}
-                  transportType={
-                    searchOrigin.toLowerCase().includes('hà nội') && searchDestination.toLowerCase().includes('củ chi')
-                      ? 'Domestic'
-                      : 'International'
-                  }
+                  transportType={transportTypeChoice === 'auto' ? undefined : transportTypeChoice}
                   onRouteCalculated={(data) => {
                     setSimulatedKm(data.distanceKm);
                     setSimulatedHours(data.durationHours);
