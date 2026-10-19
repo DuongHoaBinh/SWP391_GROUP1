@@ -164,11 +164,29 @@ export class FleetService {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
 
+    // Kiểm tra không phân công lại nhân sự đã từ chối nhận chuyến này
+    const existingStaff = await this.fleetStore.findAssignedStaff(shipmentId);
+    for (const item of dto.assignments) {
+      const prevDeclined = existingStaff.find(
+        (s) => s.userId === item.userId && s.roleInShipment === item.roleInShipment && s.confirmationNotes?.includes('TỪ CHỐI'),
+      );
+      if (prevDeclined) {
+        throw new BadRequestException(
+          `Nhân sự ${prevDeclined.user?.fullName || 'này'} đã từ chối chuyến này trước đó (${prevDeclined.confirmationNotes}). Vui lòng chọn nhân sự khác đang rảnh thay thế!`,
+        );
+      }
+    }
+
     await this.fleetStore.assignStaff(shipmentId, dto.assignments);
     const assigned = await this.fleetStore.findAssignedStaff(shipmentId);
 
-    // Thông báo cho từng nhân sự được phân công
+    // Thông báo cho nhân sự mới hoặc nhân sự cần xác nhận lại (tránh làm phiền người đã xác nhận)
     for (const item of dto.assignments) {
+      const staffRecord = assigned.find((a) => a.userId === item.userId && a.roleInShipment === item.roleInShipment);
+      if (staffRecord && staffRecord.isConfirmed) {
+        continue; // Đã xác nhận trước đó, không gửi lại thông báo trùng lặp
+      }
+
       await this.notificationsService.createNotification(
         item.userId,
         'Phân công nhiệm vụ chuyến đi mới',

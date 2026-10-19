@@ -24,6 +24,8 @@ export interface VehicleEntity {
   capacity: number;
   status: VehicleStatus;
   createdAt: string;
+  assignedShipmentId?: number | null;
+  assignedTripCode?: string | null;
 }
 
 export interface ShipmentVehicleAssignment {

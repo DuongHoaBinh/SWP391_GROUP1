@@ -20,19 +20,13 @@ export function middleware(request: NextRequest) {
   const normalizedRole = role.toUpperCase();
   const userDashboard = roleToPath[normalizedRole] || '/customer';
 
-  // 1. Root route ('/'): redirect based on authentication status
+  // 1. Root route ('/'): Always redirect directly to /login page as requested
   if (pathname === '/') {
-    if (token) {
-      return NextResponse.redirect(new URL(userDashboard, request.url));
-    }
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // 2. Authentication routes ('/login', '/register', '/forgot-password'): if already logged in, redirect to dashboard
+  // 2. Authentication routes ('/login', '/register', '/forgot-password'): Allow users to land on login page to switch accounts or re-authenticate
   if (pathname === '/login' || pathname === '/register' || pathname === '/forgot-password') {
-    if (token) {
-      return NextResponse.redirect(new URL(userDashboard, request.url));
-    }
     return NextResponse.next();
   }
 

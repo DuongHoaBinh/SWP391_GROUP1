@@ -337,12 +337,49 @@ export default function ManagerPlanningPage() {
     setSelectedOrderForAssign(order);
     setIsAssignModalOpen(true);
     try {
+      // 1. Refresh latest staff list to know real-time availability
+      try {
+        const staffList = await apiClient<any[]>('/fleet/staff');
+        if (Array.isArray(staffList)) {
+          const drivers = staffList.filter(
+            (s) => s.roleName.toLowerCase().includes('driver') || s.roleName.toLowerCase().includes('escort')
+          );
+          setAvailableDrivers(drivers);
+        }
+      } catch (e) {
+        console.warn('Failed to refresh staff:', e);
+      }
+
+      // 2. Fetch current staff assignments for this order
       const plan = await routesApi.getFullTripPlan(order.id);
-      setAssignmentStaffList(plan.assignedStaff || []);
-      const currentDriver = plan.assignedStaff?.find((s: any) => s.roleInShipment === 'driver');
-      const currentEscort = plan.assignedStaff?.find((s: any) => s.roleInShipment === 'escort');
-      if (currentDriver) setSelectedDriverId(String(currentDriver.userId));
-      if (currentEscort) setSelectedEscortId(String(currentEscort.userId));
+      const staffList = plan.assignedStaff || [];
+      setAssignmentStaffList(staffList);
+
+      const currentDriver = staffList.find((s: any) => s.roleInShipment === 'driver');
+      const currentEscort = staffList.find((s: any) => s.roleInShipment === 'escort');
+
+      // Rule: Nếu người đó ĐỒNG Ý thì giữ nguyên; nếu ĐÃ TỪ CHỐI thì RESET để chọn người đang rảnh!
+      if (currentDriver) {
+        const isDriverDeclined = currentDriver.confirmationNotes?.includes('TỪ CHỐI');
+        if (isDriverDeclined) {
+          setSelectedDriverId(''); // Tuyệt đối không chọn lại người đã từ chối
+        } else {
+          setSelectedDriverId(String(currentDriver.userId));
+        }
+      } else {
+        setSelectedDriverId('');
+      }
+
+      if (currentEscort) {
+        const isEscortDeclined = currentEscort.confirmationNotes?.includes('TỪ CHỐI');
+        if (isEscortDeclined) {
+          setSelectedEscortId(''); // Tuyệt đối không chọn lại người đã từ chối
+        } else {
+          setSelectedEscortId(String(currentEscort.userId));
+        }
+      } else {
+        setSelectedEscortId('');
+      }
     } catch (err) {
       console.error(err);
     }
@@ -351,10 +388,41 @@ export default function ManagerPlanningPage() {
   const handleSaveStaffAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedOrderForAssign) return;
+
     if (!selectedDriverId) {
-      toast.error('Vui lòng chọn ít nhất 1 tài xế chính (Driver)');
+      toast.error('Vui lòng chọn 1 tài xế chính (Driver) đang rảnh!');
       return;
     }
+
+    // 1. Kiểm tra tài xế có phải người đã từ chối đơn này không
+    const declinedDriver = assignmentStaffList.find(
+      (s: any) => s.roleInShipment === 'driver' && s.userId === Number(selectedDriverId) && s.confirmationNotes?.includes('TỪ CHỐI')
+    );
+    if (declinedDriver) {
+      toast.error(`Tài xế ${declinedDriver.user?.fullName || ''} đã từ chối chuyến này trước đó! Vui lòng chọn tài xế khác đang rảnh.`);
+      return;
+    }
+
+    // 2. Kiểm tra chuyên viên y tế có phải người đã từ chối đơn này không
+    if (selectedEscortId) {
+      const declinedEscort = assignmentStaffList.find(
+        (s: any) => s.roleInShipment === 'escort' && s.userId === Number(selectedEscortId) && s.confirmationNotes?.includes('TỪ CHỐI')
+      );
+      if (declinedEscort) {
+        toast.error(`Chuyên viên y tế ${declinedEscort.user?.fullName || ''} đã từ chối chuyến này trước đó! Vui lòng chọn người khác đang rảnh.`);
+        return;
+      }
+    }
+
+    // 3. Nếu chuyên viên y tế trước đó đã từ chối nhưng Manager vẫn để trống
+    const prevDeclinedEscort = assignmentStaffList.find(
+      (s: any) => s.roleInShipment === 'escort' && s.confirmationNotes?.includes('TỪ CHỐI')
+    );
+    if (prevDeclinedEscort && !selectedEscortId) {
+      toast.error(`Chuyên viên y tế (${prevDeclinedEscort.user?.fullName || 'trước đó'}) đã từ chối nhận chuyến. Vui lòng chọn 1 chuyên viên y tế đang rảnh để thay thế!`);
+      return;
+    }
+
     setIsSubmittingAssign(true);
     try {
       const assignments = [
@@ -369,7 +437,7 @@ export default function ManagerPlanningPage() {
         body: JSON.stringify({ assignments }),
       });
 
-      toast.success(`Đã phân công nhân sự và gửi thông báo nhận chuyến tới tài xế cho đơn ${selectedOrderForAssign.requestCode}!`);
+      toast.success(`Đã phân công nhân sự và gửi thông báo nhận chuyến cho đơn ${selectedOrderForAssign.requestCode}!`);
       setIsAssignModalOpen(false);
       loadData();
     } catch (err: any) {
@@ -1003,14 +1071,29 @@ export default function ManagerPlanningPage() {
               className="w-full p-2 border border-slate-300 rounded-lg outline-none font-medium text-xs bg-white"
               required
             >
-              <option value="">-- Chọn tài xế điều khiển phương tiện --</option>
+              <option value="">-- Chọn tài xế điều khiển phương tiện (Đang rảnh) --</option>
               {availableDrivers
                 .filter((d) => d.specialization === 'driver' || (!d.specialization && !d.fullName?.toLowerCase().includes('thú y') && !d.email?.includes('escort')))
-                .map((d) => (
-                  <option key={d.id} value={d.id}>
-                    🚚 {d.fullName} ({d.phone || d.email})
-                  </option>
-                ))}
+                .map((d) => {
+                  const hasDeclined = assignmentStaffList.some(
+                    (s: any) => s.userId === d.id && s.roleInShipment === 'driver' && s.confirmationNotes?.includes('TỪ CHỐI')
+                  );
+                  const isCurrentDriver = String(d.id) === selectedDriverId;
+                  const isFree = Number(d.activeTrips || 0) === 0 || isCurrentDriver;
+
+                  return (
+                    <option key={d.id} value={d.id} disabled={hasDeclined}>
+                      🚚 {d.fullName} ({d.phone || d.email}){' '}
+                      {hasDeclined
+                        ? '— ❌ ĐÃ TỪ CHỐI CHUYẾN NÀY (Không khả dụng)'
+                        : isCurrentDriver
+                        ? '— (Đang chọn)'
+                        : isFree
+                        ? '— ✅ Đang rảnh (0 chuyến)'
+                        : `— ⚠️ Đang bận (${d.activeTrips} chuyến)`}
+                    </option>
+                  );
+                })}
             </select>
           </div>
 
@@ -1023,14 +1106,29 @@ export default function ManagerPlanningPage() {
               onChange={(e) => setSelectedEscortId(e.target.value)}
               className="w-full p-2 border border-slate-300 rounded-lg outline-none font-medium text-xs bg-white"
             >
-              <option value="">-- Chọn chuyên viên y tế / hộ tống đi kèm --</option>
+              <option value="">-- Chọn chuyên viên y tế / hộ tống đi kèm (Đang rảnh) --</option>
               {availableDrivers
                 .filter((d) => d.specialization === 'escort' || (!d.specialization && (d.fullName?.toLowerCase().includes('thú y') || d.email?.includes('escort'))))
-                .map((d) => (
-                  <option key={d.id} value={d.id}>
-                    🩺 {d.fullName} ({d.phone || d.email})
-                  </option>
-                ))}
+                .map((d) => {
+                  const hasDeclined = assignmentStaffList.some(
+                    (s: any) => s.userId === d.id && s.roleInShipment === 'escort' && s.confirmationNotes?.includes('TỪ CHỐI')
+                  );
+                  const isCurrentEscort = String(d.id) === selectedEscortId;
+                  const isFree = Number(d.activeTrips || 0) === 0 || isCurrentEscort;
+
+                  return (
+                    <option key={d.id} value={d.id} disabled={hasDeclined}>
+                      🩺 {d.fullName} ({d.phone || d.email}){' '}
+                      {hasDeclined
+                        ? '— ❌ ĐÃ TỪ CHỐI CHUYẾN NÀY (Không khả dụng)'
+                        : isCurrentEscort
+                        ? '— (Đang chọn)'
+                        : isFree
+                        ? '— ✅ Đang rảnh (0 chuyến)'
+                        : `— ⚠️ Đang bận (${d.activeTrips} chuyến)`}
+                    </option>
+                  );
+                })}
             </select>
           </div>
 
@@ -1042,12 +1140,12 @@ export default function ManagerPlanningPage() {
                 {assignmentStaffList.map((s: any) => (
                   <div key={s.assignmentId} className="flex justify-between items-center p-2 rounded bg-slate-50 border border-slate-200">
                     <div>
-                      <p className="font-bold text-slate-800 m-0">{s.user?.fullName} ({s.roleInShipment})</p>
+                      <p className="font-bold text-slate-800 m-0">{s.user?.fullName} ({s.roleInShipment === 'driver' ? 'Tài xế chính' : 'Chuyên viên y tế/hộ tống'})</p>
                       <p className="text-[10px] text-slate-400 m-0">{s.user?.email}</p>
                     </div>
                     {s.isConfirmed ? (
                       <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
-                        <Check size={11} /> Đã xác nhận
+                        <Check size={11} /> Đã xác nhận đồng ý
                       </span>
                     ) : s.confirmationNotes?.includes('TỪ CHỐI') ? (
                       <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200 flex items-center gap-1" title={s.confirmationNotes}>
@@ -1063,11 +1161,18 @@ export default function ManagerPlanningPage() {
               </div>
 
               {assignmentStaffList.some((s: any) => s.confirmationNotes?.includes('TỪ CHỐI')) && (
-                <div className="mt-2.5 p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
-                  <AlertCircle size={15} className="shrink-0 mt-0.5 text-rose-600" />
-                  <span>
-                    <strong>Cảnh báo:</strong> Có nhân sự đã từ chối nhận chuyến. Vui lòng chọn nhân sự thay thế ở danh sách bên trên và bấm <strong>&quot;Lưu phân công &amp; Gửi thông báo&quot;</strong>.
-                  </span>
+                <div className="mt-2.5 p-3 rounded-lg bg-rose-50 border border-rose-300 text-rose-900 text-xs flex flex-col gap-1.5 shadow-sm">
+                  <div className="flex items-center gap-2 font-bold text-rose-800">
+                    <AlertCircle size={16} className="text-rose-600 shrink-0" />
+                    <span>Cảnh báo nhân sự từ chối nhận chuyến:</span>
+                  </div>
+                  {assignmentStaffList
+                    .filter((s: any) => s.confirmationNotes?.includes('TỪ CHỐI'))
+                    .map((s: any) => (
+                      <div key={s.assignmentId} className="pl-6 text-[11px] text-rose-700">
+                        • <strong>{s.roleInShipment === 'driver' ? 'Tài xế' : 'Chuyên viên y tế'} {s.user?.fullName}</strong> đã từ chối ({s.confirmationNotes}). Hệ thống đã tự động gỡ bỏ và chỉ cho phép bạn chọn nhân sự đang rảnh khác thay thế!
+                      </div>
+                    ))}
                 </div>
               )}
             </div>

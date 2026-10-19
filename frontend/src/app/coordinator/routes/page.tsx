@@ -88,7 +88,7 @@ function renderHorseNamesDisplay(horses?: Array<{ name?: string }>, horseCount?:
 }
 
 export default function RoutePlanningPage() {
-  const { routes, addRoute, updateRoute, deleteRoute, vehicles } = useFleetRouteStore();
+  const { routes, addRoute, updateRoute, deleteRoute, vehicles, refreshVehicles } = useFleetRouteStore();
   const [activeTab, setActiveTab] = useState<'flow3_planning' | 'corridor_catalog'>('flow3_planning');
   
   // Search & Map
@@ -132,6 +132,7 @@ export default function RoutePlanningPage() {
   // Load Master Data & Orders
   const loadMasterDataAndOrders = async () => {
     setIsLoadingOrders(true);
+    refreshVehicles();
     try {
       // 1. Master Data
       const mData = await routesApi.getMasterData();
@@ -942,17 +943,27 @@ export default function RoutePlanningPage() {
                             className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800"
                           >
                             <option value="">-- Chọn xe chuyên dụng --</option>
-                            <option value="29B-999.11">29B-999.11 — Climate-Controlled Truck (6 stall, Vị trí: Củ Chi)</option>
-                            <option value="51D-777.22">51D-777.22 — Climate-Controlled Truck (2 stall, Vị trí: Tân Sơn Nhất)</option>
-                            <option value="60C-555.33">60C-555.33 — Specialized Truck (4 stall, Vị trí: Bình Dương)</option>
-                            <option value="51C-888.99">51C-888.99 — Climate-Controlled Truck (4 stall, Vị trí: Long An)</option>
+                            {leg.vehiclePlate && !vehicles.some((v) => v.code === leg.vehiclePlate) && (
+                              <option value={leg.vehiclePlate}>{leg.vehiclePlate}</option>
+                            )}
                             {vehicles
-                              .filter((v) => !['29B-999.11', '51D-777.22', '60C-555.33', '51C-888.99'].includes(v.code))
-                              .map((v) => (
-                                <option key={v.id} value={v.code}>
-                                  {v.code} — {v.type} ({v.capacity} stall, Vị trí: {v.location})
-                                </option>
-                              ))}
+                              .filter((v) => !v.type?.toLowerCase().includes('air'))
+                              .map((v) => {
+                                const isBusy =
+                                  v.status === 'in_use' &&
+                                  v.assignedTripCode &&
+                                  v.assignedTripCode !== selectedPlanningOrder?.requestCode;
+                                return (
+                                  <option key={v.id} value={v.code} disabled={Boolean(isBusy)}>
+                                    {v.code} — {v.type} ({v.capacity} stall, Vị trí: {v.location}){' '}
+                                    {isBusy
+                                      ? `— ⚠️ Đang chạy chuyến ${v.assignedTripCode} (Không khả dụng)`
+                                      : v.status === 'in_use'
+                                      ? '— (Đang dùng cho chuyến này)'
+                                      : '— Sẵn sàng'}
+                                  </option>
+                                );
+                              })}
                           </select>
                         </div>
                         <div>

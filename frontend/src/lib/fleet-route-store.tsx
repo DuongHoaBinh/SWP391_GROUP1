@@ -504,7 +504,8 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
           capacity: Number(v.capacity) || 4,
           status: v.status || 'available',
           lastInspection: v.createdAt ? v.createdAt.split('T')[0] : '2026-10-01',
-          location: 'Fleet Operations Depot',
+          location: v.status === 'in_use' ? `Active: ${v.assignedTripCode || 'On Road'}` : 'Fleet Operations Depot',
+          assignedTripCode: v.assignedTripCode || undefined,
         }));
         setVehicles(mapped);
         try {
