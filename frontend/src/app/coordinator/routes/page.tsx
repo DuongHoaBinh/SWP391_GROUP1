@@ -6,12 +6,12 @@ import {
   Map, Plus, Search, Filter, Edit, Trash2, MapPin, 
   Clock, Navigation, ShieldCheck, Flag, CheckCircle2, ChevronRight, Eye, Layers,
   Plane, Truck, ArrowRight, AlertCircle, Send, FileCheck, RefreshCw, Sparkles, Building,
-  Check, X
+  Check, X, BookmarkPlus, Compass, ExternalLink
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
-import { useFleetRouteStore, RouteItem } from '@/lib/fleet-route-store';
+import { useFleetRouteStore, RouteItem, RouteStop } from '@/lib/fleet-route-store';
 import { apiClient } from '@/lib/api-client';
 import { 
   routesApi, 
@@ -22,6 +22,7 @@ import {
   MasterStopItem,
   RouteDetail
 } from '@/features/routes/api/routes.api';
+import { buildEquineRoute } from '@/lib/geo-corridors';
 
 const RoutePlanningMap = dynamic(
   () => import('@/components/maps/RoutePlanningMap'),
@@ -115,19 +116,94 @@ export default function RoutePlanningPage() {
   const [stops, setStops] = useState<RouteStopItem[]>([]);
   const [notes, setNotes] = useState('');
 
-  // Catalog Modals (Legacy support)
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-  const [selectedRoute, setSelectedRoute] = useState<RouteItem | null>(null);
-  const [formData, setFormData] = useState<Partial<RouteItem>>({
-    name: '',
-    orderCode: '',
-    origin: '',
-    destination: '',
-    distanceKm: 500,
-    status: 'planned',
-  });
+  // Tab 2 Simulation & Custom Route State
+  const [searchOrigin, setSearchOrigin] = useState<string>('Trang trại Củ Chi, TP.HCM');
+  const [searchDestination, setSearchDestination] = useState<string>('Singapore Turf Club, Kranji, Singapore');
+  const [searchMode, setSearchMode] = useState<'air' | 'road'>('air');
+  const [simulatedKm, setSimulatedKm] = useState<number>(1450);
+  const [simulatedHours, setSimulatedHours] = useState<number>(6);
+  const [catalogSearchTerm, setCatalogSearchTerm] = useState<string>('');
+
+  // Catalog Modals (Xem chi tiết & Tạo tuyến mẫu mới)
+  const [viewingCatalogRoute, setViewingCatalogRoute] = useState<RouteItem | null>(null);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState<boolean>(false);
+  const [saveTemplateName, setSaveTemplateName] = useState<string>('');
+  const [saveTemplateOrigin, setSaveTemplateOrigin] = useState<string>('');
+  const [saveTemplateDestination, setSaveTemplateDestination] = useState<string>('');
+  const [saveTemplateDistance, setSaveTemplateDistance] = useState<number>(1000);
+  const [saveTemplateStops, setSaveTemplateStops] = useState<RouteStop[]>([]);
+
+  // Open Save Template Modal
+  const handleOpenSaveTemplateModal = (fromCurrentSearch = true) => {
+    if (fromCurrentSearch) {
+      const origClean = searchOrigin.split(',')[0].trim();
+      const destClean = searchDestination.split(',')[0].trim();
+      setSaveTemplateName(`Hành lang: ${origClean} ➔ ${destClean} (${searchMode === 'air' ? 'Hàng không' : 'Đường bộ'})`);
+      setSaveTemplateOrigin(searchOrigin);
+      setSaveTemplateDestination(searchDestination);
+      setSaveTemplateDistance(simulatedKm || 1000);
+
+      try {
+        const routeData = buildEquineRoute(searchOrigin, searchDestination, searchMode);
+        const stopsList: RouteStop[] = (routeData.waypoints || []).slice(1, -1).map((w, i) => ({
+          seq: i + 1,
+          name: w.name,
+          type: (w.type === 'checkpoint' ? 'Border Gate' : w.type === 'rest' ? 'Rest' : 'Quarantine') as RouteStop['type'],
+          country: w.country || 'Việt Nam',
+        }));
+        setSaveTemplateStops(stopsList.length > 0 ? stopsList : [
+          { seq: 1, name: 'Trạm kiểm dịch động vật xuất phát', type: 'Quarantine', country: 'Việt Nam' },
+          { seq: 2, name: 'Trạm kiểm dịch tiếp nhận đích', type: 'Quarantine', country: 'Quốc tế' },
+        ]);
+      } catch {
+        setSaveTemplateStops([
+          { seq: 1, name: 'Trạm kiểm dịch động vật xuất phát', type: 'Quarantine', country: 'Việt Nam' },
+          { seq: 2, name: 'Trạm kiểm dịch tiếp nhận đích', type: 'Quarantine', country: 'Quốc tế' },
+        ]);
+      }
+    } else {
+      setSaveTemplateName('');
+      setSaveTemplateOrigin('');
+      setSaveTemplateDestination('');
+      setSaveTemplateDistance(500);
+      setSaveTemplateStops([
+        { seq: 1, name: 'Trạm kiểm dịch động vật xuất phát', type: 'Quarantine', country: 'Việt Nam' },
+        { seq: 2, name: 'Trạm dừng chân thú y', type: 'Rest', country: 'Việt Nam' },
+      ]);
+    }
+    setIsSaveModalOpen(true);
+  };
+
+  // Submit Save Route Template
+  const handleSaveTemplateSubmit = () => {
+    if (!saveTemplateName.trim()) {
+      toast.error('Vui lòng nhập tên tuyến đường mẫu!');
+      return;
+    }
+    if (!saveTemplateOrigin.trim() || !saveTemplateDestination.trim()) {
+      toast.error('Vui lòng nhập điểm xuất phát và điểm đến!');
+      return;
+    }
+
+    const newRoute = addRoute({
+      name: saveTemplateName.trim(),
+      orderCode: `TEMPLATE-${Date.now().toString().slice(-4)}`,
+      origin: saveTemplateOrigin.trim(),
+      destination: saveTemplateDestination.trim(),
+      distanceKm: Number(saveTemplateDistance) || 500,
+      stops: saveTemplateStops,
+      status: 'active',
+    });
+
+    toast.success('Đã lưu tuyến đường mẫu mới vào Thư viện thành công!');
+    setIsSaveModalOpen(false);
+
+    // Apply to map immediately
+    setActiveMapRoute(newRoute);
+    setSearchOrigin(newRoute.origin);
+    setSearchDestination(newRoute.destination);
+    setShowMap(true);
+  };
 
   // Load Master Data & Orders
   const loadMasterDataAndOrders = async () => {
@@ -690,84 +766,254 @@ export default function RoutePlanningPage() {
       {/* TAB 2: CORRIDOR CATALOG & MAP */}
       {activeTab === 'corridor_catalog' && (
         <div className="flex flex-col gap-6">
-          {/* Interactive Map Visualizer */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <Layers className="text-blue-600" size={18} />
-                <span className="font-bold text-sm text-slate-800">
-                  {activeMapRoute
-                    ? `Bản đồ lộ trình: ${activeMapRoute.name}`
-                    : 'Mô phỏng Bản đồ Tuyến đường & Điểm Kiểm dịch Xuyên Quốc gia'}
+          {/* Interactive Free Route Search & Simulation Bar */}
+          <div className="bg-white rounded-xl border border-blue-200 shadow-sm p-5 flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Compass className="text-blue-600 shrink-0" size={20} />
+                <span className="font-bold text-base text-slate-900">
+                  Công Cụ Tra Cứu &amp; Mô Phỏng Lộ Trình Tự Do
                 </span>
-                {activeMapRoute && (
-                  <span className="text-xs bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-full">
-                    {activeMapRoute.distanceKm} km
-                  </span>
-                )}
+                <span className="text-xs font-semibold bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                  <span>✨</span> Định tuyến đường bộ thực tế (OSRM)
+                </span>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowMap(!showMap)}
-                className="text-xs h-8"
-              >
-                {showMap ? 'Thu gọn bản đồ' : 'Mở bản đồ số'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleOpenSaveTemplateModal(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+                  title="Lưu lộ trình đang tra cứu thành tuyến mẫu trong Thư viện để tái sử dụng sau này"
+                >
+                  <BookmarkPlus size={15} />
+                  <span>Lưu Tuyến Này Vào Thư Viện</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowMap(!showMap)}
+                  className="text-xs h-8"
+                >
+                  {showMap ? 'Thu gọn bản đồ' : 'Mở bản đồ số'}
+                </Button>
+              </div>
             </div>
 
+            {/* Origin & Destination Free Inputs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition-all shadow-2xs">
+                <span className="mr-2 text-base shrink-0">🟢</span>
+                <div className="flex flex-col w-full">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Điểm xuất phát (Origin)
+                  </label>
+                  <input
+                    type="text"
+                    value={searchOrigin}
+                    onChange={(e) => setSearchOrigin(e.target.value)}
+                    placeholder="Gõ địa chỉ hoặc trang trại (VD: Trang trại Củ Chi, Đà Lạt, Đà Nẵng...)"
+                    className="text-xs font-bold text-slate-800 outline-none bg-transparent w-full"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition-all shadow-2xs">
+                <span className="mr-2 text-base shrink-0">🏁</span>
+                <div className="flex flex-col w-full">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Điểm đến (Destination)
+                  </label>
+                  <input
+                    type="text"
+                    value={searchDestination}
+                    onChange={(e) => setSearchDestination(e.target.value)}
+                    placeholder="Gõ địa điểm đích (VD: Singapore Turf Club, Royal Bangkok, Sóc Sơn...)"
+                    className="text-xs font-bold text-slate-800 outline-none bg-transparent w-full"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Suggestion Chips */}
+            <div className="flex items-center gap-2 flex-wrap pt-0.5">
+              <span className="text-[11px] font-bold text-slate-400 uppercase">Gợi ý nhanh:</span>
+              {[
+                { label: '🇸🇬 TP.HCM ➔ Singapore', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Singapore Turf Club, Kranji, Singapore' },
+                { label: '🇹🇭 TP.HCM ➔ Bangkok (Đường bộ)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Royal Bangkok Sports Club, Bangkok, Thái Lan' },
+                { label: '🇲🇾 TP.HCM ➔ Malaysia (Selangor)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Selangor Turf Club, Kuala Lumpur, Malaysia' },
+                { label: '🇻🇳 TP.HCM ➔ Hà Nội (Nội địa)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Trang trại Ngựa Thể thao Sóc Sơn, Hà Nội' },
+                { label: '⛰️ Đà Lạt ➔ TP.HCM', orig: 'Trang trại Ngựa Cao nguyên Đà Lạt, Lâm Đồng', dest: 'Trang trại Củ Chi, TP.HCM' },
+                { label: '🏖️ Đà Nẵng ➔ TP.HCM', orig: 'Trung tâm Huấn luyện Ngựa Đà Nẵng', dest: 'Trang trại Củ Chi, TP.HCM' },
+              ].map((chip, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setSearchOrigin(chip.orig);
+                    setSearchDestination(chip.dest);
+                    toast.success(`Đã nạp hành lang: ${chip.label}`);
+                  }}
+                  className="text-[11px] px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 font-semibold border border-slate-200 transition-colors"
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Map Canvas */}
             {showMap && (
-              <div className="rounded-xl overflow-hidden border border-slate-200">
+              <div id="map-section" className="rounded-xl overflow-hidden border border-slate-200 mt-2">
                 <RoutePlanningMap
-                  originText={activeMapRoute?.origin || 'Trang trại Củ Chi, TP.HCM'}
-                  destinationText={activeMapRoute?.destination || 'Singapore Turf Club, Kranji, Singapore'}
-                  transportType="International"
+                  originText={searchOrigin}
+                  destinationText={searchDestination}
+                  transportType={
+                    searchOrigin.toLowerCase().includes('hà nội') && searchDestination.toLowerCase().includes('củ chi')
+                      ? 'Domestic'
+                      : 'International'
+                  }
+                  onRouteCalculated={(data) => {
+                    setSimulatedKm(data.distanceKm);
+                    setSimulatedHours(data.durationHours);
+                    setSearchMode(data.mode);
+                  }}
                 />
               </div>
             )}
           </div>
 
-          {/* Catalog list */}
-          <div className="flex flex-col gap-5">
-            {routes.map((route) => (
-              <div key={route.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900 m-0">{route.name}</h3>
-                    <p className="text-xs text-slate-500 mt-0.5 m-0">
-                      Khoảng cách ước tính: <strong>{route.distanceKm} km</strong> • {route.stops.length} trạm dừng
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setActiveMapRoute(route);
-                      setShowMap(true);
-                      window.scrollTo({ top: 180, behavior: 'smooth' });
-                    }}
-                    className="text-blue-600 hover:bg-blue-50"
-                  >
-                    <Eye size={14} className="mr-1" /> Xem trên bản đồ
-                  </Button>
-                </div>
+          {/* Catalog list header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Layers className="text-blue-600" size={20} />
+                <h2 className="text-lg font-bold text-slate-900 m-0">
+                  Thư Viện Tuyến Đường Mẫu Chuẩn ({routes.length})
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500 m-0 mt-0.5">
+                Các tuyến đường đã được khảo sát &amp; lưu trữ. Khi khách hàng mới có cùng lộ trình, bạn chỉ cần xem và áp dụng trực tiếp.
+              </p>
+            </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {route.stops.map((stop) => (
-                    <div key={stop.seq} className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="font-bold text-slate-500">Stop #{stop.seq}</span>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
-                          {stop.type}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="flex items-center bg-white border border-slate-200 rounded-lg px-3 py-1.5 w-60 shadow-2xs">
+                <Search size={14} className="text-slate-400 mr-2 shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Tìm tuyến mẫu trong kho..."
+                  value={catalogSearchTerm}
+                  onChange={(e) => setCatalogSearchTerm(e.target.value)}
+                  className="border-none outline-none text-xs w-full bg-transparent font-medium"
+                />
+              </div>
+
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => handleOpenSaveTemplateModal(false)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+              >
+                <Plus size={14} />
+                <span>+ Tạo Tuyến Mẫu Mới</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Catalog list cards */}
+          <div className="flex flex-col gap-4">
+            {routes
+              .filter(
+                (r) =>
+                  r.name.toLowerCase().includes(catalogSearchTerm.toLowerCase()) ||
+                  r.origin.toLowerCase().includes(catalogSearchTerm.toLowerCase()) ||
+                  r.destination.toLowerCase().includes(catalogSearchTerm.toLowerCase())
+              )
+              .map((route) => (
+                <div
+                  key={route.id}
+                  className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col gap-4 hover:border-blue-300 transition-all"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                    <div>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h3 className="text-base font-bold text-slate-900 m-0">{route.name}</h3>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          Khả dụng (Active)
                         </span>
                       </div>
-                      <p className="font-semibold text-slate-900 m-0 line-clamp-1">{stop.name}</p>
-                      <p className="text-[11px] text-slate-400 m-0">{stop.country}</p>
+                      <p className="text-xs text-slate-500 mt-1 m-0 flex items-center gap-2">
+                        <span>Lộ trình: <strong className="text-slate-700">{route.origin}</strong> ➔ <strong className="text-slate-700">{route.destination}</strong></span>
+                        <span>•</span>
+                        <span>Cự ly: <strong className="text-blue-700 font-bold">{route.distanceKm} km</strong></span>
+                        <span>•</span>
+                        <span>{route.stops?.length || 0} trạm dừng kiểm dịch</span>
+                      </p>
                     </div>
-                  ))}
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => setViewingCatalogRoute(route)}
+                        className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold text-xs shadow-2xs flex items-center gap-1"
+                      >
+                        <Eye size={14} />
+                        <span>Xem chi tiết</span>
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSearchOrigin(route.origin);
+                          setSearchDestination(route.destination);
+                          setActiveMapRoute(route);
+                          setShowMap(true);
+                          const el = document.getElementById('map-section');
+                          if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          } else {
+                            window.scrollTo({ top: 180, behavior: 'smooth' });
+                          }
+                          toast.success(`Đã nạp lộ trình "${route.name}" lên bản đồ số!`);
+                        }}
+                        className="text-slate-700 hover:bg-slate-50 font-semibold text-xs shadow-2xs flex items-center gap-1"
+                      >
+                        <MapPin size={14} className="text-blue-600" />
+                        <span>Nạp lên bản đồ</span>
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Stops preview */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    {route.stops?.map((stop) => (
+                      <div
+                        key={stop.seq}
+                        className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-xs flex flex-col justify-between gap-1"
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="font-bold text-slate-500 text-[10px] uppercase">Trạm #{stop.seq}</span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              stop.type === 'Quarantine'
+                                ? 'bg-amber-100 text-amber-800'
+                                : stop.type === 'Border Gate'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}
+                          >
+                            {stop.type === 'Quarantine' ? 'Kiểm dịch' : stop.type === 'Border Gate' ? 'Cửa khẩu' : 'Nghỉ thú y'}
+                          </span>
+                        </div>
+                        <p className="font-bold text-slate-900 m-0 line-clamp-1">{stop.name}</p>
+                        <p className="text-[11px] text-slate-400 m-0">{stop.country}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
           </div>
         </div>
       )}
@@ -1279,6 +1525,353 @@ export default function RoutePlanningPage() {
               >
                 <Send size={14} className="mr-1.5" />
                 {isSubmittingPlan ? 'Đang gửi duyệt...' : 'Gửi Duyệt Cho Manager'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL 2: XEM CHI TIẾT TUYẾN MẪU TRONG THƯ VIỆN */}
+      {viewingCatalogRoute && (
+        <Modal
+          isOpen={Boolean(viewingCatalogRoute)}
+          onClose={() => setViewingCatalogRoute(null)}
+          title={`Chi Tiết Tuyến Đường Mẫu`}
+          subtitle={`Hành lang chuẩn hóa: ${viewingCatalogRoute.name}`}
+          maxWidth="720px"
+        >
+          <div className="flex flex-col gap-5 max-h-[75vh] overflow-y-auto pr-1">
+            {/* Overview Card */}
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold uppercase text-blue-900 flex items-center gap-1.5">
+                  <ShieldCheck size={16} className="text-blue-600" />
+                  Hành Lang Vận Chuyển Đã Kiểm Chuẩn
+                </span>
+                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  Trạng thái: Hoạt động (Active)
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Điểm xuất phát:</span>
+                  <strong className="text-slate-800 text-sm">{viewingCatalogRoute.origin}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Điểm đích đến:</span>
+                  <strong className="text-slate-800 text-sm">{viewingCatalogRoute.destination}</strong>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-6 text-xs border-t border-blue-100 pt-2 text-slate-700">
+                <div>
+                  Cự ly ước tính: <strong className="text-blue-900 font-bold">{viewingCatalogRoute.distanceKm} km</strong>
+                </div>
+                <div>
+                  Tổng số trạm dừng: <strong className="text-blue-900 font-bold">{viewingCatalogRoute.stops?.length || 0} trạm</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Stops list table */}
+            <div className="flex flex-col gap-2">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider m-0">
+                Danh Sách Các Điểm Dừng Chân, Kiểm Dịch &amp; Cửa Khẩu:
+              </h4>
+
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase">
+                    <tr>
+                      <th className="p-2.5 w-12 text-center">Thứ tự</th>
+                      <th className="p-2.5">Tên Trạm / Điểm Kiểm Dịch</th>
+                      <th className="p-2.5 w-36">Tính Chất Trạm</th>
+                      <th className="p-2.5 w-32">Quốc Gia / Khu Vực</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {viewingCatalogRoute.stops?.map((stop) => (
+                      <tr key={stop.seq} className="hover:bg-slate-50/60">
+                        <td className="p-2.5 text-center font-bold text-slate-500">#{stop.seq}</td>
+                        <td className="p-2.5 font-bold text-slate-800">{stop.name}</td>
+                        <td className="p-2.5">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                              stop.type === 'Quarantine'
+                                ? 'bg-amber-100 text-amber-800'
+                                : stop.type === 'Border Gate'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}
+                          >
+                            {stop.type === 'Quarantine' ? 'Kiểm dịch động vật' : stop.type === 'Border Gate' ? 'Cửa khẩu quốc tế' : 'Trạm dừng nghỉ'}
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-slate-600 font-medium">{stop.country}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100 pt-4 mt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  if (confirm(`Bạn có chắc muốn xóa tuyến mẫu "${viewingCatalogRoute.name}" khỏi thư viện?`)) {
+                    deleteRoute(viewingCatalogRoute.id);
+                    toast.success('Đã xóa tuyến đường mẫu khỏi thư viện!');
+                    setViewingCatalogRoute(null);
+                  }
+                }}
+                className="text-red-600 border-red-200 hover:bg-red-50 text-xs font-semibold"
+              >
+                <Trash2 size={13} className="mr-1" />
+                Xóa tuyến mẫu này
+              </Button>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setViewingCatalogRoute(null)}
+                  className="text-xs"
+                >
+                  Đóng
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setActiveTab('flow3_planning');
+                    setViewingCatalogRoute(null);
+                    toast.success('Chuyển sang Lập kế hoạch chi tiết cho đơn hàng!');
+                  }}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs"
+                >
+                  <Navigation size={13} className="mr-1 text-blue-600" />
+                  Dùng Cho Lập Kế Hoạch
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => {
+                    setSearchOrigin(viewingCatalogRoute.origin);
+                    setSearchDestination(viewingCatalogRoute.destination);
+                    setActiveMapRoute(viewingCatalogRoute);
+                    setShowMap(true);
+                    setViewingCatalogRoute(null);
+                    const el = document.getElementById('map-section');
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    toast.success(`Đã nạp tuyến "${viewingCatalogRoute.name}" lên bản đồ số!`);
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm"
+                >
+                  <MapPin size={13} className="mr-1" />
+                  Tải Lên Bản Đồ Số
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL 3: TẠO & LƯU TUYẾN ĐƯỜNG MẪU VÀO THƯ VIỆN */}
+      {isSaveModalOpen && (
+        <Modal
+          isOpen={isSaveModalOpen}
+          onClose={() => setIsSaveModalOpen(false)}
+          title={`Lưu Tuyến Đường Mẫu Vào Thư Viện`}
+          subtitle="Tạo mới hoặc lưu hành lang vận chuyển chuẩn để tái sử dụng nhanh cho các đơn hàng tiếp theo."
+          maxWidth="760px"
+        >
+          <div className="flex flex-col gap-4 max-h-[75vh] overflow-y-auto pr-1">
+            {/* Form Fields */}
+            <div>
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                Tên Tuyến Đường Mẫu <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={saveTemplateName}
+                onChange={(e) => setSaveTemplateName(e.target.value)}
+                placeholder="VD: Hành lang TP.HCM ➔ Singapore Turf Club (Hàng không)"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold text-slate-900 outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Điểm xuất phát (Origin) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={saveTemplateOrigin}
+                  onChange={(e) => setSaveTemplateOrigin(e.target.value)}
+                  placeholder="VD: Trang trại Củ Chi, TP.HCM"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800 outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  Điểm đích đến (Destination) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={saveTemplateDestination}
+                  onChange={(e) => setSaveTemplateDestination(e.target.value)}
+                  placeholder="VD: Singapore Turf Club, Kranji, Singapore"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800 outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                Tổng cự ly ước tính (km)
+              </label>
+              <input
+                type="number"
+                value={saveTemplateDistance}
+                onChange={(e) => setSaveTemplateDistance(Number(e.target.value))}
+                className="w-full sm:w-48 px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold text-blue-900 outline-none focus:border-blue-500"
+              />
+            </div>
+
+            {/* Stops Editor */}
+            <div className="flex flex-col gap-2 pt-1 border-t border-slate-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider m-0">
+                    Các trạm kiểm dịch &amp; trạm dừng chân mẫu ({saveTemplateStops.length} trạm)
+                  </h4>
+                  <p className="text-[11px] text-slate-400 m-0">
+                    Có thể thêm/xóa trạm để chuẩn hóa lộ trình cho chú ngựa.
+                  </p>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSaveTemplateStops([
+                      ...saveTemplateStops,
+                      {
+                        seq: saveTemplateStops.length + 1,
+                        name: 'Trạm kiểm dịch mới',
+                        type: 'Quarantine',
+                        country: 'Việt Nam',
+                      },
+                    ]);
+                  }}
+                  className="text-xs font-semibold text-blue-700 border-blue-200 bg-blue-50 hover:bg-blue-100 flex items-center gap-1"
+                >
+                  <Plus size={13} /> Thêm trạm
+                </Button>
+              </div>
+
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase">
+                    <tr>
+                      <th className="p-2 w-10 text-center">#</th>
+                      <th className="p-2">Tên Trạm</th>
+                      <th className="p-2 w-36">Loại Trạm</th>
+                      <th className="p-2 w-28">Quốc Gia</th>
+                      <th className="p-2 w-12 text-center">Xóa</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {saveTemplateStops.map((stop, idx) => (
+                      <tr key={idx}>
+                        <td className="p-2 text-center font-bold text-slate-400">{stop.seq}</td>
+                        <td className="p-2">
+                          <input
+                            type="text"
+                            value={stop.name}
+                            onChange={(e) => {
+                              const updated = [...saveTemplateStops];
+                              updated[idx].name = e.target.value;
+                              setSaveTemplateStops(updated);
+                            }}
+                            className="w-full px-2 py-1 border border-slate-200 rounded text-xs font-medium"
+                          />
+                        </td>
+                        <td className="p-2">
+                          <select
+                            value={stop.type}
+                            onChange={(e) => {
+                              const updated = [...saveTemplateStops];
+                              updated[idx].type = e.target.value as any;
+                              setSaveTemplateStops(updated);
+                            }}
+                            className="w-full px-1.5 py-1 border border-slate-200 rounded text-xs font-semibold"
+                          >
+                            <option value="Quarantine">Kiểm dịch (Quarantine)</option>
+                            <option value="Rest">Nghỉ ngơi (Rest)</option>
+                            <option value="Border Gate">Cửa khẩu (Border Gate)</option>
+                          </select>
+                        </td>
+                        <td className="p-2">
+                          <input
+                            type="text"
+                            value={stop.country}
+                            onChange={(e) => {
+                              const updated = [...saveTemplateStops];
+                              updated[idx].country = e.target.value;
+                              setSaveTemplateStops(updated);
+                            }}
+                            className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                          />
+                        </td>
+                        <td className="p-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = saveTemplateStops
+                                .filter((_, i) => i !== idx)
+                                .map((s, i) => ({ ...s, seq: i + 1 }));
+                              setSaveTemplateStops(updated);
+                            }}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-4 mt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsSaveModalOpen(false)}
+                className="text-xs font-medium"
+              >
+                Hủy bỏ
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleSaveTemplateSubmit}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+              >
+                <BookmarkPlus size={14} />
+                <span>Lưu Tuyến Mẫu Vào Thư Viện</span>
               </Button>
             </div>
           </div>
