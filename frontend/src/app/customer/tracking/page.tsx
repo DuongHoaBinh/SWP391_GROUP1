@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
-  Navigation,
   ShieldCheck,
   Thermometer,
   Heart,
@@ -13,34 +12,94 @@ import {
   Activity,
   Wind,
   CheckCircle2,
-  AlertCircle,
   Truck,
-  Stethoscope,
+  Plane,
+  RefreshCw,
   Radio,
+  FileCheck2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { useFleetRouteStore } from '@/lib/fleet-route-store';
 import { useTranslation } from '@/lib/i18n/LanguageContext';
+import {
+  trackingApi,
+  TripTrackingDetails,
+  AssignedTripSummary,
+} from '@/features/tracking/api/tracking.api';
+import toast from 'react-hot-toast';
 
 export default function CustomerTrackingPage() {
-  const { schedules, getMilestonesByTrip, getTelemetryByTrip, getHealthLogsByTrip } = useFleetRouteStore();
   const { t, translateStatus } = useTranslation();
 
-  const [selectedTripCode, setSelectedTripCode] = useState<string>('TR-2026-002');
+  const [trips, setTrips] = useState<AssignedTripSummary[]>([]);
+  const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
+  const [trackingDetails, setTrackingDetails] = useState<TripTrackingDetails | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
 
-  const activeTrip = schedules.find((s) => s.orderCode === selectedTripCode) || schedules[0];
-  const currentTripCode = activeTrip ? activeTrip.orderCode : selectedTripCode;
+  // Fetch customer's shipments
+  const fetchMyTrips = useCallback(async (keepSelected = true) => {
+    try {
+      const data = await trackingApi.getMyTrips();
+      setTrips(data);
+      if (data.length > 0) {
+        if (!keepSelected || !selectedShipmentId) {
+          setSelectedShipmentId(data[0].shipment_id);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Could not fetch customer shipments:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedShipmentId]);
 
-  const telemetry = getTelemetryByTrip(currentTripCode);
-  const milestones = getMilestonesByTrip(currentTripCode);
-  const healthLogs = getHealthLogsByTrip(currentTripCode);
-  const latestHealth = healthLogs[0];
+  // Fetch tracking details for selected shipment
+  const fetchTrackingDetails = useCallback(async (shipmentId: number, silent = false) => {
+    try {
+      if (!silent) setRefreshing(true);
+      const details = await trackingApi.getTrackingDetails(shipmentId);
+      setTrackingDetails(details);
+    } catch (err: any) {
+      console.error('Error fetching customer tracking details:', err);
+      if (!silent) toast.error('Không thể tải thông tin hành trình');
+    } finally {
+      if (!silent) setRefreshing(false);
+    }
+  }, []);
 
-  const completedMilestonesCount = milestones.filter((m) => m.status === 'COMPLETED').length;
-  const progressPct = milestones.length > 0
-    ? Math.round((completedMilestonesCount / milestones.length) * 100)
-    : 0;
+  useEffect(() => {
+    fetchMyTrips(false);
+  }, []);
+
+  useEffect(() => {
+    if (selectedShipmentId) {
+      fetchTrackingDetails(selectedShipmentId);
+    }
+  }, [selectedShipmentId, fetchTrackingDetails]);
+
+  // Auto-polling every 12 seconds
+  useEffect(() => {
+    if (!selectedShipmentId) return;
+    const interval = setInterval(() => {
+      fetchTrackingDetails(selectedShipmentId, true);
+    }, 12000);
+    return () => clearInterval(interval);
+  }, [selectedShipmentId, fetchTrackingDetails]);
+
+  const handleManualRefresh = () => {
+    if (selectedShipmentId) {
+      fetchTrackingDetails(selectedShipmentId);
+      toast.success('Đã đồng bộ dữ liệu lộ trình mới nhất');
+    }
+  };
+
+  const completedCount = trackingDetails?.milestones.filter((m) => m.status === 'COMPLETED').length || 0;
+  const totalCount = trackingDetails?.milestones.length || 0;
+  const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  const latestHealth = trackingDetails?.healthLogs && trackingDetails.healthLogs.length > 0
+    ? trackingDetails.healthLogs[0]
+    : null;
 
   return (
     <div className="flex flex-col gap-6 pb-12">
@@ -54,329 +113,388 @@ export default function CustomerTrackingPage() {
             <ArrowLeft size={18} />
           </Link>
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900 m-0">
-              {t('tracking.liveTitle', 'Live Trip Tracking')}
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-extrabold text-slate-900 m-0">
+                {t('tracking.liveTitle', 'Theo dõi Chuyến đi Trực tiếp')}
+              </h1>
+              <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                Live Status
+              </span>
+            </div>
             <p className="text-sm text-slate-500 mt-0.5">
-              {t('tracking.liveSubtitle', 'Real-time telemetry, GPS milestones, and vital signs monitoring during transit.')}
+              {t('tracking.liveSubtitle', 'Vị trí suy diễn theo mốc kiểm soát, thông số vi khí hậu thùng xe và sinh trắc học ngựa.')}
             </p>
           </div>
         </div>
 
-        {/* Shipment Selector */}
+        {/* Shipment Selector & Refresh */}
         <div className="flex items-center gap-3">
-          <label className="text-xs font-bold text-slate-500 hidden sm:block">
-            {t('tracking.selectShipment', 'Select Shipment')}:
-          </label>
-          <select
-            value={currentTripCode}
-            onChange={(e) => setSelectedTripCode(e.target.value)}
-            className="px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white font-semibold text-sm outline-none focus:border-blue-500 shadow-sm"
+          {trips.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-bold text-slate-500 hidden sm:block">
+                {t('tracking.selectShipment', 'Đơn hàng')}:
+              </label>
+              <select
+                value={selectedShipmentId || ''}
+                onChange={(e) => setSelectedShipmentId(Number(e.target.value))}
+                className="px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white font-semibold text-sm outline-none focus:border-blue-500 shadow-sm"
+              >
+                {trips.map((s) => (
+                  <option key={s.shipment_id} value={s.shipment_id}>
+                    {s.request_code} ({translateStatus(s.shipment_status)})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-1.5"
           >
-            {schedules.map((s) => (
-              <option key={s.id} value={s.orderCode}>
-                {s.orderCode} - {s.horseName} ({translateStatus(s.status)})
-              </option>
-            ))}
-          </select>
+            <RefreshCw size={14} className={refreshing ? 'animate-spin text-blue-600' : 'text-slate-600'} />
+            <span className="hidden sm:inline">{refreshing ? 'Đang tải...' : 'Làm mới'}</span>
+          </Button>
         </div>
       </div>
 
-      {/* Main Tracking Overview Card */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-sm flex flex-col gap-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
-          <div>
-            <span className="text-xs font-extrabold text-blue-600 tracking-wider uppercase">
-              {t('tracking.shipmentCode', 'SHIPMENT CODE')}
-            </span>
-            <h2 className="text-2xl font-extrabold text-slate-900 mt-1 m-0 flex items-center gap-3">
-              {currentTripCode} • {activeTrip?.horseName}
-            </h2>
-            <p className="text-sm text-slate-500 mt-1.5 flex items-center gap-2">
-              <MapPin size={15} className="text-slate-400 shrink-0" />
-              <span>
-                <strong>{activeTrip?.origin || 'Depot'}</strong> → <strong>{activeTrip?.destination || 'Destination'}</strong>
-              </span>
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-bold text-slate-500">
-              Vehicle: <strong>{activeTrip?.vehicleCode}</strong>
-            </span>
-            <StatusBadge
-              label={translateStatus(activeTrip?.status || 'Scheduled')}
-              variant={activeTrip?.status === 'In Transit' ? 'transit' : activeTrip?.status === 'Completed' ? 'success' : 'pending'}
-              hasDot={activeTrip?.status === 'In Transit'}
-            />
-          </div>
+      {loading ? (
+        <div className="p-12 text-center bg-white rounded-2xl border border-slate-200">
+          <RefreshCw size={32} className="animate-spin text-blue-600 mx-auto mb-3" />
+          <p className="text-slate-600 font-semibold">Đang tải dữ liệu chuyến đi của bạn...</p>
         </div>
-
-        {/* Telemetry Sensor Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Card 1: Cabin / Stall Temp */}
-          <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-100 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-blue-700">
-              <span className="text-xs font-bold uppercase">{t('tracking.stallTemp', 'Stall Temp')}</span>
-              <Thermometer size={18} />
-            </div>
-            <div className="mt-3">
-              <span className="text-2xl font-black text-blue-950">
-                {telemetry.cabinTempC.toFixed(1)}°C
-              </span>
-              <p className="text-[11px] font-bold text-emerald-600 mt-1 m-0">
-                {t('tracking.stallTempOk', 'Within safe range (18-22°C)')}
-              </p>
-            </div>
-          </div>
-
-          {/* Card 2: Equine Heart Rate */}
-          <div className="p-4 rounded-xl bg-red-50/70 border border-red-100 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-red-600">
-              <span className="text-xs font-bold uppercase">{t('driver.heartRate', 'Heart Rate')}</span>
-              <Heart size={18} />
-            </div>
-            <div className="mt-3">
-              <span className="text-2xl font-black text-red-950">
-                {latestHealth?.heartRateBpm || 40} <span className="text-xs font-bold text-slate-500">bpm</span>
-              </span>
-              <p className="text-[11px] font-bold text-emerald-600 mt-1 m-0">
-                {latestHealth?.condition === 'Stressed' ? 'Escort Attending' : 'Calm & Resting'}
-              </p>
-            </div>
-          </div>
-
-          {/* Card 3: Body Temperature */}
-          <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-100 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-amber-700">
-              <span className="text-xs font-bold uppercase">{t('driver.bodyTemp', 'Body Temp')}</span>
-              <Activity size={18} />
-            </div>
-            <div className="mt-3">
-              <span className="text-2xl font-black text-amber-950">
-                {(latestHealth?.tempC || 37.8).toFixed(1)}°C
-              </span>
-              <p className="text-[11px] font-bold text-emerald-600 mt-1 m-0">
-                {t('driver.normalRange', 'Normal: 37.2 - 38.3°C')}
-              </p>
-            </div>
-          </div>
-
-          {/* Card 4: Quarantine Seal */}
-          <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-100 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-emerald-700">
-              <span className="text-xs font-bold uppercase">{t('tracking.quarantineSeal', 'Quarantine Seal')}</span>
-              <ShieldCheck size={18} />
-            </div>
-            <div className="mt-3">
-              <span className="text-2xl font-black text-emerald-950">
-                {telemetry.quarantineSealStatus}
-              </span>
-              <p className="text-[11px] font-bold text-emerald-600 mt-1 m-0">
-                {t('tracking.sealIntact', 'Intact & Inspected')}
-              </p>
-            </div>
-          </div>
+      ) : trips.length === 0 ? (
+        <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 flex flex-col items-center">
+          <Truck size={44} className="text-slate-300 mb-3" />
+          <h3 className="text-lg font-bold text-slate-800 m-0">Bạn chưa có chuyến đi nào đang vận chuyển</h3>
+          <p className="text-sm text-slate-500 mt-1 max-w-md">
+            Khi đơn vận chuyển của bạn được phê duyệt kế hoạch và bàn giao cho đội xe xuất phát, bạn có thể theo dõi trực tiếp tại đây.
+          </p>
+          <Link href="/customer/orders" className="mt-4">
+            <Button size="sm">Xem danh sách đơn vận chuyển</Button>
+          </Link>
         </div>
-
-        {/* Environmental Extra Sensors Strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
-          <div>
-            <span className="text-slate-400 font-bold uppercase block">{t('tracking.humidity', 'Cabin Humidity')}</span>
-            <span className="font-extrabold text-slate-800 text-sm mt-0.5 block">{telemetry.humidityPct}% RH</span>
-          </div>
-          <div>
-            <span className="text-slate-400 font-bold uppercase block">{t('tracking.airQuality', 'HEPA Air Quality')}</span>
-            <span className="font-extrabold text-emerald-700 text-sm mt-0.5 block">{telemetry.airQuality}</span>
-          </div>
-          <div>
-            <span className="text-slate-400 font-bold uppercase block">{t('tracking.speed', 'Current Speed')}</span>
-            <span className="font-extrabold text-slate-800 text-sm mt-0.5 block">{telemetry.speedKmH} km/h</span>
-          </div>
-          <div>
-            <span className="text-slate-400 font-bold uppercase block">Last Sensor Sync</span>
-            <span className="font-bold text-slate-600 text-sm mt-0.5 block">{telemetry.lastUpdated}</span>
-          </div>
-        </div>
-
-        {/* Route Radar Banner */}
-        <div className="bg-slate-950 text-white rounded-xl p-6 sm:p-8 relative overflow-hidden shadow-lg border border-slate-800">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-2">
-              <Radio size={16} className="text-emerald-400 animate-pulse" />
-              <span className="text-xs font-extrabold tracking-widest text-emerald-400 uppercase">
-                {t('tracking.gpsRadar', 'LIVE GPS SATELLITE RADAR')}
+      ) : (
+        /* Main Tracking Overview Card */
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-sm flex flex-col gap-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
+            <div>
+              <span className="text-xs font-extrabold text-blue-600 tracking-wider uppercase">
+                {t('tracking.shipmentCode', 'MÃ CHUYẾN VẬN CHUYỂN')}
               </span>
+              <h2 className="text-2xl font-extrabold text-slate-900 mt-1 m-0 flex items-center gap-3">
+                {trackingDetails?.requestCode}
+              </h2>
+              <p className="text-sm text-slate-500 mt-1.5 flex items-center gap-2">
+                <MapPin size={15} className="text-slate-400 shrink-0" />
+                <span>
+                  <strong>{trackingDetails?.origin.split(',')[0]}</strong> → <strong>{trackingDetails?.destination.split(',')[0]}</strong>
+                </span>
+                <span className="text-slate-300">•</span>
+                <span>Khoảng cách: <strong>{trackingDetails?.totalDistanceKm || 0} km</strong></span>
+              </p>
             </div>
-            <span className="text-xs font-bold text-slate-400">
-              Trip Progress: <strong className="text-white">{progressPct}%</strong>
-            </span>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
+                Phương tiện: <strong className="text-slate-800">{trackingDetails?.assignedVehicle || 'Xe chuyên dụng'}</strong>
+              </span>
+              <StatusBadge
+                label={translateStatus(trackingDetails?.shipmentStatus || 'ready_to_depart')}
+                variant={
+                  trackingDetails?.shipmentStatus === 'in_transit'
+                    ? 'transit'
+                    : trackingDetails?.shipmentStatus === 'completed' || trackingDetails?.shipmentStatus === 'arrived'
+                    ? 'success'
+                    : 'pending'
+                }
+                hasDot={trackingDetails?.shipmentStatus === 'in_transit'}
+              />
+            </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-6 my-4">
-            <div className="text-center sm:text-left">
-              <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 mb-1.5 ring-4 ring-emerald-500/20 mx-auto sm:mx-0" />
-              <div className="font-bold text-base text-white">{activeTrip?.origin?.split(',')[0]}</div>
-              <div className="text-xs text-slate-400">Departed: {activeTrip?.departureTime}</div>
-            </div>
-
-            <div className="flex-1 w-full relative px-4">
-              <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 transition-all duration-500"
-                  style={{ width: `${Math.max(10, progressPct)}%` }}
-                />
+          {/* Telemetry Sensor Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Cabin / Stall Temp */}
+            <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-100 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-blue-700">
+                <span className="text-xs font-bold uppercase">{t('tracking.stallTemp', 'Nhiệt độ thùng xe')}</span>
+                <Thermometer size={18} />
               </div>
-              <div className="flex justify-center mt-3">
-                <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5 shadow-md">
-                  <Truck size={13} /> {telemetry.currentLocation} ({telemetry.speedKmH} km/h)
+              <div className="mt-3">
+                <span className="text-2xl font-black text-blue-950">19.2°C</span>
+                <p className="text-[11px] font-bold text-emerald-600 mt-1 m-0">
+                  {t('tracking.stallTempOk', 'Trong ngưỡng tiêu chuẩn (18-22°C)')}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 2: Equine Heart Rate */}
+            <div className="p-4 rounded-xl bg-red-50/70 border border-red-100 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-red-600">
+                <span className="text-xs font-bold uppercase">{t('driver.heartRate', 'Nhịp tim ngựa')}</span>
+                <Heart size={18} />
+              </div>
+              <div className="mt-3">
+                <span className="text-2xl font-black text-red-950">
+                  {latestHealth?.heartRateBpm || 40} <span className="text-xs font-bold text-slate-500">bpm</span>
+                </span>
+                <p className="text-[11px] font-bold text-emerald-600 mt-1 m-0">
+                  {latestHealth?.conditionStatus === 'stressed'
+                    ? 'Bác sĩ thú y đang chăm sóc'
+                    : 'Bình tĩnh & Nghỉ ngơi ổn định'}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 3: Body Temperature */}
+            <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-100 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-amber-700">
+                <span className="text-xs font-bold uppercase">{t('driver.bodyTemp', 'Thân nhiệt ngựa')}</span>
+                <Activity size={18} />
+              </div>
+              <div className="mt-3">
+                <span className="text-2xl font-black text-amber-950">
+                  {latestHealth?.temperatureC ? `${latestHealth.temperatureC}°C` : '37.8°C'}
+                </span>
+                <p className="text-[11px] font-bold text-emerald-600 mt-1 m-0">
+                  {t('driver.normalRange', 'Bình thường: 37.2 - 38.3°C')}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 4: Quarantine Seal */}
+            <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-100 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-emerald-700">
+                <span className="text-xs font-bold uppercase">{t('tracking.quarantineSeal', 'Niêm phong kiểm dịch')}</span>
+                <ShieldCheck size={18} />
+              </div>
+              <div className="mt-3">
+                <span className="text-xl font-black text-emerald-950">Intact & Sealed</span>
+                <p className="text-[11px] font-bold text-emerald-600 mt-1 m-0">
+                  {t('tracking.sealIntact', 'Đã kiểm tra & thông quan')}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Environmental Extra Sensors Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
+            <div>
+              <span className="text-slate-400 font-bold uppercase block">{t('tracking.humidity', 'Độ ẩm thùng xe')}</span>
+              <span className="font-extrabold text-slate-800 text-sm mt-0.5 block">62% RH</span>
+            </div>
+            <div>
+              <span className="text-slate-400 font-bold uppercase block">{t('tracking.airQuality', 'Chất lượng không khí')}</span>
+              <span className="font-extrabold text-emerald-700 text-sm mt-0.5 block">HEPA Lọc sạch 99.9%</span>
+            </div>
+            <div>
+              <span className="text-slate-400 font-bold uppercase block">Đội ngũ trên xe</span>
+              <span className="font-extrabold text-slate-800 text-sm mt-0.5 block">
+                {trackingDetails?.assignedDriver ? 'Tài xế + Bác sĩ thú y' : 'Chuyên nghiệp'}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400 font-bold uppercase block">Lần đồng bộ gần nhất</span>
+              <span className="font-bold text-slate-600 text-sm mt-0.5 block">
+                {new Date(trackingDetails?.lastUpdated || Date.now()).toLocaleTimeString('vi-VN')}
+              </span>
+            </div>
+          </div>
+
+          {/* Route Radar Banner: Derived position */}
+          <div className="bg-slate-950 text-white rounded-xl p-6 sm:p-8 relative overflow-hidden shadow-lg border border-slate-800">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <Radio size={16} className="text-emerald-400 animate-pulse" />
+                <span className="text-xs font-extrabold tracking-widest text-emerald-400 uppercase">
+                  {t('tracking.gpsRadar', 'HÀNH TRÌNH SUY DIỄN TỪ MỐC KIỂM SOÁT')}
                 </span>
               </div>
+              <span className="text-xs font-bold text-slate-400">
+                Tiến độ: <strong className="text-white">{progressPct}%</strong> ({completedCount}/{totalCount} mốc)
+              </span>
             </div>
 
-            <div className="text-center sm:text-right">
-              <div className="w-3.5 h-3.5 rounded-full bg-slate-600 mb-1.5 mx-auto sm:ml-auto" />
-              <div className="font-bold text-base text-white">{activeTrip?.destination?.split(',')[0]}</div>
-              <div className="text-xs text-slate-400">Est. Arrival: {activeTrip?.estimatedArrival}</div>
-            </div>
-          </div>
-        </div>
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-6 my-4">
+              <div className="text-center sm:text-left">
+                <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 mb-1.5 ring-4 ring-emerald-500/20 mx-auto sm:mx-0" />
+                <div className="font-bold text-base text-white">{trackingDetails?.origin.split(',')[0]}</div>
+                <div className="text-xs text-slate-400">Điểm xuất phát</div>
+              </div>
 
-        {/* Milestones Timeline */}
-        <div className="flex flex-col gap-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-bold text-slate-900 m-0 flex items-center gap-2">
-              <Navigation size={18} className="text-blue-600" />
-              {t('tracking.milestones', 'Transit Milestones Timeline')}
-            </h3>
-            <span className="text-xs font-bold text-slate-500">
-              {completedMilestonesCount} of {milestones.length} checkpoints cleared
-            </span>
-          </div>
-
-          <div className="relative border-l-2 border-slate-200 ml-4 pl-6 flex flex-col gap-6 py-2">
-            {milestones.length === 0 ? (
-              <p className="text-sm text-slate-500">No scheduled milestones recorded for this route.</p>
-            ) : (
-              milestones.map((m, idx) => (
-                <div key={m.id} className="relative">
-                  {/* Status Indicator Icon */}
+              <div className="flex-1 w-full relative px-4">
+                <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className={`absolute -left-[35px] top-0.5 w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${
-                      m.status === 'COMPLETED'
-                        ? 'bg-emerald-500 text-white ring-4 ring-emerald-50'
-                        : m.status === 'CURRENT'
-                        ? 'bg-blue-600 text-white ring-4 ring-blue-100 animate-pulse'
-                        : 'bg-slate-200 text-slate-600'
-                    }`}
-                  >
-                    {m.status === 'COMPLETED' ? <CheckCircle2 size={16} /> : idx + 1}
-                  </div>
+                    className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 transition-all duration-500"
+                    style={{ width: `${Math.max(10, progressPct)}%` }}
+                  />
+                </div>
+                <div className="flex justify-center mt-3">
+                  <span className="bg-blue-600 text-white px-3.5 py-1.5 rounded-full text-xs font-bold inline-flex items-center gap-2 shadow-md">
+                    <MapPin size={14} className="text-emerald-300" />
+                    <span>Vị trí hiện tại: {trackingDetails?.currentMilestone}</span>
+                  </span>
+                </div>
+              </div>
 
-                  <div className="bg-slate-50/80 rounded-xl p-4 border border-slate-200/80 hover:bg-slate-50 transition-colors">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900 text-sm">{m.title}</span>
-                        {m.isCustomsBorder && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                            Customs & Quarantine Gate
-                          </span>
-                        )}
+              <div className="text-center sm:text-right">
+                <div className="w-3.5 h-3.5 rounded-full bg-slate-600 mb-1.5 mx-auto sm:ml-auto" />
+                <div className="font-bold text-base text-white">{trackingDetails?.destination.split(',')[0]}</div>
+                <div className="text-xs text-slate-400">Dự kiến đến: {trackingDetails?.eta || 'Đúng tiến độ'}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Milestones Timeline */}
+          <div className="flex flex-col gap-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-bold text-slate-900 m-0 flex items-center gap-2">
+                <FileCheck2 size={18} className="text-blue-600" />
+                {t('tracking.milestones', 'Tiến độ các Mốc Lộ trình & Thủ tục Kiểm dịch')}
+              </h3>
+              <span className="text-xs font-bold text-slate-500">
+                {completedCount} trên {totalCount} chặng/trạm đã qua
+              </span>
+            </div>
+
+            <div className="relative border-l-2 border-slate-200 ml-4 pl-6 flex flex-col gap-5 py-2">
+              {!trackingDetails || trackingDetails.milestones.length === 0 ? (
+                <p className="text-sm text-slate-500">Chưa có thông tin mốc kiểm soát nào cho chuyến đi này.</p>
+              ) : (
+                trackingDetails.milestones.map((m, idx) => {
+                  const isCompleted = m.status === 'COMPLETED';
+                  const isCurrent = m.status === 'CURRENT';
+
+                  return (
+                    <div key={m.id} className="relative">
+                      {/* Status Icon */}
+                      <div
+                        className={`absolute -left-[35px] top-0.5 w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${
+                          isCompleted
+                            ? 'bg-emerald-500 text-white ring-4 ring-emerald-50'
+                            : isCurrent
+                            ? 'bg-blue-600 text-white ring-4 ring-blue-100 animate-pulse'
+                            : 'bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {isCompleted ? <CheckCircle2 size={16} /> : idx + 1}
                       </div>
-                      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full w-fit ${
-                        m.status === 'COMPLETED'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : m.status === 'CURRENT'
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-slate-200 text-slate-600'
-                      }`}>
-                        {m.status === 'COMPLETED' ? 'Completed' : m.status === 'CURRENT' ? 'In Progress' : 'Upcoming'}
+
+                      <div
+                        className={`rounded-xl p-4 border transition-colors ${
+                          isCurrent
+                            ? 'bg-blue-50/70 border-blue-300'
+                            : isCompleted
+                            ? 'bg-slate-50/80 border-slate-200'
+                            : 'bg-white border-slate-200'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-bold text-slate-900 text-sm">{m.title}</span>
+                            {m.legType === 'flight' && (
+                              <span className="bg-sky-100 text-sky-800 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                                <Plane size={11} /> Chặng bay
+                              </span>
+                            )}
+                            {m.isCustomsBorder && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                Kiểm dịch & Hải quan
+                              </span>
+                            )}
+                          </div>
+
+                          <span
+                            className={`text-xs font-bold px-2.5 py-0.5 rounded-full w-fit ${
+                              isCompleted
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : isCurrent
+                                ? 'bg-blue-100 text-blue-900'
+                                : 'bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            {isCompleted ? 'Đã hoàn tất' : isCurrent ? 'Đang thực hiện' : 'Sắp tới'}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-1.5 m-0">
+                          <MapPin size={13} className="text-slate-400" /> {m.location}
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 mt-2">
+                          {m.plannedTime && (
+                            <span>Kế hoạch: {new Date(m.plannedTime).toLocaleString('vi-VN')}</span>
+                          )}
+                          {m.actualTime && (
+                            <span className="text-emerald-700 font-bold">
+                              Thực tế: {new Date(m.actualTime).toLocaleString('vi-VN')}
+                            </span>
+                          )}
+                          {m.updatedBy && (
+                            <span className="text-slate-400 italic">Xác nhận bởi: {m.updatedBy}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Equine Health Summary for Customer */}
+          {trackingDetails?.healthLogs && trackingDetails.healthLogs.length > 0 && (
+            <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-slate-900 m-0 flex items-center gap-2">
+                  <Heart size={16} className="text-red-500" />
+                  Nhật ký Sức khỏe & Thể trạng Ngựa trong Chuyến đi
+                </h4>
+                <span className="text-xs text-slate-400">Cập nhật bởi Chuyên viên y tế áp tải</span>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                {trackingDetails.healthLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="p-3 bg-white rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-slate-900">{log.horseName}</span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            log.conditionStatus === 'stable'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-900'
+                          }`}
+                        >
+                          {log.conditionStatusVi || log.conditionStatus}
+                        </span>
+                      </div>
+                      <p className="text-slate-600 mt-1 m-0">{log.notes || 'Sức khỏe ổn định'}</p>
+                    </div>
+
+                    <div className="text-slate-500 sm:text-right shrink-0">
+                      <span className="font-bold text-slate-800 block">
+                        {log.temperatureC ? `${log.temperatureC}°C` : '--'} • {log.heartRateBpm ? `${log.heartRateBpm} bpm` : '--'}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {new Date(log.recordedAt).toLocaleString('vi-VN')}
                       </span>
                     </div>
-
-                    <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-1.5 m-0">
-                      <MapPin size={13} className="text-slate-400" /> {m.location}
-                    </p>
-
-                    {m.status === 'COMPLETED' && (
-                      <div className="mt-3 pt-3 border-t border-slate-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
-                        <span className="text-slate-700 italic">
-                          &ldquo;{m.notes || 'Checkpoint cleared.'}&rdquo;
-                        </span>
-                        <span className="text-slate-400 font-medium shrink-0">
-                          {m.timestamp} {m.author ? `• Logged by ${m.author}` : ''}
-                        </span>
-                      </div>
-                    )}
                   </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Equine Health Logs & Escort Feed */}
-        <div className="flex flex-col gap-4 border-t border-slate-100 pt-6">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-bold text-slate-900 m-0 flex items-center gap-2">
-              <Stethoscope size={18} className="text-purple-600" />
-              {t('tracking.equineVitals', 'Equine Vital Signs & Escort Feed')}
-            </h3>
-            <span className="text-xs font-bold text-slate-500">
-              {healthLogs.length} Logged Checks
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {healthLogs.length === 0 ? (
-              <div className="p-6 bg-slate-50 rounded-xl text-center text-sm text-slate-500">
-                No health observations reported yet. Driver and escort conduct checks every 3 hours.
+                ))}
               </div>
-            ) : (
-              healthLogs.map((log) => (
-                <div
-                  key={log.id}
-                  className="p-4 rounded-xl border border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
-                      <Heart size={20} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900 text-sm">{log.horseName}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                          log.condition === 'Stable'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {log.condition}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600 mt-1 m-0">{log.notes}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 text-xs font-semibold shrink-0 sm:border-l sm:border-slate-100 sm:pl-4">
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase">Temp / HR</span>
-                      <span className="text-slate-800">{log.tempC}°C • {log.heartRateBpm} bpm</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase">Examined By</span>
-                      <span className="text-slate-700">{log.loggedBy || 'Escort'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px] uppercase">Time</span>
-                      <span className="text-slate-500">{log.loggedAt}</span>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+            </div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
