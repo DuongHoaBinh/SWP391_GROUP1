@@ -156,7 +156,7 @@ async function fetchOsrmFullRoute(
 export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   originText = 'Trang trại Củ Chi, TP.HCM',
   destinationText = 'Singapore Turf Club, Singapore',
-  transportType = 'International',
+  transportType,
   onRouteCalculated,
   onApplyPreset,
 }) => {
