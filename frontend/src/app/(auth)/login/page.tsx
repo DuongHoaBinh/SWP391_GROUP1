@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { AuthShowcasePanel } from '@/components/layout/AuthShowcasePanel';
-import { setAuthSession } from '@/lib/auth';
+import { setAuthSession, clearAuthSession } from '@/lib/auth';
 import { mockCurrentUser } from '@/lib/mock-data';
 
 function LoginFormContent() {
@@ -19,6 +19,10 @@ function LoginFormContent() {
   const [rememberMe, setRememberMe] = useState(false);
 
   useEffect(() => {
+    // Clear stale session when visiting login directly so old forgot-to-logout sessions do not linger
+    if (!searchParams.get('redirect')) {
+      clearAuthSession();
+    }
     try {
       const savedEmail = localStorage.getItem('equitransit_remembered_email');
       const isRemembered = localStorage.getItem('equitransit_remember_me') === 'true';
@@ -29,7 +33,7 @@ function LoginFormContent() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [searchParams]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);

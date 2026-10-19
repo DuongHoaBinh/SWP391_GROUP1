@@ -103,21 +103,48 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async findAllVehicles(status?: VehicleStatus, type?: VehicleType): Promise<VehicleEntity[]> {
-    let sql = 'SELECT vehicle_id, vehicle_type, plate_or_code, capacity, status, created_at FROM vehicle WHERE 1=1';
+    let sql = `
+      SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity,
+             CASE 
+               WHEN active_leg.shipment_id IS NOT NULL THEN 'in_use'
+               WHEN active_sv.shipment_id IS NOT NULL THEN 'in_use'
+               ELSE v.status
+             END AS computed_status,
+             COALESCE(active_leg.shipment_id, active_sv.shipment_id) AS assigned_shipment_id,
+             v.created_at
+      FROM vehicle v
+      LEFT JOIN (
+        SELECT rl.vehicle_id, MIN(r.shipment_id) as shipment_id
+        FROM route_leg rl
+        JOIN route r ON r.route_id = rl.route_id
+        JOIN shipment s ON s.shipment_id = r.shipment_id
+        WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit')
+          AND rl.vehicle_id IS NOT NULL
+        GROUP BY rl.vehicle_id
+      ) active_leg ON active_leg.vehicle_id = v.vehicle_id
+      LEFT JOIN (
+        SELECT sv.vehicle_id, MIN(sv.shipment_id) as shipment_id
+        FROM shipment_vehicle sv
+        JOIN shipment s ON s.shipment_id = sv.shipment_id
+        WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit')
+        GROUP BY sv.vehicle_id
+      ) active_sv ON active_sv.vehicle_id = v.vehicle_id
+      WHERE 1=1
+    `;
     const params: any[] = [];
 
-    if (status) {
-      sql += ' AND status = ?';
-      params.push(status);
-    }
     if (type) {
-      sql += ' AND vehicle_type = ?';
+      sql += ' AND v.vehicle_type = ?';
       params.push(type);
     }
 
-    sql += ' ORDER BY vehicle_id ASC';
-    const [rows] = await this.pool.execute<VehicleRow[]>(sql, params);
-    return rows.map((r) => this.mapVehicleRow(r));
+    sql += ' ORDER BY v.vehicle_id ASC';
+    const [rows] = await this.pool.execute<any[]>(sql, params);
+    let mapped = rows.map((r) => this.mapVehicleRow(r));
+    if (status) {
+      mapped = mapped.filter((m) => m.status === status);
+    }
+    return mapped;
   }
 
   async findVehicleById(id: number): Promise<VehicleEntity | undefined> {
@@ -232,12 +259,30 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async assignStaff(shipmentId: number, assignments: StaffAssignmentItemDto[]): Promise<void> {
+    // 1. Lấy danh sách phân công hiện tại để bảo toàn trạng thái xác nhận của nhân sự không thay đổi
+    const [existing] = await this.pool.execute<any[]>(
+      'SELECT user_id, role_in_shipment, is_confirmed, confirmed_at, confirmation_notes FROM shipment_assignment WHERE shipment_id = ?',
+      [shipmentId],
+    );
+    const existingMap = new Map<string, any>();
+    for (const e of existing) {
+      existingMap.set(`${e.user_id}_${e.role_in_shipment}`, e);
+    }
+
     await this.pool.execute('DELETE FROM shipment_assignment WHERE shipment_id = ?', [shipmentId]);
 
     for (const item of assignments) {
+      const prev = existingMap.get(`${item.userId}_${item.roleInShipment}`);
+      // Nếu nhân sự này đã từng được phân công và ĐÃ XÁC NHẬN (chấp nhận), giữ nguyên trạng thái xác nhận!
+      // Nếu trước đó họ từ chối và Manager vẫn phân công lại họ, hoặc là người mới, thì reset về chờ xác nhận
+      const shouldPreserve = prev && Boolean(prev.is_confirmed) === true;
+      const isConfirmed = shouldPreserve ? true : false;
+      const confirmedAt = shouldPreserve ? prev.confirmed_at : null;
+      const confirmationNotes = shouldPreserve ? prev.confirmation_notes : null;
+
       await this.pool.execute(
-        'INSERT INTO shipment_assignment (shipment_id, user_id, role_in_shipment, assigned_date) VALUES (?, ?, ?, NOW())',
-        [shipmentId, item.userId, item.roleInShipment],
+        'INSERT INTO shipment_assignment (shipment_id, user_id, role_in_shipment, assigned_date, is_confirmed, confirmed_at, confirmation_notes) VALUES (?, ?, ?, NOW(), ?, ?, ?)',
+        [shipmentId, item.userId, item.roleInShipment, isConfirmed, confirmedAt, confirmationNotes],
       );
     }
   }
@@ -251,6 +296,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
                 JOIN shipment s ON sa.shipment_id = s.shipment_id
                 WHERE sa.user_id = u.user_id
                   AND s.status NOT IN ('completed', 'cancelled')
+                  AND (sa.confirmation_notes IS NULL OR sa.confirmation_notes NOT LIKE 'TỪ CHỐI%')
               ) AS active_trips_count
        FROM \`user\` u
        JOIN \`role\` r ON u.role_id = r.role_id
@@ -320,14 +366,18 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private mapVehicleRow(r: VehicleRow): VehicleEntity {
+  private mapVehicleRow(r: any): VehicleEntity {
+    const computedStatus = (r.computed_status || r.status) as VehicleStatus;
+    const assignedId = r.assigned_shipment_id ? Number(r.assigned_shipment_id) : null;
     return {
       id: r.vehicle_id,
       vehicleType: r.vehicle_type,
       plateOrCode: r.plate_or_code,
       capacity: Number(r.capacity),
-      status: r.status,
+      status: computedStatus,
       createdAt: new Date(r.created_at).toISOString(),
+      assignedShipmentId: assignedId,
+      assignedTripCode: assignedId ? `REQ-${String(assignedId).padStart(3, '0')}` : null,
     };
   }
 }
