@@ -190,7 +190,7 @@ export default function TripMonitoringPage() {
             Theo dõi vị trí suy diễn từ các mốc lộ trình, cảm biến vi khí hậu thùng xe và hồ sơ sinh trắc học ngựa.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <Button
             variant="outline"
             size="sm"

@@ -12,6 +12,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   CheckInLegDto,
   CheckInStopDto,
@@ -21,6 +22,8 @@ import {
   TripTrackingDetails,
 } from './tracking.types';
 
+@ApiTags('Tracking')
+@ApiBearerAuth()
 @Controller('tracking')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TrackingController {
