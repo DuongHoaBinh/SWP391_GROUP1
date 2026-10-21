@@ -152,22 +152,16 @@ export default function CoordinatorLayout({
               width: '34px',
               height: '34px',
               borderRadius: '8px',
-              backgroundColor: '#2563eb',
-              color: '#ffffff',
+              overflow: 'hidden',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontWeight: 800,
-              fontSize: '17px',
               marginRight: '12px',
               boxShadow: '0 0 15px rgba(37, 99, 235, 0.5)',
+              backgroundColor: '#0c1a2e',
             }}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4">
-              <circle cx="5" cy="19" r="2" fill="#fff" />
-              <path d="M5 17c0-5 4-9 9-9h5" />
-              <polyline points="15 4 19 8 15 12" />
-            </svg>
+            <img src="/logo.png" alt="RaceHorse" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
           <div>
             <h1 style={{ color: '#ffffff', fontWeight: 800, fontSize: '14px', letterSpacing: '0.02em', lineHeight: 1.2, margin: 0 }}>
@@ -396,21 +390,15 @@ export default function CoordinatorLayout({
                     width: '34px',
                     height: '34px',
                     borderRadius: '8px',
-                    backgroundColor: '#2563eb',
-                    color: '#ffffff',
+                    overflow: 'hidden',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontWeight: 800,
-                    fontSize: '17px',
                     marginRight: '12px',
+                    backgroundColor: '#0c1a2e',
                   }}
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4">
-                    <circle cx="5" cy="19" r="2" fill="#fff" />
-                    <path d="M5 17c0-5 4-9 9-9h5" />
-                    <polyline points="15 4 19 8 15 12" />
-                  </svg>
+                  <img src="/logo.png" alt="RaceHorse" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 </div>
                 <h1 style={{ color: '#ffffff', fontWeight: 800, fontSize: '14px', margin: 0 }}>
                   RaceHorse <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500 }}>Logistics</span>

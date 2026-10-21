@@ -8,6 +8,14 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'EquiTransit Logistics - Cross-Border Racehorse Transport',
   description: 'Specialized international racehorse transportation management system.',
+  icons: {
+    icon: [
+      { url: '/icon.png', type: 'image/png' },
+      { url: '/favicon.ico' },
+    ],
+    shortcut: '/icon.png',
+    apple: '/icon.png',
+  },
 };
 
 export default function RootLayout({
@@ -17,6 +25,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="vi">
+      <head>
+        <link rel="icon" href="/icon.png" type="image/png" sizes="any" />
+        <link rel="shortcut icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" href="/icon.png" />
+      </head>
       <body>
         <LanguageProvider>
           <DocumentStoreProvider>

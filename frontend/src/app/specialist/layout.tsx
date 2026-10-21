@@ -147,12 +147,8 @@ export default function SpecialistLayout({
       <aside className="hidden md:flex w-[260px] bg-slate-900 text-slate-400 flex-col h-full z-40 border-r border-white/5 shrink-0">
         {/* Logo */}
         <div className="h-[72px] flex items-center px-6 border-b border-white/5 shrink-0">
-          <div className="w-[34px] h-[34px] rounded-lg bg-blue-600 text-white flex items-center justify-center font-extrabold text-[17px] mr-3 shadow-[0_0_15px_rgba(37,99,235,0.5)]">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4">
-              <circle cx="5" cy="19" r="2" fill="#fff" />
-              <path d="M5 17c0-5 4-9 9-9h5" />
-              <polyline points="15 4 19 8 15 12" />
-            </svg>
+          <div className="w-[34px] h-[34px] rounded-lg overflow-hidden flex items-center justify-center mr-3 shadow-[0_0_15px_rgba(37,99,235,0.5)] bg-[#0c1a2e]">
+            <img src="/logo.png" alt="RaceHorse" className="w-full h-full object-cover" />
           </div>
           <div>
             <h1 className="text-white font-extrabold text-sm tracking-[0.02em] leading-tight m-0">
@@ -287,12 +283,8 @@ export default function SpecialistLayout({
             {/* Logo + Close */}
             <div className="h-[72px] flex items-center justify-between px-5 border-b border-white/5 shrink-0">
               <div className="flex items-center">
-                <div className="w-[34px] h-[34px] rounded-lg bg-blue-600 text-white flex items-center justify-center font-extrabold text-[17px] mr-3">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4">
-                    <circle cx="5" cy="19" r="2" fill="#fff" />
-                    <path d="M5 17c0-5 4-9 9-9h5" />
-                    <polyline points="15 4 19 8 15 12" />
-                  </svg>
+                <div className="w-[34px] h-[34px] rounded-lg overflow-hidden flex items-center justify-center mr-3 bg-[#0c1a2e]">
+                  <img src="/logo.png" alt="RaceHorse" className="w-full h-full object-cover" />
                 </div>
                 <h1 className="text-white font-extrabold text-sm m-0">
                   RaceHorse <span className="text-[10px] text-slate-400 font-medium">Logistics</span>

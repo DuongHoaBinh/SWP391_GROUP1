@@ -351,7 +351,7 @@ export default function RoutePlanningPage() {
           destinationLocation: selectedPlanningOrder?.destination || template.destination,
           distanceKm: 35,
           durationHours: 1.5,
-          vehiclePlate: 'SGP-EQ-004',
+          vehiclePlate: `Xe từ ${(selectedPlanningOrder?.destination || template.destination).split(',')[0].trim()} đến đón (Bên nhận tự rước)`,
         },
       ];
       setLegs(airLegs);
@@ -443,7 +443,7 @@ export default function RoutePlanningPage() {
               destinationLocation: order.destination,
               distanceKm: 35,
               durationHours: 1.5,
-              vehiclePlate: 'SGP-EQ-004',
+              vehiclePlate: `Xe từ ${order.destination.split(',')[0].trim()} đến đón (Bên nhận tự rước)`,
             },
           ]);
         }
@@ -520,7 +520,7 @@ export default function RoutePlanningPage() {
               destinationLocation: order.destination,
               distanceKm: 32,
               durationHours: 1.5,
-              vehiclePlate: 'SGP-EQ-004 (Air-Conditioned Stall)',
+              vehiclePlate: `Xe từ ${order.destination.split(',')[0].trim()} đến đón (Bên nhận tự rước)`,
             },
           ]);
           setStops([
@@ -554,16 +554,21 @@ export default function RoutePlanningPage() {
   const handleAddLeg = (type: 'road' | 'flight') => {
     const nextSeq = legs.length + 1;
     if (type === 'road') {
+      const isAfterFlight = legs.some((l) => l.legType === 'flight');
+      const destClean = (selectedPlanningOrder?.destination || 'Địa điểm đích').split(',')[0].trim();
+      const defaultPlate = isAfterFlight
+        ? `Xe từ ${destClean} đến đón (Bên nhận tự rước)`
+        : (vehicles[0]?.code || 'TRK-VN-089');
       setLegs([
         ...legs,
         {
           sequenceNo: nextSeq,
           legType: 'road',
           originLocation: legs.length > 0 ? legs[legs.length - 1].destinationLocation : 'Điểm tập kết',
-          destinationLocation: 'Điểm đến chặng đường bộ',
-          distanceKm: 120,
-          durationHours: 3,
-          vehiclePlate: vehicles[0]?.code || 'TRK-VN-089',
+          destinationLocation: isAfterFlight ? (selectedPlanningOrder?.destination || 'Địa điểm đích') : 'Điểm đến chặng đường bộ',
+          distanceKm: isAfterFlight ? 35 : 120,
+          durationHours: isAfterFlight ? 1.5 : 3,
+          vehiclePlate: defaultPlate,
         },
       ]);
     } else {
@@ -1537,51 +1542,77 @@ export default function RoutePlanningPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                         <div>
                           <label className="font-bold text-slate-700 block mb-1">Phương Tiện / Xe Chuyên Dụng *</label>
-                          <select
-                            value={leg.vehiclePlate ?? ''}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              const updated = [...legs];
-                              const plateToIdMap: Record<string, number> = {
-                                '51C-888.99': 1,
-                                '51D-777.22': 2,
-                                '29B-999.11': 3,
-                                '60C-555.33': 4,
-                                'TRK-VN-089': 3,
-                                'TRK-VN-102': 4,
-                              };
-                              const matchedVehicle = vehicles.find((v) => v.code === val);
-                              let resolvedVehicleId = plateToIdMap[val];
-                              if (!resolvedVehicleId && matchedVehicle) {
-                                const parsed = Number(String(matchedVehicle.id).replace(/\D/g, ''));
-                                if (!isNaN(parsed) && parsed > 0) resolvedVehicleId = parsed;
-                              }
-                              updated[idx].vehiclePlate = val;
-                              updated[idx].vehicleId = resolvedVehicleId || null;
-                              setLegs(updated);
-                            }}
-                            className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800 text-xs"
-                          >
-                            <option value="">-- Chọn xe từ danh sách đội xe --</option>
-                            {vehicles
-                              .filter((v) => !v.type?.toLowerCase().includes('air'))
-                              .map((v) => {
-                                const isBusy =
-                                  v.status === 'in_use' &&
-                                  v.assignedTripCode &&
-                                  v.assignedTripCode !== selectedPlanningOrder?.requestCode;
-                                return (
-                                  <option key={v.id} value={v.code} disabled={Boolean(isBusy)}>
-                                    {v.code} — {v.type} ({v.capacity} stall, {v.location}){' '}
-                                    {isBusy
-                                      ? `— ⚠️ Đang chạy chuyến ${v.assignedTripCode}`
-                                      : v.status === 'in_use'
-                                      ? '— (Đang dùng cho chuyến này)'
-                                      : '— Sẵn sàng'}
-                                  </option>
-                                );
-                              })}
-                          </select>
+                          {(() => {
+                            const destClean = (leg.destinationLocation || selectedPlanningOrder?.destination || 'Địa điểm đích').split(',')[0].trim();
+                            const receiverOption = leg.vehiclePlate && (leg.vehiclePlate.includes('đến đón') || leg.vehiclePlate.includes('đến rước'))
+                              ? leg.vehiclePlate
+                              : `Xe từ ${destClean} đến đón (Bên nhận tự rước)`;
+                            const isOverseasOrLastMile = leg.sequenceNo > 1 || legs.some((l) => l.legType === 'flight');
+
+                            return (
+                              <>
+                                <select
+                                  value={leg.vehiclePlate ?? ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    const updated = [...legs];
+                                    const plateToIdMap: Record<string, number> = {
+                                      '51C-888.99': 1,
+                                      '51D-777.22': 2,
+                                      '29B-999.11': 3,
+                                      '60C-555.33': 4,
+                                      'TRK-VN-089': 3,
+                                      'TRK-VN-102': 4,
+                                    };
+                                    const matchedVehicle = vehicles.find((v) => v.code === val);
+                                    let resolvedVehicleId = plateToIdMap[val];
+                                    if (!resolvedVehicleId && matchedVehicle) {
+                                      const parsed = Number(String(matchedVehicle.id).replace(/\D/g, ''));
+                                      if (!isNaN(parsed) && parsed > 0) resolvedVehicleId = parsed;
+                                    }
+                                    updated[idx].vehiclePlate = val;
+                                    updated[idx].vehicleId = resolvedVehicleId || null;
+                                    setLegs(updated);
+                                  }}
+                                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800 text-xs"
+                                >
+                                  <option value="">-- Chọn xe / phương tiện --</option>
+                                  {isOverseasOrLastMile && (
+                                    <optgroup label="Phương tiện địa điểm đích (Nước ngoài)">
+                                      <option value={receiverOption}>
+                                        🚗 {receiverOption}
+                                      </option>
+                                    </optgroup>
+                                  )}
+                                  <optgroup label="Đội xe chuyên dụng nội bộ (Việt Nam)">
+                                    {vehicles
+                                      .filter((v) => !v.type?.toLowerCase().includes('air'))
+                                      .map((v) => {
+                                        const isBusy =
+                                          v.status === 'in_use' &&
+                                          v.assignedTripCode &&
+                                          v.assignedTripCode !== selectedPlanningOrder?.requestCode;
+                                        return (
+                                          <option key={v.id} value={v.code} disabled={Boolean(isBusy)}>
+                                            {v.code} — {v.type} ({v.capacity} stall, {v.location}){' '}
+                                            {isBusy
+                                              ? `— ⚠️ Đang chạy chuyến ${v.assignedTripCode}`
+                                              : v.status === 'in_use'
+                                              ? '— (Đang dùng cho chuyến này)'
+                                              : '— Sẵn sàng'}
+                                          </option>
+                                        );
+                                      })}
+                                  </optgroup>
+                                </select>
+                                {leg.vehiclePlate && (leg.vehiclePlate.includes('đến đón') || leg.vehiclePlate.includes('đến rước')) && (
+                                  <p className="mt-1 text-[11px] text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-200">
+                                    ℹ️ Chặng nước ngoài: Bên nhận tự điều xe đến đón tại sân bay (không yêu cầu xe nội bộ).
+                                  </p>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                         <div>
                           <label className="font-bold text-slate-700 block mb-1">Điểm Xuất Phát Chặng</label>

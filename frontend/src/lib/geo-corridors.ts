@@ -824,8 +824,7 @@ function matchesKeyword(text: string, kw: string): boolean {
 export function resolveLocation(
   rawText: string,
   fallbackDefaultId = 'vn-hcm-cuchi',
-  forceDomesticOnly = false,
-  forceInternationalOnly = false
+  forceDomesticOnly = false
 ): KnownLocation {
   if (!rawText || !rawText.trim()) {
     return KNOWN_LOCATIONS.find((l) => l.id === fallbackDefaultId)!;
@@ -836,7 +835,6 @@ export function resolveLocation(
   // If user selected domestic scope, only search among Vietnam locations
   const candidateLocations = KNOWN_LOCATIONS.filter((loc) => {
     if (forceDomesticOnly) return loc.isVietnam;
-    if (forceInternationalOnly) return !loc.isVietnam;
     return true;
   });
 
@@ -903,14 +901,12 @@ export function buildEquineRoute(
   explicitTransportType?: 'International' | 'Domestic'
 ): RouteCalculationResult {
   const isForcedDomestic = explicitTransportType === 'Domestic';
-  const isForcedInternational = explicitTransportType === 'International';
 
-  const origin = resolveLocation(originText, 'vn-hcm-cuchi', isForcedDomestic, isForcedInternational);
+  const origin = resolveLocation(originText, 'vn-hcm-cuchi', isForcedDomestic);
   const destination = resolveLocation(
     destinationText,
     isForcedDomestic ? 'vn-tiengiang' : 'intl-singapore',
-    isForcedDomestic,
-    isForcedInternational
+    isForcedDomestic
   );
 
   const isDomestic =

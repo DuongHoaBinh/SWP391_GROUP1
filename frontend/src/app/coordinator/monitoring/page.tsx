@@ -243,6 +243,11 @@ export default function TripMonitoringPage() {
                     <span className="text-xs font-black text-blue-600 uppercase tracking-wider">
                       {trackingDetails?.requestCode || 'TR-2026-F4'}
                     </span>
+                    {trackingDetails?.requestTitle && (
+                      <span className="text-xs font-semibold text-slate-500">
+                        • {trackingDetails.requestTitle}
+                      </span>
+                    )}
                     <StatusBadge
                       label={translateStatus(trackingDetails?.shipmentStatus || 'ready_to_depart')}
                       variant={
@@ -664,7 +669,7 @@ export default function TripMonitoringPage() {
                     </div>
 
                     <p className="text-sm font-bold text-slate-900 m-0">
-                      {trip.route_name || `${trip.origin_location.split(',')[0]} → ${trip.destination_location.split(',')[0]}`}
+                      {trip.request_title || trip.route_name || `${trip.origin_location.split(',')[0]} → ${trip.destination_location.split(',')[0]}`}
                     </p>
 
                     <div className="flex items-center justify-between text-xs text-slate-500 mt-2">
