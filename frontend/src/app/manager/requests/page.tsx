@@ -402,10 +402,32 @@ export default function ManagerRequestsPage() {
             activeModal === 'REJECT' ? `Từ chối đơn vận chuyển ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}` : 
             `Yêu cầu chỉnh sửa đơn ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}`
           } 
-          maxWidth="560px"
+          maxWidth="600px"
         >
-          <div className="flex flex-col gap-4">
-            {activeModal === 'APPROVE' && selectedOrder && (() => {
+          <div className="flex flex-col gap-4 max-h-[80vh] overflow-y-auto pr-1">
+            {/* Context Notice Banner for REJECT or CHANGE */}
+            {activeModal === 'REJECT' && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-start gap-2.5">
+                <span className="text-base shrink-0">⚠️</span>
+                <div>
+                  <strong className="block text-red-900 font-bold mb-0.5">Xác nhận từ chối đơn hàng</strong>
+                  <span>Vui lòng xem lại lộ trình và thông tin chiến mã bên dưới để đưa ra lý do từ chối chính xác cho khách hàng.</span>
+                </div>
+              </div>
+            )}
+
+            {activeModal === 'CHANGE' && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+                <span className="text-base shrink-0">📝</span>
+                <div>
+                  <strong className="block text-amber-950 font-bold mb-0.5">Yêu cầu khách hàng chỉnh sửa / bổ sung</strong>
+                  <span>Vui lòng đối chiếu các thông tin đơn hàng dưới đây để chỉ dẫn cụ thể các mục cần bổ sung hoặc cập nhật lại.</span>
+                </div>
+              </div>
+            )}
+
+            {/* Shared Route & Distance Card and Horse Details Card */}
+            {(() => {
               const routeInfo = buildEquineRoute(selectedOrder.originLocation || '', selectedOrder.destinationLocation || '', selectedTransportMode);
               const horseCount = selectedOrder.requestedHorseCount || (selectedOrder.horses?.length || 1);
               return (
@@ -531,99 +553,119 @@ export default function ManagerRequestsPage() {
                       </div>
                     )}
                   </div>
-
-                  {/* Cost & Currency input */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-xs font-bold text-slate-700">
-                        Chi phí vận chuyển báo giá (Total Cost) *
-                      </label>
-                      <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-100">
-                        <button
-                          type="button"
-                          onClick={() => handleCurrencyToggle('USD')}
-                          className={`px-2.5 py-0.5 text-xs font-bold rounded-md transition-all ${
-                            costCurrency === 'USD'
-                              ? 'bg-white text-blue-600 shadow-sm'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          USD ($)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCurrencyToggle('VND')}
-                          className={`px-2.5 py-0.5 text-xs font-bold rounded-md transition-all ${
-                            costCurrency === 'VND'
-                              ? 'bg-white text-emerald-600 shadow-sm'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          VND (₫)
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="relative">
-                      <input 
-                        type="number" 
-                        min={1}
-                        step={costCurrency === 'USD' ? 50 : 100000}
-                        value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
-                        placeholder={costCurrency === 'USD' ? 'e.g. 2500' : 'e.g. 60000000'}
-                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm font-bold text-slate-900 outline-none focus:border-blue-500 pr-16"
-                      />
-                      <span className="absolute right-3.5 top-2.5 text-xs font-bold text-slate-500">
-                        {costCurrency === 'USD' ? 'USD ($)' : 'VND (₫)'}
-                      </span>
-                    </div>
-
-                    <div className="mt-2 text-xs text-slate-500 flex items-center justify-between">
-                      <span>Quy đổi tham khảo (1 USD ≈ 25,400 VND):</span>
-                      <strong className="text-slate-800 font-semibold">{formatEquivalent(inputValue, costCurrency)}</strong>
-                    </div>
-                  </div>
                 </div>
               );
             })()}
 
+            {/* Action Specific Fields */}
+            {activeModal === 'APPROVE' && (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    Chi phí vận chuyển báo giá (Total Cost) *
+                  </label>
+                  <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => handleCurrencyToggle('USD')}
+                      className={`px-2.5 py-0.5 text-xs font-bold rounded-md transition-all ${
+                        costCurrency === 'USD'
+                          ? 'bg-white text-blue-600 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      USD ($)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCurrencyToggle('VND')}
+                      className={`px-2.5 py-0.5 text-xs font-bold rounded-md transition-all ${
+                        costCurrency === 'VND'
+                          ? 'bg-white text-emerald-600 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      VND (₫)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    min={1}
+                    step={costCurrency === 'USD' ? 50 : 100000}
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    placeholder={costCurrency === 'USD' ? 'e.g. 2500' : 'e.g. 60000000'}
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm font-bold text-slate-900 outline-none focus:border-blue-500 pr-16"
+                  />
+                  <span className="absolute right-3.5 top-2.5 text-xs font-bold text-slate-500">
+                    {costCurrency === 'USD' ? 'USD ($)' : 'VND (₫)'}
+                  </span>
+                </div>
+
+                <div className="mt-2 text-xs text-slate-500 flex items-center justify-between">
+                  <span>Quy đổi tham khảo (1 USD ≈ 25,400 VND):</span>
+                  <strong className="text-slate-800 font-semibold">{formatEquivalent(inputValue, costCurrency)}</strong>
+                </div>
+              </div>
+            )}
+
             {activeModal === 'REJECT' && (
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Reason for Rejection *</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Lý do từ chối đơn vận chuyển (Reason for Rejection) *
+                </label>
                 <textarea 
                   rows={4}
-                  placeholder="Provide detailed explanation for rejection..."
+                  placeholder="Nêu rõ lý do từ chối đơn hàng (Ví dụ: Không đáp ứng điều kiện kiểm dịch thú y nước nhập cảnh, thời gian quá gấp, lộ trình không khả thi...)..."
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-xs outline-none focus:border-red-500 leading-relaxed"
                 />
               </div>
             )}
 
             {activeModal === 'CHANGE' && (
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Modification Instructions *</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Nội dung yêu cầu chỉnh sửa / bổ sung (Revision Instructions) *
+                </label>
                 <textarea 
                   rows={4}
-                  placeholder="Describe required changes (e.g., adjust departure date, provide health certificates)..."
+                  placeholder="Mô tả cụ thể thông tin khách hàng cần bổ sung hoặc sửa đổi (Ví dụ: Cập nhật lại số microchip, bổ sung sổ tiêm chủng cúm ngựa, dời ngày khởi hành...)..."
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-xs outline-none focus:border-amber-500 leading-relaxed"
                 />
               </div>
             )}
 
-            <div className="flex justify-end gap-3 mt-2">
-              <Button type="button" variant="outline" onClick={() => setActiveModal('NONE')}>Cancel</Button>
+            <div className="flex justify-end gap-3 mt-2 pt-2 border-t border-slate-100">
+              <Button type="button" variant="outline" onClick={() => setActiveModal('NONE')}>
+                Hủy bỏ
+              </Button>
               <Button 
                 type="button" 
                 variant="primary" 
                 disabled={isSubmitting}
                 onClick={handleConfirmAction}
-                className={activeModal === 'REJECT' ? 'bg-red-600 hover:bg-red-700' : activeModal === 'APPROVE' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+                className={
+                  activeModal === 'REJECT'
+                    ? 'bg-red-600 hover:bg-red-700 text-white font-bold'
+                    : activeModal === 'APPROVE'
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold'
+                    : 'bg-amber-600 hover:bg-amber-700 text-white font-bold'
+                }
               >
-                {isSubmitting ? 'Processing...' : 'Confirm Decision'}
+                {isSubmitting
+                  ? 'Đang xử lý...'
+                  : activeModal === 'REJECT'
+                  ? 'Xác nhận từ chối'
+                  : activeModal === 'CHANGE'
+                  ? 'Gửi yêu cầu chỉnh sửa'
+                  : 'Xác nhận phê duyệt'}
               </Button>
             </div>
           </div>

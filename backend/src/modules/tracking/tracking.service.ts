@@ -77,6 +77,7 @@ export class TrackingService {
     return {
       shipmentId,
       requestCode: shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`,
+      requestTitle: shipment.request_title || shipment.route_name || `${shipment.origin_location?.split(',')[0]} → ${shipment.destination_location?.split(',')[0]}`,
       customerName: shipment.customer_name || shipment.contact_name,
       origin: shipment.origin_location,
       destination: shipment.destination_location,

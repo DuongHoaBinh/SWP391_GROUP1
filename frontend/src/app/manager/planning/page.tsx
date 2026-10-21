@@ -963,7 +963,19 @@ export default function ManagerPlanningPage() {
                         </div>
                         {leg.legType === 'road' ? (
                           <p className="text-[11px] text-slate-600 m-0">
-                            Phương tiện: <strong>{leg.vehiclePlate || 'Chưa gán xe'}</strong> • Dự kiến: {leg.distanceKm || 0} km (~{leg.durationHours || 0}h)
+                            Phương tiện:{' '}
+                            {leg.vehiclePlate?.includes('đến đón') || leg.vehiclePlate?.includes('đến rước') || leg.vehiclePlate?.includes('Bên nhận') ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-800 font-bold border border-blue-200">
+                                🚗 {leg.vehiclePlate}
+                              </span>
+                            ) : !leg.vehiclePlate && (leg.sequenceNo > 1 || detailedRoute.legs?.some((l) => l.legType === 'flight')) ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-800 font-bold border border-blue-200">
+                                🚗 Xe từ {leg.destinationLocation?.split(',')[0].trim() || 'địa điểm đích'} đến đón (Bên nhận tự rước)
+                              </span>
+                            ) : (
+                              <strong>{leg.vehiclePlate || 'Chưa gán xe'}</strong>
+                            )}{' '}
+                            • Dự kiến: {leg.distanceKm || 0} km (~{leg.durationHours || 0}h)
                           </p>
                         ) : (
                           <p className="text-[11px] text-purple-700 m-0 font-medium">

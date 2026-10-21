@@ -255,7 +255,19 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
   async findShipmentById(shipmentId: number): Promise<any | null> {
     const [rows] = await this.pool.execute<any[]>(
       `SELECT s.*, u.full_name as customer_name, u.email as customer_email,
-              COALESCE(s.special_requirements, CONCAT('TR-2026-', LPAD(s.shipment_id, 3, '0'))) as request_code,
+              CASE
+                WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
+                ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
+              END as request_code,
+              COALESCE(
+                NULLIF(r.route_name, ''),
+                CASE 
+                  WHEN s.special_requirements LIKE '%[Tiêu đề:%' THEN 
+                    SUBSTRING_INDEX(SUBSTRING_INDEX(s.special_requirements, '[Tiêu đề: ', -1), ']', 1)
+                  ELSE NULL
+                END,
+                CONCAT(s.origin_location, ' → ', s.destination_location)
+              ) as request_title,
               r.route_id, r.route_name, r.plan_status as route_plan_status, r.total_distance_km
        FROM shipment s
        JOIN \`user\` u ON s.customer_id = u.user_id
@@ -333,7 +345,19 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     if (isManagerOrCoordinator) {
       const [rows] = await this.pool.execute<any[]>(
         `SELECT s.shipment_id,
-                COALESCE(s.special_requirements, CONCAT('TR-2026-', LPAD(s.shipment_id, 3, '0'))) as request_code,
+                CASE
+                  WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
+                  ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
+                END as request_code,
+                COALESCE(
+                  NULLIF(r.route_name, ''),
+                  CASE 
+                    WHEN s.special_requirements LIKE '%[Tiêu đề:%' THEN 
+                      SUBSTRING_INDEX(SUBSTRING_INDEX(s.special_requirements, '[Tiêu đề: ', -1), ']', 1)
+                    ELSE NULL
+                  END,
+                  CONCAT(s.origin_location, ' → ', s.destination_location)
+                ) as request_title,
                 s.contact_name, s.origin_location, s.destination_location,
                 s.status as shipment_status, s.requested_date, s.requested_horse_count,
                 r.route_id, r.route_name, r.plan_status as route_plan_status, r.total_distance_km
@@ -348,7 +372,19 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     if (isCustomer) {
       const [rows] = await this.pool.execute<any[]>(
         `SELECT s.shipment_id,
-                COALESCE(s.special_requirements, CONCAT('TR-2026-', LPAD(s.shipment_id, 3, '0'))) as request_code,
+                CASE
+                  WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
+                  ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
+                END as request_code,
+                COALESCE(
+                  NULLIF(r.route_name, ''),
+                  CASE 
+                    WHEN s.special_requirements LIKE '%[Tiêu đề:%' THEN 
+                      SUBSTRING_INDEX(SUBSTRING_INDEX(s.special_requirements, '[Tiêu đề: ', -1), ']', 1)
+                    ELSE NULL
+                  END,
+                  CONCAT(s.origin_location, ' → ', s.destination_location)
+                ) as request_title,
                 s.contact_name, s.origin_location, s.destination_location,
                 s.status as shipment_status, s.requested_date, s.requested_horse_count,
                 r.route_id, r.route_name, r.plan_status as route_plan_status, r.total_distance_km
@@ -365,7 +401,19 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     // For Driver or Escort: only trips assigned to them
     const [rows] = await this.pool.execute<any[]>(
       `SELECT s.shipment_id,
-              COALESCE(s.special_requirements, CONCAT('TR-2026-', LPAD(s.shipment_id, 3, '0'))) as request_code,
+              CASE
+                WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
+                ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
+              END as request_code,
+              COALESCE(
+                NULLIF(r.route_name, ''),
+                CASE 
+                  WHEN s.special_requirements LIKE '%[Tiêu đề:%' THEN 
+                    SUBSTRING_INDEX(SUBSTRING_INDEX(s.special_requirements, '[Tiêu đề: ', -1), ']', 1)
+                  ELSE NULL
+                END,
+                CONCAT(s.origin_location, ' → ', s.destination_location)
+              ) as request_title,
               s.contact_name, s.origin_location, s.destination_location,
               s.status as shipment_status, s.requested_date, s.requested_horse_count,
               r.route_id, r.route_name, r.plan_status as route_plan_status, r.total_distance_km,

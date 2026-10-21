@@ -142,7 +142,7 @@ export default function CustomerTrackingPage() {
               >
                 {trips.map((s) => (
                   <option key={s.shipment_id} value={s.shipment_id}>
-                    {s.request_code} ({translateStatus(s.shipment_status)})
+                    {s.request_code}: {s.request_title || `${s.origin_location.split(',')[0]} → ${s.destination_location.split(',')[0]}`} ({translateStatus(s.shipment_status)})
                   </option>
                 ))}
               </select>
@@ -186,8 +186,13 @@ export default function CustomerTrackingPage() {
               <span className="text-xs font-extrabold text-blue-600 tracking-wider uppercase">
                 {t('tracking.shipmentCode', 'MÃ CHUYẾN VẬN CHUYỂN')}
               </span>
-              <h2 className="text-2xl font-extrabold text-slate-900 mt-1 m-0 flex items-center gap-3">
-                {trackingDetails?.requestCode}
+              <h2 className="text-2xl font-extrabold text-slate-900 mt-1 m-0 flex flex-wrap items-center gap-2">
+                <span>{trackingDetails?.requestCode}</span>
+                {trackingDetails?.requestTitle && (
+                  <span className="text-base font-semibold text-slate-500">
+                    — {trackingDetails.requestTitle}
+                  </span>
+                )}
               </h2>
               <p className="text-sm text-slate-500 mt-1.5 flex items-center gap-2">
                 <MapPin size={15} className="text-slate-400 shrink-0" />

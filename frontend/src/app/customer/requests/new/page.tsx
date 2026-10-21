@@ -225,7 +225,8 @@ function CreateTransportRequestForm() {
       const routeNote = routeData
         ? `[Lộ trình: ${routeData.mode === 'air' ? 'Đường Hàng Không' : 'Đường Bộ Liên Vận'}, ${routeData.distanceKm} km, ~${routeData.durationHours}h]`
         : '';
-      const combinedReqs = [data.specialReqs, routeNote].filter(Boolean).join(' | ');
+      const titleNote = data.title ? `[Tiêu đề: ${data.title.trim()}]` : '';
+      const combinedReqs = [titleNote, data.specialReqs, routeNote].filter(Boolean).join(' | ');
 
       const payload = {
         contactName: currentUser.fullName || currentUser.name || 'Current Customer',

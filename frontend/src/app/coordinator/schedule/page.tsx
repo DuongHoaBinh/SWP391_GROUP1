@@ -72,7 +72,8 @@ export default function TripSchedulePage() {
       return;
     }
 
-    if (!confirm(`Xác nhận bắt đầu chuyến đi #${trip.requestCode}? Hệ thống sẽ thông báo cho khách hàng và đội xe.`)) {
+    const tripName = trip.requestTitle || `${trip.origin.split(',')[0]} → ${trip.destination.split(',')[0]}`;
+    if (!confirm(`Xác nhận bắt đầu chuyến đi [${trip.requestCode}] - ${tripName}?\n\n• Trạng thái chuyến sẽ chuyển sang "Đang di chuyển (in_transit)"\n• Hệ thống sẽ gửi thông báo đến khách hàng và đội xe trên đường.`)) {
       return;
     }
 
@@ -92,7 +93,8 @@ export default function TripSchedulePage() {
 
   // Handle Complete Trip (Kết thúc chuyến đi khi nhân viên y tế / tài xế báo hoàn thành)
   const handleCompleteTrip = async (trip: TripTrackingDetails) => {
-    if (!confirm(`Xác nhận hoàn tất chuyến đi #${trip.requestCode} sau khi nhân viên y tế và tài xế đã bàn giao ngựa an toàn?`)) {
+    const tripName = trip.requestTitle || `${trip.origin.split(',')[0]} → ${trip.destination.split(',')[0]}`;
+    if (!confirm(`Xác nhận hoàn tất chuyến đi [${trip.requestCode}] - ${tripName} sau khi nhân viên y tế và tài xế đã bàn giao ngựa an toàn?`)) {
       return;
     }
 
@@ -314,9 +316,14 @@ export default function TripSchedulePage() {
 
                   return (
                     <tr key={trip.shipmentId} className="hover:bg-slate-50/70 transition-colors">
-                      {/* Code */}
+                      {/* Code & Title */}
                       <td className="p-4">
-                        <p className="font-extrabold text-blue-600 m-0">{trip.requestCode}</p>
+                        <span className="font-extrabold text-blue-600 block">{trip.requestCode}</span>
+                        {trip.requestTitle && (
+                          <p className="text-xs font-semibold text-slate-800 mt-0.5 m-0 line-clamp-1">
+                            {trip.requestTitle}
+                          </p>
+                        )}
                         <p className="text-[11px] text-slate-400 mt-0.5 m-0">Khách: {trip.customerName}</p>
                       </td>
 

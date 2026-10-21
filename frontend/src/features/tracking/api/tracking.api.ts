@@ -56,6 +56,7 @@ export interface TripStatusLogItem {
 export interface TripTrackingDetails {
   shipmentId: number;
   requestCode: string;
+  requestTitle?: string;
   customerName: string;
   origin: string;
   destination: string;
@@ -77,6 +78,7 @@ export interface TripTrackingDetails {
 export interface AssignedTripSummary {
   shipment_id: number;
   request_code: string;
+  request_title?: string;
   contact_name: string;
   origin_location: string;
   destination_location: string;
