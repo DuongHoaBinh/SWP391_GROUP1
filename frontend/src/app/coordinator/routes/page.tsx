@@ -726,6 +726,77 @@ export default function RoutePlanningPage() {
     }
   };
 
+  // Flow 5: Simulate / Report Incident from Driver
+  const handleSimulateIncident = async (order?: PlanningOrder | null) => {
+    if (!order) return;
+    try {
+      await routesApi.reportIncident(order.id, {
+        incidentType: 'traffic_delay',
+        description: 'Tài xế báo cáo: Tuyến đường chính bị phong tỏa / sự cố giao thông, xe không thể tiếp tục di chuyển. Yêu cầu Coordinator hiệu chỉnh lại chặng đường vòng tránh!',
+        severity: 'critical',
+      });
+      toast.success('Đã kích hoạt báo cáo sự cố từ tài xế! Quyền hiệu chỉnh chặng khẩn cấp đã mở.');
+      await loadMasterDataAndOrders();
+      try {
+        const updatedRoute = await routesApi.getRouteByShipmentId(order.id);
+        setSelectedPlanningOrder((prev) => prev ? { ...prev, routeDetail: updatedRoute } : null);
+      } catch {}
+    } catch (err: any) {
+      toast.error(err?.message || 'Không thể ghi nhận sự cố');
+    }
+  };
+
+  // Flow 5: Save Emergency Reroute
+  const handleSaveEmergencyReroute = async () => {
+    if (!selectedPlanningOrder) return;
+    if (legs.length === 0) {
+      toast.error('Vui lòng dựng ít nhất 1 chặng vận chuyển!');
+      return;
+    }
+
+    setIsSubmittingPlan(true);
+    try {
+      // 1. Save new plan with modified legs
+      await routesApi.buildDetailedPlan(selectedPlanningOrder.id, {
+        routeName: planRouteName,
+        totalDistanceKm: Number(planTotalDistanceKm) || 500,
+        legs,
+        stops,
+      });
+
+      // 2. Resolve the active incident
+      if (selectedPlanningOrder.routeDetail?.activeIncident?.id) {
+        await routesApi.resolveIncident(selectedPlanningOrder.routeDetail.activeIncident.id);
+      }
+
+      toast.success('Đã lưu lộ trình tránh sự cố thành công! Tài xế đã nhận lộ trình cập nhật mới.');
+      setIsDetailModalOpen(false);
+      await loadMasterDataAndOrders();
+    } catch (err: any) {
+      toast.error(err?.message || 'Lỗi khi lưu lộ trình sự cố');
+    } finally {
+      setIsSubmittingPlan(false);
+    }
+  };
+
+  // Flow 5: Resolve Incident directly
+  const handleResolveIncidentOnly = async (incidentId?: number) => {
+    if (!incidentId) return;
+    try {
+      await routesApi.resolveIncident(incidentId);
+      toast.success('Đã đánh dấu giải quyết sự cố thành công!');
+      await loadMasterDataAndOrders();
+      if (selectedPlanningOrder) {
+        try {
+          const updatedRoute = await routesApi.getRouteByShipmentId(selectedPlanningOrder.id);
+          setSelectedPlanningOrder((prev) => prev ? { ...prev, routeDetail: updatedRoute } : null);
+        } catch {}
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Không thể giải quyết sự cố');
+    }
+  };
+
   // Filter Orders
   const filteredOrders = planningOrders.filter(
     (o) =>
@@ -736,8 +807,32 @@ export default function RoutePlanningPage() {
   );
 
   // Status Badge Helper
-  const renderPlanStatusBadge = (status?: string) => {
+  const renderPlanStatusBadge = (status?: string, activeIncident?: any) => {
+    if (activeIncident) {
+      return (
+        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1.5 shadow-2xs animate-pulse">
+          <AlertCircle size={13} className="text-rose-600" />
+          <span>⚠️ Sự cố lộ trình: Cần hiệu chỉnh tuyến</span>
+        </span>
+      );
+    }
+
     switch (status) {
+      case 'in_transit':
+        return (
+          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 text-sky-800 border border-sky-300 flex items-center gap-1.5 shadow-2xs">
+            <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse" />
+            <Truck size={13} className="text-sky-600" />
+            <span>Đang vận chuyển (In Transit)</span>
+          </span>
+        );
+      case 'completed':
+        return (
+          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+            <CheckCircle2 size={12} className="text-emerald-600" />
+            <span>Đã hoàn thành (Completed)</span>
+          </span>
+        );
       case 'pending_approval':
         return (
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1">
@@ -867,7 +962,9 @@ export default function RoutePlanningPage() {
           <div className="flex flex-col gap-4">
             {filteredOrders.map((order) => {
               const route = order.routeDetail;
-              const planStatus = route?.planStatus || 'draft';
+              const planStatus = route?.planStatus || (order.status === 'in_transit' ? 'in_transit' : 'draft');
+              const activeIncident = route?.activeIncident;
+              const isInTransit = planStatus === 'in_transit' || order.status === 'in_transit';
               const isRejected = planStatus === 'rejected' || (planStatus === 'draft' && Boolean(route?.rejectionReason));
 
               return (
@@ -888,19 +985,46 @@ export default function RoutePlanningPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      {renderPlanStatusBadge(planStatus)}
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => handleOpenDetailModal(order)}
-                        className="shadow-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        <Edit size={14} className="mr-1.5" />
-                        {planStatus === 'draft' || isRejected
-                          ? 'Dựng kế hoạch chi tiết'
-                          : 'Xem & Hiệu chỉnh chặng'}
-                      </Button>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      {renderPlanStatusBadge(isInTransit ? 'in_transit' : planStatus, activeIncident)}
+
+                      {isInTransit ? (
+                        activeIncident ? (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleOpenDetailModal(order)}
+                            className="shadow-sm font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 animate-pulse"
+                            title="Tài xế báo sự cố - Bấm để hiệu chỉnh lại chặng khẩn cấp"
+                          >
+                            <AlertCircle size={14} />
+                            <span>Hiệu chỉnh chặng do sự cố</span>
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleOpenDetailModal(order)}
+                            className="shadow-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300 flex items-center gap-1.5"
+                            title="Bấm để xem chi tiết lộ trình"
+                          >
+                            <Eye size={14} className="text-slate-500" />
+                            <span>Xem lộ trình</span>
+                          </Button>
+                        )
+                      ) : (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleOpenDetailModal(order)}
+                          className="shadow-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          <Edit size={14} className="mr-1.5" />
+                          {planStatus === 'draft' || isRejected
+                            ? 'Dựng kế hoạch chi tiết'
+                            : 'Xem & Hiệu chỉnh chặng'}
+                        </Button>
+                      )}
                     </div>
                   </div>
 
@@ -1313,6 +1437,72 @@ export default function RoutePlanningPage() {
           maxWidth="920px"
         >
           <div className="flex flex-col gap-6 max-h-[75vh] overflow-y-auto pr-1">
+            {/* IN-TRANSIT & INCIDENT BANNERS */}
+            {(() => {
+              const isSelectedInTransit = selectedPlanningOrder.status === 'in_transit' || selectedPlanningOrder.routeDetail?.planStatus === 'in_transit';
+              const activeIncident = selectedPlanningOrder.routeDetail?.activeIncident;
+              const isReadOnlyTransit = isSelectedInTransit && !activeIncident;
+
+              if (activeIncident) {
+                return (
+                  <div className="p-4 bg-rose-50 border-2 border-rose-400 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-950 shadow-sm animate-pulse">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                        <AlertCircle size={22} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-extrabold text-sm uppercase text-rose-900">
+                            🚨 Báo cáo sự cố từ tài xế (Flow 5)
+                          </span>
+                          <span className="bg-rose-200 text-rose-900 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                            Loại: {activeIncident.incidentType}
+                          </span>
+                        </div>
+                        <p className="text-xs text-rose-950 m-0 mt-1 font-semibold">
+                          {activeIncident.description}
+                        </p>
+                        <p className="text-[11px] text-rose-700 m-0 mt-0.5">
+                          Thời gian báo: {new Date(activeIncident.reportedAt).toLocaleString('vi-VN')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-xs font-extrabold text-rose-700 block">
+                        ĐÃ MỞ QUYỀN HIỆU CHỈNH CHẶNG KHẨN CẤP
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        Bạn có thể sửa chặng hoặc trạm dừng để vòng tránh sự cố
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (isReadOnlyTransit) {
+                return (
+                  <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 shadow-2xs">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 mt-0.5">
+                        🔒
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm m-0 text-amber-900">
+                          Chuyến đi đang di chuyển trên đường — Lộ trình đã khóa an toàn
+                        </h4>
+                        <p className="text-xs text-amber-800 m-0 mt-0.5">
+                          Chuyến đi đang vận chuyển theo kế hoạch đã duyệt. Hệ thống khóa các thao tác sửa đổi để đảm bảo an toàn. 
+                          Nếu tài xế báo sự cố (đường bị chặn, xe hỏng, sạt lở...), quyền hiệu chỉnh lộ trình sẽ tự động mở lại.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return null;
+            })()}
+
             {/* 1. Manager Framework Banner */}
             <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-xl flex flex-col gap-2">
               <div className="flex items-center gap-2 text-blue-900 font-extrabold text-xs uppercase tracking-wide">
@@ -1920,42 +2110,114 @@ export default function RoutePlanningPage() {
           </div>
 
           {/* Modal Actions */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100 pt-4 mt-4">
-            <span className="text-xs text-slate-500">
-              Kế hoạch sau khi gửi sẽ được chuyển đến <strong>Logistics Manager</strong> để xem xét và phê duyệt.
-            </span>
+          {(() => {
+            const isSelectedInTransit = selectedPlanningOrder.status === 'in_transit' || selectedPlanningOrder.routeDetail?.planStatus === 'in_transit';
+            const activeIncident = selectedPlanningOrder.routeDetail?.activeIncident;
+            const isReadOnlyTransit = isSelectedInTransit && !activeIncident;
 
-            <div className="flex items-center gap-2.5 shrink-0 flex-nowrap">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsDetailModalOpen(false)}
-                disabled={isSubmittingPlan}
-                className="border-slate-300 text-slate-600 hover:bg-slate-50 font-medium px-4 py-2 text-xs whitespace-nowrap"
-              >
-                Đóng
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleSaveDraft}
-                disabled={isSubmittingPlan}
-                className="border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold px-4 py-2 text-xs whitespace-nowrap"
-              >
-                Lưu Bản Nháp (Draft)
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                onClick={handleSubmitForApproval}
-                disabled={isSubmittingPlan || legs.length === 0}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 shadow-sm text-xs whitespace-nowrap flex items-center gap-1.5"
-              >
-                <Send size={14} />
-                <span>{isSubmittingPlan ? 'Đang gửi duyệt...' : 'Gửi Duyệt Cho Manager'}</span>
-              </Button>
-            </div>
-          </div>
+            if (isReadOnlyTransit) {
+              return (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100 pt-4 mt-4">
+                  <span className="text-xs text-amber-800 font-medium flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                    Chuyến đi đang di chuyển trên đường. Lộ trình đang ở chế độ xem an toàn (Khóa chỉnh sửa).
+                  </span>
+
+                  <div className="flex items-center gap-2.5 shrink-0 flex-nowrap">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={() => setIsDetailModalOpen(false)}
+                      className="bg-slate-800 hover:bg-slate-900 text-white font-bold px-5 py-2 text-xs whitespace-nowrap"
+                    >
+                      Đóng
+                    </Button>
+                  </div>
+                </div>
+              );
+            }
+
+            if (isSelectedInTransit && activeIncident) {
+              return (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-rose-200 bg-rose-50/50 p-3 rounded-lg mt-4">
+                  <span className="text-xs text-rose-900 font-semibold flex items-center gap-1.5">
+                    <AlertCircle size={14} className="text-rose-600 shrink-0" />
+                    Đang hiệu chỉnh lộ trình thay thế do sự cố trên đường. Lộ trình mới sẽ được áp dụng trực tiếp cho tài xế.
+                  </span>
+
+                  <div className="flex items-center gap-2.5 shrink-0 flex-nowrap">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsDetailModalOpen(false)}
+                      disabled={isSubmittingPlan}
+                      className="border-slate-300 text-slate-600 hover:bg-white font-medium px-4 py-2 text-xs"
+                    >
+                      Hủy bỏ
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => handleResolveIncidentOnly(activeIncident.id)}
+                      disabled={isSubmittingPlan}
+                      className="border-rose-300 text-rose-700 bg-white hover:bg-rose-50 font-semibold px-3 py-2 text-xs"
+                    >
+                      Đánh dấu hết sự cố
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={handleSaveEmergencyReroute}
+                      disabled={isSubmittingPlan || legs.length === 0}
+                      className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-5 py-2 shadow-sm text-xs flex items-center gap-1.5 animate-pulse"
+                    >
+                      <RotateCcw size={14} />
+                      <span>{isSubmittingPlan ? 'Đang lưu...' : 'Lưu Lộ Trình Mới & Giải Quyết Sự Cố'}</span>
+                    </Button>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100 pt-4 mt-4">
+                <span className="text-xs text-slate-500">
+                  Kế hoạch sau khi gửi sẽ được chuyển đến <strong>Logistics Manager</strong> để xem xét và phê duyệt.
+                </span>
+
+                <div className="flex items-center gap-2.5 shrink-0 flex-nowrap">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsDetailModalOpen(false)}
+                    disabled={isSubmittingPlan}
+                    className="border-slate-300 text-slate-600 hover:bg-slate-50 font-medium px-4 py-2 text-xs whitespace-nowrap"
+                  >
+                    Đóng
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleSaveDraft}
+                    disabled={isSubmittingPlan}
+                    className="border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold px-4 py-2 text-xs whitespace-nowrap"
+                  >
+                    Lưu Bản Nháp (Draft)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={handleSubmitForApproval}
+                    disabled={isSubmittingPlan || legs.length === 0}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 shadow-sm text-xs whitespace-nowrap flex items-center gap-1.5"
+                  >
+                    <Send size={14} />
+                    <span>{isSubmittingPlan ? 'Đang gửi duyệt...' : 'Gửi Duyệt Cho Manager'}</span>
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
         </Modal>
       )}
 

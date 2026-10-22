@@ -226,7 +226,7 @@ const fetcher = async (url: string) => {
     destinationCountry,
     transitName,
     requestedHorseCount: data.requestedHorseCount || data.requested_horse_count || (normalizedHorses.length || 1),
-    requestCode: data.requestCode || `REQ-${String(data.id).padStart(3, '0')}`,
+    requestCode: data.customerRequestCode || data.requestCode || `REQ-${String(data.id).padStart(3, '0')}`,
     horse: normalizedHorses[0]?.horse || { name: 'Racehorse' },
     horses: normalizedHorses,
     documents,

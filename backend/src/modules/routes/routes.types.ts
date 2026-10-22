@@ -154,6 +154,14 @@ export interface RouteEntity {
   createdAt: string;
   stops?: RouteStopEntity[];
   legs?: RouteLegEntity[];
+  activeIncident?: {
+    id: number;
+    incidentType: string;
+    description: string;
+    severity: string;
+    status: string;
+    reportedAt: string;
+  } | null;
 }
 
 export interface FullTripPlan {

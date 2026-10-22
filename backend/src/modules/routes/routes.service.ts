@@ -622,4 +622,57 @@ export class RoutesService {
 
     return updatedStop;
   }
+
+  // --- Flow 5: Incident Reporting & Emergency Reroute ---
+  async reportIncident(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    dto: { incidentType: string; description: string; severity?: string },
+  ): Promise<{ success: boolean; incidentId: number }> {
+    const order = await this.ordersStore.findById(shipmentId);
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    const incidentId = await this.routesStore.reportIncident({
+      shipmentId,
+      reportedBy: Number(user.id),
+      incidentType: dto.incidentType || 'traffic_delay',
+      description: dto.description,
+      severity: dto.severity || 'high',
+    });
+
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+
+    // Gửi thông báo khẩn tới tất cả Coordinator và Manager
+    const staffList = await this.fleetStore.findAvailableStaff();
+    const ops = staffList.filter(
+      (s) =>
+        s.roleName.toLowerCase().includes('coordinator') ||
+        s.roleName.toLowerCase().includes('manager'),
+    );
+    for (const op of ops) {
+      await this.notificationsService.createNotification(
+        op.id,
+        `🚨 SỰ CỐ TRÊN ĐƯỜNG: Đơn ${code}`,
+        `Báo cáo sự cố [${dto.incidentType}]: "${dto.description}". Lộ trình của chuyến đi ${code} đã được mở quyền hiệu chỉnh chặng khẩn cấp.`,
+        'incident',
+        shipmentId,
+      );
+    }
+
+    return { success: true, incidentId };
+  }
+
+  async resolveIncident(
+    user: AuthenticatedUser,
+    incidentId: number,
+  ): Promise<{ success: boolean; message: string }> {
+    await this.routesStore.resolveIncident(incidentId);
+    return {
+      success: true,
+      message: 'Đã giải quyết sự cố và hoàn tất điều chỉnh lộ trình an toàn.',
+    };
+  }
 }
+

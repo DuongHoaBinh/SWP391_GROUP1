@@ -183,13 +183,6 @@ export default function HorseHealthPage() {
             </p>
           </div>
         </div>
-
-        <button
-          onClick={() => setIsIncidentOpen(true)}
-          className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm shrink-0"
-        >
-          <AlertTriangle size={14} /> Báo sự cố khẩn cấp (Flow 5)
-        </button>
       </div>
 
       {/* Top Header */}

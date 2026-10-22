@@ -74,9 +74,15 @@ export class TrackingService {
     const escortStaff = assignedStaff.find((s) => s.role_in_shipment === 'escort');
     const assignedVehicle = legs.find((l) => l.vehicle_plate)?.vehicle_plate || 'Xe thùng chuyên dụng';
 
+    const isCustomer = String(user.role).toUpperCase() === 'CUSTOMER';
+    const finalRequestCode = isCustomer && shipment.customer_request_code
+      ? shipment.customer_request_code
+      : (shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`);
+
     return {
       shipmentId,
-      requestCode: shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`,
+      requestCode: finalRequestCode,
+      customerRequestCode: shipment.customer_request_code,
       requestTitle: shipment.request_title || shipment.route_name || `${shipment.origin_location?.split(',')[0]} → ${shipment.destination_location?.split(',')[0]}`,
       customerName: shipment.customer_name || shipment.contact_name,
       origin: shipment.origin_location,
@@ -109,7 +115,13 @@ export class TrackingService {
 
     for (let i = 0; i < legs.length; i++) {
       const leg = legs[i];
-      const legStops = stops.filter((s) => s.leg_id === leg.leg_id);
+      const legStops = stops.filter((s) => {
+        if (s.leg_id) return s.leg_id === leg.leg_id;
+        if (legs.length === 1) return true;
+        const firstRoadLeg = legs.find((l) => l.leg_type !== 'flight') || legs[0];
+        return firstRoadLeg.leg_id === leg.leg_id;
+      });
+      legStops.sort((a, b) => (a.sequence_no || 0) - (b.sequence_no || 0));
 
       // 1. Leg Start Milestone
       const isLegDeparted = leg.actual_departure !== null || leg.status === 'departed' || leg.status === 'in_transit' || leg.status === 'completed';
@@ -295,6 +307,28 @@ export class TrackingService {
         'status_update',
         shipmentId,
       );
+
+      // Send auto notification to Coordinator
+      const actorRoleName = user.role?.toLowerCase().includes('escort') ? 'Bác sĩ thú y / Hộ tống' : 'Tài xế';
+      const coordTitle = `Chuyến đi #${shipment.request_code} đã xuất phát thực tế`;
+      const coordMessage = `${actorRoleName} (${user.fullName || user.email}) đã bấm xác nhận xuất phát tại trang trại của khách (${targetLeg.origin_location}). Hệ thống đã kích hoạt giám sát thời gian thực.`;
+      if (route.assigned_coordinator_id) {
+        await this.notificationsService.createNotification(
+          route.assigned_coordinator_id,
+          coordTitle,
+          coordMessage,
+          'status_update',
+          shipmentId,
+        );
+      } else {
+        await this.notificationsService.notifyRole(
+          'FLEET_ROUTE_COORDINATOR',
+          coordTitle,
+          coordMessage,
+          'status_update',
+          shipmentId,
+        );
+      }
     }
 
     // Record trip status log
@@ -331,7 +365,7 @@ export class TrackingService {
     if (!targetStop) throw new NotFoundException(`Không tìm thấy trạm dừng #${stopId}`);
 
     const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
-    const parentLeg = legs.find((l) => l.leg_id === targetStop.leg_id);
+    const parentLeg = legs.find((l) => l.leg_id === targetStop.leg_id) || (legs.length === 1 ? legs[0] : (legs.find((l) => l.leg_type !== 'flight') || legs[0]));
 
     // Rule: Chặng phải bắt đầu rồi mới được check-in trạm dừng
     if (!parentLeg || (!parentLeg.actual_departure && parentLeg.status === 'pending')) {
@@ -370,7 +404,7 @@ export class TrackingService {
     await this.trackingStore.recordTripStatusLog({
       shipmentId,
       routeId: route.route_id,
-      legId: targetStop.leg_id,
+      legId: targetStop.leg_id || parentLeg?.leg_id || null,
       routeStopId: stopId,
       previousStatus: targetStop.status,
       newStatus: dto.action,
@@ -407,7 +441,12 @@ export class TrackingService {
 
     // Rule: Tất cả các trạm dừng trong chặng phải đã hoàn thành
     const stops = await this.trackingStore.findStopsByRouteId(route.route_id);
-    const legStops = stops.filter((s) => s.leg_id === Number(legId));
+    const legStops = stops.filter((s) => {
+      if (s.leg_id) return s.leg_id === Number(legId);
+      if (legs.length === 1) return true;
+      const firstRoadLeg = legs.find((l) => l.leg_type !== 'flight') || legs[0];
+      return firstRoadLeg.leg_id === Number(legId);
+    });
     const unfinishedStops = legStops.filter((s) => s.status !== 'departed' && s.status !== 'customs_cleared');
     if (unfinishedStops.length > 0) {
       throw new BadRequestException(
@@ -435,6 +474,28 @@ export class TrackingService {
         'handover_complete',
         shipmentId,
       );
+
+      // Send auto notification to Coordinator
+      const actorRoleName = user.role?.toLowerCase().includes('escort') ? 'Bác sĩ thú y / Hộ tống' : 'Tài xế';
+      const coordEndTitle = `Chuyến đi #${shipment.request_code} đã hoàn thành bàn giao`;
+      const coordEndMessage = `${actorRoleName} (${user.fullName || user.email}) đã xác nhận cập bến an toàn tại điểm đích (${targetLeg.destination_location}) và bàn giao ngựa thành công.`;
+      if (route.assigned_coordinator_id) {
+        await this.notificationsService.createNotification(
+          route.assigned_coordinator_id,
+          coordEndTitle,
+          coordEndMessage,
+          'handover_complete',
+          shipmentId,
+        );
+      } else {
+        await this.notificationsService.notifyRole(
+          'FLEET_ROUTE_COORDINATOR',
+          coordEndTitle,
+          coordEndMessage,
+          'handover_complete',
+          shipmentId,
+        );
+      }
     }
 
     // Record trip status log
@@ -585,12 +646,15 @@ export class TrackingService {
     if (isManagerOrCoordinator) return;
 
     if (leg.leg_type === 'road') {
-      const isDriver =
+      const isDriverOrEscort =
         user.specialization === 'driver' ||
+        user.specialization === 'escort' ||
         roleStr.includes('DRIVER') ||
-        user.email.toLowerCase().includes('driver');
-      if (!isDriver) {
-        throw new ForbiddenException('Chỉ Tài xế lái xe (Driver) mới được cập nhật chặng đường bộ!');
+        roleStr.includes('ESCORT') ||
+        user.email.toLowerCase().includes('driver') ||
+        user.email.toLowerCase().includes('escort');
+      if (!isDriverOrEscort) {
+        throw new ForbiddenException('Chỉ Tài xế lái xe hoặc Bác sĩ thú y áp tải (Escort) mới được cập nhật chặng đường bộ!');
       }
     } else if (leg.leg_type === 'flight') {
       const isEscort =

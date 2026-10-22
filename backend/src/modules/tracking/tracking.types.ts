@@ -113,6 +113,7 @@ export interface TripStatusLogEntity {
 export interface TripTrackingDetails {
   shipmentId: number;
   requestCode: string;
+  customerRequestCode?: string;
   requestTitle?: string;
   customerName: string;
   origin: string;

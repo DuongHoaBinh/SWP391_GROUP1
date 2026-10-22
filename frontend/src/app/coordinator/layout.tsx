@@ -23,6 +23,7 @@ import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser } from '
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
+import { apiClient } from '@/lib/api-client';
 
 interface NavItem {
   label: string;
@@ -42,6 +43,18 @@ export default function CoordinatorLayout({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+
+  const fetchUnread = async () => {
+    try {
+      const notifs = await apiClient<any[]>('/notifications');
+      if (Array.isArray(notifs)) {
+        setUnreadNotifs(notifs.filter((n) => !n.isRead).length);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     // Ensure active coordinator session exists
@@ -57,6 +70,20 @@ export default function CoordinatorLayout({
         initials: 'AM',
       });
     }
+
+    fetchUnread();
+
+    const handleNotificationsUpdated = () => {
+      fetchUnread();
+    };
+    window.addEventListener('notifications-updated', handleNotificationsUpdated);
+    window.addEventListener('auth-user-updated', handleNotificationsUpdated);
+    const interval = setInterval(fetchUnread, 15000);
+    return () => {
+      window.removeEventListener('notifications-updated', handleNotificationsUpdated);
+      window.removeEventListener('auth-user-updated', handleNotificationsUpdated);
+      clearInterval(interval);
+    };
   }, []);
 
   const navItems: NavItem[] = [
@@ -98,6 +125,7 @@ export default function CoordinatorLayout({
       label: t('common.notifications', 'Notifications'),
       href: '/coordinator/notifications',
       icon: <Bell size={18} />,
+      badge: unreadNotifs > 0 ? unreadNotifs : undefined,
     },
     {
       label: t('common.settings', 'Settings'),
@@ -618,6 +646,8 @@ export default function CoordinatorLayout({
             <LanguageSwitcher variant="pill" />
 
             <button
+              onClick={() => router.push('/coordinator/notifications')}
+              aria-label="Notifications"
               style={{
                 width: '36px',
                 height: '36px',
@@ -633,18 +663,20 @@ export default function CoordinatorLayout({
               }}
             >
               <Bell size={16} />
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '8px',
-                  right: '9px',
-                  width: '7px',
-                  height: '7px',
-                  borderRadius: '50%',
-                  backgroundColor: '#ef4444',
-                  border: '1px solid #ffffff',
-                }}
-              />
+              {unreadNotifs > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    right: '9px',
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ef4444',
+                    border: '1px solid #ffffff',
+                  }}
+                />
+              )}
             </button>
 
             <div

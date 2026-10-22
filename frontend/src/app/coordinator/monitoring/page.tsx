@@ -102,6 +102,16 @@ export default function TripMonitoringPage() {
     return () => clearInterval(timer);
   }, [selectedShipmentId, fetchTrackingDetails]);
 
+  // Helper format date and time with clear separation
+  const formatDateTimeVi = (isoString?: string | null) => {
+    if (!isoString) return { time: '--:--', date: '--/--/----' };
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return { time: '--:--', date: '--/--/----' };
+    const time = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const date = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return { time, date };
+  };
+
   const handleManualRefresh = () => {
     if (selectedShipmentId) {
       fetchTrackingDetails(selectedShipmentId);
@@ -496,17 +506,33 @@ export default function TripMonitoringPage() {
                               <MapPin size={12} className="text-slate-400" /> {m.location}
                             </p>
 
-                            <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400 mt-1.5">
-                              {m.plannedTime && (
-                                <span>Kế hoạch: {new Date(m.plannedTime).toLocaleString('vi-VN')}</span>
-                              )}
-                              {m.actualTime && (
-                                <span className="text-emerald-700 font-semibold">
-                                  Thực tế: {new Date(m.actualTime).toLocaleString('vi-VN')}
-                                </span>
-                              )}
+                            <div className="flex flex-wrap items-center gap-2.5 text-[11px] text-slate-500 mt-2">
+                              {m.plannedTime && (() => {
+                                const { time, date } = formatDateTimeVi(m.plannedTime);
+                                return (
+                                  <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px] font-medium border border-slate-200">
+                                    <Clock size={11} className="text-slate-400 shrink-0" />
+                                    <span>Kế hoạch:</span>
+                                    <strong className="text-slate-900">{time}</strong>
+                                    <span className="text-slate-300">•</span>
+                                    <span>Ngày {date}</span>
+                                  </span>
+                                );
+                              })()}
+                              {m.actualTime && (() => {
+                                const { time, date } = formatDateTimeVi(m.actualTime);
+                                return (
+                                  <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded text-[11px] font-medium border border-emerald-200">
+                                    <CheckCircle2 size={11} className="text-emerald-600 shrink-0" />
+                                    <span>Thực tế:</span>
+                                    <strong className="text-emerald-950 font-bold">{time}</strong>
+                                    <span className="text-emerald-300">•</span>
+                                    <span>Ngày {date}</span>
+                                  </span>
+                                );
+                              })()}
                               {m.updatedBy && (
-                                <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-medium">
+                                <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-medium text-[11px]">
                                   {m.updatedBy}
                                 </span>
                               )}
@@ -603,10 +629,20 @@ export default function TripMonitoringPage() {
                               {log.notes || 'Thể trạng bình thường, ổn định.'}
                             </p>
 
-                            <div className="text-[11px] text-slate-400 mt-1">
-                              Ghi bởi: <strong>{log.recordedByName || 'Bác sĩ thú y'}</strong> ({log.recordedByRole || 'Escort'})
-                              {' • '}
-                              {new Date(log.recordedAt).toLocaleString('vi-VN')}
+                            <div className="text-[11px] text-slate-500 mt-1.5 flex flex-wrap items-center gap-1.5">
+                              <span>Ghi bởi: <strong>{log.recordedByName || 'Bác sĩ thú y'}</strong> ({log.recordedByRole || 'Escort'})</span>
+                              <span className="text-slate-300">•</span>
+                              {(() => {
+                                const { time, date } = formatDateTimeVi(log.recordedAt);
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-slate-600">
+                                    <Clock size={11} className="text-slate-400" />
+                                    <strong>{time}</strong>
+                                    <span className="text-slate-300">•</span>
+                                    <span>Ngày {date}</span>
+                                  </span>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import {
   CalendarDays,
   Clock,
@@ -15,9 +16,12 @@ import {
   Calendar,
   AlertCircle,
   Plane,
+  Radio,
+  Eye,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { Modal } from '@/components/ui/Modal';
 import { useTranslation } from '@/lib/i18n/LanguageContext';
 import { trackingApi, TripTrackingDetails } from '@/features/tracking/api/tracking.api';
 import toast from 'react-hot-toast';
@@ -31,6 +35,17 @@ export default function TripSchedulePage() {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('ready_to_depart'); // Default: Chờ xuất phát
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+
+  // Custom Confirmation Modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    type: 'start' | 'complete';
+    trip: TripTrackingDetails | null;
+  }>({
+    isOpen: false,
+    type: 'start',
+    trip: null,
+  });
 
   // Load real trips from Tracking API
   const loadScheduleData = useCallback(async () => {
@@ -64,51 +79,68 @@ export default function TripSchedulePage() {
     loadScheduleData();
   }, [loadScheduleData]);
 
-  // Handle Start Trip (Khởi hành chặng 1)
-  const handleStartTrip = async (trip: TripTrackingDetails) => {
+  // Handle Start Trip (Khởi hành chặng 1) - Opens custom Modal
+  const handleStartTrip = (trip: TripTrackingDetails) => {
     const firstLeg = trip.milestones.find((m) => m.itemType === 'leg_start');
     if (!firstLeg) {
       toast.error('Không tìm thấy chặng đầu tiên để xuất phát');
       return;
     }
 
-    const tripName = trip.requestTitle || `${trip.origin.split(',')[0]} → ${trip.destination.split(',')[0]}`;
-    if (!confirm(`Xác nhận bắt đầu chuyến đi [${trip.requestCode}] - ${tripName}?\n\n• Trạng thái chuyến sẽ chuyển sang "Đang di chuyển (in_transit)"\n• Hệ thống sẽ gửi thông báo đến khách hàng và đội xe trên đường.`)) {
-      return;
-    }
-
-    try {
-      setActionLoadingId(trip.shipmentId);
-      await trackingApi.checkInLegStart(trip.shipmentId, firstLeg.legId, {
-        notes: 'Điều phối viên phát lệnh xuất bến chặng 1',
-      });
-      toast.success(`Chuyến đi ${trip.requestCode} đã chính thức xuất phát!`);
-      await loadScheduleData();
-    } catch (err: any) {
-      toast.error(err?.message || 'Không thể bắt đầu chuyến đi');
-    } finally {
-      setActionLoadingId(null);
-    }
+    setConfirmModal({
+      isOpen: true,
+      type: 'start',
+      trip,
+    });
   };
 
-  // Handle Complete Trip (Kết thúc chuyến đi khi nhân viên y tế / tài xế báo hoàn thành)
-  const handleCompleteTrip = async (trip: TripTrackingDetails) => {
-    const tripName = trip.requestTitle || `${trip.origin.split(',')[0]} → ${trip.destination.split(',')[0]}`;
-    if (!confirm(`Xác nhận hoàn tất chuyến đi [${trip.requestCode}] - ${tripName} sau khi nhân viên y tế và tài xế đã bàn giao ngựa an toàn?`)) {
-      return;
-    }
+  // Handle Complete Trip - Opens custom Modal
+  const handleCompleteTrip = (trip: TripTrackingDetails) => {
+    setConfirmModal({
+      isOpen: true,
+      type: 'complete',
+      trip,
+    });
+  };
 
-    try {
-      setActionLoadingId(trip.shipmentId);
-      await trackingApi.completeShipment(trip.shipmentId, {
-        notes: 'Điều phối viên xác nhận kết thúc chuyến đi sau khi nhận báo cáo bàn giao ngựa an toàn.',
-      });
-      toast.success(`Chuyến đi ${trip.requestCode} đã hoàn thành an toàn!`);
-      await loadScheduleData();
-    } catch (err: any) {
-      toast.error(err?.message || 'Không thể hoàn tất chuyến đi');
-    } finally {
-      setActionLoadingId(null);
+  // Perform confirmed action from custom Modal
+  const handleConfirmAction = async () => {
+    if (!confirmModal.trip) return;
+    const trip = confirmModal.trip;
+
+    if (confirmModal.type === 'start') {
+      const firstLeg = trip.milestones.find((m) => m.itemType === 'leg_start');
+      if (!firstLeg) {
+        toast.error('Không tìm thấy chặng đầu tiên để xuất phát');
+        return;
+      }
+      try {
+        setActionLoadingId(trip.shipmentId);
+        await trackingApi.checkInLegStart(trip.shipmentId, firstLeg.legId, {
+          notes: 'Điều phối viên phát lệnh xuất bến chặng 1',
+        });
+        toast.success(`Chuyến đi ${trip.requestCode} đã chính thức xuất phát!`);
+        setConfirmModal({ isOpen: false, type: 'start', trip: null });
+        await loadScheduleData();
+      } catch (err: any) {
+        toast.error(err?.message || 'Không thể bắt đầu chuyến đi');
+      } finally {
+        setActionLoadingId(null);
+      }
+    } else {
+      try {
+        setActionLoadingId(trip.shipmentId);
+        await trackingApi.completeShipment(trip.shipmentId, {
+          notes: 'Điều phối viên xác nhận kết thúc chuyến đi sau khi nhận báo cáo bàn giao ngựa an toàn.',
+        });
+        toast.success(`Chuyến đi ${trip.requestCode} đã hoàn thành an toàn!`);
+        setConfirmModal({ isOpen: false, type: 'complete', trip: null });
+        await loadScheduleData();
+      } catch (err: any) {
+        toast.error(err?.message || 'Không thể hoàn tất chuyến đi');
+      } finally {
+        setActionLoadingId(null);
+      }
     }
   };
 
@@ -197,7 +229,7 @@ export default function TripSchedulePage() {
             </span>
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            Quản lý giờ xuất bến chặng 1, phát lệnh khởi hành và kết thúc chuyến khi nhân viên y tế báo hoàn thành.
+            Trạng thái chuyến đi tự động đồng bộ theo thời gian thực khi Bác sĩ thú y / Tài xế bấm xuất phát tại trang trại của khách.
           </p>
         </div>
 
@@ -319,6 +351,11 @@ export default function TripSchedulePage() {
                       {/* Code & Title */}
                       <td className="p-4">
                         <span className="font-extrabold text-blue-600 block">{trip.requestCode}</span>
+                        {trip.customerRequestCode && trip.customerRequestCode !== trip.requestCode && (
+                          <span className="text-[10px] text-slate-400 block font-normal">
+                            (Mã khách: {trip.customerRequestCode})
+                          </span>
+                        )}
                         {trip.requestTitle && (
                           <p className="text-xs font-semibold text-slate-800 mt-0.5 m-0 line-clamp-1">
                             {trip.requestTitle}
@@ -387,42 +424,47 @@ export default function TripSchedulePage() {
 
                       {/* Status */}
                       <td className="p-4">
-                        <StatusBadge
-                          label={translateStatus(trip.shipmentStatus)}
-                          variant={
-                            isInTransit ? 'transit' : isCompleted ? 'success' : 'pending'
-                          }
-                          hasDot={isInTransit}
-                        />
+                        {isReady ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                            Chờ nhân sự xuất phát
+                          </span>
+                        ) : isInTransit ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                            Đang di chuyển
+                          </span>
+                        ) : (
+                          <StatusBadge
+                            label={translateStatus(trip.shipmentStatus)}
+                            variant={isCompleted ? 'success' : 'pending'}
+                            hasDot={false}
+                          />
+                        )}
                       </td>
 
                       {/* Actions */}
                       <td className="p-4 text-right">
                         {isReady && (
-                          <button
-                            onClick={() => handleStartTrip(trip)}
-                            disabled={isActionLoading}
-                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
-                          >
-                            <Play size={13} fill="currentColor" />
-                            <span>{isActionLoading ? 'Đang gửi...' : 'Bắt đầu chuyến đi'}</span>
-                          </button>
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-xs font-medium">
+                            <Radio size={13} className="text-amber-500 animate-pulse" />
+                            <span>Chờ tín hiệu từ hiện trường</span>
+                          </div>
                         )}
 
                         {isInTransit && (
-                          <button
-                            onClick={() => handleCompleteTrip(trip)}
-                            disabled={isActionLoading}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                          <Link
+                            href={`/coordinator/monitoring?shipmentId=${trip.shipmentId}`}
+                            className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-lg border border-blue-200 inline-flex items-center gap-1.5 transition-colors shadow-2xs"
                           >
-                            <CheckCircle2 size={14} />
-                            <span>{isActionLoading ? 'Đang lưu...' : 'Kết thúc chuyến đi'}</span>
-                          </button>
+                            <Eye size={13} />
+                            <span>Giám sát trực tiếp</span>
+                          </Link>
                         )}
 
                         {isCompleted && (
                           <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md inline-flex items-center gap-1">
-                            <CheckCircle2 size={13} /> Đã cập bến
+                            <CheckCircle2 size={13} /> Đã hoàn thành
                           </span>
                         )}
                       </td>
@@ -434,6 +476,104 @@ export default function TripSchedulePage() {
           </div>
         </div>
       )}
+
+      {/* Modern Confirmation Modal */}
+      <Modal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+        title={confirmModal.type === 'start' ? 'Xác Nhận Ghi Đè Xuất Bến Thủ Công' : 'Xác Nhận Kết Thúc Chuyến Đi'}
+        subtitle={confirmModal.trip ? `Mã đơn vận chuyển: ${confirmModal.trip.requestCode}` : undefined}
+        maxWidth="max-w-md"
+      >
+        {confirmModal.trip && (
+          <div className="flex flex-col gap-4 p-5">
+            {/* Summary card */}
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Hành lang vận chuyển</span>
+                <span className="text-xs font-extrabold text-blue-600 px-2 py-0.5 rounded bg-blue-50 border border-blue-200">
+                  {confirmModal.trip.requestCode}
+                </span>
+              </div>
+              <div className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <span>{confirmModal.trip.origin.split(',')[0]}</span>
+                <span className="text-slate-400">→</span>
+                <span className="text-blue-700">{confirmModal.trip.destination.split(',')[0]}</span>
+              </div>
+              {confirmModal.trip.requestTitle && (
+                <div className="text-xs text-slate-500 font-medium">
+                  {confirmModal.trip.requestTitle}
+                </div>
+              )}
+            </div>
+
+            {/* Impact Details */}
+            <div className="p-3.5 rounded-xl bg-blue-50/60 border border-blue-100 flex flex-col gap-2 text-xs text-slate-700">
+              <span className="font-bold text-blue-900 flex items-center gap-1.5">
+                <AlertCircle size={14} className="text-blue-600" />
+                {confirmModal.type === 'start' ? 'Lưu ý khi ghi đè xuất bến từ Coordinator:' : 'Lưu ý khi hoàn tất chuyến:'}
+              </span>
+              <ul className="list-disc pl-5 m-0 space-y-1 text-slate-600">
+                {confirmModal.type === 'start' ? (
+                  <>
+                    <li className="text-amber-800 font-semibold">Quyền bấm xuất phát chính thức ưu tiên cho Bác sĩ thú y / Tài xế tại trang trại khách. Chỉ ghi đè khi nhân sự gặp sự cố thiết bị.</li>
+                    <li>Chuyển trạng thái chuyến đi sang <strong>Đang di chuyển (in_transit)</strong>.</li>
+                    <li>Kích hoạt tính năng <strong>Live Monitoring</strong> và định vị hành trình thời gian thực.</li>
+                    <li>Gửi thông báo xuất bến chặng 1 đến khách hàng, tài xế và bác sĩ hộ tống.</li>
+                  </>
+                ) : (
+                  <>
+                    <li>Xác nhận ngựa đã được kiểm tra sức khỏe và bàn giao an toàn tại điểm đích.</li>
+                    <li>Chuyển trạng thái chuyến đi sang <strong>Đã hoàn thành (completed)</strong>.</li>
+                    <li>Lưu trữ nhật ký hành trình vào báo cáo tổng kết.</li>
+                  </>
+                )}
+              </ul>
+            </div>
+
+            {/* Footer buttons */}
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100 mt-1">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                disabled={actionLoadingId !== null}
+                className="text-xs px-4 py-2"
+              >
+                Hủy bỏ
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={handleConfirmAction}
+                disabled={actionLoadingId !== null}
+                className={`text-xs px-5 py-2 font-bold text-white flex items-center gap-1.5 ${
+                  confirmModal.type === 'start'
+                    ? 'bg-blue-600 hover:bg-blue-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+              >
+                {actionLoadingId !== null ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin mr-1" />
+                    <span>Đang xử lý...</span>
+                  </>
+                ) : confirmModal.type === 'start' ? (
+                  <>
+                    <Play size={13} fill="currentColor" />
+                    <span>Xác nhận xuất phát</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={13} />
+                    <span>Xác nhận hoàn tất</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

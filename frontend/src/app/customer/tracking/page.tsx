@@ -101,6 +101,16 @@ export default function CustomerTrackingPage() {
     ? trackingDetails.healthLogs[0]
     : null;
 
+  // Helper format date and time with clear separation
+  const formatDateTimeVi = (isoString?: string | null) => {
+    if (!isoString) return { time: '--:--', date: '--/--/----' };
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return { time: '--:--', date: '--/--/----' };
+    const time = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const date = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return { time, date };
+  };
+
   return (
     <div className="flex flex-col gap-6 pb-12">
       {/* Top Header */}
@@ -431,17 +441,33 @@ export default function CustomerTrackingPage() {
                           <MapPin size={13} className="text-slate-400" /> {m.location}
                         </p>
 
-                        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 mt-2">
-                          {m.plannedTime && (
-                            <span>Kế hoạch: {new Date(m.plannedTime).toLocaleString('vi-VN')}</span>
-                          )}
-                          {m.actualTime && (
-                            <span className="text-emerald-700 font-bold">
-                              Thực tế: {new Date(m.actualTime).toLocaleString('vi-VN')}
-                            </span>
-                          )}
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-2.5">
+                          {m.plannedTime && (() => {
+                            const { time, date } = formatDateTimeVi(m.plannedTime);
+                            return (
+                              <span className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md text-[11px] font-medium border border-slate-200">
+                                <Clock size={12} className="text-slate-400 shrink-0" />
+                                <span>Kế hoạch:</span>
+                                <strong className="text-slate-900">{time}</strong>
+                                <span className="text-slate-300 mx-0.5">•</span>
+                                <span>Ngày {date}</span>
+                              </span>
+                            );
+                          })()}
+                          {m.actualTime && (() => {
+                            const { time, date } = formatDateTimeVi(m.actualTime);
+                            return (
+                              <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 px-2.5 py-1 rounded-md text-[11px] font-medium border border-emerald-200">
+                                <CheckCircle2 size={12} className="text-emerald-600 shrink-0" />
+                                <span>Thực tế:</span>
+                                <strong className="text-emerald-950 font-bold">{time}</strong>
+                                <span className="text-emerald-300 mx-0.5">•</span>
+                                <span>Ngày {date}</span>
+                              </span>
+                            );
+                          })()}
                           {m.updatedBy && (
-                            <span className="text-slate-400 italic">Xác nhận bởi: {m.updatedBy}</span>
+                            <span className="text-slate-400 italic text-[11px]">Xác nhận bởi: {m.updatedBy}</span>
                           )}
                         </div>
                       </div>
@@ -489,9 +515,17 @@ export default function CustomerTrackingPage() {
                       <span className="font-bold text-slate-800 block">
                         {log.temperatureC ? `${log.temperatureC}°C` : '--'} • {log.heartRateBpm ? `${log.heartRateBpm} bpm` : '--'}
                       </span>
-                      <span className="text-[10px] text-slate-400">
-                        {new Date(log.recordedAt).toLocaleString('vi-VN')}
-                      </span>
+                      {(() => {
+                        const { time, date } = formatDateTimeVi(log.recordedAt);
+                        return (
+                          <span className="text-[11px] text-slate-500 flex sm:justify-end items-center gap-1 mt-0.5">
+                            <Clock size={11} className="text-slate-400" />
+                            <strong className="text-slate-700">{time}</strong>
+                            <span className="text-slate-300 mx-0.5">•</span>
+                            <span>Ngày {date}</span>
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))}

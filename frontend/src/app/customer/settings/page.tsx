@@ -164,7 +164,7 @@ export default function CustomerSettingsPage() {
           Account & Profile Settings
         </h1>
         <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', marginTop: '6px' }}>
-          Quản lý thông tin cá nhân và liên hệ của bạn trên hệ thống vận chuyển EquiRoute.
+          Quản lý thông tin cá nhân và liên hệ của bạn trên hệ thống vận chuyển RaceHorse Logistics.
         </p>
       </div>
 

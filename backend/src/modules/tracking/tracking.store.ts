@@ -256,9 +256,13 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     const [rows] = await this.pool.execute<any[]>(
       `SELECT s.*, u.full_name as customer_name, u.email as customer_email,
               CASE
-                WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
+                WHEN s.special_requirements LIKE 'REQ-F4-%' THEN s.special_requirements
                 ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
               END as request_code,
+              CONCAT('REQ-', LPAD(
+                (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+                3, '0'
+              )) as customer_request_code,
               COALESCE(
                 NULLIF(r.route_name, ''),
                 CASE 
@@ -373,9 +377,17 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       const [rows] = await this.pool.execute<any[]>(
         `SELECT s.shipment_id,
                 CASE
-                  WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
-                  ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
+                  WHEN s.special_requirements LIKE 'REQ-F4-%' THEN s.special_requirements
+                  ELSE CONCAT('REQ-', LPAD(
+                    (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+                    3, '0'
+                  ))
                 END as request_code,
+                CONCAT('REQ-', LPAD(
+                  (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+                  3, '0'
+                )) as customer_request_code,
+                CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as system_request_code,
                 COALESCE(
                   NULLIF(r.route_name, ''),
                   CASE 

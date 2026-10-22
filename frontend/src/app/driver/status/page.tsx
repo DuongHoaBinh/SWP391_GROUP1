@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Crosshair, CheckCircle2, Clock, MapPin, AlertCircle, 
-  Truck, Stethoscope, RefreshCw, AlertTriangle, ArrowRight, ShieldCheck, Flag, Plane
+  Truck, Stethoscope, RefreshCw, AlertTriangle, ArrowRight, ShieldCheck, Flag, Plane, Play
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -15,6 +15,7 @@ import {
   TripTrackingDetails, 
   TrackingMilestoneItem 
 } from '@/features/tracking/api/tracking.api';
+import { routesApi } from '@/features/routes/api/routes.api';
 import toast from 'react-hot-toast';
 
 export default function DriverStatusPage() {
@@ -32,9 +33,11 @@ export default function DriverStatusPage() {
   const [selectedAction, setSelectedAction] = useState<string>('');
   const [checkInNotes, setCheckInNotes] = useState('');
 
-  // Emergency Incident Modal Placeholder (Flow 5)
+  // Emergency Incident Modal (Flow 5)
   const [isIncidentOpen, setIsIncidentOpen] = useState(false);
   const [incidentNotes, setIncidentNotes] = useState('');
+  const [incidentType, setIncidentType] = useState('traffic_delay');
+  const [activeIncident, setActiveIncident] = useState<any>(null);
 
   const isEscort =
     currentUser?.persona === 'escort' ||
@@ -64,6 +67,12 @@ export default function DriverStatusPage() {
     try {
       const details = await trackingApi.getTrackingDetails(shipmentId);
       setTrackingDetails(details);
+      try {
+        const route = await routesApi.getRouteByShipmentId(shipmentId);
+        setActiveIncident(route?.activeIncident || null);
+      } catch {
+        setActiveIncident(null);
+      }
     } catch (err: any) {
       toast.error(err?.message || 'Không thể tải chi tiết tiến độ');
     }
@@ -83,6 +92,16 @@ export default function DriverStatusPage() {
       return () => clearInterval(interval);
     }
   }, [selectedShipmentId, loadDetails]);
+
+  // Helper format date and time with clear separation
+  const formatDateTimeVi = (isoString?: string | null) => {
+    if (!isoString) return { time: '--:--', date: '--/--/----' };
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return { time: '--:--', date: '--/--/----' };
+    const time = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const date = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return { time, date };
+  };
 
   const handleOpenCheckin = (milestone: TrackingMilestoneItem) => {
     setActiveMilestone(milestone);
@@ -130,16 +149,35 @@ export default function DriverStatusPage() {
     }
   };
 
-  const handleReportIncident = (e: React.FormEvent) => {
+  const handleReportIncident = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success('Báo cáo sự cố khẩn cấp đã được gửi tới Logistics Manager (Flow 5). Đang duy trì ổn định cho ngựa!');
-    setIsIncidentOpen(false);
-    setIncidentNotes('');
+    if (!selectedShipmentId) return;
+    try {
+      await routesApi.reportIncident(selectedShipmentId, {
+        incidentType,
+        description: incidentNotes,
+        severity: 'critical',
+      });
+      toast.success(
+        'Báo cáo sự cố khẩn cấp đã được gửi tới Fleet Coordinator và Logistics Manager! Tuyến đường sẽ được kiểm tra và hiệu chỉnh lại.',
+      );
+      setIsIncidentOpen(false);
+      setIncidentNotes('');
+      loadDetails(selectedShipmentId);
+    } catch (err: any) {
+      toast.error(err?.message || 'Không thể gửi báo cáo sự cố');
+    }
   };
 
   const currentTrip = trips.find((t) => t.shipment_id === selectedShipmentId);
   const milestones = trackingDetails?.milestones || [];
   const nextMilestone = milestones.find((m) => m.status === 'CURRENT');
+  const firstLegMilestone = milestones.find((m) => m.itemType === 'leg_start' && m.seq === 1);
+  const isTripReadyToDepart =
+    (currentTrip?.shipment_status === 'ready_to_depart' ||
+     trackingDetails?.shipmentStatus === 'ready_to_depart') &&
+    firstLegMilestone &&
+    firstLegMilestone.status !== 'COMPLETED';
 
   return (
     <div className="flex flex-col gap-6 pb-12">
@@ -164,14 +202,6 @@ export default function DriverStatusPage() {
             </p>
           </div>
         </div>
-
-        {/* Nút Báo sự cố dẫn sang Flow 5 */}
-        <button
-          onClick={() => setIsIncidentOpen(true)}
-          className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm shrink-0"
-        >
-          <AlertTriangle size={14} /> Báo sự cố khẩn cấp (Flow 5)
-        </button>
       </div>
 
       {/* Top Header */}
@@ -210,6 +240,33 @@ export default function DriverStatusPage() {
         </div>
       </div>
 
+      {/* Active Incident Alert Banner */}
+      {activeIncident && (
+        <div className="p-4 rounded-xl border-2 border-rose-400 bg-rose-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-950 shadow-sm animate-pulse">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+              <AlertTriangle size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-xs uppercase text-rose-900 block">
+                  🚨 BẠN ĐÃ BÁO CÁO SỰ CỐ: {activeIncident.incidentType}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-rose-200 text-rose-900 font-bold text-[10px]">
+                  Đang chờ Coordinator đổi tuyến
+                </span>
+              </div>
+              <p className="text-xs text-rose-950 m-0 mt-1 font-semibold">
+                Nội dung: {activeIncident.description}
+              </p>
+              <span className="text-[11px] text-rose-700 block mt-0.5">
+                Điều phối viên (Coordinator) đã nhận cảnh báo và đang hiệu chỉnh lại các chặng đường vòng tránh cho xe của bạn.
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Trip Information Cards */}
       {trackingDetails && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
@@ -244,6 +301,42 @@ export default function DriverStatusPage() {
               {trackingDetails.assignedHorses.map((h) => h.name).join(', ') || 'Chiến mã'} ({trackingDetails.assignedHorses.length} con)
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Official Start Trip Action Card when at customer's farm */}
+      {isTripReadyToDepart && firstLegMilestone && (
+        <div className="p-5 rounded-2xl border-2 border-emerald-500 bg-linear-to-r from-emerald-50 via-teal-50 to-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="w-12 h-12 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm text-2xl">
+              🏇
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold text-sm text-emerald-950 uppercase tracking-wide">
+                  Chuyến Đi Đã Sẵn Sàng Xuất Phát Tại Trang Trại Khách Hàng
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-bold text-[11px] animate-pulse">
+                  Chờ nhân sự bấm xuất phát
+                </span>
+              </div>
+              <p className="text-xs text-slate-700 m-0 mt-1">
+                Điểm tiếp nhận &amp; xuất phát: <strong className="text-slate-900">{firstLegMilestone.location || currentTrip?.origin_location}</strong>
+              </p>
+              <p className="text-[11px] text-slate-500 m-0 mt-0.5">
+                Sau khi kiểm tra ngựa và chuẩn bị xong tại trang trại của khách, {!isEscort ? 'Tài xế' : 'Bác sĩ thú y / Hộ tống'} bấm nút bên cạnh để chính thức kích hoạt hành trình. Giờ xuất bến sẽ tự động đồng bộ sang màn hình Coordinator &amp; Khách hàng.
+              </p>
+            </div>
+          </div>
+
+          <Button
+            variant="primary"
+            onClick={() => handleOpenCheckin(firstLegMilestone)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm px-6 py-3 rounded-xl shrink-0 shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
+          >
+            <Play size={18} fill="currentColor" />
+            <span>Bắt đầu chuyến đi (Xuất phát)</span>
+          </Button>
         </div>
       )}
 
@@ -312,15 +405,21 @@ export default function DriverStatusPage() {
 
                       <p className="text-xs text-slate-500 flex items-center gap-1 mt-1 m-0">
                         <MapPin size={12} className="text-slate-400" /> {m.location}
-                        {m.actualTime ? (
-                          <span className="text-emerald-700 font-semibold ml-2">
-                            • Giờ thực tế: {new Date(m.actualTime).toLocaleTimeString('vi-VN')} ({new Date(m.actualTime).toLocaleDateString('vi-VN')})
-                          </span>
-                        ) : m.plannedTime ? (
-                          <span className="text-slate-400 ml-2">
-                            • Dự kiến: {new Date(m.plannedTime).toLocaleTimeString('vi-VN')}
-                          </span>
-                        ) : null}
+                        {m.actualTime ? (() => {
+                          const { time, date } = formatDateTimeVi(m.actualTime);
+                          return (
+                            <span className="text-emerald-700 font-semibold ml-2 inline-flex items-center gap-1">
+                              • Thực tế: <strong>{time}</strong> (Ngày {date})
+                            </span>
+                          );
+                        })() : m.plannedTime ? (() => {
+                          const { time, date } = formatDateTimeVi(m.plannedTime);
+                          return (
+                            <span className="text-slate-500 ml-2 inline-flex items-center gap-1">
+                              • Dự kiến: <strong>{time}</strong> (Ngày {date})
+                            </span>
+                          );
+                        })() : null}
                       </p>
 
                       {m.notes && (
@@ -336,9 +435,21 @@ export default function DriverStatusPage() {
                       <Button
                         variant="primary"
                         onClick={() => handleOpenCheckin(m)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shrink-0 shadow-sm"
+                        className={`font-bold text-xs shrink-0 shadow-sm transition-all ${
+                          m.itemType === 'leg_start' && m.seq === 1
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        }`}
                       >
-                        <CheckCircle2 size={15} className="mr-1.5" /> Báo cáo mốc này
+                        {m.itemType === 'leg_start' && m.seq === 1 ? (
+                          <>
+                            <Play size={14} fill="currentColor" className="mr-1.5" /> Bắt đầu chuyến đi (Xuất phát)
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 size={15} className="mr-1.5" /> Báo cáo mốc này
+                          </>
+                        )}
                       </Button>
                     )}
                   </div>
@@ -354,7 +465,11 @@ export default function DriverStatusPage() {
         <Modal
           isOpen={isCheckInOpen}
           onClose={() => setIsCheckInOpen(false)}
-          title={`Báo cáo mốc di chuyển - #${activeMilestone.seq}`}
+          title={
+            activeMilestone.itemType === 'leg_start' && activeMilestone.seq === 1
+              ? `🚀 Bắt đầu chuyến đi tại trang trại khách hàng - #${currentTrip?.request_code || activeMilestone.seq}`
+              : `Báo cáo mốc di chuyển - #${activeMilestone.seq}`
+          }
           maxWidth="520px"
         >
           <div className="flex flex-col gap-4 text-xs">
@@ -404,11 +519,24 @@ export default function DriverStatusPage() {
             )}
 
             {/* Action for Leg Start / Leg End */}
-            {activeMilestone.itemType === 'leg_start' && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 font-semibold">
-                🚀 Bạn đang bấm xác nhận <strong>"ĐÃ XUẤT PHÁT"</strong> chặng đường này. Giờ thực tế sẽ được tự động ghi nhận và thông báo sẽ gửi tới Khách hàng.
+            {activeMilestone.itemType === 'leg_start' && activeMilestone.seq === 1 ? (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-950 font-medium space-y-1">
+                <div className="font-bold text-sm text-emerald-900 flex items-center gap-1.5">
+                  <span>🚀</span>
+                  <span>Xác nhận xuất phát chính thức tại trang trại của khách</span>
+                </div>
+                <p className="text-xs text-emerald-800 m-0">
+                  Địa điểm tiếp nhận: <strong>{activeMilestone.location}</strong>
+                </p>
+                <p className="text-[11px] text-emerald-700 m-0">
+                  Khi bạn bấm xác nhận, hệ thống sẽ lập tức chuyển trạng thái sang <strong>&quot;Đang di chuyển (In Transit)&quot;</strong>, tự động đồng bộ thời gian thực lên màn hình của Điều phối viên (Coordinator) và gửi thông báo tới Khách hàng.
+                </p>
               </div>
-            )}
+            ) : activeMilestone.itemType === 'leg_start' ? (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 font-semibold">
+                🚀 Bạn đang bấm xác nhận <strong>&quot;ĐÃ XUẤT PHÁT&quot;</strong> chặng đường này. Giờ thực tế sẽ được tự động ghi nhận và thông báo sẽ gửi tới Khách hàng.
+              </div>
+            ) : null}
 
             {activeMilestone.itemType === 'leg_end' && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 font-semibold">
@@ -438,9 +566,19 @@ export default function DriverStatusPage() {
                 variant="primary"
                 onClick={handleConfirmCheckin}
                 disabled={isSubmitting}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                className={`font-bold transition-all ${
+                  activeMilestone.itemType === 'leg_start' && activeMilestone.seq === 1
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
               >
-                {isSubmitting ? 'Đang lưu...' : 'Xác nhận Báo cáo Mốc'}
+                {activeMilestone.itemType === 'leg_start' && activeMilestone.seq === 1
+                  ? isSubmitting
+                    ? 'Đang kích hoạt...'
+                    : '🚀 Bắt đầu chuyến đi ngay'
+                  : isSubmitting
+                  ? 'Đang lưu...'
+                  : 'Xác nhận Báo cáo Mốc'}
               </Button>
             </div>
           </div>
@@ -461,13 +599,29 @@ export default function DriverStatusPage() {
             </div>
 
             <div>
-              <label className="font-bold text-slate-700 block mb-1">Mô tả tình huống sự cố *</label>
+              <label className="font-bold text-slate-700 block mb-1">Loại sự cố gặp phải trên đường *</label>
+              <select
+                value={incidentType}
+                onChange={(e) => setIncidentType(e.target.value)}
+                className="w-full p-2.5 border border-slate-300 rounded-lg text-xs font-semibold bg-white outline-none focus:border-rose-500 shadow-2xs"
+              >
+                <option value="traffic_delay">🚧 Tuyến đường bị chặn / Sự cố kẹt xe nghiêm trọng (Road Blocked / Traffic Delay)</option>
+                <option value="vehicle_breakdown">🚚 Hỏng xe / Sự cố điều hòa thùng xe (Vehicle Breakdown)</option>
+                <option value="weather">🌧️ Thời tiết nguy hiểm / Sạt lở / Bão lũ (Severe Weather)</option>
+                <option value="border_issue">🛂 Trục trặc kiểm dịch / Cửa khẩu từ chối thông quan (Border / Customs Issue)</option>
+                <option value="horse_medical">🩺 Ngựa gặp vấn đề sức khỏe khẩn cấp (Horse Medical Emergency)</option>
+                <option value="other">⚠️ Sự cố bất khả kháng khác (Other)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Mô tả tình huống sự cố cụ thể *</label>
               <textarea
-                rows={4}
+                rows={3}
                 required
                 value={incidentNotes}
                 onChange={(e) => setIncidentNotes(e.target.value)}
-                placeholder="Ghi rõ loại sự cố: Hỏng điều hòa khoang xe, tắc đường kẹt xe vượt quá 2 giờ, ngựa sốt cao đột ngột..."
+                placeholder="Ví dụ: Đoạn đèo Quốc lộ 1 phía trước bị sạt lở cây chắn ngang đường, xe tải không qua được. Đề nghị Coordinator đổi tuyến đi đường tránh cao tốc..."
                 className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-rose-500 text-xs"
               />
             </div>
@@ -476,8 +630,9 @@ export default function DriverStatusPage() {
               <Button type="button" variant="outline" onClick={() => setIsIncidentOpen(false)}>
                 Đóng
               </Button>
-              <Button type="submit" variant="primary" className="bg-rose-600 hover:bg-rose-700 text-white font-bold">
-                Gửi cảnh báo khẩn cấp
+              <Button type="submit" variant="primary" className="bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center gap-1.5">
+                <AlertTriangle size={14} />
+                <span>Gửi cảnh báo & Yêu cầu đổi tuyến</span>
               </Button>
             </div>
           </form>
