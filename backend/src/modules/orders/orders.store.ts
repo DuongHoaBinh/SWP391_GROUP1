@@ -234,6 +234,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   async findAllShipments(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
     let query = `
       SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+             CONCAT('REQ-', LPAD(
+               (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+               3, '0'
+             )) as customer_request_code,
              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id

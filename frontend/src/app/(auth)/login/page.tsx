@@ -162,25 +162,25 @@ function LoginFormContent() {
         >
           <div
             style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #1e3a8a, #2563eb)',
+              width: '36px',
+              height: '36px',
+              borderRadius: '10px',
+              overflow: 'hidden',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              backgroundColor: '#0c1a2e',
+              flexShrink: 0,
             }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5">
-              <circle cx="5" cy="19" r="2" fill="#fff" />
-              <path d="M5 17c0-5 4-9 9-9h5" />
-              <polyline points="15 4 19 8 15 12" />
-            </svg>
+            <img src="/logo.png" alt="RaceHorse Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
           <div>
-            <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff' }}>EquiRoute</div>
-            <div style={{ fontSize: '9px', fontWeight: 600, color: '#94a3b8', letterSpacing: '0.12em' }}>
-              TRANSPORT MANAGEMENT
+            <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>RaceHorse</div>
+            <div style={{ fontSize: '9px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: '2px' }}>
+              LOGISTICS MANAGEMENT
             </div>
           </div>
         </div>
@@ -218,7 +218,7 @@ function LoginFormContent() {
               marginBottom: '28px',
             }}
           >
-            Sign in to continue to EquiRoute.
+            Sign in to continue to RaceHorse Logistics.
           </p>
 
           {/* Error Banner */}
@@ -481,7 +481,7 @@ function LoginFormContent() {
           </div>
 
           {/* Social Logins */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ width: '100%' }}>
             {/* Google */}
             <button
               type="button"
@@ -490,14 +490,15 @@ function LoginFormContent() {
                 setPassword('Password@123');
               }}
               style={{
+                width: '100%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '9px',
+                gap: '10px',
                 backgroundColor: '#121316',
                 border: '1px solid #272a30',
                 borderRadius: '10px',
-                padding: '11px',
+                padding: '12px 16px',
                 color: '#e2e8f0',
                 fontSize: '13.5px',
                 fontWeight: 600,
@@ -513,7 +514,7 @@ function LoginFormContent() {
                 (e.currentTarget as HTMLElement).style.borderColor = '#272a30';
               }}
             >
-              <svg width="17" height="17" viewBox="0 0 24 24">
+              <svg width="18" height="18" viewBox="0 0 24 24">
                 <path
                   fill="#EA4335"
                   d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.4 1 3.5 3.6 1.6 7.4l3.7 2.9C6.2 7.5 8.9 5 12 5z"
@@ -531,44 +532,7 @@ function LoginFormContent() {
                   d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.1-6.7-5.1L1.6 16.1C3.5 19.9 7.4 23 12 23z"
                 />
               </svg>
-              Google
-            </button>
-
-            {/* Facebook */}
-            <button
-              type="button"
-              onClick={() => {
-                setEmail('facebook.user@equitransit.com');
-                setPassword('Password@123');
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '9px',
-                backgroundColor: '#121316',
-                border: '1px solid #272a30',
-                borderRadius: '10px',
-                padding: '11px',
-                color: '#e2e8f0',
-                fontSize: '13.5px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.backgroundColor = '#18191e';
-                (e.currentTarget as HTMLElement).style.borderColor = '#383b42';
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.backgroundColor = '#121316';
-                (e.currentTarget as HTMLElement).style.borderColor = '#272a30';
-              }}
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="#1877F2">
-                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-              </svg>
-              Facebook
+              Continue with Google
             </button>
           </div>
 
@@ -608,7 +572,7 @@ function LoginFormContent() {
             marginTop: '24px',
           }}
         >
-          <div>© 2026 EquiRoute Logistics Ltd.</div>
+          <div>© 2026 RaceHorse Logistics Ltd.</div>
           <div style={{ display: 'flex', gap: '16px' }}>
             <span style={{ cursor: 'pointer' }}>Privacy</span>
             <span style={{ cursor: 'pointer' }}>Terms</span>
@@ -634,7 +598,7 @@ export default function LoginPage() {
             color: '#94a3b8',
           }}
         >
-          Loading EquiRoute...
+          Loading RaceHorse Logistics...
         </div>
       }
     >

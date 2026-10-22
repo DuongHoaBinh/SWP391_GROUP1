@@ -96,12 +96,13 @@ export default function ManagerRequestsPage() {
 
   const handleConfirmAction = async () => {
     if (!selectedOrder) return;
+    const orderCode = selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`;
     setIsSubmitting(true);
     try {
       if (activeModal === 'APPROVE') {
         const cost = parseFloat(inputValue);
         if (isNaN(cost) || cost <= 0) {
-          toast.error('Please enter a valid cost');
+          toast.error('Vui lòng nhập chi phí vận chuyển hợp lệ');
           setIsSubmitting(false);
           return;
         }
@@ -109,10 +110,10 @@ export default function ManagerRequestsPage() {
           method: 'PATCH',
           body: JSON.stringify({ totalCost: cost }),
         });
-        toast.success(`Order #${selectedOrder.id} approved!`);
+        toast.success(`Đơn hàng ${orderCode} đã được chấp thuận!`);
       } else if (activeModal === 'REJECT') {
         if (!inputValue.trim()) {
-          toast.error('Rejection reason required');
+          toast.error('Vui lòng nhập lý do từ chối đơn hàng');
           setIsSubmitting(false);
           return;
         }
@@ -120,10 +121,10 @@ export default function ManagerRequestsPage() {
           method: 'PATCH',
           body: JSON.stringify({ reason: inputValue }),
         });
-        toast.success(`Order #${selectedOrder.id} rejected.`);
+        toast.success(`Đơn hàng ${orderCode} đã bị từ chối.`);
       } else if (activeModal === 'CHANGE') {
         if (!inputValue.trim()) {
-          toast.error('Required change details needed');
+          toast.error('Vui lòng nhập nội dung yêu cầu bổ sung');
           setIsSubmitting(false);
           return;
         }
@@ -131,13 +132,13 @@ export default function ManagerRequestsPage() {
           method: 'PATCH',
           body: JSON.stringify({ reason: inputValue }),
         });
-        toast.success(`Changes requested for Order #${selectedOrder.id}.`);
+        toast.success(`Đã gửi yêu cầu bổ sung cho đơn hàng ${orderCode}.`);
       }
       mutate();
       setActiveModal('NONE');
       setSelectedOrder(null);
     } catch {
-      toast.error('Failed to submit action. Please try again.');
+      toast.error('Không thể thực hiện thao tác. Vui lòng thử lại.');
     } finally {
       setIsSubmitting(false);
     }
@@ -236,7 +237,10 @@ export default function ManagerRequestsPage() {
               ) : paginatedOrders.map(order => (
                 <tr key={order.id} className="hover:bg-slate-50/70 transition-colors">
                   <td className="px-6 py-4 font-bold text-blue-600 whitespace-nowrap">
-                    {order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`}
+                    <div>{order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`}</div>
+                    {order.customerRequestCode && order.customerRequestCode !== order.requestCode && (
+                      <div className="text-[10px] text-slate-400 font-normal">Khách: {order.customerRequestCode}</div>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-bold text-slate-900 m-0">{order.contactName || 'Customer'}</p>

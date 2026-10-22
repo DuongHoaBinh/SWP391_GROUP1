@@ -208,4 +208,29 @@ export class RoutesController {
   ) {
     return this.routesService.recordStopProgress(user, stopId, dto);
   }
+
+  @Post('shipment/:shipmentId/incident')
+  @ApiOperation({
+    summary: 'Tài xế, Escort hoặc Coordinator báo cáo sự cố (tắc đường, sạt lở, hỏng xe...) để mở quyền hiệu chỉnh chặng',
+  })
+  reportIncident(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('shipmentId', ParseIntPipe) shipmentId: number,
+    @Body() dto: { incidentType: string; description: string; severity?: string },
+  ) {
+    return this.routesService.reportIncident(user, shipmentId, dto);
+  }
+
+  @Post('incident/:incidentId/resolve')
+  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Coordinator hoặc Manager xác nhận đã giải quyết sự cố / Cập nhật xong lộ trình thay thế',
+  })
+  resolveIncident(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('incidentId', ParseIntPipe) incidentId: number,
+  ) {
+    return this.routesService.resolveIncident(user, incidentId);
+  }
 }
+

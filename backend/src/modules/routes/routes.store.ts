@@ -222,21 +222,84 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     `;
   }
 
+  async findActiveIncident(shipmentId: number): Promise<{
+    id: number;
+    incidentType: string;
+    description: string;
+    severity: string;
+    status: string;
+    reportedAt: string;
+  } | null> {
+    try {
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT incident_id, incident_type, description, severity, status, reported_at
+         FROM incident_report
+         WHERE shipment_id = ? AND status IN ('open', 'in_review')
+         ORDER BY incident_id DESC LIMIT 1`,
+        [shipmentId],
+      );
+      if (rows.length === 0) return null;
+      const r = rows[0];
+      return {
+        id: r.incident_id,
+        incidentType: r.incident_type,
+        description: r.description,
+        severity: r.severity,
+        status: r.status,
+        reportedAt: new Date(r.reported_at).toISOString(),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async reportIncident(data: {
+    shipmentId: number;
+    reportedBy: number;
+    incidentType: string;
+    description: string;
+    severity?: string;
+  }): Promise<number> {
+    const [res] = await this.pool.execute(
+      `INSERT INTO incident_report (shipment_id, reported_by, incident_type, description, severity, status)
+       VALUES (?, ?, ?, ?, ?, 'open')`,
+      [
+        data.shipmentId,
+        data.reportedBy,
+        data.incidentType,
+        data.description,
+        data.severity || 'high',
+      ],
+    );
+    return (res as any).insertId;
+  }
+
+  async resolveIncident(incidentId: number): Promise<void> {
+    await this.pool.execute(
+      `UPDATE incident_report
+       SET status = 'resolved', resolved_at = NOW()
+       WHERE incident_id = ?`,
+      [incidentId],
+    );
+  }
+
   async findRouteByShipmentId(shipmentId: number): Promise<RouteEntity | undefined> {
     const sql = `${this.getRouteSelectQuery()} WHERE r.shipment_id = ? ORDER BY r.route_id DESC LIMIT 1`;
     const [rows] = await this.pool.execute<RouteRow[]>(sql, [shipmentId]);
     const r = rows[0];
     if (!r) return undefined;
 
-    const [stops, legs] = await Promise.all([
+    const [stops, legs, activeIncident] = await Promise.all([
       this.findStopsByRouteId(r.route_id),
       this.findLegsByRouteId(r.route_id),
+      this.findActiveIncident(shipmentId),
     ]);
 
     return {
       ...this.mapRouteRow(r),
       stops,
       legs,
+      activeIncident,
     };
   }
 
@@ -246,15 +309,17 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     const r = rows[0];
     if (!r) return undefined;
 
-    const [stops, legs] = await Promise.all([
+    const [stops, legs, activeIncident] = await Promise.all([
       this.findStopsByRouteId(r.route_id),
       this.findLegsByRouteId(r.route_id),
+      this.findActiveIncident(r.shipment_id),
     ]);
 
     return {
       ...this.mapRouteRow(r),
       stops,
       legs,
+      activeIncident,
     };
   }
 

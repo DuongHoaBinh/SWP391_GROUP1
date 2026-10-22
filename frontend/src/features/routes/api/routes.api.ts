@@ -108,6 +108,14 @@ export interface RouteDetail {
   createdAt: string;
   legs?: RouteLegItem[];
   stops?: RouteStopItem[];
+  activeIncident?: {
+    id: number;
+    incidentType: string;
+    description: string;
+    severity: string;
+    status: string;
+    reportedAt: string;
+  } | null;
 }
 
 export interface TripPlanReadiness {
@@ -220,4 +228,24 @@ export const routesApi = {
   getTripPlanReadiness: async (shipmentId: number): Promise<TripPlanReadiness> => {
     return apiClient(`/routes/plan/${shipmentId}/readiness`);
   },
+
+  // Flow 5: Incident Reporting & Emergency Reroute
+  reportIncident: async (
+    shipmentId: number,
+    data: { incidentType: string; description: string; severity?: string }
+  ): Promise<{ success: boolean; incidentId: number }> => {
+    return apiClient(`/routes/shipment/${shipmentId}/incident`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  resolveIncident: async (
+    incidentId: number
+  ): Promise<{ success: boolean; message: string }> => {
+    return apiClient(`/routes/incident/${incidentId}/resolve`, {
+      method: 'POST',
+    });
+  },
 };
+

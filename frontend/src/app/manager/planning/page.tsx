@@ -32,6 +32,7 @@ import toast from 'react-hot-toast';
 interface OrderItem {
   id: number;
   requestCode: string;
+  customerRequestCode?: string;
   customerName?: string;
   originLocation: string;
   destinationLocation: string;
@@ -179,6 +180,7 @@ export default function ManagerPlanningPage() {
           return {
             id: o.id,
             requestCode: o.requestCode || `REQ-${String(o.id).padStart(3, '0')}`,
+            customerRequestCode: o.customerRequestCode || o.customer_request_code,
             customerName: o.contactName || o.customer?.fullName || o.customerName || 'Khách hàng',
             originLocation: o.originLocation || o.origin || 'Ho Chi Minh City, Vietnam',
             destinationLocation: o.destinationLocation || o.destination || 'Singapore Turf Club',
@@ -241,14 +243,15 @@ export default function ManagerPlanningPage() {
   const handleOpenFrameworkModal = (order: OrderItem) => {
     setSelectedOrderForFramework(order);
     const existing = order.routePlan;
+    const isIntl = isInternational(order);
     setFrameworkForm({
       managerVehicleType: existing?.managerVehicleType || 'Xe thùng chuyên dụng điều hòa 18°C',
-      managerAirlineId: existing?.managerAirlineId ? String(existing.managerAirlineId) : (airlines[0]?.id ? String(airlines[0].id) : ''),
-      managerDepartureAirportId: existing?.managerDepartureAirportId ? String(existing.managerDepartureAirportId) : (airports[0]?.id ? String(airports[0].id) : ''),
-      managerArrivalAirportId: existing?.managerArrivalAirportId ? String(existing.managerArrivalAirportId) : (airports[3]?.id ? String(airports[3].id) : ''),
-      managerMainCorridor: existing?.managerMainCorridor || (isInternational(order) ? 'Hành lang Sân bay Quốc tế Tân Sơn Nhất' : 'Tuyến cao tốc liên tỉnh'),
+      managerAirlineId: isIntl && existing?.managerAirlineId ? String(existing.managerAirlineId) : (isIntl && airlines[0]?.id ? String(airlines[0].id) : ''),
+      managerDepartureAirportId: isIntl && existing?.managerDepartureAirportId ? String(existing.managerDepartureAirportId) : (isIntl && airports[0]?.id ? String(airports[0].id) : ''),
+      managerArrivalAirportId: isIntl && existing?.managerArrivalAirportId ? String(existing.managerArrivalAirportId) : (isIntl && airports[3]?.id ? String(airports[3].id) : ''),
+      managerMainCorridor: existing?.managerMainCorridor || (isIntl ? 'Hành lang Sân bay Quốc tế Tân Sơn Nhất' : 'Tuyến Quốc lộ 1A / Cao tốc Bắc Nam'),
       assignedCoordinatorId: existing?.assignedCoordinatorId ? String(existing.assignedCoordinatorId) : (coordinators[0]?.id ? String(coordinators[0].id) : ''),
-      strategicNotes: existing?.strategicNotes || 'Bảo đảm nhiệt độ khoang 18°C, chuẩn bị đệm rơm timothy và bổ sung điện giải trước giờ cất cánh.',
+      strategicNotes: existing?.strategicNotes || (isIntl ? 'Bảo đảm nhiệt độ khoang 18°C, chuẩn bị đệm rơm timothy và bổ sung điện giải trước giờ cất cánh.' : 'Bảo đảm nhiệt độ thùng xe 18°C - 20°C, kiểm tra thể trạng ngựa và bổ sung nước điện giải tại các trạm dừng.'),
     });
     setIsFrameworkModalOpen(true);
   };
@@ -257,12 +260,13 @@ export default function ManagerPlanningPage() {
     e.preventDefault();
     if (!selectedOrderForFramework) return;
     setIsSubmittingFramework(true);
+    const isIntl = isInternational(selectedOrderForFramework);
     try {
       await routesApi.setStrategicFramework(selectedOrderForFramework.id, {
         managerVehicleType: frameworkForm.managerVehicleType,
-        managerAirlineId: frameworkForm.managerAirlineId ? Number(frameworkForm.managerAirlineId) : undefined,
-        managerDepartureAirportId: frameworkForm.managerDepartureAirportId ? Number(frameworkForm.managerDepartureAirportId) : undefined,
-        managerArrivalAirportId: frameworkForm.managerArrivalAirportId ? Number(frameworkForm.managerArrivalAirportId) : undefined,
+        managerAirlineId: isIntl && frameworkForm.managerAirlineId ? Number(frameworkForm.managerAirlineId) : undefined,
+        managerDepartureAirportId: isIntl && frameworkForm.managerDepartureAirportId ? Number(frameworkForm.managerDepartureAirportId) : undefined,
+        managerArrivalAirportId: isIntl && frameworkForm.managerArrivalAirportId ? Number(frameworkForm.managerArrivalAirportId) : undefined,
         managerMainCorridor: frameworkForm.managerMainCorridor,
         assignedCoordinatorId: frameworkForm.assignedCoordinatorId ? Number(frameworkForm.assignedCoordinatorId) : undefined,
         strategicNotes: frameworkForm.strategicNotes,
@@ -449,35 +453,45 @@ export default function ManagerPlanningPage() {
 
   // Helper: Detect whether an order is international multi-modal
   const isInternational = (order: OrderItem) => {
-    // 1. Check direct transportType field
-    const t = (order.transportType || '').toLowerCase();
-    if (t.includes('international') || t.includes('quốc tế') || t.includes('air')) return true;
-
-    // 2. Check route plan has airline or air leg
-    if (order.routePlan?.managerAirlineId || order.routePlan?.legs?.some((l) => l.legType === 'flight' || (l as any).mode === 'air')) return true;
-
-    // 3. Check origin / destination for international countries
     const o = (order.originLocation || '').toLowerCase();
     const d = (order.destinationLocation || '').toLowerCase();
-    const intlKeywords = [
-      'singapore', 'australia', 'japan', 'hong kong', 'malaysia', 'thailand',
-      'india', 'belgium', 'france', 'germany', 'usa', 'united states', 'uk',
-      'china', 'korea', 'cambodia', 'laos', 'dubai', 'uae', 'qatar', 'netherlands'
-    ];
-    if (intlKeywords.some((k) => d.includes(k) || o.includes(k))) return true;
 
-    // 4. If destination does not mention Vietnam or typical Vietnamese provinces
-    const isDomesticVietnam = (loc: string) => {
+    const isDomesticLoc = (loc: string) => {
       const l = loc.toLowerCase();
       return (
         l.includes('vietnam') || l.includes('việt nam') || l.includes('hồ chí minh') ||
         l.includes('hcm') || l.includes('hà nội') || l.includes('đà lạt') ||
         l.includes('bình dương') || l.includes('cà mau') || l.includes('sóc sơn') ||
-        l.includes('đà nẵng') || l.includes('cần thơ') || l.includes('hải phòng')
+        l.includes('đà nẵng') || l.includes('cần thơ') || l.includes('hải phòng') ||
+        l.includes('củ chi') || l.includes('long an') || l.includes('đồng nai')
       );
     };
 
-    if (!isDomesticVietnam(d)) return true;
+    const hasIntlKeyword = (loc: string) => {
+      const intlKeywords = [
+        'singapore', 'australia', 'japan', 'hong kong', 'malaysia', 'thailand',
+        'india', 'belgium', 'france', 'germany', 'usa', 'united states', 'uk',
+        'china', 'korea', 'cambodia', 'laos', 'dubai', 'uae', 'qatar', 'netherlands'
+      ];
+      return intlKeywords.some((k) => loc.includes(k));
+    };
+
+    // Priority 1: Check destination/origin for clear international countries
+    if (hasIntlKeyword(d) || hasIntlKeyword(o)) return true;
+
+    // Priority 2: If both origin and destination are in Vietnam, it is domestic road
+    if (isDomesticLoc(o) && isDomesticLoc(d)) return false;
+
+    // Priority 3: Check transportType explicitly
+    const t = (order.transportType || '').toLowerCase();
+    if (t.includes('domestic') || t.includes('nội địa') || t.includes('road') || t.includes('đường bộ')) return false;
+    if (t.includes('international') || t.includes('quốc tế') || t.includes('air')) return true;
+
+    // Priority 4: Check if route plan has flight legs
+    if (order.routePlan?.legs?.some((l) => l.legType === 'flight' || (l as any).mode === 'air')) return true;
+
+    // Fallback: If destination does not mention Vietnam, treat as international
+    if (!isDomesticLoc(d)) return true;
 
     return false;
   };
@@ -629,6 +643,11 @@ export default function ManagerPlanningPage() {
                       {/* Code & Horse */}
                       <td className="p-4 align-middle">
                         <span className="font-bold text-blue-600 text-xs">{order.requestCode}</span>
+                        {order.customerRequestCode && order.customerRequestCode !== order.requestCode && (
+                          <span className="text-[10px] text-slate-400 block font-normal">
+                            (Mã khách: {order.customerRequestCode})
+                          </span>
+                        )}
                         <p className="text-xs text-slate-800 font-semibold m-0 mt-0.5">{order.customerName}</p>
                         <p className="text-[11px] text-slate-400 m-0">{order.requestedHorseCount} cá thể ngựa</p>
                       </td>
@@ -655,7 +674,7 @@ export default function ManagerPlanningPage() {
                         {plan?.managerVehicleType ? (
                           <div className="text-xs">
                             <p className="font-semibold text-slate-800 m-0">{plan.managerVehicleType}</p>
-                            {plan.managerAirlineName && (
+                            {plan.managerAirlineName && isIntl && (
                               <p className="text-[11px] text-blue-600 font-medium m-0 flex items-center gap-1 mt-0.5">
                                 <Plane size={11} /> {plan.managerAirlineName} ({plan.managerDepartureAirportCode} → {plan.managerArrivalAirportCode})
                               </p>
