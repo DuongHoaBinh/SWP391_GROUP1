@@ -3,7 +3,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Plane, Truck, Navigation, Info, ShieldCheck, Clock, MapPin, Layers } from 'lucide-react';
 
-import { buildEquineRoute, calculateHaversine, RouteCalculationResult, Waypoint } from '@/lib/geo-corridors';
+import {
+  buildEquineRoute,
+  calculateHaversine,
+  geocodeAddress,
+  GeocodedLocation,
+  RouteCalculationResult,
+  Waypoint,
+} from '@/lib/geo-corridors';
 
 export interface RoutePreset {
   id: string;
@@ -169,14 +176,68 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   const [selectedWaypoint, setSelectedWaypoint] = useState<Waypoint | null>(null);
   const [osrmDistanceKm, setOsrmDistanceKm] = useState<number | null>(null);
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
+  const [customOriginGeo, setCustomOriginGeo] = useState<GeocodedLocation | null>(null);
+  const [customDestGeo, setCustomDestGeo] = useState<GeocodedLocation | null>(null);
+  const [isGeocoding, setIsGeocoding] = useState<boolean>(false);
 
   const requestIdRef = useRef<number>(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Dynamic OpenStreetMap / Photon Geocoding for arbitrary addresses
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+
+    const timer = setTimeout(async () => {
+      let isFetching = false;
+
+      if (originText && originText.trim().length >= 3) {
+        isFetching = true;
+        setIsGeocoding(true);
+        const geoOrigin = await geocodeAddress(originText, controller.signal);
+        if (active) {
+          setCustomOriginGeo(geoOrigin);
+        }
+      } else if (active) {
+        setCustomOriginGeo(null);
+      }
+
+      if (destinationText && destinationText.trim().length >= 3) {
+        isFetching = true;
+        setIsGeocoding(true);
+        const geoDest = await geocodeAddress(destinationText, controller.signal);
+        if (active) {
+          setCustomDestGeo(geoDest);
+        }
+      } else if (active) {
+        setCustomDestGeo(null);
+      }
+
+      if (active && isFetching) {
+        setIsGeocoding(false);
+      }
+    }, 400);
+
+    return () => {
+      active = false;
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [originText, destinationText]);
+
   // Dynamic Equine Route Computation for ANY input text
   const routeResult: RouteCalculationResult = React.useMemo(() => {
-    return buildEquineRoute(originText, destinationText, mode, transportType);
-  }, [originText, destinationText, mode, transportType]);
+    return buildEquineRoute(
+      originText,
+      destinationText,
+      mode,
+      transportType,
+      customOriginGeo?.coords ?? null,
+      customDestGeo?.coords ?? null,
+      customOriginGeo,
+      customDestGeo
+    );
+  }, [originText, destinationText, mode, transportType, customOriginGeo, customDestGeo]);
 
   const waypoints = routeResult.waypoints;
   const totalDistanceKm = routeResult.distanceKm;
@@ -186,7 +247,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   // Reset osrmDistanceKm when inputs change
   useEffect(() => {
     setOsrmDistanceKm(null);
-  }, [originText, destinationText, mode, transportType]);
+  }, [originText, destinationText, mode, transportType, customOriginGeo, customDestGeo]);
 
   useEffect(() => {
     if (onRouteCalculated) {
@@ -428,7 +489,10 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
             leg1Polyline.setLatLngs(resLeg1.coordinates);
           }
           if (resLeg3 && resLeg3.coordinates.length > 0) {
-            leg3Polyline.setLatLngs(resLeg3.coordinates);
+            const directLeg3 = calculateHaversine(wps[2].coords, wps[3].coords);
+            if (resLeg3.distanceKm <= Math.max(80, directLeg3 * 3.5)) {
+              leg3Polyline.setLatLngs(resLeg3.coordinates);
+            }
           }
 
           const leg1Dist = resLeg1 ? resLeg1.distanceKm : calculateHaversine(wps[0].coords, wps[1].coords);
@@ -676,16 +740,25 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
             gap: '6px',
             padding: '4px 10px',
             borderRadius: '20px',
-            backgroundColor: '#eff6ff',
-            border: '1px solid #bfdbfe',
+            backgroundColor: isGeocoding ? '#fef3c7' : '#eff6ff',
+            border: isGeocoding ? '1px solid #fde68a' : '1px solid #bfdbfe',
             fontSize: '11.5px',
-            color: '#1d4ed8',
+            color: isGeocoding ? '#b45309' : '#1d4ed8',
             fontWeight: 600,
+            transition: 'all 0.2s ease',
           }}
         >
-          <MapPin size={12} color="#2563eb" />
+          <MapPin size={12} color={isGeocoding ? '#d97706' : '#2563eb'} />
           <span>
-            Nhận diện: <strong>{routeResult.origin.name}</strong> ➔ <strong>{routeResult.destination.name}</strong> ({routeResult.isDomestic ? 'Nội địa' : 'Quốc tế'})
+            {isGeocoding ? (
+              'Đang tra cứu toạ độ thực tế...'
+            ) : (
+              <>
+                Nhận diện: <strong>{routeResult.origin.name}</strong> ➔ <strong>{routeResult.destination.name}</strong> (
+                {routeResult.isDomestic ? 'Nội địa' : 'Quốc tế'}
+                {customDestGeo || customOriginGeo ? ' • GPS Dynamic' : ''})
+              </>
+            )}
           </span>
         </div>
       </div>

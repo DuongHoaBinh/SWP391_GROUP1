@@ -27,6 +27,7 @@ import { EditHorseModal } from '@/components/horses/EditHorseModal';
 import { DeleteHorseModal } from '@/components/horses/DeleteHorseModal';
 import { apiClient } from '@/lib/api-client';
 import { getFullPhotoUrl } from '@/lib/customer-store';
+import { formatHorseColor, formatHorseMedicalStatus } from '@/lib/horse-constants';
 
 export default function HorseDetailPage() {
   const params = useParams();
@@ -413,7 +414,7 @@ export default function HorseDetailPage() {
                   }}
                 >
                   <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
-                  {horse.medicalStatus || 'Healthy'}
+                  {formatHorseMedicalStatus(horse.medicalStatus)}
                 </span>
               </div>
               <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
@@ -538,7 +539,7 @@ export default function HorseDetailPage() {
             <div>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Color</span>
               <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.color || '—'}
+                {formatHorseColor(horse.color)}
               </div>
             </div>
             <div>
@@ -590,7 +591,7 @@ export default function HorseDetailPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '13.5px', color: 'var(--text-body)' }}>Medical Status</span>
                 <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, backgroundColor: '#dcfce7', color: '#15803d' }}>
-                  {horse.medicalStatus || 'Healthy'}
+                  {formatHorseMedicalStatus(horse.medicalStatus)}
                 </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

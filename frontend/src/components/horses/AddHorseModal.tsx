@@ -7,6 +7,7 @@ import { Horse } from '@/lib/types';
 import { Check, Loader2, Camera } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { getFullPhotoUrl } from '@/lib/customer-store';
+import { HORSE_COAT_COLORS, HORSE_MEDICAL_STATUSES } from '@/lib/horse-constants';
 
 interface AddHorseModalProps {
   isOpen: boolean;
@@ -43,7 +44,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   const [gender, setGender] = useState<'Stallion' | 'Mare' | 'Gelding'>('Stallion');
   const [passportNumber, setPassportNumber] = useState('');
   const [microchipNumber, setMicrochipNumber] = useState('');
-  const [medicalStatus, setMedicalStatus] = useState<'Healthy' | 'Monitoring' | 'Medical Attention'>('Healthy');
+  const [medicalStatus, setMedicalStatus] = useState<'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention'>('Healthy');
   const [color, setColor] = useState('Bay');
   const [weight, setWeight] = useState('480 kg');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -155,9 +156,9 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
       onClose={onClose}
       title="Add New Racehorse"
       subtitle="Register a new horse profile to include in transport shipments."
-      maxWidth="620px"
+      maxWidth="1000px"
     >
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px', paddingBottom: '30px' }}>
         {error && (
           <div
             style={{
@@ -180,7 +181,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
             display: 'flex',
             alignItems: 'center',
             gap: '16px',
-            padding: '12px 16px',
+            padding: '12px 18px',
             backgroundColor: '#f8fafc',
             borderRadius: '12px',
             border: '1px solid #e2e8f0',
@@ -202,8 +203,8 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
           <div
             onClick={() => fileInputRef.current?.click()}
             style={{
-              width: '64px',
-              height: '64px',
+              width: '56px',
+              height: '56px',
               borderRadius: '50%',
               backgroundColor: '#eff6ff',
               border: '2px dashed #93c5fd',
@@ -222,7 +223,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
             )}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)' }}>
+            <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)' }}>
               Ảnh đại diện con ngựa
             </div>
             <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
@@ -233,11 +234,11 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             style={{
-              padding: '6px 14px',
+              padding: '7px 16px',
               borderRadius: '8px',
               border: '1px solid #cbd5e1',
               backgroundColor: '#ffffff',
-              fontSize: '12.5px',
+              fontSize: '13px',
               fontWeight: 600,
               color: '#334155',
               cursor: 'pointer',
@@ -247,8 +248,8 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
           </button>
         </div>
 
-        {/* Name and Breed */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '14px' }}>
+        {/* Row 1: Name & Color (2 wide columns: gives Color ~440px width so it never spills horizontally) */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
           <div>
             <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
               Horse Name <span style={{ color: '#dc2626' }}>*</span>
@@ -261,7 +262,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
               required
               style={{
                 width: '100%',
-                padding: '9px 12px',
+                padding: '10px 14px',
                 borderRadius: '8px',
                 border: '1px solid #cbd5e1',
                 fontSize: '14px',
@@ -271,14 +272,66 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
           </div>
           <div>
             <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Breed
+              Màu lông (Color)
+            </label>
+            <select
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                fontSize: '14px',
+                backgroundColor: '#ffffff',
+                outline: 'none',
+              }}
+            >
+              {HORSE_COAT_COLORS.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Row 2: Medical Status, Breed, Gender (3 spacious columns) */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '20px' }}>
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+              Tình trạng y tế (Medical)
+            </label>
+            <select
+              value={medicalStatus}
+              onChange={(e) => setMedicalStatus(e.target.value as any)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                fontSize: '14px',
+                backgroundColor: '#ffffff',
+                outline: 'none',
+              }}
+            >
+              {HORSE_MEDICAL_STATUSES.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+              Breed (Giống ngựa)
             </label>
             <select
               value={breed}
               onChange={(e) => setBreed(e.target.value)}
               style={{
                 width: '100%',
-                padding: '9px 12px',
+                padding: '10px 14px',
                 borderRadius: '8px',
                 border: '1px solid #cbd5e1',
                 fontSize: '14px',
@@ -294,10 +347,32 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
               <option value="Akhal-Teke">Akhal-Teke</option>
             </select>
           </div>
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+              Gender (Giới tính)
+            </label>
+            <select
+              value={gender}
+              onChange={(e) => setGender(e.target.value as any)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                fontSize: '14px',
+                backgroundColor: '#ffffff',
+                outline: 'none',
+              }}
+            >
+              <option value="Stallion">Stallion (Male)</option>
+              <option value="Mare">Mare (Female)</option>
+              <option value="Gelding">Gelding</option>
+            </select>
+          </div>
         </div>
 
-        {/* Date of Birth (Auto Calculate Age) and Gender */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '14px' }}>
+        {/* Row 3: Date of Birth & Weight */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
               <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)' }}>
@@ -309,7 +384,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                   fontWeight: 700,
                   color: '#2563eb',
                   backgroundColor: '#eff6ff',
-                  padding: '2px 8px',
+                  padding: '2px 10px',
                   borderRadius: '6px',
                   border: '1px solid #bfdbfe',
                 }}
@@ -325,7 +400,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
               required
               style={{
                 width: '100%',
-                padding: '9px 12px',
+                padding: '10px 14px',
                 borderRadius: '8px',
                 border: '1px solid #cbd5e1',
                 fontSize: '14px',
@@ -333,35 +408,32 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
               }}
             />
             <p style={{ fontSize: '11px', color: '#64748b', margin: '4px 0 0 0' }}>
-              Hệ thống tự động đối chiếu ngày sinh để tính số tuổi chính xác ({age} tuổi).
+              Hệ thống tự động tính số tuổi ({age} tuổi).
             </p>
           </div>
           <div>
             <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Gender
+              Cân nặng (Weight)
             </label>
-            <select
-              value={gender}
-              onChange={(e) => setGender(e.target.value as any)}
+            <input
+              type="text"
+              placeholder="e.g. 480 kg"
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
               style={{
                 width: '100%',
-                padding: '9px 12px',
+                padding: '10px 14px',
                 borderRadius: '8px',
                 border: '1px solid #cbd5e1',
                 fontSize: '14px',
-                backgroundColor: '#ffffff',
                 outline: 'none',
               }}
-            >
-              <option value="Stallion">Stallion (Male)</option>
-              <option value="Mare">Mare (Female)</option>
-              <option value="Gelding">Gelding</option>
-            </select>
+            />
           </div>
         </div>
 
-        {/* Passport and Microchip Number */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+        {/* Row 4: Passport & Microchip */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           <div>
             <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
               FEI Passport Number
@@ -373,10 +445,10 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
               onChange={(e) => setPassportNumber(e.target.value)}
               style={{
                 width: '100%',
-                padding: '9px 12px',
+                padding: '10px 14px',
                 borderRadius: '8px',
                 border: '1px solid #cbd5e1',
-                fontSize: '13.5px',
+                fontSize: '14px',
                 outline: 'none',
               }}
             />
@@ -392,74 +464,10 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
               onChange={(e) => setMicrochipNumber(e.target.value)}
               style={{
                 width: '100%',
-                padding: '9px 12px',
+                padding: '10px 14px',
                 borderRadius: '8px',
                 border: '1px solid #cbd5e1',
-                fontSize: '13.5px',
-                outline: 'none',
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Medical Status, Color, Weight */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Medical Status
-            </label>
-            <select
-              value={medicalStatus}
-              onChange={(e) => setMedicalStatus(e.target.value as any)}
-              style={{
-                width: '100%',
-                padding: '9px 12px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '13.5px',
-                backgroundColor: '#ffffff',
-                outline: 'none',
-              }}
-            >
-              <option value="Healthy">Healthy</option>
-              <option value="Monitoring">Monitoring</option>
-              <option value="Medical Attention">Medical Attention</option>
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Color
-            </label>
-            <input
-              type="text"
-              placeholder="Bay / Chestnut"
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '9px 12px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '13.5px',
-                outline: 'none',
-              }}
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Weight
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. 480 kg"
-              value={weight}
-              onChange={(e) => setWeight(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '9px 12px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '13.5px',
+                fontSize: '14px',
                 outline: 'none',
               }}
             />

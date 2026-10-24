@@ -537,6 +537,266 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
       country: 'Việt Nam',
     },
   },
+  {
+    id: 'vn-bacninh',
+    name: 'Bắc Ninh (Từ Sơn / Tiên Du / Yên Phong)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [21.1861, 106.0763],
+    keywords: ['bac ninh', 'tu son', 'yen phong', 'que vo', 'thuan thanh', 'tien du', 'gia binh', 'luong tai'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Nội Bài (HAN Cargo Hub)',
+      coords: [21.2212, 105.8072],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-bacgiang',
+    name: 'Bắc Giang (Việt Yên / Lục Ngạn)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [21.2731, 106.1946],
+    keywords: ['bac giang', 'viet yen', 'luc ngan', 'hiep hoa', 'lang giang'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Nội Bài (HAN Cargo Hub)',
+      coords: [21.2212, 105.8072],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-haiduong',
+    name: 'Hải Dương (Chí Linh / Cẩm Giàng)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [20.9405, 106.333],
+    keywords: ['hai duong', 'chi linh', 'kinh mon', 'cam giang'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Cát Bi (HPH Cargo)',
+      coords: [20.8194, 106.7247],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-hungyen',
+    name: 'Hưng Yên (Mỹ Hào / Văn Giang / Phố Nối)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [20.6464, 106.0511],
+    keywords: ['hung yen', 'my hao', 'van giang', 'pho noi', 'khoai chau'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Nội Bài (HAN Cargo Hub)',
+      coords: [21.2212, 105.8072],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-thainguyen',
+    name: 'Thái Nguyên (Sông Công / Phổ Yên)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [21.5928, 105.8442],
+    keywords: ['thai nguyen', 'song cong', 'pho yen', 'dai tu'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Nội Bài (HAN Cargo Hub)',
+      coords: [21.2212, 105.8072],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-vinhphuc',
+    name: 'Vĩnh Phúc (Vĩnh Yên / Phúc Yên / Tam Đảo)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [21.3089, 105.6049],
+    keywords: ['vinh phuc', 'vinh yen', 'phuc yen', 'tam dao', 'binh xuyen'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Nội Bài (HAN Cargo Hub)',
+      coords: [21.2212, 105.8072],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-phutho',
+    name: 'Phú Thọ (Việt Trì / Đền Hùng)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [21.3228, 105.4019],
+    keywords: ['phu tho', 'viet tri', 'den hung'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Nội Bài (HAN Cargo Hub)',
+      coords: [21.2212, 105.8072],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-ninhbinh',
+    name: 'Ninh Bình (Tam Điệp / Tràng An)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [20.2506, 105.9745],
+    keywords: ['ninh binh', 'tam diep', 'trang an'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Nội Bài (HAN Cargo Hub)',
+      coords: [21.2212, 105.8072],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-namdinh',
+    name: 'Nam Định',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [20.42, 106.1683],
+    keywords: ['nam dinh', 'y yen', 'hai hau'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Cát Bi (HPH Cargo)',
+      coords: [20.8194, 106.7247],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-hanam',
+    name: 'Hà Nam (Phủ Lý / Đồng Văn)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [20.5453, 105.9122],
+    keywords: ['ha nam', 'phu ly', 'dong van'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Nội Bài (HAN Cargo Hub)',
+      coords: [21.2212, 105.8072],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-thaibinh',
+    name: 'Thái Bình',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [20.4463, 106.3366],
+    keywords: ['thai binh', 'tien hai', 'dong hung'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Cát Bi (HPH Cargo)',
+      coords: [20.8194, 106.7247],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-hoabinh',
+    name: 'Hòa Bình (Lương Sơn / Mai Châu)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [20.8172, 105.3376],
+    keywords: ['hoa binh', 'luong son', 'mai chau'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Nội Bài (HAN Cargo Hub)',
+      coords: [21.2212, 105.8072],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-hatinh',
+    name: 'Hà Tĩnh (Kỳ Anh / Vũng Áng)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [18.3559, 105.9059],
+    keywords: ['ha tinh', 'hong linh', 'ky anh', 'vung ang'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Vinh (VII Cargo)',
+      coords: [18.7278, 105.6706],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-quangbinh',
+    name: 'Quảng Bình (Đồng Hới / Phong Nha)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [17.4709, 106.6225],
+    keywords: ['quang binh', 'dong hoi', 'phong nha'],
+    nearestAirport: {
+      name: 'Sân bay Đồng Hới (VDH Cargo)',
+      coords: [17.5153, 106.5906],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-quangtri',
+    name: 'Quảng Trị (Đông Hà / Lao Bảo)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [16.8163, 107.1004],
+    keywords: ['quang tri', 'dong ha', 'lao bao'],
+    nearestAirport: {
+      name: 'Sân bay Phú Bài (HUI Cargo)',
+      coords: [16.4008, 107.7031],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-quangngai',
+    name: 'Quảng Ngãi (Dung Quất)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [15.1205, 108.7923],
+    keywords: ['quang ngai', 'dung quat'],
+    nearestAirport: {
+      name: 'Sân bay Chu Lai (VCL Cargo)',
+      coords: [15.4061, 108.7056],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-phuyen',
+    name: 'Phú Yên (Tuy Hòa)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [13.0882, 109.3083],
+    keywords: ['phu yen', 'tuy hoa', 'song cau'],
+    nearestAirport: {
+      name: 'Sân bay Tuy Hòa (TBB)',
+      coords: [13.0489, 109.3339],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-gialai',
+    name: 'Gia Lai (Pleiku)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [13.9833, 108.0],
+    keywords: ['gia lai', 'pleiku', 'an khe'],
+    nearestAirport: {
+      name: 'Sân bay Pleiku (PXU)',
+      coords: [14.0044, 108.0169],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-kontum',
+    name: 'Kon Tum (Cửa khẩu Bờ Y)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [14.35, 108.0],
+    keywords: ['kon tum', 'dak ha', 'ngoc hoi', 'bo y'],
+    nearestAirport: {
+      name: 'Sân bay Pleiku (PXU)',
+      coords: [14.0044, 108.0169],
+      country: 'Việt Nam',
+    },
+  },
+  {
+    id: 'vn-daknong',
+    name: 'Đắk Nông (Gia Nghĩa)',
+    country: 'Việt Nam',
+    isVietnam: true,
+    coords: [12.0, 107.6833],
+    keywords: ['dak nong', 'gia nghia'],
+    nearestAirport: {
+      name: 'Sân bay Buôn Ma Thuột (BMV)',
+      coords: [12.6683, 108.12],
+      country: 'Việt Nam',
+    },
+  },
 
   // --- QUỐC TẾ: SINGAPORE ---
   {
@@ -803,6 +1063,34 @@ export const KNOWN_LOCATIONS: KnownLocation[] = [
       country: 'Trung Quốc',
     },
   },
+
+  // --- QUỐC TẾ: INDONESIA ---
+  {
+    id: 'intl-indonesia-kalimantan',
+    name: 'Khu Quản lý Vận chuyển Ngựa Kalimantan (Indonesia)',
+    country: 'Indonesia',
+    isVietnam: false,
+    coords: [-1.4996, 113.2903],
+    keywords: ['kalimantan', 'borneo', 'tengah', 'selatan', 'timur', 'barat', 'banjarmasin', 'samarinda', 'balikpapan', 'palangkaraya', 'pontianak'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Syamsudin Noor (BDJ Cargo), Kalimantan',
+      coords: [-3.4474, 114.7578],
+      country: 'Indonesia',
+    },
+  },
+  {
+    id: 'intl-indonesia-jakarta',
+    name: 'Trường đua Jakarta International Equestrian Park (Indonesia)',
+    country: 'Indonesia',
+    isVietnam: false,
+    coords: [-6.1837, 106.8833],
+    keywords: ['indonesia', 'jakarta', 'pulomas', 'java', 'bali', 'surabaya', 'medan', 'bandung', 'indo'],
+    nearestAirport: {
+      name: 'Sân bay Quốc tế Soekarno-Hatta (CGK Cargo), Jakarta',
+      coords: [-6.1256, 106.6559],
+      country: 'Indonesia',
+    },
+  },
 ];
 
 /**
@@ -890,6 +1178,340 @@ export function resolveLocation(
   };
 }
 
+export interface GeocodedLocation {
+  coords: [number, number];
+  displayName: string;
+  country: string;
+  countryCode?: string;
+  state?: string;
+}
+
+/**
+ * Standardize international country names into friendly Vietnamese conventions
+ */
+export function normalizeCountryName(countryName?: string, countryCode?: string): string {
+  const code = (countryCode || '').toUpperCase();
+  const c = (countryName || '').toLowerCase();
+
+  if (code === 'VN' || c.includes('vietnam') || c.includes('việt nam')) return 'Việt Nam';
+  if (code === 'MY' || c.includes('malaysia')) return 'Malaysia';
+  if (code === 'SG' || c.includes('singapore')) return 'Singapore';
+  if (code === 'TH' || c.includes('thailand') || c.includes('thái lan')) return 'Thái Lan';
+  if (code === 'KH' || c.includes('cambodia') || c.includes('campuchia')) return 'Campuchia';
+  if (code === 'LA' || c.includes('laos') || c.includes('lào')) return 'Lào';
+  if (code === 'CN' || c.includes('china') || c.includes('trung quoc')) return 'Trung Quốc';
+  if (code === 'ID' || c.includes('indonesia')) return 'Indonesia';
+  if (code === 'PH' || c.includes('philippines')) return 'Philippines';
+  if (code === 'JP' || c.includes('japan') || c.includes('nhật bản')) return 'Nhật Bản';
+  if (code === 'KR' || c.includes('korea') || c.includes('hàn quốc')) return 'Hàn Quốc';
+  if (code === 'AU' || c.includes('australia') || c.includes('úc')) return 'Úc';
+  if (code === 'FR' || c.includes('france') || c.includes('pháp')) return 'Pháp';
+  if (code === 'GB' || c.includes('united kingdom') || c.includes('anh')) return 'Vương quốc Anh';
+  if (code === 'US' || c.includes('united states') || c.includes('mỹ')) return 'Hoa Kỳ';
+
+  return countryName || 'Quốc tế';
+}
+
+export interface EquineAirportHub {
+  name: string;
+  coords: [number, number];
+  country: string;
+  code?: string;
+}
+
+export const INTERNATIONAL_EQUINE_AIRPORTS: EquineAirportHub[] = [
+  // --- INDONESIA ---
+  {
+    name: 'Sân bay Quốc tế Syamsudin Noor (BDJ Cargo), Kalimantan',
+    coords: [-3.4474, 114.7578],
+    country: 'Indonesia',
+    code: 'BDJ',
+  },
+  {
+    name: 'Sân bay Quốc tế Soekarno-Hatta (CGK Cargo), Jakarta',
+    coords: [-6.1256, 106.6559],
+    country: 'Indonesia',
+    code: 'CGK',
+  },
+  {
+    name: 'Sân bay Quốc tế Ngurah Rai (DPS Cargo), Bali',
+    coords: [-8.7482, 115.1672],
+    country: 'Indonesia',
+    code: 'DPS',
+  },
+  {
+    name: 'Sân bay Quốc tế Juanda (SUB Cargo), Surabaya',
+    coords: [-7.3798, 112.7876],
+    country: 'Indonesia',
+    code: 'SUB',
+  },
+  {
+    name: 'Sân bay Quốc tế Kualanamu (KNO Cargo), Medan',
+    coords: [3.6422, 98.8853],
+    country: 'Indonesia',
+    code: 'KNO',
+  },
+  // --- SINGAPORE ---
+  {
+    name: 'Sân bay Quốc tế Changi (SIN Live Animal Cargo Hub)',
+    coords: [1.3644, 103.9915],
+    country: 'Singapore',
+    code: 'SIN',
+  },
+  // --- MALAYSIA ---
+  {
+    name: 'Sân bay Quốc tế Kuala Lumpur (KUL Cargo Hub)',
+    coords: [2.7456, 101.7099],
+    country: 'Malaysia',
+    code: 'KUL',
+  },
+  {
+    name: 'Sân bay Quốc tế Penang (PEN Cargo)',
+    coords: [5.2971, 100.2768],
+    country: 'Malaysia',
+    code: 'PEN',
+  },
+  // --- THÁI LAN ---
+  {
+    name: 'Sân bay Quốc tế Suvarnabhumi (BKK Cargo Hub)',
+    coords: [13.69, 100.7501],
+    country: 'Thái Lan',
+    code: 'BKK',
+  },
+  {
+    name: 'Sân bay Quốc tế Chiang Mai (CNX Cargo)',
+    coords: [18.7668, 98.9626],
+    country: 'Thái Lan',
+    code: 'CNX',
+  },
+  {
+    name: 'Sân bay Quốc tế Phuket (HKT Cargo)',
+    coords: [8.1132, 98.3169],
+    country: 'Thái Lan',
+    code: 'HKT',
+  },
+  // --- CAMPUCHIA ---
+  {
+    name: 'Sân bay Quốc tế Phnom Penh (PNH Cargo)',
+    coords: [11.5466, 104.8441],
+    country: 'Campuchia',
+    code: 'PNH',
+  },
+  {
+    name: 'Sân bay Quốc tế Siem Reap Angkor (SAI Cargo)',
+    coords: [13.3712, 104.2215],
+    country: 'Campuchia',
+    code: 'SAI',
+  },
+  // --- LÀO ---
+  {
+    name: 'Sân bay Quốc tế Wattay (VTE Cargo), Vientiane',
+    coords: [17.9883, 102.5633],
+    country: 'Lào',
+    code: 'VTE',
+  },
+  // --- PHILIPPINES ---
+  {
+    name: 'Sân bay Quốc tế Ninoy Aquino (MNL Cargo), Manila',
+    coords: [14.5086, 121.0194],
+    country: 'Philippines',
+    code: 'MNL',
+  },
+  // --- HỒNG KÔNG / ĐÀI LOAN ---
+  {
+    name: 'Sân bay Quốc tế Hồng Kông (HKG Equine Center)',
+    coords: [22.308, 113.9185],
+    country: 'Hồng Kông',
+    code: 'HKG',
+  },
+  {
+    name: 'Sân bay Quốc tế Đào Viên (TPE Cargo), Đài Bắc',
+    coords: [25.0797, 121.2342],
+    country: 'Đài Loan',
+    code: 'TPE',
+  },
+  // --- NHẬT BẢN ---
+  {
+    name: 'Sân bay Quốc tế Narita (NRT Cargo), Tokyo',
+    coords: [35.772, 140.3929],
+    country: 'Nhật Bản',
+    code: 'NRT',
+  },
+  {
+    name: 'Sân bay Quốc tế Kansai (KIX Cargo), Osaka',
+    coords: [34.4347, 135.244],
+    country: 'Nhật Bản',
+    code: 'KIX',
+  },
+  // --- HÀN QUỐC ---
+  {
+    name: 'Sân bay Quốc tế Incheon (ICN Cargo), Seoul',
+    coords: [37.4602, 126.4407],
+    country: 'Hàn Quốc',
+    code: 'ICN',
+  },
+  // --- TRUNG QUỐC ---
+  {
+    name: 'Sân bay Quốc tế Bạch Vân Quảng Châu (CAN Cargo)',
+    coords: [23.3924, 113.2988],
+    country: 'Trung Quốc',
+    code: 'CAN',
+  },
+  {
+    name: 'Sân bay Quốc tế Phố Đông Thượng Hải (PVG Cargo)',
+    coords: [31.1443, 121.8083],
+    country: 'Trung Quốc',
+    code: 'PVG',
+  },
+  // --- ÚC ---
+  {
+    name: 'Sân bay Quốc tế Sydney (SYD Equine Cargo), Úc',
+    coords: [-33.9399, 151.1753],
+    country: 'Úc',
+    code: 'SYD',
+  },
+  {
+    name: 'Sân bay Quốc tế Melbourne (MEL Cargo), Úc',
+    coords: [-37.669, 144.841],
+    country: 'Úc',
+    code: 'MEL',
+  },
+  // --- TRUNG ĐÔNG ---
+  {
+    name: 'Sân bay Quốc tế Dubai (DXB Equine Cargo Terminal)',
+    coords: [25.2532, 55.3657],
+    country: 'UAE',
+    code: 'DXB',
+  },
+  // --- CHÂU ÂU ---
+  {
+    name: 'Sân bay Quốc tế Frankfurt (FRA Animal Lounge Hub), Đức',
+    coords: [50.0379, 8.5622],
+    country: 'Đức',
+    code: 'FRA',
+  },
+  {
+    name: 'Sân bay Quốc tế Charles de Gaulle (CDG Cargo), Pháp',
+    coords: [49.0097, 2.5479],
+    country: 'Pháp',
+    code: 'CDG',
+  },
+  {
+    name: 'Sân bay Quốc tế Heathrow (LHR Animal Reception Centre), Anh',
+    coords: [51.47, -0.4543],
+    country: 'Vương quốc Anh',
+    code: 'LHR',
+  },
+  // --- MỸ ---
+  {
+    name: 'Sân bay Quốc tế JFK The ARK Live Animals Hub, New York, Mỹ',
+    coords: [40.6413, -73.7781],
+    country: 'Hoa Kỳ',
+    code: 'JFK',
+  },
+  {
+    name: 'Sân bay Quốc tế Los Angeles (LAX Cargo), Mỹ',
+    coords: [33.9416, -118.4085],
+    country: 'Hoa Kỳ',
+    code: 'LAX',
+  },
+];
+
+/**
+ * Automatically determine the nearest major equine cargo airport by coordinate and country
+ */
+export function getNearestAirportForCoords(coords: [number, number], country?: string) {
+  const [lat, lng] = coords;
+
+  // 1. If domestic Vietnam
+  if (country === 'Việt Nam' || (!country && lat >= 8.3 && lat <= 23.5 && lng >= 102.0 && lng <= 109.8)) {
+    if (lat > 18.5) {
+      return {
+        name: 'Sân bay Quốc tế Nội Bài (HAN Cargo)',
+        coords: [21.2212, 105.8072] as [number, number],
+        country: 'Việt Nam',
+      };
+    } else if (lat > 14.0) {
+      return {
+        name: 'Sân bay Quốc tế Đà Nẵng (DAD Cargo)',
+        coords: [16.0439, 108.1994] as [number, number],
+        country: 'Việt Nam',
+      };
+    }
+    return {
+      name: 'Sân bay Quốc tế Tân Sơn Nhất (SGN Cargo)',
+      coords: [10.8185, 106.6588] as [number, number],
+      country: 'Việt Nam',
+    };
+  }
+
+  // 2. Filter by country first if specified
+  const countryCandidates = country
+    ? INTERNATIONAL_EQUINE_AIRPORTS.filter(
+        (a) =>
+          a.country.toLowerCase() === country.toLowerCase() ||
+          country.toLowerCase().includes(a.country.toLowerCase())
+      )
+    : [];
+
+  const searchPool = countryCandidates.length > 0 ? countryCandidates : INTERNATIONAL_EQUINE_AIRPORTS;
+
+  // 3. Find closest airport by Haversine distance
+  let closest = searchPool[0];
+  let minDistance = calculateHaversine(coords, closest.coords);
+
+  for (let i = 1; i < searchPool.length; i++) {
+    const dist = calculateHaversine(coords, searchPool[i].coords);
+    if (dist < minDistance) {
+      minDistance = dist;
+      closest = searchPool[i];
+    }
+  }
+
+  return {
+    name: closest.name,
+    coords: closest.coords,
+    country: closest.country,
+  };
+}
+
+/**
+ * Dynamic OpenStreetMap / Photon Geocoding Service (Free, No API Key, CORS Enabled)
+ * Discovers precise coordinates [lat, lng] and real country for any arbitrary address worldwide.
+ */
+export async function geocodeAddress(
+  query: string,
+  signal?: AbortSignal
+): Promise<GeocodedLocation | null> {
+  const trimmed = query?.trim();
+  if (!trimmed || trimmed.length < 3) return null;
+
+  try {
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(trimmed)}&limit=1`;
+    const res = await fetch(url, { signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.features && data.features.length > 0) {
+      const feat = data.features[0];
+      const [lng, lat] = feat.geometry.coordinates;
+      const props = feat.properties || {};
+
+      const standardizedCountry = normalizeCountryName(props.country, props.countrycode);
+
+      return {
+        coords: [lat, lng],
+        displayName: props.name || trimmed,
+        country: standardizedCountry,
+        countryCode: (props.countrycode || '').toUpperCase(),
+        state: props.state,
+      };
+    }
+  } catch {
+    // Ignore network hiccups or aborts
+  }
+  return null;
+}
+
 /**
  * Intelligent Equine Route Builder
  * Produces real waypoints, flight paths or road transit checkpoints dynamically
@@ -898,16 +1520,39 @@ export function buildEquineRoute(
   originText: string,
   destinationText: string,
   preferredMode: 'air' | 'road' = 'air',
-  explicitTransportType?: 'International' | 'Domestic'
+  explicitTransportType?: 'International' | 'Domestic',
+  customOriginCoords?: [number, number] | null,
+  customDestCoords?: [number, number] | null,
+  customOriginGeo?: GeocodedLocation | null,
+  customDestGeo?: GeocodedLocation | null
 ): RouteCalculationResult {
   const isForcedDomestic = explicitTransportType === 'Domestic';
 
   const origin = resolveLocation(originText, 'vn-hcm-cuchi', isForcedDomestic);
+  if (customOriginGeo) {
+    origin.coords = customOriginGeo.coords;
+    origin.country = customOriginGeo.country;
+    origin.isVietnam = customOriginGeo.country === 'Việt Nam';
+    origin.name = `${originText} (${customOriginGeo.country})`;
+    origin.nearestAirport = getNearestAirportForCoords(origin.coords, origin.country);
+  } else if (customOriginCoords) {
+    origin.coords = customOriginCoords;
+  }
+
   const destination = resolveLocation(
     destinationText,
-    isForcedDomestic ? 'vn-tiengiang' : 'intl-singapore',
+    isForcedDomestic ? 'vn-hanoi-socson' : 'intl-singapore',
     isForcedDomestic
   );
+  if (customDestGeo) {
+    destination.coords = customDestGeo.coords;
+    destination.country = customDestGeo.country;
+    destination.isVietnam = customDestGeo.country === 'Việt Nam';
+    destination.name = `${destinationText} (${customDestGeo.country})`;
+    destination.nearestAirport = getNearestAirportForCoords(destination.coords, destination.country);
+  } else if (customDestCoords) {
+    destination.coords = customDestCoords;
+  }
 
   const isDomestic =
     explicitTransportType === 'Domestic' ||
@@ -1091,7 +1736,10 @@ export function buildEquineRoute(
         details: 'Đưa vào khu cách ly theo dõi 14 ngày theo quy chuẩn đua quốc tế.',
       });
 
-      distanceKm = Math.max(650, Math.round(directDistanceKm * 1.1));
+      const leg1Dist = Math.round(calculateHaversine(origin.coords, originAirport.coords));
+      const flightDist = Math.round(calculateHaversine(originAirport.coords, destAirport.coords));
+      const leg3Dist = Math.round(calculateHaversine(destAirport.coords, destination.coords) * 1.35);
+      distanceKm = Math.max(650, leg1Dist + flightDist + leg3Dist);
       durationHours = Math.max(5, Math.round(distanceKm / 700 + 4.5));
     } else {
       // International Overland Road Route
@@ -1104,66 +1752,137 @@ export function buildEquineRoute(
         details: 'Khởi hành xe chuyên dụng thùng điều hòa kháng chấn.',
       });
 
-      waypoints.push({
-        name: 'Cửa khẩu Quốc tế Mộc Bài (Tây Ninh)',
-        type: 'checkpoint',
-        coords: [11.0743, 106.1821],
-        label: 'Cửa khẩu xuất cảnh & Hải quan Việt Nam',
-        country: 'Việt Nam',
-        details: 'Thực hiện thủ tục hải quan xuất cảnh cho gia súc đua, kiểm tra giấy kiểm dịch.',
-      });
-
-      waypoints.push({
-        name: 'Trạm dừng nghỉ & Thú y Phnom Penh',
-        type: 'rest',
-        coords: [11.5564, 104.9282],
-        label: 'Trạm kiểm tra sức khỏe quá cảnh (6h)',
-        country: 'Campuchia',
-        details: 'Bác sĩ thú y kiểm tra thân nhiệt, cho ngựa uống điện giải và nghỉ ngơi.',
-      });
-
-      waypoints.push({
-        name: 'Cửa khẩu Quốc tế Poipet - Aranyaprathet',
-        type: 'checkpoint',
-        coords: [13.6558, 102.5516],
-        label: 'Cửa khẩu quá cảnh Campuchia - Thái Lan',
-        country: 'Thái Lan',
-        details: 'Khử trùng lốp xe vận chuyển, làm thủ tục hải quan quá cảnh ASEAN Transit.',
-      });
-
-      // If heading further south to Malaysia or Singapore
-      const destLat = destination.coords[0];
-      if (destLat < 10) {
+      // 1. Tuyến trực tiếp sang Campuchia
+      if (destination.country === 'Campuchia') {
         waypoints.push({
-          name: 'Trạm dừng chân Surat Thani Equine Rest',
-          type: 'rest',
-          coords: [9.1382, 99.3217],
-          label: 'Trạm nghỉ ngơi & Kiểm tra móng ngựa',
-          country: 'Thái Lan',
-          details: 'Thay đệm rơm chuồng xe, kiểm tra tình trạng căng thẳng (stress log).',
-        });
-
-        waypoints.push({
-          name: 'Cửa khẩu Quốc tế Sadao - Bukit Kayu Hitam',
+          name: 'Cửa khẩu Quốc tế Mộc Bài (Tây Ninh) / Bavet',
           type: 'checkpoint',
-          coords: [6.5167, 100.4167],
-          label: 'Cửa khẩu biên giới Thái Lan - Malaysia',
-          country: 'Malaysia',
-          details: 'Kiểm tra giấy phép DVS Malaysia, kiểm dịch thú y biên giới.',
+          coords: [11.0743, 106.1821],
+          label: 'Cửa khẩu biên giới Việt Nam - Campuchia',
+          country: 'Việt Nam',
+          details: 'Thực hiện thủ tục hải quan xuất cảnh Việt Nam và kiểm dịch thú y nhập cảnh Campuchia.',
         });
+
+        // Nếu điểm đến cách xa biên giới (>220km) hoặc các tỉnh xa như Siem Reap
+        if (directDistanceKm > 250) {
+          waypoints.push({
+            name: 'Trạm dừng nghỉ & Thú y Svay Rieng (Quốc lộ 1)',
+            type: 'rest',
+            coords: [11.0878, 105.7994],
+            label: 'Trạm dừng nghỉ thú y chặng QL1',
+            country: 'Campuchia',
+            details: 'Cho ngựa uống điện giải, ăn cỏ khô, kiểm tra thân nhiệt và thông gió.',
+          });
+        }
+
+        waypoints.push({
+          name: destination.name,
+          type: 'destination',
+          coords: destination.coords,
+          label: 'Điểm đến Campuchia (Destination)',
+          country: destination.country,
+          details: 'Hoàn tất bàn giao ngựa cho chủ trang trại/trường đua, đưa vào chuồng dưỡng sức.',
+        });
+
+        distanceKm = Math.max(180, Math.round(directDistanceKm * 1.3));
+        durationHours = Math.max(4.5, Math.round(distanceKm / 50 + 2));
+      } else if (destination.country === 'Lào') {
+        // 2. Tuyến sang Lào
+        const isFromSouth = origin.coords[0] < 14;
+        if (isFromSouth) {
+          waypoints.push({
+            name: 'Cửa khẩu Quốc tế Bờ Y (Kon Tum / Attapeu)',
+            type: 'checkpoint',
+            coords: [14.7083, 107.5458],
+            label: 'Cửa khẩu biên giới Việt Nam - Lào (Bờ Y)',
+            country: 'Việt Nam',
+            details: 'Thủ tục hải quan xuất cảnh và kiểm dịch thú y liên vận Việt - Lào.',
+          });
+        } else {
+          waypoints.push({
+            name: 'Cửa khẩu Quốc tế Cầu Treo (Hà Tĩnh / Bolikhamxay)',
+            type: 'checkpoint',
+            coords: [18.3883, 105.1583],
+            label: 'Cửa khẩu biên giới Việt Nam - Lào (Cầu Treo)',
+            country: 'Việt Nam',
+            details: 'Kiểm dịch thú y động vật sống qua biên giới và thông quan hàng hóa.',
+          });
+        }
+
+        waypoints.push({
+          name: destination.name,
+          type: 'destination',
+          coords: destination.coords,
+          label: 'Điểm đến tại Lào (Destination)',
+          country: destination.country,
+          details: 'Bàn giao ngựa tại chuồng cách ly theo dõi tiêu chuẩn.',
+        });
+
+        distanceKm = Math.max(350, Math.round(directDistanceKm * 1.35));
+        durationHours = Math.max(8, Math.round(distanceKm / 50 + 2.5));
+      } else {
+        // 3. Tuyến quá cảnh ASEAN đi Thái Lan, Malaysia, Singapore bằng đường bộ
+        waypoints.push({
+          name: 'Cửa khẩu Quốc tế Mộc Bài (Tây Ninh)',
+          type: 'checkpoint',
+          coords: [11.0743, 106.1821],
+          label: 'Cửa khẩu xuất cảnh & Hải quan Việt Nam',
+          country: 'Việt Nam',
+          details: 'Thực hiện thủ tục hải quan xuất cảnh cho gia súc đua, kiểm tra giấy kiểm dịch.',
+        });
+
+        waypoints.push({
+          name: 'Trạm dừng nghỉ & Thú y Phnom Penh',
+          type: 'rest',
+          coords: [11.5564, 104.9282],
+          label: 'Trạm kiểm tra sức khỏe quá cảnh (Campuchia)',
+          country: 'Campuchia',
+          details: 'Bác sĩ thú y kiểm tra thân nhiệt, cho ngựa uống điện giải và nghỉ ngơi.',
+        });
+
+        waypoints.push({
+          name: 'Cửa khẩu Quốc tế Poipet - Aranyaprathet',
+          type: 'checkpoint',
+          coords: [13.6558, 102.5516],
+          label: 'Cửa khẩu quá cảnh Campuchia - Thái Lan',
+          country: 'Thái Lan',
+          details: 'Khử trùng lốp xe vận chuyển, làm thủ tục hải quan quá cảnh ASEAN Transit.',
+        });
+
+        // Nếu đi tiếp xuống Malaysia hoặc Singapore
+        const destLat = destination.coords[0];
+        if (destLat < 10) {
+          waypoints.push({
+            name: 'Trạm dừng chân Surat Thani Equine Rest',
+            type: 'rest',
+            coords: [9.1382, 99.3217],
+            label: 'Trạm nghỉ ngơi & Kiểm tra móng ngựa',
+            country: 'Thái Lan',
+            details: 'Thay đệm rơm chuồng xe, kiểm tra tình trạng căng thẳng (stress log).',
+          });
+
+          waypoints.push({
+            name: 'Cửa khẩu Quốc tế Sadao - Bukit Kayu Hitam',
+            type: 'checkpoint',
+            coords: [6.5167, 100.4167],
+            label: 'Cửa khẩu biên giới Thái Lan - Malaysia',
+            country: 'Malaysia',
+            details: 'Kiểm tra giấy phép DVS Malaysia, kiểm dịch thú y biên giới.',
+          });
+        }
+
+        waypoints.push({
+          name: destination.name,
+          type: 'destination',
+          coords: destination.coords,
+          label: 'Điểm đến bàn giao (Final Destination)',
+          country: destination.country,
+          details: 'Bàn giao ngựa cho chủ sở hữu, đưa vào chuồng cách ly theo dõi.',
+        });
+
+        distanceKm = Math.max(900, Math.round(directDistanceKm * 1.45));
+        durationHours = Math.max(18, Math.round((distanceKm / 55) * 1.35));
       }
-
-      waypoints.push({
-        name: destination.name,
-        type: 'destination',
-        coords: destination.coords,
-        label: 'Điểm đến bàn giao (Final Destination)',
-        country: destination.country,
-        details: 'Bàn giao ngựa cho chủ sở hữu, đưa vào chuồng cách ly theo dõi.',
-      });
-
-      distanceKm = Math.max(900, Math.round(directDistanceKm * 1.45));
-      durationHours = Math.max(18, Math.round((distanceKm / 55) * 1.35));
     }
   }
 

@@ -385,7 +385,10 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  const cancelRequest = (requestId: string) => {
+  const cancelRequest = async (requestId: string) => {
+    const target = requests.find((r) => r.id === requestId || r.requestCode === requestId);
+    const horseIds = target?.horses?.map((h) => String(h.horse?.id || h.horseId || '')).filter(Boolean) || [];
+
     setRequests((prev) =>
       prev.map((r) =>
         r.id === requestId || r.requestCode === requestId
@@ -407,6 +410,22 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
           : r
       )
     );
+
+    if (horseIds.length > 0) {
+      setHorses((prev) =>
+        prev.map((h) =>
+          horseIds.includes(String(h.id))
+            ? { ...h, status: 'active', availabilityStatus: 'Available' }
+            : h
+        )
+      );
+    }
+
+    try {
+      await refreshHorses();
+    } catch {
+      // ignore
+    }
   };
 
   const markAllNotificationsRead = async () => {

@@ -115,13 +115,23 @@ INSERT IGNORE INTO `airport` (`iata_code`, `icao_code`, `name`, `city`, `country
 ('SGN', 'VVTS', 'Sân bay Quốc tế Tân Sơn Nhất (Cargo Terminal)', 'TP. Hồ Chí Minh', 'Vietnam', TRUE, TRUE, 10.8185, 106.6519),
 ('VCA', 'VVCT', 'Sân bay Quốc tế Cần Thơ (Mekong Cargo Terminal)', 'Cần Thơ', 'Vietnam', TRUE, TRUE, 10.0851, 105.7119),
 ('HAN', 'VVNB', 'Sân bay Quốc tế Nội Bài (North Cargo Hub)', 'Hà Nội', 'Vietnam', TRUE, TRUE, 21.2212, 105.8072),
+('DAD', 'VVDN', 'Sân bay Quốc tế Đà Nẵng (Central Cargo Terminal)', 'Đà Nẵng', 'Vietnam', TRUE, TRUE, 16.0538, 108.1994),
 ('SIN', 'WSSS', 'Singapore Changi International Airport (ALPS Cargo Hub)', 'Singapore', 'Singapore', TRUE, TRUE, 1.3644, 103.9915),
 ('SYD', 'YSSY', 'Sydney Kingsford Smith Airport (Equine Air Center)', 'Sydney', 'Australia', TRUE, TRUE, -33.9461, 151.1772),
 ('MEL', 'YMML', 'Melbourne Tullamarine Airport (Victoria Cargo Hub)', 'Melbourne', 'Australia', TRUE, TRUE, -37.6733, 144.8433),
 ('HKG', 'VHHH', 'Hong Kong International Airport (SuperTerminal 1)', 'Hồng Kông', 'Hong Kong', TRUE, TRUE, 22.3080, 113.9185),
 ('NRT', 'RJAA', 'Tokyo Narita International Airport', 'Tokyo', 'Japan', TRUE, TRUE, 35.7647, 140.3863),
 ('KUL', 'WMKK', 'Kuala Lumpur International Airport (KLIA Cargo)', 'Sepang', 'Malaysia', TRUE, TRUE, 2.7456, 101.7099),
-('BKK', 'VTBS', 'Bangkok Suvarnabhumi Airport (Free Zone Cargo)', 'Bangkok', 'Thailand', TRUE, TRUE, 13.6900, 100.7501);
+('BKK', 'VTBS', 'Bangkok Suvarnabhumi Airport (Free Zone Cargo)', 'Bangkok', 'Thailand', TRUE, TRUE, 13.6900, 100.7501),
+('CGK', 'WIII', 'Soekarno-Hatta International Airport (Jakarta Cargo Hub)', 'Jakarta', 'Indonesia', TRUE, TRUE, -6.1256, 106.6559),
+('BDJ', 'WAOO', 'Syamsudin Noor Airport (Kalimantan Regional Cargo Hub)', 'Banjarmasin', 'Indonesia', TRUE, TRUE, -3.4474, 114.7578),
+('DPS', 'WADD', 'Ngurah Rai International Airport (Bali Cargo Terminal)', 'Denpasar', 'Indonesia', TRUE, TRUE, -8.7482, 115.1672),
+('SUB', 'WARR', 'Juanda International Airport (Surabaya Cargo Hub)', 'Surabaya', 'Indonesia', TRUE, TRUE, -7.3798, 112.7876),
+('PNH', 'VDPP', 'Phnom Penh International Airport (Live Animal Cargo)', 'Phnom Penh', 'Campuchia', TRUE, TRUE, 11.5466, 104.8441),
+('DXB', 'OMDB', 'Dubai International Airport (Emirates Equine Hub)', 'Dubai', 'UAE', TRUE, TRUE, 25.2532, 55.3657),
+('FRA', 'EDDF', 'Frankfurt Airport (Lufthansa Animal Lounge Hub)', 'Frankfurt', 'Đức', TRUE, TRUE, 50.0379, 8.5622),
+('CDG', 'LFPG', 'Paris Charles de Gaulle Airport (Air France Cargo Hub)', 'Paris', 'Pháp', TRUE, TRUE, 49.0097, 2.5479),
+('JFK', 'KJFK', 'John F. Kennedy International Airport (The ARK Equine Center)', 'New York', 'Mỹ', TRUE, TRUE, 40.6413, -73.7781);
 
 INSERT IGNORE INTO `master_stop` (`name`, `stop_type`, `address`, `city`, `country`, `has_veterinarian`, `has_stalls`, `lat`, `lng`) VALUES
 ('Trạm trung chuyển & Nghỉ dưỡng ngựa Củ Chi', 'rest', 'Đường Tỉnh Lộ 15, Huyện Củ Chi', 'TP. Hồ Chí Minh', 'Vietnam', TRUE, TRUE, 11.0267, 106.5167),

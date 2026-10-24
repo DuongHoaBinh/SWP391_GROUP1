@@ -252,4 +252,41 @@ export class OrdersService {
     const updated = await this.ordersStore.findShipmentById(orderId);
     return updated!;
   }
+
+  async cancelOrder(user: AuthenticatedUser, orderId: number): Promise<TransportOrder> {
+    const order = await this.ordersStore.findShipmentById(orderId);
+    if (!order) {
+      throw new NotFoundException(`Transport order #${orderId} not found`);
+    }
+
+    if (user.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ có thể hủy đơn vận chuyển của chính mình');
+    }
+
+    if (order.status === ShipmentStatus.COMPLETED) {
+      throw new BadRequestException('Không thể hủy đơn vận chuyển đã hoàn tất');
+    }
+
+    if (order.status === ShipmentStatus.IN_TRANSIT) {
+      throw new BadRequestException('Không thể hủy đơn vận chuyển đang trong hành trình di chuyển');
+    }
+
+    if (order.status === ShipmentStatus.CANCELLED) {
+      throw new BadRequestException('Đơn vận chuyển này đã được hủy trước đó');
+    }
+
+    await this.ordersStore.cancelShipment(orderId);
+
+    const code = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
+    await this.notificationsService.createNotification(
+      order.customerId,
+      'Đơn vận chuyển đã được hủy',
+      `Đơn vận chuyển mã ${code} đã được hủy theo yêu cầu của bạn. Trạng thái các chú ngựa trong đơn đã được mở lại.`,
+      'status_update',
+      orderId,
+    );
+
+    const updated = await this.ordersStore.findShipmentById(orderId);
+    return updated!;
+  }
 }

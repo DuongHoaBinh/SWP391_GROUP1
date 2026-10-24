@@ -21,6 +21,7 @@ import {
   Loader2,
   Building,
   Flag,
+  ArrowRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -40,6 +41,7 @@ interface OrderItem {
   requestedDate: string;
   status: string;
   transportType?: string;
+  specialRequirements?: string;
   routePlan?: RouteDetail | null;
   readiness?: TripPlanReadiness | null;
 }
@@ -59,6 +61,7 @@ export default function ManagerPlanningPage() {
   // Modal 1: Step 1a - Strategic Framework Modal
   const [isFrameworkModalOpen, setIsFrameworkModalOpen] = useState(false);
   const [selectedOrderForFramework, setSelectedOrderForFramework] = useState<OrderItem | null>(null);
+  const [enableAirCargo, setEnableAirCargo] = useState(false);
   const [frameworkForm, setFrameworkForm] = useState({
     managerVehicleType: 'Xe thùng chuyên dụng điều hòa 18°C',
     managerAirlineId: '',
@@ -69,6 +72,23 @@ export default function ManagerPlanningPage() {
     strategicNotes: '',
   });
   const [isSubmittingFramework, setIsSubmittingFramework] = useState(false);
+
+  const getAirlineDescriptionVi = (code: string) => {
+    switch (code) {
+      case 'CX':
+        return 'Dịch vụ Chuyên chở Động vật sống & Ngựa thi đấu quốc tế';
+      case 'EK':
+        return 'Dịch vụ Khoang bay Đẳng cấp cho Ngựa đua Quốc tế (Hạng Nhất)';
+      case 'QR':
+        return 'Dịch vụ Hàng không Đặc biệt cho Động vật sống & Ngựa giống';
+      case 'SQ':
+        return 'Dịch vụ Vận chuyển Ngựa đua Chuyên nghiệp Hàng đầu Châu Á';
+      case 'VN':
+        return 'Hãng Hàng không Quốc gia - Chăm sóc Đặc biệt & Tuyến Nội địa';
+      default:
+        return 'Dịch vụ Hàng không Vận chuyển Ngựa Chuyên dụng';
+    }
+  };
 
   // Modal 2: Step 2 - Review Detailed Plan Modal
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
@@ -188,6 +208,7 @@ export default function ManagerPlanningPage() {
             requestedDate: o.requestedDate || o.departureDate || '2026-10-20',
             status: o.status,
             transportType: o.transportType || o.transportationType,
+            specialRequirements: o.specialRequirements || o.special_requirements,
             routePlan,
             readiness,
           };
@@ -244,14 +265,100 @@ export default function ManagerPlanningPage() {
     setSelectedOrderForFramework(order);
     const existing = order.routePlan;
     const isIntl = isInternational(order);
+
+    // Kiểm tra đơn có sử dụng chặng bay không (quốc tế mặc định true, nội địa kiểm tra existing hoặc transportType)
+    const isExistingAir = Boolean(
+      existing?.managerAirlineId ||
+      existing?.managerDepartureAirportId ||
+      order.transportType === 'air' ||
+      (order.specialRequirements || '').toLowerCase().includes('bay') ||
+      (order.specialRequirements || '').toLowerCase().includes('hàng không')
+    );
+    const initialAirEnabled = isIntl || isExistingAir;
+    setEnableAirCargo(initialAirEnabled);
+
+    // Smart Airport Selection based on customer request
+    const oLower = (order.originLocation || '').toLowerCase();
+    const dLower = (order.destinationLocation || '').toLowerCase();
+
+    // 1. Departure Airport (from Vietnam)
+    let bestDepAirport = airports.find((a) => a.iataCode === 'SGN');
+    if (oLower.includes('hà nội') || oLower.includes('ha noi') || oLower.includes('nội bài')) {
+      bestDepAirport = airports.find((a) => a.iataCode === 'HAN') || bestDepAirport;
+    } else if (oLower.includes('đà nẵng') || oLower.includes('da nang')) {
+      bestDepAirport = airports.find((a) => a.iataCode === 'DAD') || bestDepAirport;
+    } else if (oLower.includes('cần thơ') || oLower.includes('can tho')) {
+      bestDepAirport = airports.find((a) => a.iataCode === 'VCA') || bestDepAirport;
+    }
+    const defaultDepId = bestDepAirport?.id ? String(bestDepAirport.id) : (airports[0]?.id ? String(airports[0].id) : '');
+
+    // 2. Arrival Airport (near destination country or domestic destination)
+    let bestArrAirport: AirportItem | undefined = undefined;
+    if (isIntl) {
+      if (dLower.includes('kalimantan') || dLower.includes('borneo')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'BDJ') || airports.find((a) => a.iataCode === 'CGK');
+      } else if (dLower.includes('indonesia') || dLower.includes('jakarta')) {
+        bestArrAirport =
+          airports.find((a) => a.iataCode === 'CGK') ||
+          airports.find((a) => a.iataCode === 'SUB') ||
+          airports.find((a) => a.iataCode === 'DPS') ||
+          airports.find((a) => (a.country || '').toLowerCase().includes('indonesia'));
+      } else if (dLower.includes('campuchia') || dLower.includes('cambodia') || dLower.includes('phnom penh')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'PNH');
+      } else if (dLower.includes('singapore')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'SIN');
+      } else if (dLower.includes('malaysia') || dLower.includes('kuala lumpur')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'KUL');
+      } else if (dLower.includes('thailand') || dLower.includes('thái') || dLower.includes('bangkok')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'BKK');
+      } else if (dLower.includes('japan') || dLower.includes('nhật') || dLower.includes('tokyo')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'NRT');
+      } else if (dLower.includes('australia') || dLower.includes('úc') || dLower.includes('melbourne')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'MEL' || a.iataCode === 'SYD');
+      } else if (dLower.includes('hong kong')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'HKG');
+      } else if (dLower.includes('uae') || dLower.includes('dubai')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'DXB');
+      } else if (dLower.includes('đức') || dLower.includes('germany') || dLower.includes('frankfurt')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'FRA');
+      } else if (dLower.includes('pháp') || dLower.includes('france') || dLower.includes('paris')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'CDG');
+      } else if (dLower.includes('mỹ') || dLower.includes('usa') || dLower.includes('new york')) {
+        bestArrAirport = airports.find((a) => a.iataCode === 'JFK');
+      }
+    } else {
+      // Đơn nội địa: nếu xuất phát ở miền Nam (SGN) thì hạ cánh HAN (Hà Nội), ngược lại nếu xuất phát HAN thì hạ cánh SGN
+      if (bestDepAirport?.iataCode === 'SGN' || bestDepAirport?.iataCode === 'VCA') {
+        bestArrAirport = airports.find((a) => a.iataCode === 'HAN') || airports.find((a) => a.iataCode === 'DAD');
+      } else {
+        bestArrAirport = airports.find((a) => a.iataCode === 'SGN') || airports.find((a) => a.iataCode === 'VCA');
+      }
+    }
+
+    const defaultArrId = bestArrAirport?.id
+      ? String(bestArrAirport.id)
+      : (airports.find((a) => !(a.country || '').toLowerCase().includes('vietnam'))?.id ? String(airports.find((a) => !(a.country || '').toLowerCase().includes('vietnam'))?.id) : (airports[1]?.id ? String(airports[1].id) : ''));
+
+    // 3. Auto corridor name
+    const depCode = airports.find((a) => String(a.id) === (existing?.managerDepartureAirportId ? String(existing.managerDepartureAirportId) : defaultDepId))?.iataCode || 'SGN';
+    const arrCode = airports.find((a) => String(a.id) === (existing?.managerArrivalAirportId ? String(existing.managerArrivalAirportId) : defaultArrId))?.iataCode || (isIntl ? 'DEST' : 'HAN');
+
+    const defaultCorridor = initialAirEnabled
+      ? `Hành lang Hàng không ${isIntl ? 'Quốc tế' : 'Nội địa'}: Sân bay ${depCode} ➔ Sân bay ${arrCode}`
+      : 'Tuyến đường bộ cao tốc / Quốc lộ kết hợp trạm nghỉ';
+
+    const defaultAirline = isIntl
+      ? (airlines[0]?.id ? String(airlines[0].id) : '')
+      : (airlines.find((a) => a.code === 'VN')?.id ? String(airlines.find((a) => a.code === 'VN')?.id) : (airlines[0]?.id ? String(airlines[0].id) : ''));
+
     setFrameworkForm({
       managerVehicleType: existing?.managerVehicleType || 'Xe thùng chuyên dụng điều hòa 18°C',
-      managerAirlineId: isIntl && existing?.managerAirlineId ? String(existing.managerAirlineId) : (isIntl && airlines[0]?.id ? String(airlines[0].id) : ''),
-      managerDepartureAirportId: isIntl && existing?.managerDepartureAirportId ? String(existing.managerDepartureAirportId) : (isIntl && airports[0]?.id ? String(airports[0].id) : ''),
-      managerArrivalAirportId: isIntl && existing?.managerArrivalAirportId ? String(existing.managerArrivalAirportId) : (isIntl && airports[3]?.id ? String(airports[3].id) : ''),
-      managerMainCorridor: existing?.managerMainCorridor || (isIntl ? 'Hành lang Sân bay Quốc tế Tân Sơn Nhất' : 'Tuyến Quốc lộ 1A / Cao tốc Bắc Nam'),
+      managerAirlineId: initialAirEnabled && existing?.managerAirlineId ? String(existing.managerAirlineId) : (initialAirEnabled ? defaultAirline : ''),
+      managerDepartureAirportId: initialAirEnabled && existing?.managerDepartureAirportId ? String(existing.managerDepartureAirportId) : (initialAirEnabled ? defaultDepId : ''),
+      managerArrivalAirportId: initialAirEnabled && existing?.managerArrivalAirportId ? String(existing.managerArrivalAirportId) : (initialAirEnabled ? defaultArrId : ''),
+      managerMainCorridor: existing?.managerMainCorridor || defaultCorridor,
       assignedCoordinatorId: existing?.assignedCoordinatorId ? String(existing.assignedCoordinatorId) : (coordinators[0]?.id ? String(coordinators[0].id) : ''),
-      strategicNotes: existing?.strategicNotes || (isIntl ? 'Bảo đảm nhiệt độ khoang 18°C, chuẩn bị đệm rơm timothy và bổ sung điện giải trước giờ cất cánh.' : 'Bảo đảm nhiệt độ thùng xe 18°C - 20°C, kiểm tra thể trạng ngựa và bổ sung nước điện giải tại các trạm dừng.'),
+      strategicNotes: existing?.strategicNotes || (initialAirEnabled ? 'Bảo đảm nhiệt độ khoang 18°C, chuẩn bị đệm rơm timothy và bổ sung điện giải trước giờ cất cánh.' : 'Bảo đảm nhiệt độ thùng xe 18°C - 20°C, kiểm tra thể trạng ngựa và bổ sung nước điện giải tại các trạm dừng.'),
     });
     setIsFrameworkModalOpen(true);
   };
@@ -261,12 +368,13 @@ export default function ManagerPlanningPage() {
     if (!selectedOrderForFramework) return;
     setIsSubmittingFramework(true);
     const isIntl = isInternational(selectedOrderForFramework);
+    const hasAir = isIntl || enableAirCargo;
     try {
       await routesApi.setStrategicFramework(selectedOrderForFramework.id, {
         managerVehicleType: frameworkForm.managerVehicleType,
-        managerAirlineId: isIntl && frameworkForm.managerAirlineId ? Number(frameworkForm.managerAirlineId) : undefined,
-        managerDepartureAirportId: isIntl && frameworkForm.managerDepartureAirportId ? Number(frameworkForm.managerDepartureAirportId) : undefined,
-        managerArrivalAirportId: isIntl && frameworkForm.managerArrivalAirportId ? Number(frameworkForm.managerArrivalAirportId) : undefined,
+        managerAirlineId: hasAir && frameworkForm.managerAirlineId ? Number(frameworkForm.managerAirlineId) : undefined,
+        managerDepartureAirportId: hasAir && frameworkForm.managerDepartureAirportId ? Number(frameworkForm.managerDepartureAirportId) : undefined,
+        managerArrivalAirportId: hasAir && frameworkForm.managerArrivalAirportId ? Number(frameworkForm.managerArrivalAirportId) : undefined,
         managerMainCorridor: frameworkForm.managerMainCorridor,
         assignedCoordinatorId: frameworkForm.assignedCoordinatorId ? Number(frameworkForm.assignedCoordinatorId) : undefined,
         strategicNotes: frameworkForm.strategicNotes,
@@ -470,6 +578,7 @@ export default function ManagerPlanningPage() {
     const hasIntlKeyword = (loc: string) => {
       const intlKeywords = [
         'singapore', 'australia', 'japan', 'hong kong', 'malaysia', 'thailand',
+        'indonesia', 'kalimantan', 'borneo', 'jakarta', 'bali',
         'india', 'belgium', 'france', 'germany', 'usa', 'united states', 'uk',
         'china', 'korea', 'cambodia', 'laos', 'dubai', 'uae', 'qatar', 'netherlands'
       ];
@@ -807,6 +916,38 @@ export default function ManagerPlanningPage() {
         title={`Thiết lập khung kế hoạch vận chuyển - ${selectedOrderForFramework?.requestCode}`}
       >
         <form onSubmit={handleSaveFramework} className="flex flex-col gap-4 text-xs">
+          {/* Customer Request Summary Card */}
+          {selectedOrderForFramework && (
+            <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-extrabold text-[11px]">
+                    {selectedOrderForFramework.customerRequestCode || selectedOrderForFramework.requestCode}
+                  </span>
+                  <span>Khách hàng: <strong>{selectedOrderForFramework.customerName}</strong></span>
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${isInternational(selectedOrderForFramework) ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                  {isInternational(selectedOrderForFramework) ? '✈️ Vận chuyển Quốc tế' : '🚛 Vận chuyển Nội địa'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 bg-white p-2.5 rounded-lg border border-slate-200">
+                <span className="text-slate-600 truncate">{selectedOrderForFramework.originLocation}</span>
+                <ArrowRight size={14} className="text-slate-400 shrink-0" />
+                <span className="text-blue-700 font-bold truncate">{selectedOrderForFramework.destinationLocation}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
+                <span>Số lượng ngựa: <strong className="text-slate-800">{selectedOrderForFramework.requestedHorseCount} chiến mã</strong></span>
+                <span>Ngày xuất phát: <strong className="text-slate-800">{new Date(selectedOrderForFramework.requestedDate).toLocaleDateString('vi-VN')}</strong></span>
+              </div>
+              {selectedOrderForFramework.specialRequirements && (
+                <div className="text-[11px] text-slate-600 bg-amber-50/90 p-2 rounded border border-amber-200">
+                  <span className="font-bold text-amber-900">Ghi chú & Lộ trình yêu cầu: </span>
+                  {selectedOrderForFramework.specialRequirements}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-blue-800 leading-relaxed">
             <strong>Vai trò Logistics Manager:</strong> Bạn định hướng loại phương tiện, hãng hàng không,
             cặp sân bay và chỉ định Coordinator. Coordinator sẽ căn cứ vào đây để chọn xe cụ thể, đặt booking và dựng từng chặng chi tiết.
@@ -827,11 +968,67 @@ export default function ManagerPlanningPage() {
             </select>
           </div>
 
-          {selectedOrderForFramework && isInternational(selectedOrderForFramework) && (
+          {/* Toggle Air Cargo cho đơn nội địa */}
+          {selectedOrderForFramework && !isInternational(selectedOrderForFramework) && (
+            <div className="flex items-center justify-between p-2.5 bg-blue-50/80 border border-blue-200 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Plane size={15} className="text-blue-600 shrink-0" />
+                <div>
+                  <div className="font-bold text-slate-800 text-xs">Vận chuyển Hàng không Nội địa (Air Cargo Express)</div>
+                  <div className="text-[11px] text-slate-500">Tích chọn nếu chuyến đi kết hợp chặng bay nội địa (VD: SGN ➔ HAN, DAD)</div>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableAirCargo}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setEnableAirCargo(enabled);
+                    if (enabled) {
+                      const oLower = (selectedOrderForFramework.originLocation || '').toLowerCase();
+                      let dep = airports.find((a) => a.iataCode === 'SGN');
+                      let arr = airports.find((a) => a.iataCode === 'HAN');
+                      if (oLower.includes('hà nội') || oLower.includes('ha noi')) {
+                        dep = airports.find((a) => a.iataCode === 'HAN');
+                        arr = airports.find((a) => a.iataCode === 'SGN');
+                      }
+                      const depId = dep ? String(dep.id) : (airports[0]?.id ? String(airports[0].id) : '');
+                      const arrId = arr ? String(arr.id) : (airports[1]?.id ? String(airports[1].id) : '');
+                      const vnAirline = airlines.find((a) => a.code === 'VN') || airlines[0];
+                      setFrameworkForm((prev) => ({
+                        ...prev,
+                        managerAirlineId: prev.managerAirlineId || (vnAirline ? String(vnAirline.id) : ''),
+                        managerDepartureAirportId: depId,
+                        managerArrivalAirportId: arrId,
+                        managerMainCorridor: `Hành lang Hàng không Nội địa: Sân bay ${dep?.iataCode || 'SGN'} ➔ Sân bay ${arr?.iataCode || 'HAN'}`,
+                      }));
+                    } else {
+                      setFrameworkForm((prev) => ({
+                        ...prev,
+                        managerAirlineId: '',
+                        managerDepartureAirportId: '',
+                        managerArrivalAirportId: '',
+                        managerMainCorridor: 'Tuyến đường bộ cao tốc / Quốc lộ kết hợp trạm nghỉ',
+                      }));
+                    }
+                  }}
+                  className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                />
+              </label>
+            </div>
+          )}
+
+          {selectedOrderForFramework && (isInternational(selectedOrderForFramework) || enableAirCargo) && (
             <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg flex flex-col gap-3">
-              <span className="font-bold text-purple-900 flex items-center gap-1.5 text-xs">
-                <Plane size={14} /> 2. Định hướng Chặng bay Quốc tế (Air Cargo)
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-purple-900 flex items-center gap-1.5 text-xs">
+                  <Plane size={14} /> 2. Định hướng Chặng bay {isInternational(selectedOrderForFramework) ? 'Quốc tế' : 'Nội địa'} (Air Cargo)
+                </span>
+                <span className="text-[10px] bg-purple-200 text-purple-800 font-bold px-2 py-0.5 rounded-full">
+                  IATA Live Animals Regulations (LAR)
+                </span>
+              </div>
 
               <div>
                 <label className="font-bold text-slate-700 block mb-1">Hãng hàng không vận chuyển ngựa *</label>
@@ -842,7 +1039,7 @@ export default function ManagerPlanningPage() {
                 >
                   {airlines.map((al) => (
                     <option key={al.id} value={al.id}>
-                      {al.name} ({al.code}) — {al.cargoServiceName}
+                      {al.name} ({al.code}) — {al.cargoServiceName} [{getAirlineDescriptionVi(al.code)}]
                     </option>
                   ))}
                 </select>
@@ -853,30 +1050,78 @@ export default function ManagerPlanningPage() {
                   <label className="font-bold text-slate-700 block mb-1">Sân bay xuất phát *</label>
                   <select
                     value={frameworkForm.managerDepartureAirportId}
-                    onChange={(e) => setFrameworkForm({ ...frameworkForm, managerDepartureAirportId: e.target.value })}
+                    onChange={(e) => {
+                      const newDepId = e.target.value;
+                      const depAp = airports.find((a) => String(a.id) === newDepId);
+                      const arrAp = airports.find((a) => String(a.id) === frameworkForm.managerArrivalAirportId);
+                      setFrameworkForm({
+                        ...frameworkForm,
+                        managerDepartureAirportId: newDepId,
+                        managerMainCorridor: `Hành lang Hàng không ${isInternational(selectedOrderForFramework) ? 'Quốc tế' : 'Nội địa'}: Sân bay ${depAp?.iataCode || 'DEP'} ➔ Sân bay ${arrAp?.iataCode || 'ARR'}`,
+                      });
+                    }}
                     className="w-full p-2 border border-slate-300 rounded-lg outline-none font-medium text-xs bg-white"
                   >
-                    {airports.map((ap) => (
-                      <option key={ap.id} value={ap.id}>
-                        {ap.iataCode} - {ap.name} ({ap.country})
-                      </option>
-                    ))}
+                    <optgroup label="Sân bay Việt Nam (Xuất phát)">
+                      {airports
+                        .filter((ap) => (ap.country || '').toLowerCase().includes('vietnam') || (ap.country || '').toLowerCase().includes('việt nam') || ['SGN', 'HAN', 'DAD', 'VCA'].includes(ap.iataCode))
+                        .map((ap) => (
+                          <option key={ap.id} value={ap.id}>
+                            {ap.iataCode} - {ap.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                    <optgroup label="Sân bay Quốc tế">
+                      {airports
+                        .filter((ap) => !((ap.country || '').toLowerCase().includes('vietnam') || (ap.country || '').toLowerCase().includes('việt nam')) && !['SGN', 'HAN', 'DAD', 'VCA'].includes(ap.iataCode))
+                        .map((ap) => (
+                          <option key={ap.id} value={ap.id}>
+                            {ap.iataCode} - {ap.name} ({ap.country})
+                          </option>
+                        ))}
+                    </optgroup>
                   </select>
                 </div>
                 <div>
                   <label className="font-bold text-slate-700 block mb-1">Sân bay hạ cánh *</label>
                   <select
                     value={frameworkForm.managerArrivalAirportId}
-                    onChange={(e) => setFrameworkForm({ ...frameworkForm, managerArrivalAirportId: e.target.value })}
+                    onChange={(e) => {
+                      const newArrId = e.target.value;
+                      const depAp = airports.find((a) => String(a.id) === frameworkForm.managerDepartureAirportId);
+                      const arrAp = airports.find((a) => String(a.id) === newArrId);
+                      setFrameworkForm({
+                        ...frameworkForm,
+                        managerArrivalAirportId: newArrId,
+                        managerMainCorridor: `Hành lang Hàng không ${isInternational(selectedOrderForFramework) ? 'Quốc tế' : 'Nội địa'}: Sân bay ${depAp?.iataCode || 'DEP'} ➔ Sân bay ${arrAp?.iataCode || 'ARR'}`,
+                      });
+                    }}
                     className="w-full p-2 border border-slate-300 rounded-lg outline-none font-medium text-xs bg-white"
                   >
-                    {airports.map((ap) => (
-                      <option key={ap.id} value={ap.id}>
-                        {ap.iataCode} - {ap.name} ({ap.country})
-                      </option>
-                    ))}
+                    <optgroup label="Sân bay Việt Nam (Hạ cánh Nội địa)">
+                      {airports
+                        .filter((ap) => (ap.country || '').toLowerCase().includes('vietnam') || (ap.country || '').toLowerCase().includes('việt nam') || ['SGN', 'HAN', 'DAD', 'VCA'].includes(ap.iataCode))
+                        .map((ap) => (
+                          <option key={ap.id} value={ap.id}>
+                            {ap.iataCode} - {ap.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                    <optgroup label="Sân bay Quốc tế (Equine Air Cargo Hub)">
+                      {airports
+                        .filter((ap) => !((ap.country || '').toLowerCase().includes('vietnam') || (ap.country || '').toLowerCase().includes('việt nam')) && !['SGN', 'HAN', 'DAD', 'VCA'].includes(ap.iataCode))
+                        .map((ap) => (
+                          <option key={ap.id} value={ap.id}>
+                            {ap.iataCode} - {ap.name} ({ap.country})
+                          </option>
+                        ))}
+                    </optgroup>
                   </select>
                 </div>
+              </div>
+
+              <div className="text-[11px] text-purple-900 bg-purple-100/70 p-2 rounded border border-purple-200 leading-snug">
+                💡 <strong>Quy chuẩn Hub trung chuyển quốc tế:</strong> Máy bay chở ngựa chỉ hạ cánh tại các <strong>Cảng hàng không trung chuyển động vật sống (Equine Hub)</strong> đạt chuẩn IATA có trạm kiểm dịch thú y. Nếu địa phương/quốc gia đích chưa có sân bay trực tiếp, chuyến bay sẽ hạ cánh tại Hub gần nhất của khu vực, sau đó Coordinator sẽ phân công xe thùng điều hòa chuyên dụng chở tiếp chặng cuối về tận chuồng nuôi đích.
               </div>
             </div>
           )}

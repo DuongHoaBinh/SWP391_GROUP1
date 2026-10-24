@@ -354,6 +354,25 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return this.updateShipmentStatus(shipmentId, status);
   }
 
+  async cancelShipment(shipmentId: number): Promise<boolean> {
+    // 1. Revert horse statuses back to active
+    await this.pool.execute(
+      `UPDATE horse h
+       JOIN shipment_horse sh ON sh.horse_id = h.horse_id
+       SET h.status = 'active'
+       WHERE sh.shipment_id = ?`,
+      [shipmentId],
+    );
+
+    // 2. Set shipment status to cancelled
+    const [result] = await this.pool.execute(
+      'UPDATE shipment SET status = ? WHERE shipment_id = ?',
+      [ShipmentStatus.CANCELLED, shipmentId],
+    );
+
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
   async updateAndResubmitShipment(
     customerId: number,
     shipmentId: number,

@@ -119,4 +119,14 @@ export class OrdersController {
   ) {
     return this.ordersService.completeOrder(user, id);
   }
+
+  @Patch(':id/cancel')
+  @Roles(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.LOGISTICS_MANAGER)
+  @ApiOperation({ summary: 'Cancel a transport request' })
+  cancelOrder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.cancelOrder(user, id);
+  }
 }

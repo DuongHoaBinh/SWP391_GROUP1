@@ -28,23 +28,56 @@ export default function ManagerRequestsPage() {
   const [selectedTransportMode, setSelectedTransportMode] = useState<'road' | 'air'>('road');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const getOrderRouteMetrics = (order: any, mode: 'road' | 'air') => {
+    const specialReq = String(order?.specialRequirements || order?.special_requirements || '');
+    const routeMatch = specialReq.match(/\[Lộ trình:\s*([^,]+),\s*([0-9,]+)\s*km,\s*~?([0-9]+)h\]/i);
+    const savedMode = routeMatch
+      ? routeMatch[1].toLowerCase().includes('hàng không') || routeMatch[1].toLowerCase().includes('air')
+        ? 'air'
+        : 'road'
+      : null;
+    const savedDistKm = routeMatch ? Number(routeMatch[2].replace(/,/g, '')) : null;
+    const savedHours = routeMatch ? Number(routeMatch[3]) : null;
+
+    const fallback = buildEquineRoute(order?.originLocation || '', order?.destinationLocation || '', mode);
+
+    if (savedDistKm && savedMode === mode) {
+      return {
+        ...fallback,
+        distanceKm: savedDistKm,
+        durationHours: savedHours ?? fallback.durationHours,
+      };
+    }
+
+    return fallback;
+  };
+
   const openActionModal = (type: 'APPROVE' | 'REJECT' | 'CHANGE', order: any) => {
     setActiveModal(type);
     setSelectedOrder(order);
+
+    const specialReq = String(order?.specialRequirements || order?.special_requirements || '');
+    const routeMatch = specialReq.match(/\[Lộ trình:\s*([^,]+),\s*([0-9,]+)\s*km,\s*~?([0-9]+)h\]/i);
+    const savedMode = routeMatch
+      ? routeMatch[1].toLowerCase().includes('hàng không') || routeMatch[1].toLowerCase().includes('air')
+        ? 'air'
+        : 'road'
+      : null;
+
+    const originStr = (order.originLocation || '').toLowerCase();
+    const destStr = (order.destinationLocation || '').toLowerCase();
+    const reqNotes = specialReq.toLowerCase();
+
+    const isDomestic =
+      (originStr.includes('vietnam') || originStr.includes('việt nam') || originStr.includes('hồ chí minh') || originStr.includes('ho chi minh')) &&
+      (destStr.includes('vietnam') || destStr.includes('việt nam') || destStr.includes('hà nội') || destStr.includes('ha noi'));
+    const isRoadRequested = reqNotes.includes('đường bộ') || reqNotes.includes('road') || (isDomestic && !reqNotes.includes('hàng không'));
+
+    const initialMode: 'road' | 'air' = savedMode || (isRoadRequested ? 'road' : 'air');
+    setSelectedTransportMode(initialMode);
+
     if (type === 'APPROVE') {
-      const originStr = (order.originLocation || '').toLowerCase();
-      const destStr = (order.destinationLocation || '').toLowerCase();
-      const reqNotes = (order.specialRequirements || order.special_requirements || '').toLowerCase();
-
-      const isDomestic =
-        (originStr.includes('vietnam') || originStr.includes('việt nam') || originStr.includes('hồ chí minh') || originStr.includes('ho chi minh')) &&
-        (destStr.includes('vietnam') || destStr.includes('việt nam') || destStr.includes('hà nội') || destStr.includes('ha noi'));
-      const isRoadRequested = reqNotes.includes('đường bộ') || reqNotes.includes('road') || isDomestic;
-
-      const initialMode: 'road' | 'air' = isRoadRequested ? 'road' : 'air';
-      setSelectedTransportMode(initialMode);
-
-      const routeInfo = buildEquineRoute(order.originLocation || '', order.destinationLocation || '', initialMode);
+      const routeInfo = getOrderRouteMetrics(order, initialMode);
       const horseCount = order.requestedHorseCount || (order.horses?.length || 1);
       const baseCost = initialMode === 'air' ? 600 + routeInfo.distanceKm * 1.6 : 300 + routeInfo.distanceKm * 1.1;
       const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
@@ -58,7 +91,7 @@ export default function ManagerRequestsPage() {
   const handleModeToggle = (newMode: 'road' | 'air') => {
     if (!selectedOrder || newMode === selectedTransportMode) return;
     setSelectedTransportMode(newMode);
-    const routeInfo = buildEquineRoute(selectedOrder.originLocation || '', selectedOrder.destinationLocation || '', newMode);
+    const routeInfo = getOrderRouteMetrics(selectedOrder, newMode);
     const horseCount = selectedOrder.requestedHorseCount || (selectedOrder.horses?.length || 1);
     const baseCost = newMode === 'air' ? 600 + routeInfo.distanceKm * 1.6 : 300 + routeInfo.distanceKm * 1.1;
     const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
@@ -402,9 +435,12 @@ export default function ManagerRequestsPage() {
           isOpen={true} 
           onClose={() => setActiveModal('NONE')} 
           title={
-            activeModal === 'APPROVE' ? `Phê duyệt đơn vận chuyển ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}` :
-            activeModal === 'REJECT' ? `Từ chối đơn vận chuyển ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}` : 
-            `Yêu cầu chỉnh sửa đơn ${selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`}`
+            (() => {
+              const code = selectedOrder.customerRequestCode || selectedOrder.requestCode || `REQ-${String(selectedOrder.id).padStart(3, '0')}`;
+              return activeModal === 'APPROVE' ? `Phê duyệt đơn vận chuyển ${code}` :
+                activeModal === 'REJECT' ? `Từ chối đơn vận chuyển ${code}` : 
+                `Yêu cầu chỉnh sửa đơn ${code}`;
+            })()
           } 
           maxWidth="600px"
         >
@@ -432,7 +468,7 @@ export default function ManagerRequestsPage() {
 
             {/* Shared Route & Distance Card and Horse Details Card */}
             {(() => {
-              const routeInfo = buildEquineRoute(selectedOrder.originLocation || '', selectedOrder.destinationLocation || '', selectedTransportMode);
+              const routeInfo = getOrderRouteMetrics(selectedOrder, selectedTransportMode);
               const horseCount = selectedOrder.requestedHorseCount || (selectedOrder.horses?.length || 1);
               return (
                 <div className="flex flex-col gap-4">

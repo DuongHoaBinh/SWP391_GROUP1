@@ -6,6 +6,7 @@ import { useCustomerStore } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
 import { Check, Loader2, Save, X, AlertCircle, Camera } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { HORSE_COAT_COLORS, HORSE_MEDICAL_STATUSES } from '@/lib/horse-constants';
 
 interface EditHorseModalProps {
   isOpen: boolean;
@@ -54,7 +55,11 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
         horse.gender === 'Mare' || horse.gender === 'female' ? 'Mare' : horse.gender === 'Gelding' || horse.gender === 'gelding' ? 'Gelding' : 'Stallion'
       );
       setDob(horse.dob || '2021-04-15');
-      setColor(horse.color || 'Bay');
+      let initialColor = horse.color || 'Bay';
+      if (initialColor.toLowerCase() === 'grey' || initialColor.toLowerCase() === 'gray') {
+        initialColor = 'Gray / Grey';
+      }
+      setColor(initialColor);
       setWeight(horse.weight || '480 kg');
       setPassportNumber(horse.passportNumber || '');
       setMicrochipNumber(horse.microchipNumber || '');
@@ -156,9 +161,9 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Chỉnh sửa thông tin con ngựa"
-      maxWidth="680px"
+      maxWidth="1000px"
     >
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px', paddingBottom: '30px' }}>
         {error && (
           <div
             style={{
@@ -184,7 +189,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
             display: 'flex',
             alignItems: 'center',
             gap: '16px',
-            padding: '12px 16px',
+            padding: '12px 18px',
             backgroundColor: '#f8fafc',
             borderRadius: '12px',
             border: '1px solid #e2e8f0',
@@ -206,8 +211,8 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
           <div
             onClick={() => fileInputRef.current?.click()}
             style={{
-              width: '64px',
-              height: '64px',
+              width: '56px',
+              height: '56px',
               borderRadius: '50%',
               backgroundColor: '#eff6ff',
               border: '2px dashed #93c5fd',
@@ -226,7 +231,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
             )}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)' }}>
+            <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)' }}>
               Ảnh đại diện con ngựa
             </div>
             <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
@@ -237,11 +242,11 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             style={{
-              padding: '6px 14px',
+              padding: '7px 16px',
               borderRadius: '8px',
               border: '1px solid #cbd5e1',
               backgroundColor: '#ffffff',
-              fontSize: '12.5px',
+              fontSize: '13px',
               fontWeight: 600,
               color: '#334155',
               cursor: 'pointer',
@@ -251,8 +256,8 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
           </button>
         </div>
 
-        {/* Row 1: Name & Breed */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '16px' }}>
+        {/* Row 1: Name & Color */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
               Tên con ngựa <span style={{ color: '#dc2626' }}>*</span>
@@ -272,6 +277,62 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                 outline: 'none',
               }}
             />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
+              Màu lông (Color)
+            </label>
+            <select
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                fontSize: '14px',
+                outline: 'none',
+                backgroundColor: '#fff',
+              }}
+            >
+              {HORSE_COAT_COLORS.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+              {color && !HORSE_COAT_COLORS.some((c) => c.value.toLowerCase() === color.toLowerCase()) && (
+                <option value={color}>{color}</option>
+              )}
+            </select>
+          </div>
+        </div>
+
+        {/* Row 2: Medical Status, Breed, Gender */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '20px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
+              Tình trạng y tế (Medical)
+            </label>
+            <select
+              value={medicalStatus}
+              onChange={(e) => setMedicalStatus(e.target.value as any)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                fontSize: '14px',
+                outline: 'none',
+                backgroundColor: '#fff',
+              }}
+            >
+              {HORSE_MEDICAL_STATUSES.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -301,30 +362,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               <option value="Irish Sport Horse">Irish Sport Horse</option>
             </select>
           </div>
-        </div>
-
-        {/* Row 2: Age, Gender, DOB */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: '16px' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
-              Tuổi (Years)
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={35}
-              value={age}
-              onChange={(e) => setAge(parseInt(e.target.value) || 1)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                outline: 'none',
-              }}
-            />
-          </div>
 
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
@@ -348,7 +385,10 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               <option value="Gelding">Gelding (Ngựa thiến)</option>
             </select>
           </div>
+        </div>
 
+        {/* Row 3: DOB, Age, Weight */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 1fr', gap: '20px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
               Ngày sinh (DOB)
@@ -367,17 +407,17 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               }}
             />
           </div>
-        </div>
 
-        {/* Row 3: Color, Weight, Health Status */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: '16px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
-              Màu lông (Color)
+              Tuổi (Years)
             </label>
-            <select
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
+            <input
+              type="number"
+              min={1}
+              max={35}
+              value={age}
+              onChange={(e) => setAge(parseInt(e.target.value) || 1)}
               style={{
                 width: '100%',
                 padding: '10px 14px',
@@ -385,16 +425,8 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                 border: '1px solid #cbd5e1',
                 fontSize: '14px',
                 outline: 'none',
-                backgroundColor: '#fff',
               }}
-            >
-              <option value="Bay">Bay (Nâu đỏ)</option>
-              <option value="Chestnut">Chestnut (Hạt dẻ)</option>
-              <option value="Black">Black (Đen tuyền)</option>
-              <option value="Grey">Grey (Xám/Bạch mã)</option>
-              <option value="Dark Bay">Dark Bay (Nâu sẫm)</option>
-              <option value="Palomino">Palomino (Vàng óng)</option>
-            </select>
+            />
           </div>
 
           <div>
@@ -416,34 +448,10 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               }}
             />
           </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
-              Tình trạng y tế (Medical)
-            </label>
-            <select
-              value={medicalStatus}
-              onChange={(e) => setMedicalStatus(e.target.value as any)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                outline: 'none',
-                backgroundColor: '#fff',
-              }}
-            >
-              <option value="Healthy">Healthy (Khỏe mạnh)</option>
-              <option value="Monitoring">Monitoring (Theo dõi)</option>
-              <option value="Requires Review">Requires Review (Cần xem xét)</option>
-              <option value="Medical Attention">Medical Attention (Cần chăm sóc)</option>
-            </select>
-          </div>
         </div>
 
         {/* Row 4: Passport & Microchip */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
               Số hộ chiếu FEI (Passport)
@@ -484,6 +492,8 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
             />
           </div>
         </div>
+
+
 
         {/* Row 5: Special requirements */}
         <div>
