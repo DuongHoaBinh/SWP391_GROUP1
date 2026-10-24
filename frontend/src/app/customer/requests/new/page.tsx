@@ -51,16 +51,49 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 
-const formSchema = z.object({
-  title: z.string().min(1, 'Request title is required'),
-  transportType: z.enum(['International', 'Domestic']),
-  origin: z.string().min(1, 'Origin is required'),
-  destination: z.string().min(1, 'Destination is required'),
-  departureDate: z.string().min(1, 'Departure date is required'),
-  arrivalDate: z.string().optional(),
-  horseCount: z.coerce.number().min(1),
-  specialReqs: z.string().optional(),
-});
+const getTodayString = () => new Date().toISOString().split('T')[0];
+const getTomorrowString = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split('T')[0];
+};
+
+const formSchema = z
+  .object({
+    title: z.string().min(1, 'Request title is required'),
+    transportType: z.enum(['International', 'Domestic']),
+    origin: z.string().min(1, 'Origin is required'),
+    destination: z.string().min(1, 'Destination is required'),
+    departureDate: z
+      .string()
+      .min(1, 'Departure date is required')
+      .refine((val) => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dep = new Date(val);
+        dep.setHours(0, 0, 0, 0);
+        return dep >= today;
+      }, 'Ngày khởi hành không được chọn ngày trong quá khứ'),
+    arrivalDate: z.string().optional(),
+    horseCount: z.coerce.number().min(1),
+    specialReqs: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.arrivalDate && data.departureDate) {
+        const dep = new Date(data.departureDate);
+        const arr = new Date(data.arrivalDate);
+        dep.setHours(0, 0, 0, 0);
+        arr.setHours(0, 0, 0, 0);
+        return arr >= dep;
+      }
+      return true;
+    },
+    {
+      message: 'Ngày đến dự kiến phải từ ngày khởi hành trở đi',
+      path: ['arrivalDate'],
+    }
+  );
 type FormData = z.infer<typeof formSchema>;
 
 function CreateTransportRequestForm() {
@@ -74,6 +107,9 @@ function CreateTransportRequestForm() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
+
+  const todayStr = getTodayString();
+  const tomorrowStr = getTomorrowString();
 
   // Form states using react-hook-form
   const {
@@ -90,8 +126,8 @@ function CreateTransportRequestForm() {
       transportType: 'International',
       origin: 'Ho Chi Minh City, Vietnam',
       destination: 'Singapore Turf Club',
-      departureDate: '2026-10-15',
-      arrivalDate: '2026-10-16',
+      departureDate: todayStr,
+      arrivalDate: tomorrowStr,
       horseCount: 1,
       specialReqs: '',
     },
@@ -104,6 +140,10 @@ function CreateTransportRequestForm() {
 
   // Horse quantities mapping: horseId -> quantity
   const [horseQuantities, setHorseQuantities] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    refreshHorses();
+  }, [currentStep, refreshHorses]);
 
   useEffect(() => {
     if (preselectedHorseId) {
@@ -225,8 +265,9 @@ function CreateTransportRequestForm() {
       const routeNote = routeData
         ? `[Lộ trình: ${routeData.mode === 'air' ? 'Đường Hàng Không' : 'Đường Bộ Liên Vận'}, ${routeData.distanceKm} km, ~${routeData.durationHours}h]`
         : '';
+      const typeNote = `[Hình thức: ${data.transportType === 'International' ? 'Quốc tế (International)' : 'Nội địa (Domestic)'}]`;
       const titleNote = data.title ? `[Tiêu đề: ${data.title.trim()}]` : '';
-      const combinedReqs = [titleNote, data.specialReqs, routeNote].filter(Boolean).join(' | ');
+      const combinedReqs = [titleNote, typeNote, data.specialReqs, routeNote].filter(Boolean).join(' | ');
 
       const payload = {
         contactName: currentUser.fullName || currentUser.name || 'Current Customer',
@@ -236,6 +277,8 @@ function CreateTransportRequestForm() {
         originLocation: data.origin,
         destinationLocation: data.destination,
         requestedDate: new Date(data.departureDate).toISOString(),
+        transportationType: data.transportType,
+        transportType: data.transportType,
         specialRequirements: combinedReqs || undefined,
         horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
         // Fallback for single horse if array is not preferred by backend yet
@@ -507,7 +550,15 @@ function CreateTransportRequestForm() {
                   </label>
                   <input
                     type="date"
-                    {...register('departureDate')}
+                    min={todayStr}
+                    {...register('departureDate', {
+                      onChange: (e) => {
+                        const newDep = e.target.value;
+                        if (formValues.arrivalDate && formValues.arrivalDate < newDep) {
+                          setValue('arrivalDate', newDep, { shouldValidate: true });
+                        }
+                      },
+                    })}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -517,6 +568,11 @@ function CreateTransportRequestForm() {
                       backgroundColor: '#f8fafc',
                     }}
                   />
+                  {errors.departureDate && (
+                    <span style={{ fontSize: '12px', color: '#dc2626', display: 'block', marginTop: '4px' }}>
+                      {errors.departureDate.message}
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -525,16 +581,22 @@ function CreateTransportRequestForm() {
                   </label>
                   <input
                     type="date"
+                    min={formValues.departureDate || todayStr}
                     {...register('arrivalDate')}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
                       borderRadius: '8px',
-                      border: '1px solid #cbd5e1',
+                      border: errors.arrivalDate ? '1px solid #dc2626' : '1px solid #cbd5e1',
                       fontSize: '14px',
                       backgroundColor: '#f8fafc',
                     }}
                   />
+                  {errors.arrivalDate && (
+                    <span style={{ fontSize: '12px', color: '#dc2626', display: 'block', marginTop: '4px' }}>
+                      {errors.arrivalDate.message}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -704,7 +766,12 @@ function CreateTransportRequestForm() {
                         </td>
                         <td style={{ padding: '16px', color: 'var(--text-body)' }}>{h.breed}</td>
                         <td style={{ padding: '16px', color: 'var(--text-body)' }}>
-                          {h.age} yrs • {h.gender.includes('Male') ? 'Male' : 'Female'}
+                          {h.age} yrs •{' '}
+                          {h.gender === 'Mare' || String(h.gender).toLowerCase() === 'female'
+                            ? 'Female (Mare)'
+                            : h.gender === 'Gelding' || String(h.gender).toLowerCase() === 'gelding'
+                            ? 'Gelding'
+                            : 'Male (Stallion)'}
                         </td>
                         <td style={{ padding: '16px' }}>
                           <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#dcfce7', color: '#15803d' }}>

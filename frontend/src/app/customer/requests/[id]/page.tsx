@@ -27,6 +27,7 @@ import {
   Info,
   Sparkles,
   RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
@@ -35,7 +36,7 @@ import { TripTrackingModal } from '@/features/tracking/components/TripTrackingMo
 import { apiClient } from '@/lib/api-client';
 import { Modal } from '@/components/ui/Modal';
 import { OrderComplianceChecklist } from '@/features/documents/api/documents.api';
-import { buildEquineRoute } from '@/lib/geo-corridors';
+import { buildEquineRoute, geocodeAddress, resolveLocation, GeocodedLocation } from '@/lib/geo-corridors';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 
@@ -50,27 +51,27 @@ const fetcher = async (url: string) => {
       : [];
 
   const normalizedHorses = rawHorses.map((item: any, idx: number) => {
-    if (item.horse) {
-      return item;
-    }
+    const rawObj = item.horse || item;
+    const rawGender = String(rawObj.gender || item.gender || '').toLowerCase();
+    const normalizedGender =
+      rawGender.includes('female') || rawGender.includes('mare')
+        ? 'Mare (Female)'
+        : rawGender.includes('gelding')
+        ? 'Gelding'
+        : 'Stallion (Male)';
+
     const horseObj = {
-      id: String(item.horseId || item.id || `hrs-${idx + 1}`),
-      name: item.name || 'Racehorse',
-      breed: item.breed || 'Thoroughbred',
-      age: item.age || 5,
-      gender: item.gender
-        ? (String(item.gender).toLowerCase().includes('female') || String(item.gender).toLowerCase().includes('mare')
-            ? 'Mare (Female)'
-            : String(item.gender).toLowerCase().includes('male') || String(item.gender).toLowerCase().includes('stallion')
-              ? 'Stallion (Male)'
-              : 'Gelding')
-        : 'Mare (Female)',
+      id: String(rawObj.horseId || rawObj.id || item.horseId || item.id || `hrs-${idx + 1}`),
+      name: rawObj.name || item.name || 'Racehorse',
+      breed: rawObj.breed || item.breed || 'Thoroughbred',
+      age: rawObj.age || item.age || 5,
+      gender: normalizedGender,
     };
     return {
       horse: horseObj,
       isComplete: true,
-      medicalStatus: 'Healthy',
-      docsSummary: '4/4 Complete',
+      medicalStatus: item.medicalStatus || 'Healthy',
+      docsSummary: item.docsSummary || '4/4 Complete',
     };
   });
 
@@ -149,70 +150,106 @@ const fetcher = async (url: string) => {
 
   const originStr = String(data.originLocation || '');
   const destStr = String(data.destinationLocation || '');
-  const originLower = originStr.toLowerCase();
-  const destLower = destStr.toLowerCase();
+  const specialReq = String(data.specialRequirements || '');
+  const specialReqLower = specialReq.toLowerCase();
 
-  const vnKeywords = ['vietnam', 'việt nam', 'hcm', 'hồ chí minh', 'sài gòn', 'hà nội', 'cần thơ', 'bạc liêu', 'đà nẵng', 'bình dương', 'long an', 'đồng nai', 'củ chi', 'vũng tàu', 'hải phòng', 'huế', 'nha trang', 'quy nhơn', 'buôn ma thuột'];
-  const isOriginVN = vnKeywords.some((k) => originLower.includes(k)) || originLower.includes('vn') || !originLower.includes(',');
+  // 1. Dynamic Geocoding for Destination to get exact country and coordinates
+  let geoDest: GeocodedLocation | null = null;
+  if (destStr && destStr.trim().length >= 3) {
+    try {
+      geoDest = await geocodeAddress(destStr);
+    } catch {}
+  }
 
-  const intlKeywords = ['singapore', 'australia', 'japan', 'hong kong', 'malaysia', 'thailand', 'france', 'usa', 'ireland', 'uk', 'germany', 'dubai', 'uae', 'qatar', 'new zealand', 'china', 'korea', 'india', 'belgium'];
-  const isDestIntl = intlKeywords.some((k) => destLower.includes(k));
-  const isDestVN = !isDestIntl && (vnKeywords.some((k) => destLower.includes(k)) || destLower.includes('vn') || !destLower.includes(','));
+  // 2. Fallback resolution via known locations
+  const resolvedDest = resolveLocation(destStr);
 
-  let isDomestic = isOriginVN && isDestVN;
-  if (data.transportationType) {
-    isDomestic = String(data.transportationType).toLowerCase() === 'domestic';
-  } else if (data.transportType) {
-    isDomestic = String(data.transportType).toLowerCase() === 'domestic';
-  } else if (String(data.specialRequirements || '').toLowerCase().includes('nội địa') || String(data.specialRequirements || '').toLowerCase().includes('domestic')) {
+  // 3. Parse saved route/mode metrics from specialRequirements if present
+  // e.g. "[Lộ trình: Đường Hàng Không, 2189 km, ~7h]"
+  const routeMatch = specialReq.match(/\[Lộ trình:\s*([^,]+),\s*([0-9,]+)\s*km,\s*~?([0-9]+)h\]/i);
+  const savedMode = routeMatch
+    ? routeMatch[1].toLowerCase().includes('hàng không') || routeMatch[1].toLowerCase().includes('air')
+      ? 'air'
+      : 'road'
+    : null;
+  const savedDistKm = routeMatch ? Number(routeMatch[2].replace(/,/g, '')) : null;
+  const savedHours = routeMatch ? Number(routeMatch[3]) : null;
+
+  // 4. Determine domestic vs international
+  const hasIntlNote =
+    specialReqLower.includes('quốc tế') ||
+    specialReqLower.includes('international') ||
+    specialReqLower.includes('hàng không') ||
+    specialReqLower.includes('air flight') ||
+    String(data.transportationType || '').toLowerCase() === 'international' ||
+    String(data.transportType || '').toLowerCase() === 'international' ||
+    savedMode === 'air';
+
+  const hasDomesticNote =
+    specialReqLower.includes('nội địa') ||
+    specialReqLower.includes('domestic') ||
+    String(data.transportationType || '').toLowerCase() === 'domestic' ||
+    String(data.transportType || '').toLowerCase() === 'domestic';
+
+  let isDomestic = false;
+  if (hasDomesticNote && !hasIntlNote) {
     isDomestic = true;
+  } else if (hasIntlNote) {
+    isDomestic = false;
+  } else {
+    // If geoDest or resolvedDest is foreign, it is international
+    const isForeign =
+      (geoDest && geoDest.country !== 'Việt Nam') ||
+      (!geoDest && !resolvedDest.isVietnam);
+    isDomestic = !isForeign;
   }
 
   const transportationType = isDomestic ? 'Domestic' : 'International';
-  const originCountryCode = isOriginVN ? 'VN' : 'INTL';
-  const destinationCountryCode = isDomestic
-    ? 'VN'
-    : destLower.includes('singapore')
-    ? 'SG'
-    : destLower.includes('australia')
-    ? 'AU'
-    : destLower.includes('japan')
-    ? 'JP'
-    : destLower.includes('hong kong')
-    ? 'HK'
-    : destLower.includes('malaysia')
-    ? 'MY'
-    : destLower.includes('thailand')
-    ? 'TH'
-    : destLower.includes('india')
-    ? 'IN'
-    : destLower.includes('belgium')
-    ? 'BE'
-    : 'INTL';
+
+  // 5. Origin and destination country & code
+  const originCountryCode = 'VN';
   const destinationCountry = isDomestic
     ? 'Vietnam'
-    : destLower.includes('singapore')
-    ? 'Singapore'
-    : destLower.includes('australia')
-    ? 'Australia'
-    : destLower.includes('japan')
-    ? 'Japan'
-    : destLower.includes('hong kong')
-    ? 'Hong Kong'
-    : destLower.includes('india')
-    ? 'Ấn Độ'
-    : destLower.includes('belgium')
-    ? 'Bỉ'
-    : 'International';
+    : geoDest?.country || resolvedDest.country || 'International';
+
+  let destinationCountryCode = 'INTL';
+  if (isDomestic) {
+    destinationCountryCode = 'VN';
+  } else if (geoDest?.countryCode) {
+    destinationCountryCode = geoDest.countryCode.toUpperCase();
+  } else {
+    const cLower = destinationCountry.toLowerCase();
+    if (cLower.includes('indonesia')) destinationCountryCode = 'ID';
+    else if (cLower.includes('singapore')) destinationCountryCode = 'SG';
+    else if (cLower.includes('malaysia')) destinationCountryCode = 'MY';
+    else if (cLower.includes('thailand') || cLower.includes('thái')) destinationCountryCode = 'TH';
+    else if (cLower.includes('japan') || cLower.includes('nhật')) destinationCountryCode = 'JP';
+    else if (cLower.includes('korea') || cLower.includes('hàn')) destinationCountryCode = 'KR';
+    else if (cLower.includes('australia') || cLower.includes('úc')) destinationCountryCode = 'AU';
+    else if (cLower.includes('china') || cLower.includes('trung')) destinationCountryCode = 'CN';
+    else if (cLower.includes('pháp') || cLower.includes('france')) destinationCountryCode = 'FR';
+    else if (cLower.includes('anh') || cLower.includes('uk')) destinationCountryCode = 'GB';
+    else if (cLower.includes('mỹ') || cLower.includes('usa')) destinationCountryCode = 'US';
+    else destinationCountryCode = 'INTL';
+  }
+
+  // 6. Build route calculation
+  const preferredMode = (savedMode || (isDomestic ? 'road' : 'air')) as 'air' | 'road';
   const routeCalc = buildEquineRoute(
     originStr,
     destStr,
-    isDomestic ? 'road' : 'air',
-    transportationType as any
+    preferredMode,
+    transportationType as any,
+    null,
+    geoDest?.coords ?? null,
+    null,
+    geoDest
   );
 
-  const estimatedDistance = data.estimatedDistance || `${routeCalc.distanceKm.toLocaleString()} km`;
-  const estimatedDuration = data.estimatedDuration || (isDomestic ? `~${routeCalc.durationHours} hours` : `~${routeCalc.durationHours} hours (${routeCalc.mode === 'air' ? 'Air Flight' : 'Road Transit'})`);
+  const finalDistKm = savedDistKm ?? routeCalc.distanceKm;
+  const finalHours = savedHours ?? routeCalc.durationHours;
+  const estimatedDistance = data.estimatedDistance || `${finalDistKm.toLocaleString()} km`;
+  const estimatedDuration = data.estimatedDuration || (isDomestic ? `~${finalHours} hours` : `~${finalHours} hours (${preferredMode === 'air' ? 'Air Flight' : 'Road Transit'})`);
   const transitName = isDomestic
     ? (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'rest')?.name || 'Trạm kiểm dịch nội địa')
     : (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'airport')?.name || 'Border / Transit Checkpoint');
@@ -256,7 +293,7 @@ export default function RequestDetailPage() {
   const router = useRouter();
   const requestId = params?.id as string;
 
-  const { getRequestById, uploadDocumentForRequest, cancelRequest } = useCustomerStore();
+  const { getRequestById, uploadDocumentForRequest, cancelRequest, refreshHorses } = useCustomerStore();
   const { data: request, error, isLoading: loading, mutate } = useSWR(`/orders/${requestId}`, fetcher, {
     revalidateOnFocus: true,
   });
@@ -293,6 +330,10 @@ export default function RequestDetailPage() {
   const [resubmitNotes, setResubmitNotes] = useState('');
   const [isResubmitting, setIsResubmitting] = useState(false);
   const [resubmitError, setResubmitError] = useState('');
+
+  // Cancel Request Modal States
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   if (loading || !request) {
     return (
@@ -428,9 +469,48 @@ export default function RequestDetailPage() {
     toast.success('Hồ sơ đã được tải lên thành công!');
   };
 
-  const handleCancel = () => {
-    if (confirm(`Are you sure you want to cancel transport request ${request.requestCode}?`)) {
-      cancelRequest(request.id);
+  const handleOpenCancelModal = () => {
+    setIsCancelModalOpen(true);
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!request) return;
+    setIsCancelling(true);
+    try {
+      await apiClient(`/orders/${request.id}/cancel`, { method: 'PATCH' });
+      await cancelRequest(request.id);
+      await refreshHorses();
+      await mutate();
+      if (mutateChecklist) await mutateChecklist();
+
+      toast.success(
+        `Đơn vận chuyển ${request.requestCode || `#${request.id}`} đã được hủy thành công!`,
+        {
+          duration: 5000,
+          icon: '✅',
+          style: {
+            borderRadius: '10px',
+            background: '#0f172a',
+            color: '#fff',
+            fontWeight: 600,
+            fontSize: '14px',
+          },
+        }
+      );
+      setIsCancelModalOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || 'Không thể hủy đơn vận chuyển lúc này. Vui lòng thử lại!', {
+        duration: 5000,
+        style: {
+          borderRadius: '10px',
+          background: '#991b1b',
+          color: '#fff',
+          fontWeight: 600,
+          fontSize: '14px',
+        },
+      });
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -561,9 +641,12 @@ export default function RequestDetailPage() {
           >
             <Plane size={14} /> Live Tracking
           </button>
-          {request.status !== 'CANCELLED' && (
+          {request.status !== 'CANCELLED' &&
+            request.status !== 'cancelled' &&
+            request.status !== 'completed' &&
+            request.status !== 'in_transit' && (
             <button
-              onClick={handleCancel}
+              onClick={handleOpenCancelModal}
               style={{
                 padding: '9px 16px',
                 borderRadius: '8px',
@@ -572,6 +655,8 @@ export default function RequestDetailPage() {
                 fontSize: '13.5px',
                 fontWeight: 600,
                 color: '#dc2626',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
               }}
             >
               Cancel Request
@@ -944,7 +1029,13 @@ export default function RequestDetailPage() {
                       </td>
                       <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>{horse.breed}</td>
                       <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>
-                        {horse.age} yrs • {String(horse.gender || '').toLowerCase().includes('male') ? 'Male' : 'Female'}
+                        {(() => {
+                          const g = String(horse.gender || '').toLowerCase();
+                          const isFemale = g.includes('female') || g.includes('mare');
+                          const isGelding = g.includes('gelding');
+                          const genderLabel = isFemale ? 'Female' : isGelding ? 'Gelding' : 'Male';
+                          return `${horse.age} yrs • ${genderLabel}`;
+                        })()}
                       </td>
                       <td style={{ padding: '16px 20px' }}>
                         <span
@@ -1916,6 +2007,135 @@ export default function RequestDetailPage() {
               }}
             >
               {isResubmitting ? 'Resubmitting...' : 'Submit Now'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Professional Cancel Request Confirmation Modal */}
+      <Modal
+        isOpen={isCancelModalOpen}
+        onClose={() => !isCancelling && setIsCancelModalOpen(false)}
+        title="Xác nhận hủy đơn vận chuyển"
+        subtitle={`Mã đơn: ${request?.requestCode || `#${request?.id}`}`}
+        maxWidth="480px"
+      >
+        <div style={{ padding: '24px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '14px',
+              padding: '16px',
+              borderRadius: '12px',
+              backgroundColor: '#fef2f2',
+              border: '1px solid #fee2e2',
+              marginBottom: '20px',
+            }}
+          >
+            <div
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '10px',
+                backgroundColor: '#fee2e2',
+                color: '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <AlertTriangle size={22} />
+            </div>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#991b1b', marginBottom: '4px' }}>
+                Hành động này không thể hoàn tác
+              </div>
+              <div style={{ fontSize: '13px', color: '#7f1d1d', lineHeight: '1.5' }}>
+                Bạn có chắc chắn muốn hủy đơn vận chuyển <strong>{request?.requestCode || `#${request?.id}`}</strong>?
+                Sau khi hủy, hành trình vận chuyển sẽ bị dừng lại và các chú ngựa liên quan sẽ được mở khóa trạng thái.
+              </div>
+            </div>
+          </div>
+
+          {/* Request details recap */}
+          <div
+            style={{
+              padding: '14px 16px',
+              borderRadius: '10px',
+              backgroundColor: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              fontSize: '13px',
+              color: '#475569',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              marginBottom: '24px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#64748b' }}>Tuyến đường:</span>
+              <span style={{ fontWeight: 600, color: '#1e293b' }}>
+                {request?.route?.origin || 'N/A'} ➔ {request?.route?.destination || 'N/A'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#64748b' }}>Số lượng ngựa:</span>
+              <span style={{ fontWeight: 600, color: '#1e293b' }}>{request?.horses?.length || 1} con</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#64748b' }}>Trạng thái hiện tại:</span>
+              <span style={{ fontWeight: 600, color: '#d97706' }}>{request?.statusLabel || request?.status}</span>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={() => setIsCancelModalOpen(false)}
+              disabled={isCancelling}
+              style={{
+                padding: '10px 18px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                backgroundColor: '#ffffff',
+                color: '#475569',
+                fontWeight: 600,
+                fontSize: '13.5px',
+                cursor: isCancelling ? 'not-allowed' : 'pointer',
+              }}
+            >
+              Giữ lại đơn
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmCancel}
+              disabled={isCancelling}
+              style={{
+                padding: '10px 22px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: '#dc2626',
+                color: '#ffffff',
+                fontWeight: 600,
+                fontSize: '13.5px',
+                cursor: isCancelling ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 2px 4px rgba(220, 38, 38, 0.2)',
+                opacity: isCancelling ? 0.8 : 1,
+              }}
+            >
+              {isCancelling ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Đang xử lý hủy...
+                </>
+              ) : (
+                'Xác nhận hủy đơn'
+              )}
             </button>
           </div>
         </div>
