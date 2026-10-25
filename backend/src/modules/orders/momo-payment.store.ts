@@ -84,4 +84,13 @@ export class MomoPaymentStore implements OnModuleInit, OnModuleDestroy {
       WHERE payment_id = ? AND (last_checked_at IS NULL OR last_checked_at < CURRENT_TIMESTAMP(3) - INTERVAL 5 SECOND)`, [paymentId]);
     return result.affectedRows === 1;
   }
+
+  async isPaymentSucceeded(shipmentId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<any[]>(
+      "SELECT payment_id FROM shipment_sandbox_payment WHERE shipment_id = ? AND status = 'succeeded' LIMIT 1",
+      [shipmentId]
+    );
+    return rows.length > 0;
+  }
 }
+
