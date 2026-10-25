@@ -1,28 +1,89 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Search, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useCustomerStore } from '@/lib/customer-store';
+import { apiClient } from '@/lib/api-client';
 
 export default function RequestsPage() {
   const router = useRouter();
-  const { requests } = useCustomerStore();
+  const { requests: mockRequests } = useCustomerStore();
+  const [requests, setRequests] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchRequests = async () => {
+      try {
+        const data = await apiClient<any[]>('/orders/my-orders');
+        const statusMap: Record<string, { label: string; variant: 'pending' | 'success' | 'danger' | 'transit' | 'neutral' }> = {
+          requested: { label: 'Pending Approval', variant: 'pending' },
+          under_review: { label: 'Under Review', variant: 'pending' },
+          IN_REVIEW: { label: 'Under Review', variant: 'pending' },
+          approved: { label: 'Approved', variant: 'success' },
+          APPROVED: { label: 'Approved', variant: 'success' },
+          change_requested: { label: 'Change Requested', variant: 'pending' },
+          rejected: { label: 'Rejected', variant: 'danger' },
+          REJECTED: { label: 'Rejected', variant: 'danger' },
+          planning: { label: 'Planning', variant: 'neutral' },
+          confirmed: { label: 'Confirmed Plan', variant: 'neutral' },
+          ready_to_depart: { label: 'Ready to Depart', variant: 'success' },
+          ready: { label: 'Ready to Depart', variant: 'success' },
+          in_transit: { label: 'In Transit', variant: 'transit' },
+          IN_TRANSIT: { label: 'In Transit', variant: 'transit' },
+          completed: { label: 'Completed', variant: 'success' },
+          COMPLETED: { label: 'Completed', variant: 'success' },
+          cancelled: { label: 'Cancelled', variant: 'danger' },
+          CANCELLED: { label: 'Cancelled', variant: 'danger' },
+        };
+
+        const mappedData = data.map((item) => {
+          const statusKey = String(item.status || '').toLowerCase();
+          const statusInfo = statusMap[statusKey] || statusMap[item.status] || { label: item.status || 'Pending', variant: 'pending' as const };
+          return {
+            ...item,
+            requestCode: item.requestCode || `REQ-${String(item.id).padStart(3, '0')}`,
+            horse: item.horses?.[0] || { name: 'Multiple Horses' },
+            origin: item.originLocation,
+            destination: item.destinationLocation,
+            departureDate: item.requestedDate ? new Date(item.requestedDate).toLocaleDateString('en-GB') : '',
+            statusLabel: item.statusLabel || statusInfo.label,
+            statusVariant: statusInfo.variant,
+            requestedHorseCount: item.requestedHorseCount || item.requested_horse_count || (item.horses?.length || 1),
+          };
+        });
+        setRequests(mappedData);
+      } catch (err) {
+        console.error('Failed to fetch requests, falling back to mock:', err);
+        setRequests(mockRequests);
+      }
+    };
+    fetchRequests();
+  }, [mockRequests]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
 
   const filtered = requests.filter((r) => {
     const matchesSearch =
-      r.requestCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.horse.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.destination.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'ALL' || r.status === filterStatus;
-    return matchesSearch && matchesFilter;
+      r.requestCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.horse?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.origin?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.destination?.toLowerCase().includes(searchTerm.toLowerCase());
+
+    if (!matchesSearch) return false;
+    if (filterStatus === 'ALL') return true;
+
+    const s = String(r.status || '').toLowerCase();
+    if (filterStatus === 'SUBMITTED') return s === 'requested' || s === 'submitted';
+    if (filterStatus === 'IN_REVIEW') return s === 'under_review' || s === 'change_requested';
+    if (filterStatus === 'READY_TO_DEPART') return s === 'ready_to_depart' || s === 'ready';
+    if (filterStatus === 'IN_TRANSIT') return s === 'in_transit';
+    if (filterStatus === 'CANCELLED') return s === 'cancelled' || s === 'rejected';
+
+    return s === filterStatus.toLowerCase();
   });
 
   return (
@@ -107,9 +168,9 @@ export default function RequestsPage() {
           />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>Filter by:</span>
-          {['ALL', 'IN_TRANSIT', 'IN_REVIEW', 'SUBMITTED', 'CANCELLED'].map((status) => (
+          {['ALL', 'READY_TO_DEPART', 'IN_TRANSIT', 'IN_REVIEW', 'SUBMITTED', 'CANCELLED'].map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
@@ -123,7 +184,7 @@ export default function RequestsPage() {
                 color: filterStatus === status ? 'var(--primary)' : 'var(--text-muted)',
               }}
             >
-              {status.replace('_', ' ')}
+              {status === 'READY_TO_DEPART' ? 'Ready to Depart' : status.replace('_', ' ')}
             </button>
           ))}
         </div>
@@ -174,12 +235,19 @@ export default function RequestsPage() {
                   </Link>
                 </td>
                 <td style={{ padding: '16px 14px' }}>
-                  <Link
-                    href={`/customer/horses/${req.horse.id || 'hrs-001'}`}
-                    style={{ fontWeight: 600, color: 'var(--text-heading)' }}
-                  >
-                    {req.horse.name}
-                  </Link>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Link
+                      href={`/customer/horses/${req.horse.id || 'hrs-001'}`}
+                      style={{ fontWeight: 600, color: 'var(--text-heading)' }}
+                    >
+                      {req.horse.name}
+                    </Link>
+                    {req.requestedHorseCount && req.requestedHorseCount > 1 ? (
+                      <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', backgroundColor: '#eff6ff', color: '#2563eb', fontWeight: 700, border: '1px solid #dbeafe' }}>
+                        +{req.requestedHorseCount - 1} more
+                      </span>
+                    ) : null}
+                  </div>
                 </td>
                 <td style={{ padding: '16px 14px' }}>
                   {req.origin} → {req.destination}
@@ -187,17 +255,9 @@ export default function RequestsPage() {
                 <td style={{ padding: '16px 14px' }}>{req.departureDate}</td>
                 <td style={{ padding: '16px 14px' }}>
                   <StatusBadge
-                    label={req.statusLabel}
-                    variant={
-                      req.status === 'IN_TRANSIT'
-                        ? 'transit'
-                        : req.status === 'APPROVED'
-                        ? 'success'
-                        : req.status === 'CANCELLED'
-                        ? 'danger'
-                        : 'pending'
-                    }
-                    hasDot={req.status === 'IN_TRANSIT'}
+                    label={req.statusLabel || 'Pending'}
+                    variant={req.statusVariant || 'pending'}
+                    hasDot={req.status === 'in_transit' || req.status === 'IN_TRANSIT'}
                   />
                 </td>
                 <td style={{ padding: '16px 14px', textAlign: 'right' }}>

@@ -60,20 +60,17 @@ export function AuthShowcasePanel() {
             width: '38px',
             height: '38px',
             borderRadius: '10px',
-            background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)',
+            overflow: 'hidden',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
             border: '1px solid rgba(255, 255, 255, 0.15)',
+            backgroundColor: '#0c1a2e',
+            flexShrink: 0,
           }}
         >
-          {/* Custom Route Mark SVG */}
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="5" cy="19" r="2" fill="#ffffff" />
-            <path d="M5 17c0-5 4-9 9-9h5" />
-            <polyline points="15 4 19 8 15 12" />
-          </svg>
+          <img src="/logo.png" alt="RaceHorse Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </div>
         <div>
           <div
@@ -85,7 +82,7 @@ export function AuthShowcasePanel() {
               lineHeight: 1.1,
             }}
           >
-            EquiRoute
+            RaceHorse
           </div>
           <div
             style={{
@@ -97,7 +94,7 @@ export function AuthShowcasePanel() {
               marginTop: '3px',
             }}
           >
-            Transport Management
+            Logistics Management
           </div>
         </div>
       </div>

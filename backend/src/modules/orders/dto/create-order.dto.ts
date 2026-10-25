@@ -37,6 +37,17 @@ export class HorseInfoDto {
   @IsInt({ message: 'Tuổi phải là số nguyên' })
   @Min(0, { message: 'Tuổi không được âm' })
   age?: number;
+
+  @ApiPropertyOptional({ example: 1, description: 'ID con ngựa đã có trong My Horses' })
+  @IsOptional()
+  @IsInt()
+  horseId?: number;
+
+  @ApiPropertyOptional({ example: 1, minimum: 1, description: 'Số lượng con ngựa cần vận chuyển' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  quantity?: number;
 }
 
 export class CreateOrderDto {

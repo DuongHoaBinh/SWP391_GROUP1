@@ -70,25 +70,25 @@ export default function ForgotPasswordPage() {
         >
           <div
             style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #1e3a8a, #2563eb)',
+              width: '36px',
+              height: '36px',
+              borderRadius: '10px',
+              overflow: 'hidden',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              backgroundColor: '#0c1a2e',
+              flexShrink: 0,
             }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5">
-              <circle cx="5" cy="19" r="2" fill="#fff" />
-              <path d="M5 17c0-5 4-9 9-9h5" />
-              <polyline points="15 4 19 8 15 12" />
-            </svg>
+            <img src="/logo.png" alt="RaceHorse Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
           <div>
-            <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff' }}>EquiRoute</div>
-            <div style={{ fontSize: '9px', fontWeight: 600, color: '#94a3b8', letterSpacing: '0.12em' }}>
-              TRANSPORT MANAGEMENT
+            <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>RaceHorse</div>
+            <div style={{ fontSize: '9px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: '2px' }}>
+              LOGISTICS MANAGEMENT
             </div>
           </div>
         </div>
@@ -349,7 +349,7 @@ export default function ForgotPasswordPage() {
             marginTop: '24px',
           }}
         >
-          <div>© 2026 EquiRoute Logistics Ltd.</div>
+          <div>© 2026 RaceHorse Logistics Ltd.</div>
           <div style={{ display: 'flex', gap: '16px' }}>
             <span style={{ cursor: 'pointer' }}>Privacy</span>
             <span style={{ cursor: 'pointer' }}>Terms</span>
