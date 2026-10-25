@@ -12,61 +12,179 @@ import {
   Plus,
   Check,
   ArrowRight,
-  Save,
   AlertCircle,
-  FileText,
+  Loader2,
+  Truck,
+  Navigation,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
+import { Horse } from '@/lib/types';
+import { AddHorseModal } from '@/components/horses/AddHorseModal';
+import { apiClient } from '@/lib/api-client';
+import { getCurrentUser } from '@/lib/auth';
+import dynamic from 'next/dynamic';
+
+const RoutePlanningMap = dynamic(
+  () => import('@/components/maps/RoutePlanningMap'),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        style={{
+          height: '360px',
+          backgroundColor: '#f1f5f9',
+          borderRadius: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#64748b',
+          fontSize: '13px',
+          fontWeight: 600,
+        }}
+      >
+        Đang tải bản đồ lộ trình & cửa khẩu...
+      </div>
+    ),
+  }
+);
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+
+const formSchema = z.object({
+  title: z.string().min(1, 'Request title is required'),
+  transportType: z.enum(['International', 'Domestic']),
+  origin: z.string().min(1, 'Origin is required'),
+  destination: z.string().min(1, 'Destination is required'),
+  departureDate: z.string().min(1, 'Departure date is required'),
+  arrivalDate: z.string().optional(),
+  horseCount: z.coerce.number().min(1),
+  specialReqs: z.string().optional(),
+});
+type FormData = z.infer<typeof formSchema>;
 
 function CreateTransportRequestForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const preselectedHorseId = searchParams.get('horseId');
 
-  const { horses, createRequest } = useCustomerStore();
+  const { horses, refreshHorses } = useCustomerStore();
 
-  // Step state (1 to 4)
+  // Step state (1 to 3)
   const [currentStep, setCurrentStep] = useState(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
 
-  // Form states
-  const [title, setTitle] = useState('');
-  const [transportType, setTransportType] = useState<'International' | 'Domestic'>('International');
-  const [origin, setOrigin] = useState('Ho Chi Minh City, Vietnam');
-  const [destination, setDestination] = useState('Singapore Turf Club');
-  const [departureDate, setDepartureDate] = useState('2026-10-15');
-  const [arrivalDate, setArrivalDate] = useState('2026-10-16');
-  const [horseCount, setHorseCount] = useState(1);
-  const [specialReqs, setSpecialReqs] = useState('');
+  // Form states using react-hook-form
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    trigger,
+    formState: { errors },
+  } = useForm<FormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      title: '',
+      transportType: 'International',
+      origin: 'Ho Chi Minh City, Vietnam',
+      destination: 'Singapore Turf Club',
+      departureDate: '2026-10-15',
+      arrivalDate: '2026-10-16',
+      horseCount: 1,
+      specialReqs: '',
+    },
+  });
 
-  // Selected horses
-  const [selectedHorseIds, setSelectedHorseIds] = useState<string[]>(
-    preselectedHorseId ? [preselectedHorseId] : [horses[0]?.id || 'hrs-001']
-  );
+  const formValues = watch();
+
+  // Route calculation and corridor metrics from Leaflet map
+  const [routeData, setRouteData] = useState<{ distanceKm: number; durationHours: number; mode: 'air' | 'road' } | null>(null);
+
+  // Horse quantities mapping: horseId -> quantity
+  const [horseQuantities, setHorseQuantities] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    if (preselectedHorseId && !selectedHorseIds.includes(preselectedHorseId)) {
-      setSelectedHorseIds([preselectedHorseId]);
+    if (preselectedHorseId) {
+      const target = horses.find((item) => item.id === preselectedHorseId);
+      if (target && (target.status === 'active' || target.availabilityStatus === 'Available')) {
+        setHorseQuantities({ [preselectedHorseId]: 1 });
+      }
+    } else if (horses.length > 0 && Object.keys(horseQuantities).length === 0) {
+      const firstAvailable = horses.find(
+        (h) => h.status === 'active' || h.availabilityStatus === 'Available'
+      );
+      if (firstAvailable) {
+        setHorseQuantities({ [firstAvailable.id]: 1 });
+      }
     }
-  }, [preselectedHorseId]);
+  }, [preselectedHorseId, horses]);
 
-  // Validation errors
-  const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const selectedHorseIds = Object.keys(horseQuantities).filter((id) => (horseQuantities[id] || 0) > 0);
+  const totalSelectedHorses = Object.values(horseQuantities).reduce((sum, q) => sum + (q || 0), 0);
 
-  const validateStep1 = () => {
-    const errs: { [key: string]: string } = {};
-    if (!title.trim()) errs.title = 'Request title is required.';
-    if (!origin.trim()) errs.origin = 'Origin is required.';
-    if (!destination.trim()) errs.destination = 'Destination is required.';
-    if (!departureDate) errs.departureDate = 'Departure date is required.';
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
+  useEffect(() => {
+    setValue('horseCount', Math.max(1, totalSelectedHorses));
+  }, [totalSelectedHorses, setValue]);
+
+  const selectedHorses = horses
+    .filter((h) => (horseQuantities[h.id] || 0) > 0)
+    .map((h) => ({
+      ...h,
+      quantity: horseQuantities[h.id] || 1,
+    }));
+
+  const breedBreakdown = selectedHorses.reduce((acc, h) => {
+    const breed = h.breed || 'Other Breed';
+    acc[breed] = (acc[breed] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const toggleHorseSelection = (id: string) => {
+    const target = horses.find((h) => h.id === id);
+    if (!target) return;
+    const isUnavailable =
+      target.status === 'in_transit' ||
+      target.availabilityStatus === 'In Transit' ||
+      target.status === 'delivered' ||
+      target.availabilityStatus === 'Delivered' ||
+      target.status === 'retired';
+    if (isUnavailable) return;
+
+    setHorseQuantities((prev) => {
+      const next = { ...prev };
+      if ((next[id] || 0) > 0) {
+        delete next[id];
+      } else {
+        next[id] = 1;
+      }
+      return next;
+    });
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (currentStep === 1) {
-      if (!validateStep1()) return;
+      const isValid = await trigger(['title', 'origin', 'destination', 'departureDate']);
+      if (!isValid) return;
     }
-    if (currentStep < 4) {
+    if (currentStep === 2) {
+      if (totalSelectedHorses === 0) {
+        alert('Vui lòng chọn ít nhất một con ngựa sẵn sàng vận chuyển.');
+        return;
+      }
+      const invalidSelected = selectedHorses.find(
+        (h) =>
+          h.status === 'in_transit' ||
+          h.availabilityStatus === 'In Transit' ||
+          h.status === 'delivered'
+      );
+      if (invalidSelected) {
+        alert(`Ngựa "${invalidSelected.name}" đang vận chuyển hoặc đã bàn giao, không thể chọn.`);
+        return;
+      }
+    }
+    if (currentStep < 3) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -77,45 +195,75 @@ function CreateTransportRequestForm() {
     }
   };
 
-  const handleSubmit = () => {
-    const newReq = createRequest({
-      title,
-      transportType,
-      origin,
-      destination,
-      departureDate,
-      arrivalDate,
-      horseIds: selectedHorseIds,
-      specialReqs,
-    });
-    router.push(`/customer/requests/${newReq.id}`);
-  };
+  const onSubmitForm = async (data: FormData) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const selectedHorsesData: Array<{
+        horseId?: number;
+        name: string;
+        breed?: string;
+        gender?: 'male' | 'female' | 'gelding';
+        age?: number;
+        quantity: number;
+      }> = [];
 
-  const handleSaveDraft = () => {
-    const newReq = createRequest({
-      title: title || 'Draft Transport Request',
-      transportType,
-      origin,
-      destination,
-      departureDate,
-      arrivalDate,
-      horseIds: selectedHorseIds,
-      specialReqs,
-    });
-    router.push('/customer/requests');
-  };
-
-  const toggleHorseSelection = (id: string) => {
-    if (selectedHorseIds.includes(id)) {
-      if (selectedHorseIds.length > 1) {
-        setSelectedHorseIds(selectedHorseIds.filter((hId) => hId !== id));
+      for (const h of selectedHorses) {
+        const qty = h.quantity || 1;
+        const numericHorseId = h.backendId || (Number(h.id) > 0 ? Number(h.id) : undefined);
+        selectedHorsesData.push({
+          horseId: numericHorseId,
+          name: h.name,
+          breed: h.breed,
+          gender: h.gender === 'Stallion' ? 'male' : h.gender === 'Mare' ? 'female' : 'gelding',
+          age: h.age,
+          quantity: qty,
+        });
       }
-    } else {
-      setSelectedHorseIds([...selectedHorseIds, id]);
+
+      const currentUser = getCurrentUser();
+      const routeNote = routeData
+        ? `[Lộ trình: ${routeData.mode === 'air' ? 'Đường Hàng Không' : 'Đường Bộ Liên Vận'}, ${routeData.distanceKm} km, ~${routeData.durationHours}h]`
+        : '';
+      const titleNote = data.title ? `[Tiêu đề: ${data.title.trim()}]` : '';
+      const combinedReqs = [titleNote, data.specialReqs, routeNote].filter(Boolean).join(' | ');
+
+      const payload = {
+        contactName: currentUser.fullName || currentUser.name || 'Current Customer',
+        contactPhone: currentUser.phone || '0901234567',
+        contactEmail: currentUser.email || 'customer@example.com',
+        requestedHorseCount: totalSelectedHorses || (data.horseCount ? Number(data.horseCount) : 1),
+        originLocation: data.origin,
+        destinationLocation: data.destination,
+        requestedDate: new Date(data.departureDate).toISOString(),
+        specialRequirements: combinedReqs || undefined,
+        horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
+        // Fallback for single horse if array is not preferred by backend yet
+        horseName: selectedHorsesData[0]?.name,
+        horseBreed: selectedHorsesData[0]?.breed,
+        horseGender: selectedHorsesData[0]?.gender,
+        horseAge: selectedHorsesData[0]?.age,
+      };
+
+      const newReq = await apiClient<any>('/orders', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      // Refresh horse stock in store
+      try {
+        await refreshHorses();
+      } catch {}
+
+      router.push(`/customer/requests/${newReq.id}`);
+    } catch (error) {
+      console.error('Failed to create request:', error);
+      alert('Failed to submit request. Please try again.');
+      setIsSubmitting(false);
     }
   };
 
-  const progressPercent = ((currentStep - 1) / 3) * 100;
+  const progressPercent = ((currentStep - 1) / 2) * 100;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '90px' }}>
@@ -176,10 +324,9 @@ function CreateTransportRequestForm() {
 
           <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
             {[
-              { num: 1, label: 'Transport Info' },
-              { num: 2, label: 'Select Horse' },
-              { num: 3, label: 'Documents' },
-              { num: 4, label: 'Review & Submit' },
+              { num: 1, label: 'Thông tin lộ trình' },
+              { num: 2, label: 'Chọn ngựa vận chuyển' },
+              { num: 3, label: 'Rà soát & Gửi đơn' },
             ].map((step) => {
               const isPast = step.num < currentStep;
               const isActive = step.num === currentStep;
@@ -251,8 +398,7 @@ function CreateTransportRequestForm() {
                   </label>
                   <input
                     type="text"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
+                    {...register('title')}
                     placeholder="Enter request title (e.g. Championship Transport to Singapore)"
                     style={{
                       width: '100%',
@@ -265,7 +411,7 @@ function CreateTransportRequestForm() {
                   />
                   {errors.title && (
                     <span style={{ fontSize: '12px', color: '#dc2626', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <AlertCircle size={12} /> {errors.title}
+                      <AlertCircle size={12} /> {errors.title.message}
                     </span>
                   )}
                 </div>
@@ -275,8 +421,7 @@ function CreateTransportRequestForm() {
                     Transportation Type <span style={{ color: '#dc2626' }}>*</span>
                   </label>
                   <select
-                    value={transportType}
-                    onChange={(e) => setTransportType(e.target.value as any)}
+                    {...register('transportType')}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -302,8 +447,7 @@ function CreateTransportRequestForm() {
                     <MapPin size={16} color="#94a3b8" style={{ position: 'absolute', top: '13px', left: '12px' }} />
                     <input
                       type="text"
-                      value={origin}
-                      onChange={(e) => setOrigin(e.target.value)}
+                      {...register('origin')}
                       placeholder="Search origin (e.g. Ho Chi Minh City, Vietnam)"
                       style={{
                         width: '100%',
@@ -315,7 +459,7 @@ function CreateTransportRequestForm() {
                       }}
                     />
                   </div>
-                  {errors.origin && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.origin}</span>}
+                  {errors.origin && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.origin.message}</span>}
                 </div>
 
                 <div>
@@ -326,8 +470,7 @@ function CreateTransportRequestForm() {
                     <Flag size={16} color="#94a3b8" style={{ position: 'absolute', top: '13px', left: '12px' }} />
                     <input
                       type="text"
-                      value={destination}
-                      onChange={(e) => setDestination(e.target.value)}
+                      {...register('destination')}
                       placeholder="Search destination (e.g. Singapore Turf Club)"
                       style={{
                         width: '100%',
@@ -339,45 +482,32 @@ function CreateTransportRequestForm() {
                       }}
                     />
                   </div>
-                  {errors.destination && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.destination}</span>}
+                  {errors.destination && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.destination.message}</span>}
                 </div>
               </div>
 
-              {/* Inline Route Summary */}
-              <div
-                style={{
-                  backgroundColor: '#eff6ff',
-                  border: '1px solid #dbeafe',
-                  borderRadius: '10px',
-                  padding: '14px 20px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '16px',
+              {/* Interactive Route & Border Checkpoints Map */}
+              <RoutePlanningMap
+                originText={formValues.origin}
+                destinationText={formValues.destination}
+                transportType={formValues.transportType}
+                onRouteCalculated={setRouteData}
+                onApplyPreset={(preset) => {
+                  setValue('origin', preset.origin, { shouldValidate: true });
+                  setValue('destination', preset.destination, { shouldValidate: true });
+                  setValue('transportType', preset.type, { shouldValidate: true });
                 }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  <span style={{ fontWeight: 700, color: 'var(--text-heading)', fontSize: '14px' }}>{origin || 'Origin'}</span>
-                  <div style={{ width: '80px', height: '1px', backgroundColor: '#93c5fd', position: 'relative' }}>
-                    <Plane size={14} color="#2563eb" style={{ position: 'absolute', top: '-7px', left: '33px' }} />
-                  </div>
-                  <span style={{ fontWeight: 700, color: 'var(--text-heading)', fontSize: '14px' }}>{destination || 'Destination'}</span>
-                </div>
-                <span style={{ fontSize: '12px', color: '#1e40af', fontWeight: 600, backgroundColor: '#ffffff', padding: '4px 10px', borderRadius: '6px' }}>
-                  Est. Distance: 1,100 km • Est. Time: 12 hrs
-                </span>
-              </div>
+              />
 
-              {/* Row 3: Dates & Horses */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+              {/* Row 3: Dates */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
                 <div>
                   <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
                     Departure Date <span style={{ color: '#dc2626' }}>*</span>
                   </label>
                   <input
                     type="date"
-                    value={departureDate}
-                    onChange={(e) => setDepartureDate(e.target.value)}
+                    {...register('departureDate')}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -395,8 +525,7 @@ function CreateTransportRequestForm() {
                   </label>
                   <input
                     type="date"
-                    value={arrivalDate}
-                    onChange={(e) => setArrivalDate(e.target.value)}
+                    {...register('arrivalDate')}
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -404,27 +533,6 @@ function CreateTransportRequestForm() {
                       border: '1px solid #cbd5e1',
                       fontSize: '14px',
                       backgroundColor: '#f8fafc',
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Number of Horses <span style={{ color: '#dc2626' }}>*</span>
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={horseCount}
-                    onChange={(e) => setHorseCount(parseInt(e.target.value) || 1)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      backgroundColor: '#f8fafc',
-                      textAlign: 'center',
                     }}
                   />
                 </div>
@@ -438,8 +546,7 @@ function CreateTransportRequestForm() {
                 </label>
                 <textarea
                   rows={3}
-                  value={specialReqs}
-                  onChange={(e) => setSpecialReqs(e.target.value)}
+                  {...register('specialReqs')}
                   placeholder="Enter any special transportation requirements (e.g. Temperature-controlled vehicle required, specific hydration schedule)..."
                   style={{
                     width: '100%',
@@ -472,11 +579,34 @@ function CreateTransportRequestForm() {
                   Horse Information
                 </h3>
                 <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                  Select one or multiple horses for this transport ({selectedHorseIds.length} selected).
+                  Tích chọn các con ngựa cần vận chuyển từ đàn của bạn (Đã chọn: {totalSelectedHorses} con).
                 </p>
+                {selectedHorses.length > 0 && (
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-heading)' }}>
+                      Breed Breakdown:
+                    </span>
+                    {Object.entries(breedBreakdown).map(([breed, count]) => (
+                      <span
+                        key={breed}
+                        style={{
+                          fontSize: '11.5px',
+                          padding: '3px 10px',
+                          borderRadius: '20px',
+                          backgroundColor: '#e0f2fe',
+                          color: '#0284c7',
+                          fontWeight: 600,
+                          border: '1px solid #bae6fd',
+                        }}
+                      >
+                        {breed}: <strong>{count}</strong>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <button
-                onClick={() => alert('Add new horse form')}
+                onClick={() => setIsAddHorseModalOpen(true)}
                 style={{
                   padding: '8px 16px',
                   borderRadius: '8px',
@@ -488,6 +618,7 @@ function CreateTransportRequestForm() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
+                  cursor: 'pointer',
                 }}
               >
                 <Plus size={14} /> Add New Horse
@@ -508,25 +639,68 @@ function CreateTransportRequestForm() {
                 </thead>
                 <tbody>
                   {horses.map((h) => {
-                    const isSelected = selectedHorseIds.includes(h.id);
+                    const isInTransit = h.status === 'in_transit' || h.availabilityStatus === 'In Transit';
+                    const isDelivered = h.status === 'delivered' || h.availabilityStatus === 'Delivered';
+                    const isRetired = h.status === 'retired' || h.status === 'deceased';
+                    const isUnavailable = isInTransit || isDelivered || isRetired;
+                    const isSelected = (horseQuantities[h.id] || 0) > 0;
                     return (
                       <tr
                         key={h.id}
                         style={{
                           borderBottom: '1px solid var(--border-light)',
-                          backgroundColor: isSelected ? '#eff6ff' : 'transparent',
+                          backgroundColor: isSelected ? '#eff6ff' : isUnavailable ? '#f8fafc' : 'transparent',
+                          opacity: isUnavailable ? 0.7 : 1,
                         }}
                       >
                         <td style={{ padding: '16px', textAlign: 'center' }}>
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => toggleHorseSelection(h.id)}
-                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                            disabled={isUnavailable}
+                            onChange={() => !isUnavailable && toggleHorseSelection(h.id)}
+                            style={{ width: '16px', height: '16px', cursor: isUnavailable ? 'not-allowed' : 'pointer' }}
                           />
                         </td>
                         <td style={{ padding: '16px', fontWeight: 700, color: 'var(--text-heading)' }}>
-                          {h.name}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div
+                              style={{
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '50%',
+                                overflow: 'hidden',
+                                backgroundColor: '#eff6ff',
+                                border: '1px solid #e2e8f0',
+                                flexShrink: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              {h.photoUrl ? (
+                                <img src={h.photoUrl} alt={h.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              ) : (
+                                <span style={{ fontSize: '14px', fontWeight: 700, color: '#2563eb' }}>{h.name.charAt(0)}</span>
+                              )}
+                            </div>
+                            <div>
+                              <div>{h.name}</div>
+                              {isInTransit ? (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#e0e7ff', color: '#4338ca', fontSize: '11px', fontWeight: 700 }}>
+                                  <Truck size={12} /> Đang vận chuyển
+                                </div>
+                              ) : isDelivered ? (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#ecfdf5', color: '#047857', fontSize: '11px', fontWeight: 700 }}>
+                                  <Check size={12} /> Đã bàn giao
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '11px', fontWeight: 600, color: '#16a34a', marginTop: '2px' }}>
+                                  ● Sẵn sàng vận chuyển
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </td>
                         <td style={{ padding: '16px', color: 'var(--text-body)' }}>{h.breed}</td>
                         <td style={{ padding: '16px', color: 'var(--text-body)' }}>
@@ -551,85 +725,8 @@ function CreateTransportRequestForm() {
           </div>
         )}
 
-        {/* STEP 3: DOCUMENTS CHECKLIST */}
+        {/* STEP 3: REVIEW & SUBMIT */}
         {currentStep === 3 && (
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-                Required Documents Checklist
-              </h3>
-              <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                Upload passports, vaccination certificates, and customs permits for selected horses.
-              </p>
-            </div>
-
-            <div style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {[
-                { name: 'Horse FEI Passport', required: true, uploaded: true },
-                { name: 'Equine Influenza Vaccination Record', required: true, uploaded: true },
-                { name: 'Veterinary Export Health Certificate', required: true, uploaded: false },
-                { name: 'Import / CITES Clearance Permit', required: false, uploaded: false },
-              ].map((doc, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    padding: '16px 20px',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border-card)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    backgroundColor: doc.uploaded ? '#f0fdf4' : '#ffffff',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <FileText size={22} color={doc.uploaded ? '#16a34a' : '#64748b'} />
-                    <div>
-                      <div style={{ fontWeight: 600, color: 'var(--text-heading)', fontSize: '14px' }}>
-                        {doc.name} {doc.required && <span style={{ color: '#dc2626' }}>*</span>}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>
-                        {doc.uploaded ? 'Verified on file' : 'Pending customer upload'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {doc.uploaded ? (
-                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Check size={14} /> Ready
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => alert(`Upload dialog for ${doc.name}`)}
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: '6px',
-                        border: '1px solid #cbd5e1',
-                        backgroundColor: '#ffffff',
-                        fontSize: '12.5px',
-                        fontWeight: 600,
-                        color: 'var(--primary)',
-                      }}
-                    >
-                      Browse File
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* STEP 4: REVIEW & SUBMIT */}
-        {currentStep === 4 && (
           <div
             style={{
               backgroundColor: '#ffffff',
@@ -652,43 +749,120 @@ function CreateTransportRequestForm() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                 <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
                   <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Request Title</span>
-                  <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-heading)', marginTop: '2px' }}>{title || 'Untitled Request'}</div>
+                  <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-heading)', marginTop: '2px' }}>{formValues.title || 'Untitled Request'}</div>
                 </div>
                 <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
                   <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Route</span>
                   <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>
-                    {origin} → {destination}
+                    {formValues.origin} → {formValues.destination}
                   </div>
                 </div>
                 <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
                   <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Departure Date</span>
-                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>{departureDate}</div>
+                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>{formValues.departureDate}</div>
                 </div>
               </div>
 
+              {/* Route & Customs Logistics Summary */}
+              {routeData && (
+                <div
+                  style={{
+                    backgroundColor: '#eff6ff',
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid #dbeafe',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '14px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '8px',
+                        backgroundColor: '#dbeafe',
+                        color: '#1d4ed8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Navigation size={18} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#1e40af' }}>
+                        Lộ trình: {routeData.mode === 'air' ? 'Đường Hàng Không (Air Freight Corridor)' : 'Đường Bộ Liên Vận (Overland Road)'}
+                      </div>
+                      <div style={{ fontSize: '12.5px', color: '#475569' }}>
+                        Quãng đường: <strong style={{ color: '#0f172a' }}>{routeData.distanceKm.toLocaleString()} km</strong> • Thời gian ước tính: <strong style={{ color: '#0f172a' }}>~{routeData.durationHours} giờ</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      padding: '4px 10px',
+                      borderRadius: '20px',
+                      backgroundColor: '#dcfce7',
+                      color: '#15803d',
+                      border: '1px solid #bbf7d0',
+                    }}
+                  >
+                    ✓ Đã tối ưu kiểm dịch & trạm thú y
+                  </span>
+                </div>
+              )}
+
               <div>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)' }}>
-                  Selected Horses ({selectedHorseIds.length})
-                </span>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                  {horses
-                    .filter((h) => selectedHorseIds.includes(h.id))
-                    .map((h) => (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)' }}>
+                    Selected Horses ({totalSelectedHorses} horses)
+                  </span>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {Object.entries(breedBreakdown).map(([breed, count]) => (
                       <span
-                        key={h.id}
+                        key={breed}
                         style={{
-                          padding: '6px 12px',
-                          borderRadius: '8px',
-                          backgroundColor: '#eff6ff',
-                          color: 'var(--primary)',
-                          fontSize: '13px',
+                          fontSize: '11px',
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          backgroundColor: '#e0f2fe',
+                          color: '#0284c7',
                           fontWeight: 600,
-                          border: '1px solid #dbeafe',
+                          border: '1px solid #bae6fd',
                         }}
                       >
-                        {h.name} ({h.breed})
+                        {breed}: {count}
                       </span>
                     ))}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
+                  {selectedHorses.map((h) => (
+                    <span
+                      key={h.id}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: '8px',
+                        backgroundColor: '#eff6ff',
+                        color: 'var(--primary)',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        border: '1px solid #dbeafe',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                      }}
+                    >
+                      <span>{h.name}</span>
+                      <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 500 }}>• {h.breed}</span>
+                    </span>
+                  ))}
                 </div>
               </div>
             </div>
@@ -728,23 +902,6 @@ function CreateTransportRequestForm() {
           >
             Cancel
           </button>
-          <button
-            onClick={handleSaveDraft}
-            style={{
-              padding: '9px 18px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#f8fafc',
-              fontSize: '13.5px',
-              fontWeight: 600,
-              color: 'var(--text-body)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <Save size={15} /> Save as Draft
-          </button>
         </div>
 
         <div style={{ display: 'flex', gap: '12px' }}>
@@ -765,7 +922,7 @@ function CreateTransportRequestForm() {
             </button>
           )}
 
-          {currentStep < 4 ? (
+          {currentStep < 3 ? (
             <button
               onClick={handleContinue}
               style={{
@@ -786,11 +943,12 @@ function CreateTransportRequestForm() {
             </button>
           ) : (
             <button
-              onClick={handleSubmit}
+              onClick={handleSubmit(onSubmitForm)}
+              disabled={isSubmitting}
               style={{
                 padding: '9px 26px',
                 borderRadius: '8px',
-                backgroundColor: '#16a34a',
+                backgroundColor: isSubmitting ? '#94a3b8' : '#16a34a',
                 color: '#ffffff',
                 fontSize: '13.5px',
                 fontWeight: 600,
@@ -798,14 +956,31 @@ function CreateTransportRequestForm() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)',
+                boxShadow: isSubmitting ? 'none' : '0 2px 8px rgba(22, 163, 74, 0.3)',
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
               }}
             >
-              Submit Request <Check size={16} strokeWidth={2.5} />
+              {isSubmitting ? (
+                <>
+                  Submitting... <Loader2 size={16} className="animate-spin" />
+                </>
+              ) : (
+                <>
+                  Submit Request <Check size={16} strokeWidth={2.5} />
+                </>
+              )}
             </button>
           )}
         </div>
       </div>
+
+      <AddHorseModal
+        isOpen={isAddHorseModalOpen}
+        onClose={() => setIsAddHorseModalOpen(false)}
+        onHorseAdded={(newHorse) => {
+          setHorseQuantities((prev) => ({ ...prev, [newHorse.id]: 1 }));
+        }}
+      />
     </div>
   );
 }

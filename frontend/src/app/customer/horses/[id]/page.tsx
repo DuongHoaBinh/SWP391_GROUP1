@@ -1,11 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ChevronRight,
   Edit3,
+  Trash2,
+  CheckCircle2,
   MoreVertical,
   Check,
   Clock,
@@ -15,43 +17,112 @@ import {
   X,
   FileText,
   UserCheck,
+  Camera,
+  Loader2,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { HorseDocument } from '@/lib/types';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
+import { EditHorseModal } from '@/components/horses/EditHorseModal';
+import { DeleteHorseModal } from '@/components/horses/DeleteHorseModal';
+import { apiClient } from '@/lib/api-client';
+import { getFullPhotoUrl } from '@/lib/customer-store';
 
 export default function HorseDetailPage() {
   const params = useParams();
   const router = useRouter();
   const horseId = params?.id as string;
 
-  const { getHorseById, uploadDocumentForHorse, uploadDocumentForRequest } = useCustomerStore();
+  const { getHorseById, uploadDocumentForHorse, uploadDocumentForRequest, uploadHorseAvatar, refreshHorses } = useCustomerStore();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [apiHorse, setApiHorse] = useState<any>(null);
 
-  const horse = getHorseById(horseId) || getHorseById('hrs-001') || {
-    id: 'hrs-001',
-    code: 'HOR-2026-001',
-    name: 'Thunder',
-    breed: 'Thoroughbred',
-    age: 6,
-    gender: 'Male (Stallion)',
-    dob: '12 May 2020',
-    color: 'Bay',
-    weight: '520 kg',
-    microchipNumber: '985141000123456',
-    passportNumber: 'HP-2026-001',
-    ownerName: 'John Doe',
-    medicalStatus: 'Healthy',
-    vaccinationStatus: 'Up to date',
-    quarantineStatus: 'Pending',
-    lastExamDate: '20 Sep 2026',
-    veterinarian: 'Dr. Nguyen',
-    specialRequirements: 'Temperature-controlled transportation recommended.',
-  };
+  useEffect(() => {
+    if (horseId) {
+      apiClient<any>(`/horses/${horseId}`)
+        .then((data) => {
+          if (data && (data.id || data.name)) {
+            setApiHorse({
+              id: String(data.id || horseId),
+              backendId: data.id,
+              code: data.passportNo || `HR-${String(data.id || horseId).padStart(5, '0')}`,
+              name: data.name,
+              breed: data.breed || 'Thoroughbred',
+              age: Number(data.age) || 4,
+              gender:
+                data.gender === 'female'
+                  ? 'Mare'
+                  : data.gender === 'gelding'
+                  ? 'Gelding'
+                  : 'Stallion',
+              dob: data.dateOfBirth
+                ? new Date(data.dateOfBirth).toISOString().split('T')[0]
+                : '',
+              color: data.color || '',
+              weight: data.weight || '',
+              microchipNumber: data.microchipNo || '',
+              passportNumber: data.passportNo || '',
+              ownerName: 'You',
+              medicalStatus: data.medicalStatus || 'Healthy',
+              specialRequirements: data.specialRequirements || '',
+              photoUrl: getFullPhotoUrl(data.photoUrl),
+              avatarUrl: getFullPhotoUrl(data.photoUrl),
+              status: data.status || 'active',
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [horseId]);
+
+  const storeHorse = getHorseById(horseId);
+  const horse = apiHorse
+    ? { ...storeHorse, ...apiHorse }
+    : storeHorse || {
+        id: horseId || 'hrs-001',
+        code: `HR-${String(horseId || 1).padStart(5, '0')}`,
+        name: 'Horse',
+        breed: 'Thoroughbred',
+        age: 4,
+        gender: 'Stallion',
+        dob: '2022-01-15',
+        color: '',
+        weight: '',
+        microchipNumber: '',
+        passportNumber: '',
+        ownerName: 'You',
+        medicalStatus: 'Healthy',
+        vaccinationStatus: 'Up to date',
+        quarantineStatus: 'Pending',
+        lastExamDate: '20 Sep 2026',
+        veterinarian: 'Dr. Nguyen',
+        specialRequirements: '',
+      };
 
   const [previewDoc, setPreviewDoc] = useState<HorseDocument | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
 
-  const hasMissingDoc = horse.documents?.some((d) => d.status === 'Missing');
+  const hasMissingDoc = horse.documents?.some((d: any) => d.status === 'Missing');
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingAvatar(true);
+      await uploadHorseAvatar(horse.id, file);
+      setFeedbackSuccess('Cập nhật ảnh đại diện con ngựa thành công!');
+      setTimeout(() => setFeedbackSuccess(null), 4000);
+    } catch (err: any) {
+      alert(err?.message || 'Không thể tải lên ảnh đại diện.');
+    } finally {
+      setIsUploadingAvatar(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const handleUploadSuccess = (uploadedDoc: any) => {
     uploadDocumentForHorse(horse.id, uploadedDoc.title);
@@ -115,12 +186,13 @@ export default function HorseDetailPage() {
               fontWeight: 600,
               border: 'none',
               boxShadow: 'var(--shadow-sm)',
+              cursor: 'pointer',
             }}
           >
             Ship This Horse
           </button>
           <button
-            onClick={() => alert(`Edit profile for ${horse.name}`)}
+            onClick={() => setIsEditModalOpen(true)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -133,13 +205,54 @@ export default function HorseDetailPage() {
               fontWeight: 600,
               color: 'var(--text-body)',
               boxShadow: 'var(--shadow-sm)',
+              cursor: 'pointer',
             }}
           >
             <Edit3 size={15} />
             <span>Edit Horse</span>
           </button>
+          <button
+            onClick={() => setIsDeleteModalOpen(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 16px',
+              borderRadius: '8px',
+              border: '1px solid #fecaca',
+              backgroundColor: '#fff5f5',
+              fontSize: '13.5px',
+              fontWeight: 600,
+              color: '#dc2626',
+              boxShadow: 'var(--shadow-sm)',
+              cursor: 'pointer',
+            }}
+          >
+            <Trash2 size={15} />
+            <span>Delete Horse</span>
+          </button>
         </div>
       </div>
+
+      {feedbackSuccess && (
+        <div
+          style={{
+            padding: '12px 18px',
+            borderRadius: '10px',
+            backgroundColor: '#ecfdf5',
+            border: '1px solid #a7f3d0',
+            color: '#065f46',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            fontSize: '14px',
+            fontWeight: 600,
+          }}
+        >
+          <CheckCircle2 size={18} color="#059669" />
+          <span>{feedbackSuccess}</span>
+        </div>
+      )}
 
       {/* HORSE PROFILE HERO CARD */}
       <div
@@ -156,42 +269,124 @@ export default function HorseDetailPage() {
           flexWrap: 'wrap',
         }}
       >
-        {/* Avatar */}
-        <div
-          style={{
-            width: '130px',
-            height: '130px',
-            borderRadius: '50%',
-            overflow: 'hidden',
-            border: '4px solid #f8fafc',
-            boxShadow: '0 0 0 1px #e2e8f0',
-            flexShrink: 0,
-            backgroundColor: '#eff6ff',
-          }}
-        >
-          {horse.photoUrl ? (
-            <img
-              src={horse.photoUrl}
-              alt={horse.name}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          ) : (
-            <div
-              style={{
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--primary)',
-              }}
-            >
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M22 17v-1c0-4-3-7-7-7H9l-2-3H3l1 5-2 3v3h10" />
-                <circle cx="8" cy="7" r="1" />
-              </svg>
-            </div>
-          )}
+        {/* Avatar with click-to-upload & Camera Overlay */}
+        <div style={{ position: 'relative' }}>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleAvatarChange}
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            style={{ display: 'none' }}
+          />
+          <div
+            onClick={() => !isUploadingAvatar && fileInputRef.current?.click()}
+            title="Nhấn để đổi ảnh đại diện cho ngựa"
+            style={{
+              width: '130px',
+              height: '130px',
+              borderRadius: '50%',
+              overflow: 'hidden',
+              border: '4px solid #f8fafc',
+              boxShadow: '0 0 0 1px #e2e8f0',
+              flexShrink: 0,
+              backgroundColor: '#eff6ff',
+              cursor: isUploadingAvatar ? 'wait' : 'pointer',
+              position: 'relative',
+              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+            }}
+          >
+            {horse.photoUrl ? (
+              <img
+                src={horse.photoUrl}
+                alt={horse.name}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--primary)',
+                }}
+              >
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 17v-1c0-4-3-7-7-7H9l-2-3H3l1 5-2 3v3h10" />
+                  <circle cx="8" cy="7" r="1" />
+                </svg>
+              </div>
+            )}
+
+            {/* Hover / Loading Overlay */}
+            {isUploadingAvatar ? (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff',
+                  gap: '6px',
+                }}
+              >
+                <Loader2 size={24} className="animate-spin" />
+                <span style={{ fontSize: '11px', fontWeight: 600 }}>Uploading...</span>
+              </div>
+            ) : (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                  padding: '4px 0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  color: '#ffffff',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  transition: 'opacity 0.2s ease',
+                }}
+              >
+                <Camera size={13} />
+                <span>Đổi ảnh</span>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Camera Badge at bottom-right */}
+          <button
+            type="button"
+            onClick={() => !isUploadingAvatar && fileInputRef.current?.click()}
+            title="Đổi ảnh đại diện"
+            style={{
+              position: 'absolute',
+              bottom: '4px',
+              right: '4px',
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              backgroundColor: '#2563eb',
+              color: '#ffffff',
+              border: '2px solid #ffffff',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              zIndex: 2,
+            }}
+          >
+            <Camera size={15} />
+          </button>
         </div>
 
         {/* Details & Quick Stats */}
@@ -343,13 +538,13 @@ export default function HorseDetailPage() {
             <div>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Color</span>
               <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.color || 'Bay'}
+                {horse.color || '—'}
               </div>
             </div>
             <div>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Weight</span>
               <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.weight || '520 kg'}
+                {horse.weight || '—'}
               </div>
             </div>
             <div>
@@ -432,7 +627,7 @@ export default function HorseDetailPage() {
                 Special Medical Requirements
               </div>
               <div style={{ fontSize: '13.5px', color: '#1e3a8a', fontWeight: 500, marginTop: '4px' }}>
-                "{horse.specialRequirements || 'Temperature-controlled transportation recommended.'}"
+                "{horse.specialRequirements || 'Không có yêu cầu chăm sóc đặc biệt.'}"
               </div>
             </div>
           </div>
@@ -532,7 +727,7 @@ export default function HorseDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {horse.documents?.map((doc) => (
+              {horse.documents?.map((doc: any) => (
                 <tr
                   key={doc.id}
                   style={{
@@ -647,7 +842,7 @@ export default function HorseDetailPage() {
             }}
           />
 
-          {horse.medicalHistory?.map((item, idx) => (
+          {horse.medicalHistory?.map((item: any, idx: number) => (
             <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
               <div
                 style={{
@@ -861,6 +1056,32 @@ export default function HorseDetailPage() {
         onClose={() => setIsUploadOpen(false)}
         onSuccess={handleUploadSuccess}
       />
+
+      {/* Edit Horse Modal */}
+      {isEditModalOpen && (
+        <EditHorseModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          horse={horse}
+          onHorseUpdated={(updated) => {
+            setApiHorse(updated);
+            setFeedbackSuccess(`Đã cập nhật thông tin con ngựa "${updated.name}" thành công!`);
+            setTimeout(() => setFeedbackSuccess(null), 5000);
+          }}
+        />
+      )}
+
+      {/* Delete Horse Modal */}
+      {isDeleteModalOpen && (
+        <DeleteHorseModal
+          isOpen={isDeleteModalOpen}
+          onClose={() => setIsDeleteModalOpen(false)}
+          horse={horse}
+          onHorseDeleted={() => {
+            router.push('/customer/horses');
+          }}
+        />
+      )}
     </div>
   );
 }
