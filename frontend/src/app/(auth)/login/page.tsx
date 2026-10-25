@@ -1,22 +1,39 @@
 'use client';
 
-import React, { useState, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { AuthShowcasePanel } from '@/components/layout/AuthShowcasePanel';
-import { setAuthSession } from '@/lib/auth';
+import { setAuthSession, clearAuthSession } from '@/lib/auth';
+import { getPostLoginRedirect } from '@/lib/auth-redirect';
 import { mockCurrentUser } from '@/lib/mock-data';
 
 function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTarget = searchParams.get('redirect') || '/customer';
 
-  const [email, setEmail] = useState('customer@equitransit.com');
-  const [password, setPassword] = useState('Password@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberMe, setRememberMe] = useState(false);
+
+  useEffect(() => {
+    // Clear stale session when visiting login directly so old forgot-to-logout sessions do not linger
+    if (!searchParams.get('redirect')) {
+      clearAuthSession();
+    }
+    try {
+      const savedEmail = localStorage.getItem('equitransit_remembered_email');
+      const isRemembered = localStorage.getItem('equitransit_remember_me') === 'true';
+      if (savedEmail && isRemembered) {
+        setEmail(savedEmail);
+        setRememberMe(true);
+      }
+    } catch {
+      // ignore
+    }
+  }, [searchParams]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -58,13 +75,45 @@ function LoginFormContent() {
       // Backend offline fallback for preview
     }
 
+    if (rememberMe) {
+      try {
+        localStorage.setItem('equitransit_remembered_email', email.trim().toLowerCase());
+        localStorage.setItem('equitransit_remember_me', 'true');
+      } catch {
+        // ignore
+      }
+    } else {
+      try {
+        localStorage.removeItem('equitransit_remembered_email');
+        localStorage.removeItem('equitransit_remember_me');
+      } catch {
+        // ignore
+      }
+    }
+
+    const roleRoutes: Record<string, string> = {
+      CUSTOMER: '/customer',
+      LOGISTICS_MANAGER: '/manager',
+      TRANSPORT_SPECIALIST: '/specialist',
+      FLEET_ROUTE_COORDINATOR: '/coordinator',
+      COORDINATOR: '/coordinator',
+      DRIVER_ESCORT: '/driver',
+      DRIVER: '/driver',
+      ADMIN: '/manager',
+    };
+
+    const userRoleKey = (authUser.role || 'CUSTOMER').toUpperCase();
+    const defaultRoleRoute = roleRoutes[userRoleKey] || '/customer';
+
+    const finalRoute = getPostLoginRedirect(searchParams.get('redirect'), defaultRoleRoute);
+
     setAuthSession(authToken, authUser);
     setIsLoading(false);
     setIsSuccess(true);
 
     setTimeout(() => {
-      router.push(redirectTarget);
-    }, 1200);
+      router.push(finalRoute);
+    }, 1000);
   };
 
   return (
