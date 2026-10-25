@@ -4,21 +4,19 @@ import React, { useEffect } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { CustomerStoreProvider } from '@/lib/customer-store';
-import { getAuthToken, setAuthSession } from '@/lib/auth';
-import { mockCurrentUser } from '@/lib/mock-data';
+import { getAuthToken, getCurrentUser } from '@/lib/auth';
+import { useRouter } from 'next/navigation';
 
 export default function CustomerLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const router = useRouter();
   useEffect(() => {
-    // Ensure active session exists so user never gets blocked or stuck
     const token = getAuthToken();
-    if (!token) {
-      setAuthSession('mock-jwt-token-customer', mockCurrentUser);
-    }
-  }, []);
+    if (!token || token.startsWith('mock-') || getCurrentUser().role !== 'CUSTOMER') router.replace('/login');
+  }, [router]);
 
   return (
     <CustomerStoreProvider>
@@ -29,10 +27,9 @@ export default function CustomerLayout({
         {/* Main Content Area */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, backgroundColor: '#f8fafc' }}>
           <Header />
-          <main
+          <main className="px-4 py-6 sm:px-8 sm:py-7"
             style={{
               flex: 1,
-              padding: '28px 32px 48px 32px',
               maxWidth: '1600px',
               width: '100%',
               margin: '0 auto',

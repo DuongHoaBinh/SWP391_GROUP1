@@ -16,99 +16,47 @@ export const Button: React.FC<ButtonProps> = ({
   iconPosition = 'left',
   badge,
   className = '',
-  style,
   ...props
 }) => {
-  const getVariantStyles = (): React.CSSProperties => {
+  const getVariantClasses = () => {
     switch (variant) {
       case 'primary':
-        return {
-          backgroundColor: 'var(--primary)',
-          color: '#ffffff',
-          border: '1px solid var(--primary)',
-          boxShadow: '0 2px 8px var(--primary-glow)',
-        };
+        return 'bg-blue-600 text-white border border-blue-600 hover:bg-blue-700 shadow-[0_2px_8px_rgba(37,99,235,0.18)]';
       case 'secondary':
-        return {
-          backgroundColor: '#ffffff',
-          color: 'var(--text-body)',
-          border: '1px solid #e2e8f0',
-          boxShadow: 'var(--shadow-sm)',
-        };
+        return 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm';
       case 'outline':
-        return {
-          backgroundColor: 'transparent',
-          color: 'var(--text-body)',
-          border: '1px solid #cbd5e1',
-        };
+        return 'bg-transparent text-slate-700 border border-slate-300 hover:bg-slate-50';
       case 'ghost':
-        return {
-          backgroundColor: 'transparent',
-          color: 'var(--text-body)',
-          border: 'none',
-        };
+        return 'bg-transparent text-slate-700 border-none hover:bg-slate-100';
       case 'danger':
-        return {
-          backgroundColor: 'var(--status-danger)',
-          color: '#ffffff',
-          border: '1px solid var(--status-danger)',
-        };
+        return 'bg-red-600 text-white border border-red-600 hover:bg-red-700';
       default:
-        return {};
+        return '';
     }
   };
 
-  const getSizeStyles = (): React.CSSProperties => {
+  const getSizeClasses = () => {
     switch (size) {
       case 'sm':
-        return { padding: '6px 12px', fontSize: '13px', borderRadius: '8px' };
+        return 'px-3 py-1.5 text-[13px] rounded-lg';
       case 'lg':
-        return { padding: '12px 22px', fontSize: '15px', borderRadius: '10px' };
+        return 'px-5 py-3 text-[15px] rounded-xl';
       case 'md':
       default:
-        return { padding: '9px 16px', fontSize: '14px', borderRadius: '9px' };
+        return 'px-4 py-2 text-[14px] rounded-xl';
     }
   };
 
   return (
     <button
       {...props}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '8px',
-        fontWeight: 600,
-        position: 'relative',
-        transition: 'all 0.18s ease-in-out',
-        ...getVariantStyles(),
-        ...getSizeStyles(),
-        ...style,
-      }}
+      className={`inline-flex items-center justify-center gap-2 font-semibold relative transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${getVariantClasses()} ${getSizeClasses()} ${className}`}
     >
-      {icon && iconPosition === 'left' && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
-      <span>{children}</span>
-      {icon && iconPosition === 'right' && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
+      {icon && iconPosition === 'left' && <span className="flex items-center">{icon}</span>}
+      <span className="inline-flex min-w-0 items-center justify-center gap-2">{children}</span>
+      {icon && iconPosition === 'right' && <span className="flex items-center">{icon}</span>}
       {badge !== undefined && (
-        <span
-          style={{
-            position: 'absolute',
-            top: '-6px',
-            right: '-6px',
-            backgroundColor: '#ef4444',
-            color: '#ffffff',
-            fontSize: '11px',
-            fontWeight: 700,
-            borderRadius: '999px',
-            minWidth: '18px',
-            height: '18px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '0 4px',
-            border: '2px solid #ffffff',
-          }}
-        >
+        <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[11px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border-2 border-white">
           {badge}
         </span>
       )}

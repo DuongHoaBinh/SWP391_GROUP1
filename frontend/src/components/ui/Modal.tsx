@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -16,103 +16,68 @@ export const Modal: React.FC<ModalProps> = ({
   title,
   subtitle,
   children,
-  maxWidth = '580px',
+  maxWidth = 'max-w-2xl',
 }) => {
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  const titleId = useId();
   useEffect(() => {
+    if (!isOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    const controls = () => Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]') ?? []);
+    (controls()[0] ?? panel.current)?.focus();
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') close.current();
+      if (e.key === 'Tab') {
+        const items = controls();
+        const first = items[0], last = items[items.length - 1];
+        if (!first) { e.preventDefault(); return; }
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
     };
     if (isOpen) {
       document.body.style.overflow = 'hidden';
       window.addEventListener('keydown', handleKeyDown);
     }
     return () => {
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '16px',
-        backgroundColor: 'rgba(15, 23, 42, 0.55)',
-        backdropFilter: 'blur(5px)',
-        animation: 'fadeIn 0.2s ease-out',
-      }}
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '18px',
-          width: '100%',
-          maxWidth,
-          maxHeight: '90vh',
-          display: 'flex',
-          flexDirection: 'column',
-          boxShadow: 'var(--shadow-popup)',
-          overflow: 'hidden',
-          animation: 'fadeIn 0.25s ease-out',
-        }}
+        ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+        className={`bg-white rounded-2xl w-full max-h-[90vh] flex flex-col shadow-xl overflow-hidden animate-fade-in ${maxWidth}`}
+        style={maxWidth.startsWith('max-w') ? undefined : { maxWidth }}
       >
         {/* Modal Header */}
-        <div
-          style={{
-            padding: '20px 24px',
-            borderBottom: '1px solid var(--border-light)',
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: '12px',
-          }}
-        >
+        <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-3">
           <div>
-            <h3
-              style={{
-                fontSize: '18px',
-                fontWeight: 700,
-                color: 'var(--text-heading)',
-                margin: 0,
-              }}
-            >
+            <h3 id={titleId} className="text-lg font-bold text-slate-900 m-0">
               {title}
             </h3>
             {subtitle && (
-              <p
-                style={{
-                  fontSize: '13px',
-                  color: 'var(--text-muted)',
-                  marginTop: '4px',
-                  marginBottom: 0,
-                }}
-              >
+              <p className="text-[13px] text-slate-500 mt-1 mb-0">
                 {subtitle}
               </p>
             )}
           </div>
           <button
             onClick={onClose}
-            style={{
-              padding: '6px',
-              borderRadius: '8px',
-              color: 'var(--text-muted)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: '#f1f5f9',
-              transition: 'all 0.15s ease',
-            }}
+            className="p-1.5 rounded-lg text-slate-500 flex items-center justify-center bg-slate-100 hover:bg-slate-200 transition-colors"
             aria-label="Close modal"
           >
             <X size={18} />
@@ -120,12 +85,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div
-          style={{
-            padding: '24px',
-            overflowY: 'auto',
-          }}
-        >
+        <div className="p-6 overflow-y-auto">
           {children}
         </div>
       </div>
