@@ -1589,7 +1589,7 @@ export default function ManagerPlanningPage() {
             </p>
             <p className="text-slate-600 text-xs mt-1 m-0 leading-relaxed">
               Theo quy định vận tải ngựa đua quốc tế, chuyến đi chỉ được chuyển sang <strong>Ready to depart</strong> khi và chỉ khi
-              thỏa mãn đồng thời cả 2 điều kiện: Kế hoạch lộ trình đã xác nhận VÀ Toàn bộ hồ sơ kiểm dịch đạt chuẩn 100%.
+              thỏa mãn đồng thời cả 3 điều kiện: Kế hoạch lộ trình đã xác nhận, Toàn bộ hồ sơ kiểm dịch đạt chuẩn 100% VÀ Cước phí vận chuyển đã thanh toán thành công.
             </p>
           </div>
 
@@ -1623,11 +1623,26 @@ export default function ManagerPlanningPage() {
                 </p>
               </div>
             </div>
+
+            {/* Condition 3 */}
+            <div className={`p-3 rounded-lg border flex items-start gap-3 ${
+              currentReadiness?.isPaymentSucceeded ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-pink-50 border-pink-200 text-pink-900'
+            }`}>
+              {currentReadiness?.isPaymentSucceeded ? <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" /> : <Clock size={18} className="text-pink-600 shrink-0 mt-0.5" />}
+              <div>
+                <strong className="block text-xs">Điều kiện 3: Thanh toán cước vận chuyển (MoMo / Thẻ ngân hàng)</strong>
+                <p className="text-[11px] mt-0.5 m-0">
+                  {currentReadiness?.isPaymentSucceeded
+                    ? 'Khách hàng đã hoàn tất thanh toán cước phí vận chuyển thành công qua MoMo.'
+                    : 'Đang chờ khách hàng thanh toán cước vận chuyển. Chuyến đi chưa được cấp lệnh xuất bến.'}
+                </p>
+              </div>
+            </div>
           </div>
 
           {currentReadiness?.isReadyToDepart ? (
             <div className="p-3 bg-emerald-100 border border-emerald-300 rounded-lg text-emerald-900 text-center font-bold">
-              🎉 CẢ HAI ĐIỀU KIỆN ĐÃ ĐẠT! Chuyến đi đã đủ điều kiện và sẵn sàng xuất phát (Ready to Depart).
+              🎉 CẢ 3 ĐIỀU KIỆN ĐÃ ĐẠT! Chuyến đi đã đủ điều kiện và sẵn sàng xuất phát (Ready to Depart).
             </div>
           ) : (
             <div className="p-3 bg-slate-100 rounded-lg text-slate-700">

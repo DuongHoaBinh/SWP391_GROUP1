@@ -123,6 +123,7 @@ export interface TripPlanReadiness {
   orderCode: string;
   isPlanConfirmed: boolean;
   isLegalCompliant: boolean;
+  isPaymentSucceeded: boolean;
   isReadyToDepart: boolean;
   currentShipmentStatus: string;
   currentPlanStatus: PlanStatus | string;
