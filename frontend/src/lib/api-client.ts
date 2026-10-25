@@ -17,6 +17,11 @@ export async function apiClient<T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
+  if (!headers.has('Accept-Language')) {
+    const currentLang = typeof window !== 'undefined' ? localStorage.getItem('equitransit_lang') || 'vi' : 'vi';
+    headers.set('Accept-Language', currentLang);
+  }
+
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...options,
     headers,

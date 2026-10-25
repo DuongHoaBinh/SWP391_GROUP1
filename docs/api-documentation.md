@@ -44,6 +44,77 @@ Authenticates verified customers and pre-provisioned internal accounts. Returns 
 }
 ```
 
+### `GET /auth/profile`
+
+Retrieves the authenticated user's profile details. Requires Bearer JWT token.
+
+Response:
+```json
+{
+	"id": "7",
+	"email": "tamngoi192@gmail.com",
+	"role": "CUSTOMER",
+	"fullName": "Nguyễn Văn Tâm",
+	"name": "Nguyễn Văn Tâm",
+	"phone": "0912345678",
+	"address": "123 Nguyễn Huệ, TP.HCM",
+	"avatarUrl": "",
+	"createdAt": "2026-09-30T10:00:00.000Z"
+}
+```
+
+### `PATCH /auth/profile`
+
+Updates the authenticated user's profile information. Requires Bearer JWT token.
+
+Request body:
+```json
+{
+	"fullName": "Nguyễn Văn Tâm",
+	"phone": "0912345678",
+	"address": "123 Nguyễn Huệ, Quận 1, TP.HCM",
+	"avatarUrl": ""
+}
+```
+
+Response:
+```json
+{
+	"message": "Profile updated successfully",
+	"user": {
+		"id": "7",
+		"email": "tamngoi192@gmail.com",
+		"role": "CUSTOMER",
+		"fullName": "Nguyễn Văn Tâm",
+		"name": "Nguyễn Văn Tâm",
+		"phone": "0912345678",
+		"address": "123 Nguyễn Huệ, Quận 1, TP.HCM",
+		"avatarUrl": "",
+		"createdAt": "2026-09-30T10:00:00.000Z"
+	}
+}
+```
+
+### `POST /auth/change-password`
+
+Changes the password for the currently authenticated user. Requires Bearer JWT token.
+
+Request body:
+```json
+{
+	"currentPassword": "OldPassword123",
+	"newPassword": "NewPassword123",
+	"confirmPassword": "NewPassword123"
+}
+```
+
+Response:
+```json
+{
+	"message": "Mật khẩu đã được thay đổi thành công"
+}
+```
+
 ## Local MySQL and SMTP configuration
 
 The backend reads database and SMTP settings from `backend/.env`. `SMTP_USER` and `SMTP_PASSWORD` belong to a dedicated system sender account, not to the customer. The customer email from `POST /auth/register` is passed as the recipient of the OTP email. Required values for the real registration flow are `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASSWORD`. For Gmail, use an App Password with two-step verification enabled. Never commit `backend/.env` or expose `SMTP_PASSWORD`.
@@ -114,6 +185,90 @@ Approves a pending `requested` order and notifies the customer.
 Rejects a pending `requested` order with a mandatory reason and notifies the customer.
 - **Body:** `{ "reason": "Lý do từ chối đơn hàng" }`
 
+### `PATCH /orders/:id/request-changes` (Logistics Manager / Admin)
+Requests modifications on a pending `requested` order with a mandatory explanation note. Updates status to `change_requested` and sends a notification to the customer.
+- **Body:** `{ "reason": "Vui lòng dời ngày xuất phát sang 16/10 và cập nhật địa chỉ đón chi tiết" }`
+
+### `PUT /orders/:id` (Customer)
+Customer updates editable order details (dates, route locations, horse info, special requirements) and resubmits the request. Resets status back to `requested` for manager review.
+- **Body:** Partial or full fields from `CreateOrderDto`.
+
+## Documents endpoints (Flow 2: Legal, Quarantine, and Customs Documents)
+
+Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)
+
+### `GET /documents/regulations`
+Lists active quarantine and legal regulations by destination country. Supports optional query `?country=Singapore`.
+
+### `POST /documents/regulations` (Transport Specialist / Admin)
+Creates a new document requirement for a destination country.
+- **Role:** `TRANSPORT_SPECIALIST`, `ADMIN`
+- **Body:**
+```json
+{
+  "country": "Singapore",
+  "documentType": "horse_passport",
+  "description": "Hộ chiếu FEI hoặc liên đoàn quốc gia cấp có gắn mã microchip",
+  "effectiveDate": "2026-01-01"
+}
+```
+
+### `POST /documents/upload` (Customer / Transport Specialist / Admin)
+Uploads an official scan/PDF document for a specific horse.
+- **Body:**
+```json
+{
+  "horseId": 1,
+  "regulationId": 1,
+  "docType": "horse_passport",
+  "docNumber": "FEI-VN-2026-12",
+  "fileUrl": "https://storage.example.com/docs/passport.pdf",
+  "issueDate": "2026-01-10",
+  "expiryDate": "2027-01-10"
+}
+```
+
+### `GET /documents/:id`
+Retrieves detailed information for a specific document, including reviewer notes and official authority approval history.
+
+### `GET /documents/horse/:horseId`
+Lists all uploaded documents for a specific horse.
+
+### `GET /documents/order/:orderId/checklist`
+Returns the complete legal and quarantine compliance checklist for all horses in a transport order. Evaluates missing regulations, accepted documents, and the overall `isFullyCompliant` status.
+
+### `PATCH /documents/:id/review` (Transport Specialist / Admin)
+Specialist reviews and approves (`approved`), rejects (`rejected` with required reason), or marks a document as expired (`expired`). Notifies the customer automatically.
+- **Body:**
+```json
+{
+  "status": "approved",
+  "notes": "Hồ sơ hợp lệ và còn thời hạn",
+  "expiryDate": "2027-01-10"
+}
+```
+
+### `POST /documents/:id/authority-approval` (Transport Specialist / Admin)
+Records official submission and approval progress with agricultural, veterinary, and customs agencies.
+- **Body:**
+```json
+{
+  "authorityName": "Cơ quan Thú y Singapore (AVS)",
+  "status": "approved",
+  "approvalDate": "2026-10-10T08:00:00.000Z",
+  "notes": "Đã cấp giấy phép nhập khẩu số AVS-2026/099"
+}
+```
+
+### `POST /documents/order/:orderId/notify-missing` (Transport Specialist / Admin)
+Evaluates compliance for the order and automatically sends a high-priority notification to the customer listing all missing and rejected documents per horse.
+- **Body:**
+```json
+{
+  "customMessage": "Vui lòng hoàn tất nộp giấy tờ trước ngày 10/10 để kịp trình Cục Thú Y."
+}
+```
+
 ## Notifications endpoints
 
 ### `GET /notifications`
@@ -121,6 +276,163 @@ Retrieves all notifications for the authenticated user (sorted newest first).
 
 ### `PATCH /notifications/:id/read`
 Marks a notification as read.
+
+## Horses endpoints
+
+### `GET /horses`
+Retrieves all racehorses belonging to the authenticated customer.
+
+### `GET /horses/:id`
+Retrieves details of a specific racehorse. Customers can only view their own horses.
+
+### `POST /horses`
+Registers a new racehorse profile directly into the database.
+- **Body:**
+```json
+{
+  "name": "Pegasus Star",
+  "breed": "Thoroughbred",
+  "gender": "male",
+  "age": 5,
+  "dateOfBirth": "2021-04-15",
+  "microchipNo": "985141001248999",
+  "passportNo": "FEI-VN-2026-888",
+  "status": "active"
+}
+```
+
+### `PUT /horses/:id`
+Updates details of a racehorse profile owned by the customer.
+
+### `DELETE /horses/:id`
+Deletes a horse profile. If the horse has been part of past shipments, it is soft-deleted to status `'retired'` to preserve transport audit history.
+
+## Fleet endpoints (Flow 3: Fleet Management & Capacity Allocation)
+
+Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)
+
+### `GET /fleet/vehicles`
+Lists transport vehicles. Supports optional query filters: `?status=available|in_use|maintenance` and `?type=truck|aircraft_stall|container`.
+
+### `GET /fleet/vehicles/:id`
+Retrieves details of a specific vehicle.
+
+### `POST /fleet/vehicles` (Fleet Coordinator / Manager / Admin)
+Registers a new transport vehicle with plate/code and horse capacity.
+- **Body:**
+```json
+{
+  "vehicleType": "truck",
+  "plateOrCode": "51C-888.99",
+  "capacity": 4,
+  "status": "available"
+}
+```
+
+### `GET /fleet/staff` (Fleet Coordinator / Manager / Admin)
+Lists drivers, escorts, and coordinators available for trip assignment.
+
+### `GET /fleet/shipments/:id/assignments`
+Retrieves all vehicles and staff assigned to a specific shipment.
+
+### `POST /fleet/shipments/:id/assign-vehicles` (Fleet Coordinator / Manager / Admin)
+Assigns vehicles to an approved transport order. Enforces rule: total vehicle capacity must be >= `requestedHorseCount`. Sets vehicle status to `in_use` and order status to `planning`.
+- **Body:** `{ "vehicleIds": [1, 2] }`
+
+### `POST /fleet/shipments/:id/assign-staff` (Fleet Coordinator / Manager / Admin)
+Assigns drivers and escorts to a transport trip and sends system notifications.
+- **Body:**
+```json
+{
+  "assignments": [
+    { "userId": 5, "roleInShipment": "driver" },
+    { "userId": 6, "roleInShipment": "escort" }
+  ]
+}
+```
+
+## Routes endpoints (Flow 3: Route Planning & Trip Publishing)
+
+Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)
+
+### `GET /routes/shipment/:shipmentId`
+Retrieves the planned route and ordered stops for a shipment.
+
+### `GET /routes/shipment/:shipmentId/plan`
+Returns the full trip plan (route, assigned vehicles, staff) and readiness evaluation (`isReadyToPublish`, list of `missingRequirements`).
+
+### `POST /routes/shipment/:shipmentId` (Fleet Coordinator / Manager / Admin)
+Creates or updates an ordered route with stops (rest, border check, quarantine, refuel, other). International routes must include at least one `border_check` or `quarantine` stop.
+- **Body:**
+```json
+{
+  "routeName": "Tuyến TP.HCM - Mộc Bài - Phnom Penh - Singapore",
+  "totalDistanceKm": 1250.5,
+  "stops": [
+    {
+      "sequenceNo": 1,
+      "stopType": "other",
+      "locationName": "Củ Chi Horse Farm, TP.HCM",
+      "country": "Vietnam",
+      "plannedDeparture": "2026-10-15T08:00:00Z"
+    },
+    {
+      "sequenceNo": 2,
+      "stopType": "border_check",
+      "locationName": "Mộc Bài Border Gate",
+      "country": "Vietnam",
+      "plannedArrival": "2026-10-15T12:00:00Z",
+      "plannedDeparture": "2026-10-15T14:00:00Z"
+    },
+    {
+      "sequenceNo": 3,
+      "stopType": "rest",
+      "locationName": "Phnom Penh Vet Care Station",
+      "country": "Cambodia",
+      "plannedArrival": "2026-10-15T19:00:00Z",
+      "plannedDeparture": "2026-10-16T06:00:00Z"
+    },
+    {
+      "sequenceNo": 4,
+      "stopType": "quarantine",
+      "locationName": "Singapore Turf Club Quarantine Station",
+      "country": "Singapore",
+      "plannedArrival": "2026-10-17T15:00:00Z"
+    }
+  ]
+}
+```
+
+### `PATCH /routes/:routeId/schedule` (Fleet Coordinator / Manager / Admin)
+Modifies planned schedule times on stops. A mandatory `reason` is required for audit history.
+- **Body:**
+```json
+{
+  "reason": "Thời tiết xấu và ùn tắc tại cửa khẩu, lùi giờ khởi hành 2 tiếng",
+  "stops": [
+    {
+      "stopId": 2,
+      "plannedArrival": "2026-10-15T14:00:00Z",
+      "plannedDeparture": "2026-10-15T16:00:00Z"
+    }
+  ]
+}
+```
+
+### `POST /routes/shipment/:shipmentId/publish` (Logistics Manager / Coordinator / Admin)
+Publishes the trip plan. Validates that the order is approved, route has >= 2 stops, assigned vehicles meet horse capacity, and staff is assigned. Changes shipment status to `in_transit` and route status to `active`. Notifies customer and operations team.
+- **Body:** `{ "notes": "Xe đã chuẩn bị đầy đủ oxy và thuốc chống say" }`
+
+### `POST /routes/stops/:stopId/progress` (Driver / Escort / Operations)
+Records actual progress at a milestone stop (`arrived`, `customs_cleared`, `departed`, `delivered`) and notifies the coordinator and customer.
+- **Body:**
+```json
+{
+  "status": "arrived",
+  "actualArrival": "2026-10-15T12:15:00Z",
+  "notes": "Đã đến trạm Mộc Bài an toàn, kiểm tra sức khỏe ngựa ổn định"
+}
+```
 
 ## Contract rules
 
