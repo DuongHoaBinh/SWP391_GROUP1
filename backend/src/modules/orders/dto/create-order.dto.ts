@@ -37,6 +37,11 @@ export class HorseInfoDto {
   @IsInt({ message: 'Tuổi phải là số nguyên' })
   @Min(0, { message: 'Tuổi không được âm' })
   age?: number;
+
+  @ApiPropertyOptional({ example: '985141000123456', description: 'Số microchip của con ngựa (để kiểm tra trùng lặp)' })
+  @IsOptional()
+  @IsString()
+  microchipNumber?: string;
 }
 
 export class CreateOrderDto {

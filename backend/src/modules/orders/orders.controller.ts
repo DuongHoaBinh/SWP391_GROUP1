@@ -41,17 +41,63 @@ export class OrdersController {
 
   @Get('my-orders')
   @Roles(UserRole.CUSTOMER)
-  @ApiOperation({ summary: 'Customer views their own transport requests' })
-  getMyOrders(@CurrentUser() user: AuthenticatedUser) {
-    return this.ordersService.getMyOrders(user);
+  @ApiOperation({ summary: 'Customer views their own transport requests with pagination, filter and sort' })
+  @ApiQuery({ name: 'status', enum: ShipmentStatus, required: false })
+  @ApiQuery({ name: 'departureDateFrom', required: false, description: 'Filter by departure date from (YYYY-MM-DD)' })
+  @ApiQuery({ name: 'departureDateTo', required: false, description: 'Filter by departure date to (YYYY-MM-DD)' })
+  @ApiQuery({ name: 'sortBy', enum: ['createdAt', 'totalCost', 'requestedDate'], required: false })
+  @ApiQuery({ name: 'sortOrder', enum: ['asc', 'desc'], required: false })
+  @ApiQuery({ name: 'page', required: false, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (10 or 20, default: 10)' })
+  getMyOrders(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('status') status?: ShipmentStatus,
+    @Query('departureDateFrom') departureDateFrom?: string,
+    @Query('departureDateTo') departureDateTo?: string,
+    @Query('sortBy') sortBy?: 'createdAt' | 'totalCost' | 'requestedDate',
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.ordersService.getMyOrders(user, {
+      status,
+      departureDateFrom,
+      departureDateTo,
+      sortBy,
+      sortOrder,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
   }
 
   @Get()
   @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Logistics Manager views all transport requests with optional status filter' })
+  @ApiOperation({ summary: 'Logistics Manager views all transport requests with pagination, filter and sort' })
   @ApiQuery({ name: 'status', enum: ShipmentStatus, required: false })
-  getAllOrders(@Query('status') status?: ShipmentStatus) {
-    return this.ordersService.getAllOrders(status);
+  @ApiQuery({ name: 'departureDateFrom', required: false })
+  @ApiQuery({ name: 'departureDateTo', required: false })
+  @ApiQuery({ name: 'sortBy', enum: ['createdAt', 'totalCost', 'requestedDate'], required: false })
+  @ApiQuery({ name: 'sortOrder', enum: ['asc', 'desc'], required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  getAllOrders(
+    @Query('status') status?: ShipmentStatus,
+    @Query('departureDateFrom') departureDateFrom?: string,
+    @Query('departureDateTo') departureDateTo?: string,
+    @Query('sortBy') sortBy?: 'createdAt' | 'totalCost' | 'requestedDate',
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.ordersService.getAllOrders({
+      status,
+      departureDateFrom,
+      departureDateTo,
+      sortBy,
+      sortOrder,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
   }
 
   @Get(':id')

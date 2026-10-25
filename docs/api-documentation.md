@@ -1,4 +1,4 @@
-# API Documentation
+﻿# API Documentation
 
 ## API technology
 
@@ -35,12 +35,26 @@ Completes the customer registration after a valid OTP. OTPs expire after ten min
 
 ### `POST /auth/login`
 
-Authenticates verified customers and pre-provisioned internal accounts. Returns a JWT access token and the user's role.
+Authenticates verified customers and pre-provisioned internal accounts. Returns a JWT access token and the user's profile fields used by the frontend header and dashboard.
 
 ```json
 {
 	"email": "owner@example.com",
 	"password": "Password123"
+}
+```
+
+Successful response:
+
+```json
+{
+	"accessToken": "<jwt>",
+	"user": {
+		"id": "7",
+		"email": "owner@example.com",
+		"fullName": "owner@example.com",
+		"role": "CUSTOMER"
+	}
 }
 ```
 
@@ -98,10 +112,26 @@ Creates and submits a new transport request.
 ```
 
 ### `GET /orders/my-orders` (Customer)
-Lists all transport requests submitted by the authenticated customer.
+Lists transport requests submitted by the authenticated customer with pagination, filtering, and sorting.
+- **Query parameters:**
+  - `status`: optional (`requested`, `under_review`, `approved`, `rejected`, `planning`, `in_transit`, `completed`, `cancelled`)
+  - `departureDateFrom`: optional (`YYYY-MM-DD`)
+  - `departureDateTo`: optional (`YYYY-MM-DD`)
+  - `sortBy`: optional (`createdAt`, `totalCost`, `requestedDate`)
+  - `sortOrder`: optional (`asc`, `desc`, default: `desc`)
+  - `page`: optional (integer, default: `1`)
+  - `limit`: optional (`10` or `20`, default: `10`)
 
 ### `GET /orders` (Logistics Manager / Admin)
-Lists all transport requests across the system. Supports optional query parameter `?status=requested`.
+Lists all transport requests across the system with pagination, filtering, and sorting.
+- **Query parameters:**
+  - `status`: optional (`requested`, `under_review`, `approved`, `rejected`, `planning`, `in_transit`, `completed`, `cancelled`)
+  - `departureDateFrom`: optional (`YYYY-MM-DD`)
+  - `departureDateTo`: optional (`YYYY-MM-DD`)
+  - `sortBy`: optional (`createdAt`, `totalCost`, `requestedDate`)
+  - `sortOrder`: optional (`asc`, `desc`, default: `desc`)
+  - `page`: optional (integer, default: `1`)
+  - `limit`: optional (`10` or `20`, default: `10`)
 
 ### `GET /orders/:id`
 Retrieves detailed information for a specific order. Customers can only view their own orders.

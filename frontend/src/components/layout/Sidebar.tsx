@@ -23,12 +23,18 @@ interface NavItem {
   badge?: number;
 }
 
-export const Sidebar: React.FC = () => {
+interface SidebarProps {
+  role?: 'customer' | 'manager' | string;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
   const pathname = usePathname();
   const router = useRouter();
   const user = getCurrentUser();
 
-  const navItems: NavItem[] = [
+  const activeRole = role || (user?.role === 'LOGISTICS_MANAGER' ? 'manager' : 'customer');
+
+  const customerNavItems: NavItem[] = [
     {
       label: 'Dashboard',
       href: '/customer',
@@ -78,6 +84,16 @@ export const Sidebar: React.FC = () => {
       badge: 3,
     },
   ];
+
+  const managerNavItems: NavItem[] = [
+    {
+      label: 'Transport Requests',
+      href: '/manager/requests',
+      icon: <Truck size={18} />,
+    },
+  ];
+
+  const navItems: NavItem[] = activeRole === 'manager' ? managerNavItems : customerNavItems;
 
   const managementItems: NavItem[] = [
     {
@@ -358,7 +374,7 @@ export const Sidebar: React.FC = () => {
                 flexShrink: 0,
               }}
             >
-              AM
+              {user.initials}
             </div>
             <div style={{ minWidth: 0 }}>
               <div
@@ -371,7 +387,7 @@ export const Sidebar: React.FC = () => {
                   textOverflow: 'ellipsis',
                 }}
               >
-                Alex Morgan
+                {user.name}
               </div>
               <div
                 style={{
@@ -382,7 +398,7 @@ export const Sidebar: React.FC = () => {
                   textOverflow: 'ellipsis',
                 }}
               >
-                alex@stablesco.com
+                {user.email}
               </div>
             </div>
           </div>

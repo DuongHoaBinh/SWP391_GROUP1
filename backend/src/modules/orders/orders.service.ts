@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { OrdersStore } from './orders.store';
+import { OrdersStore, OrderQueryParams, PaginatedOrders } from './orders.store';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ApproveOrderDto } from './dto/approve-order.dto';
 import { RejectOrderDto } from './dto/reject-order.dto';
@@ -22,6 +22,21 @@ export class OrdersService {
 
   async createOrder(user: AuthenticatedUser, dto: CreateOrderDto): Promise<TransportOrder> {
     const customerId = Number(user.id);
+
+    // Kiểm tra microchip trùng lặp trước khi tạo đơn
+    if (dto.horses && dto.horses.length > 0) {
+      for (const h of dto.horses) {
+        if (h.microchipNumber) {
+          const exists = await this.ordersStore.checkMicrochipExists(h.microchipNumber);
+          if (exists) {
+            throw new BadRequestException(
+              `Số microchip "${h.microchipNumber}" của ngựa "${h.name}" đã tồn tại trong hệ thống`,
+            );
+          }
+        }
+      }
+    }
+
     const shipmentId = await this.ordersStore.createShipment(customerId, dto);
     const created = await this.ordersStore.findShipmentById(shipmentId);
     if (!created) {
@@ -30,12 +45,12 @@ export class OrdersService {
     return created;
   }
 
-  async getMyOrders(user: AuthenticatedUser): Promise<TransportOrder[]> {
-    return this.ordersStore.findShipmentsByCustomer(Number(user.id));
+  async getMyOrders(user: AuthenticatedUser, params: OrderQueryParams = {}): Promise<PaginatedOrders> {
+    return this.ordersStore.findShipmentsByCustomer(Number(user.id), params);
   }
 
-  async getAllOrders(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
-    return this.ordersStore.findAllShipments(statusFilter);
+  async getAllOrders(params: OrderQueryParams = {}): Promise<PaginatedOrders> {
+    return this.ordersStore.findAllShipments(params);
   }
 
   async getOrderById(user: AuthenticatedUser, orderId: number): Promise<TransportOrder> {

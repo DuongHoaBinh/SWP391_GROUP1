@@ -15,13 +15,20 @@ export function getCurrentUser(): UserProfile {
   if (!stored) return mockCurrentUser;
   try {
     const parsed = JSON.parse(stored);
+    const name = parsed.name || parsed.fullName || (parsed.email ? parsed.email.split('@')[0] : mockCurrentUser.name);
     return {
       id: parsed.id || mockCurrentUser.id,
-      name: parsed.name || (parsed.email ? parsed.email.split('@')[0] : mockCurrentUser.name),
+      name,
       email: parsed.email || mockCurrentUser.email,
       role: parsed.role || 'CUSTOMER',
       organization: parsed.organization || 'Al Fares Stud',
-      initials: (parsed.name ? parsed.name.slice(0, 2) : 'JD').toUpperCase(),
+      initials: name
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((part: string) => part[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase(),
     };
   } catch {
     return mockCurrentUser;

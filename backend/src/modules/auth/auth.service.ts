@@ -68,6 +68,7 @@ export class AuthService {
     const user: AuthUser = {
       id: randomUUID(),
       email,
+      fullName: email,
       passwordHash: pending.passwordHash,
       role: UserRole.CUSTOMER,
       emailVerified: true,
@@ -86,7 +87,7 @@ export class AuthService {
       message: 'Registration completed. You can now log in.',
       email,
       accessToken,
-      user: { id: userId, email, role: user.role },
+      user: { id: userId, email, fullName: user.fullName, role: user.role },
     };
   }
 
@@ -107,7 +108,7 @@ export class AuthService {
     });
     return {
       accessToken,
-      user: { id: user.id, email: user.email, role: user.role },
+      user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role },
     };
   }
 }
