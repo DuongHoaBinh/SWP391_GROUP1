@@ -17,7 +17,7 @@ Trước khi triển khai tính năng mới, Agent phải đọc:
 - Database: MySQL 8.0+ (InnoDB, utf8mb4).
 - API documentation: OpenAPI/Swagger.
 - Backend API development port: `5000`.
-- Frontend development port: `3001`.
+- Frontend development port: `3000`.
 - Frontend gọi Backend qua `NEXT_PUBLIC_API_BASE_URL`.
 
 Cấu trúc chính:

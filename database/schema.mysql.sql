@@ -92,6 +92,7 @@ CREATE TABLE transport_document (
   issue_date DATE,
   expiry_date DATE,
   status ENUM('draft','submitted','approved','rejected','expired') NOT NULL DEFAULT 'draft',
+  reviewer_notes VARCHAR(500),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_doc_horse FOREIGN KEY (horse_id) REFERENCES horse(horse_id),
   CONSTRAINT fk_doc_regulation FOREIGN KEY (regulation_id) REFERENCES regulation(regulation_id),
@@ -128,7 +129,8 @@ CREATE TABLE shipment (
   actual_arrival_date DATETIME,
   special_requirements TEXT,
   rejection_reason VARCHAR(500),
-  status ENUM('requested','approved','rejected','planning','in_transit','completed','cancelled') NOT NULL DEFAULT 'requested',
+  change_request_notes VARCHAR(500),
+  status ENUM('requested','change_requested','approved','rejected','planning','in_transit','completed','cancelled') NOT NULL DEFAULT 'requested',
   total_cost DECIMAL(15,2) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -187,7 +189,7 @@ CREATE TABLE route_stop (
   country VARCHAR(100),
   planned_arrival DATETIME,
   planned_departure DATETIME,
-  status ENUM('pending','arrived','cleared','departed') NOT NULL DEFAULT 'pending',
+  status ENUM('pending','arrived','cleared','customs_cleared','departed') NOT NULL DEFAULT 'pending',
   CONSTRAINT fk_stop_route FOREIGN KEY (route_id) REFERENCES route(route_id),
   UNIQUE KEY uq_route_sequence (route_id, sequence_no)
 ) ENGINE=InnoDB;
@@ -210,7 +212,10 @@ CREATE TABLE route_stop_update (
   actual_departure DATETIME,
   status ENUM('departed','arrived','customs_cleared','delivered') NOT NULL,
   notes TEXT,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  vehicle_temperature_c DECIMAL(4,1) NULL,
+  event_time DATETIME(3) NULL,
+  legacy_status_log_id INT NULL UNIQUE,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_rsu_stop FOREIGN KEY (route_stop_id) REFERENCES route_stop(route_stop_id),
   CONSTRAINT fk_rsu_user FOREIGN KEY (updated_by) REFERENCES `user`(user_id)
 ) ENGINE=InnoDB;
@@ -221,7 +226,12 @@ CREATE TABLE horse_condition_log (
   recorded_by INT NOT NULL,
   condition_status ENUM('stable','not_eating','stressed','climate_change','other') NOT NULL,
   notes TEXT,
-  recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  temperature_c DECIMAL(4,1) NULL,
+  heart_rate_bpm INT NULL,
+  vehicle_temperature_c DECIMAL(4,1) NULL,
+  attachments_json JSON NULL,
+  legacy_health_log_id INT NULL UNIQUE,
+  recorded_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_hcl_sh FOREIGN KEY (shipment_horse_id) REFERENCES shipment_horse(shipment_horse_id),
   CONSTRAINT fk_hcl_user FOREIGN KEY (recorded_by) REFERENCES `user`(user_id)
 ) ENGINE=InnoDB;
@@ -317,3 +327,43 @@ INSERT INTO `role` (role_name, description) VALUES
 -- Do not insert plaintext passwords or CHANGE_ME_HASH into a shared environment.
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+
+-- MoMo sandbox payment persistence (migration 013)
+-- Sandbox records are deliberately separate from shipment execution and real settlement.
+CREATE TABLE IF NOT EXISTS shipment_sandbox_payment (
+  payment_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  customer_id INT NOT NULL,
+  partner_code VARCHAR(50) NOT NULL,
+  request_type VARCHAR(32) NOT NULL DEFAULT 'captureWallet',
+  order_id VARCHAR(100) NOT NULL UNIQUE,
+  request_id VARCHAR(100) NOT NULL UNIQUE,
+  order_info VARCHAR(255) NOT NULL,
+  amount BIGINT NOT NULL,
+  status ENUM('creating','pending','succeeded','failed','unknown') NOT NULL DEFAULT 'creating',
+  pay_url TEXT NULL,
+  qr_content TEXT NULL,
+  result_code INT NULL,
+  result_message VARCHAR(1000) NULL,
+  trans_id VARCHAR(30) NULL,
+  last_checked_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_sandbox_payment_shipment (shipment_id, payment_id),
+  CONSTRAINT fk_sandbox_payment_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_sandbox_payment_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shipment_sandbox_payment_event (
+  event_id INT AUTO_INCREMENT PRIMARY KEY,
+  payment_id INT NOT NULL,
+  event_key VARCHAR(100) NOT NULL,
+  source ENUM('create','query','ipn') NOT NULL,
+  new_status ENUM('creating','pending','succeeded','failed','unknown') NOT NULL,
+  result_code INT NULL,
+  result_message VARCHAR(1000) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uq_sandbox_payment_event (payment_id, event_key),
+  CONSTRAINT fk_sandbox_payment_event FOREIGN KEY (payment_id) REFERENCES shipment_sandbox_payment(payment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

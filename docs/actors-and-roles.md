@@ -17,5 +17,10 @@
 - Only the Fleet & Route Coordinator can publish route legs, capacity assignments, and planned schedules.
 - Drivers/escorts can update execution events and health logs only for assigned trips.
 - Customers cannot edit an approved request or operational status; they can submit requested corrections/documents.
+- Customers may create, read and reconcile MoMo sandbox payments only for their own quoted, approved/operational orders. Server-side ownership and stored amounts apply; sandbox results do not change shipment status or real settlement.
 
 All authorization checks belong to `backend/src/modules/auth` and must be enforced server-side. The frontend route grouping is a usability boundary, not a security boundary.
+
+### Flow 4 execution permissions
+
+The tracking service enforces resource ownership and assignments in addition to JWT authentication. Customers read only shipments where they are the customer; private operational notes are omitted. Drivers/escorts read and update assigned shipments only. Road milestones require a confirmed `driver` assignment, flight milestones a confirmed `escort` assignment. Assigned drivers and escorts can record health observations for horses actually attached to that shipment. A fleet coordinator can monitor trips and update milestones only on trips where they have the `fleet_coordinator` assignment. Managers/admins can update milestones; coordinator overrides record a mandatory reason. No frontend layout creates a mock JWT or switches a real identity to a sample user.

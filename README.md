@@ -33,9 +33,9 @@ Backend code belongs under `backend/src`. Organize controllers, services, DTOs, 
 ### Development ports
 
 - **Backend API:** `http://localhost:5000`
-- **Frontend:** `http://localhost:3001`
+- **Frontend:** `http://localhost:3000`
 
-The frontend and backend are two separate processes. The frontend runs on port `3001` and sends API requests to the backend on port `5000`; they should not use the same port on the same computer.
+The frontend and backend are two separate processes. The frontend runs on port `3000` and sends API requests to the backend on port `5000`; they should not use the same port on the same computer.
 
 The authentication API is backend-only on this feature branch. Customer registration uses email, password, password confirmation, OTP verification, MySQL persistence, and SMTP email delivery. Internal roles receive provisioned accounts and do not use public registration.
 
@@ -64,7 +64,7 @@ The authentication API is backend-only on this feature branch. Customer registra
 
 With this configuration, `POST /api/auth/register` stores the pending OTP and password hash in MySQL and sends the OTP by email. `POST /api/auth/verify-otp` creates the `Customer` row in `user`, and `POST /api/auth/login` reads the account from MySQL.
 
-For local development, start the backend on port `5000` and the Next.js frontend on port `3001` (for example, `next dev -p 3001`).
+For local development, start the backend on port `5000` and the Next.js frontend on port `3000` (for example, `next dev -p 3000`).
 
 ## Suggested ownership
 
