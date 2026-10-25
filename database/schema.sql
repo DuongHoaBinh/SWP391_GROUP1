@@ -1,0 +1,4 @@
+-- Canonical database schema: database/schema.mysql.sql
+--
+-- The project uses MySQL 8.0+ / InnoDB / utf8mb4. Keep this entry point as a
+-- pointer for contributors; execute schema.mysql.sql with the MySQL client.
