@@ -24,13 +24,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi">
+    <html lang="vi" suppressHydrationWarning>
       <head>
         <link rel="icon" href="/icon.png" type="image/png" sizes="any" />
         <link rel="shortcut icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" href="/icon.png" />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <LanguageProvider>
           <DocumentStoreProvider>
             <FleetRouteStoreProvider>

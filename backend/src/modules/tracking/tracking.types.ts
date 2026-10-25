@@ -50,6 +50,7 @@ export interface CoordinatorOverrideDto {
 export interface CreateHealthLogDto {
   horseId?: number;
   horseName: string;
+  legName?: string;
   conditionStatus: HorseConditionStatus;
   temperatureC?: number;
   heartRateBpm?: number;
@@ -81,6 +82,7 @@ export interface HorseHealthLogEntity {
   shipmentId: number;
   horseId: number | null;
   horseName: string;
+  legName?: string | null;
   recordedBy: number;
   recordedByName?: string;
   recordedByRole?: string;

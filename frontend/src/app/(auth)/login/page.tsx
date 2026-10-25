@@ -17,8 +17,10 @@ function LoginFormContent() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     // Clear stale session when visiting login directly so old forgot-to-logout sessions do not linger
     if (!searchParams.get('redirect')) {
       clearAuthSession();
@@ -264,7 +266,7 @@ function LoginFormContent() {
           )}
 
           {/* Login Form */}
-          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <form suppressHydrationWarning onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {/* Email Field */}
             <div>
               <label
@@ -279,6 +281,7 @@ function LoginFormContent() {
                 Email address
               </label>
               <input
+                suppressHydrationWarning
                 type="email"
                 required
                 value={email}
@@ -337,6 +340,7 @@ function LoginFormContent() {
 
               <div style={{ position: 'relative' }}>
                 <input
+                  suppressHydrationWarning
                   type={showPassword ? 'text' : 'password'}
                   required
                   value={password}
@@ -380,6 +384,7 @@ function LoginFormContent() {
             {/* Remember Me Checkbox */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input
+                suppressHydrationWarning
                 type="checkbox"
                 id="rememberMe"
                 checked={rememberMe}

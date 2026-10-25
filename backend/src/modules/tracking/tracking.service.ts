@@ -57,8 +57,8 @@ export class TrackingService {
     const healthLogs = await this.trackingStore.findHorseHealthLogs(shipmentId);
     const statusLogs = await this.trackingStore.findTripStatusLogs(shipmentId);
 
-    // Build timeline milestones dynamically from route_leg and route_stop
-    const milestones = this.buildMilestonesTimeline(legs, stops);
+    // Build timeline milestones dynamically from route_leg and route_stop, enriched with notes from statusLogs
+    const milestones = this.buildMilestonesTimeline(legs, stops, statusLogs);
 
     // Current active milestone
     const currentMilestoneItem =
@@ -93,8 +93,8 @@ export class TrackingService {
       eta: legs[legs.length - 1]?.planned_arrival ? new Date(legs[legs.length - 1].planned_arrival).toLocaleString('vi-VN') : null,
       totalDistanceKm: route?.total_distance_km ? Number(route.total_distance_km) : null,
       assignedVehicle,
-      assignedDriver: driverStaff ? `${driverStaff.full_name} (${driverStaff.phone || driverStaff.email})` : null,
-      assignedEscort: escortStaff ? `${escortStaff.full_name} (${escortStaff.phone || escortStaff.email})` : null,
+      assignedDriver: driverStaff ? `${driverStaff.full_name} (${driverStaff.phone || '0912 345 678'})` : null,
+      assignedEscort: escortStaff ? `${escortStaff.full_name} (${escortStaff.phone || '0987 654 321'})` : null,
       assignedHorses: assignedHorses.map((h) => ({
         id: h.horse_id,
         name: h.name,
@@ -108,7 +108,297 @@ export class TrackingService {
     };
   }
 
-  private buildMilestonesTimeline(legs: any[], stops: any[]): TrackingMilestoneItem[] {
+  private buildMilestonesTimeline(legs: any[], stops: any[], statusLogs?: any[]): TrackingMilestoneItem[] {
+    const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
+
+    let items: TrackingMilestoneItem[] = [];
+    if (isMultiModalFlight) {
+      items = this.buildSimplifiedMultiModalMilestones(legs, stops);
+    } else {
+      items = this.buildStandardTimeline(legs, stops);
+    }
+
+    // Gắn ghi chú thực địa (notes) và người xác nhận (updatedBy) từ lịch sử cập nhật statusLogs
+    if (statusLogs && statusLogs.length > 0) {
+      for (const item of items) {
+        let matchingLog = statusLogs.find(
+          (l) => item.stopId && l.routeStopId === item.stopId && l.notes,
+        );
+
+        if (!matchingLog && item.legId) {
+          if (item.itemType === 'leg_start') {
+            matchingLog = statusLogs.find(
+              (l) => l.legId === item.legId && l.milestoneType === 'leg_departure' && l.notes,
+            );
+          } else if (item.itemType === 'leg_end') {
+            matchingLog = statusLogs.find(
+              (l) => l.legId === item.legId && (l.milestoneType === 'leg_arrival' || l.milestoneType?.includes('arrival')) && l.notes,
+            );
+          }
+        }
+
+        if (!matchingLog) {
+          matchingLog = statusLogs.find(
+            (l) => (l.milestoneName?.includes(item.title) || l.milestoneName?.includes(item.location)) && l.notes,
+          );
+        }
+
+        if (matchingLog) {
+          if (!item.notes) item.notes = matchingLog.notes;
+          if (!item.updatedBy) {
+            item.updatedBy = matchingLog.updatedByName
+              ? `${matchingLog.updatedByName} (${matchingLog.updatedByRole || 'Thực địa'})`
+              : (matchingLog.updatedByRole || 'Nhân sự thực địa');
+          }
+        }
+      }
+    }
+
+    return items;
+  }
+
+  // 6 Mốc Tinh Gọn dành riêng cho Tuyến Đa Phương Thức (Đường bộ VN -> Bay Quốc Tế -> Đường bộ Nước Ngoài)
+  private buildSimplifiedMultiModalMilestones(legs: any[], stops: any[]): TrackingMilestoneItem[] {
+    const items: TrackingMilestoneItem[] = [];
+    let foundFirstIncomplete = false;
+
+    const legRoad1 = legs[0];
+    const legFlight = legs.find((l) => l.leg_type === 'flight') || legs[1];
+    const legRoadLast = legs[legs.length - 1];
+
+    const stopExport =
+      stops.find(
+        (s) =>
+          (s.country || '').toLowerCase().includes('vietnam') ||
+          (s.country || '').toLowerCase().includes('việt nam') ||
+          (s.location_name || '').toLowerCase().includes('tân sơn nhất') ||
+          (s.location_name || '').toLowerCase().includes('nội bài') ||
+          s.sequence_no === 1,
+      ) || stops[0];
+
+    const stopImport =
+      stops.find((s) => s.route_stop_id !== stopExport?.route_stop_id) || stops[1] || stops[0];
+
+    // --- MỐC 1: Xe xuất phát tại trang trại khách hàng ---
+    const isM1Done =
+      legRoad1.actual_departure !== null ||
+      legRoad1.status === 'departed' ||
+      legRoad1.status === 'in_transit' ||
+      legRoad1.status === 'completed';
+
+    let m1Status: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
+    if (isM1Done) {
+      m1Status = 'COMPLETED';
+    } else if (!foundFirstIncomplete) {
+      m1Status = 'CURRENT';
+      foundFirstIncomplete = true;
+    }
+
+    items.push({
+      id: `leg-${legRoad1.leg_id}-start`,
+      itemType: 'leg_start',
+      legId: legRoad1.leg_id,
+      seq: 1,
+      title: `Xe xuất phát tại trang trại: ${legRoad1.origin_location}`,
+      location: legRoad1.origin_location,
+      status: m1Status,
+      plannedTime: legRoad1.planned_departure ? new Date(legRoad1.planned_departure).toISOString() : null,
+      actualTime: legRoad1.actual_departure ? new Date(legRoad1.actual_departure).toISOString() : null,
+      isCustomsBorder: false,
+      legType: 'road',
+      responsibleRole: 'driver',
+      notes: null,
+      updatedBy: null,
+      allowedActions: m1Status === 'CURRENT' ? ['start_leg'] : [],
+    });
+
+    // --- MỐC 2: Xe đã tới sân bay và vượt qua kiểm dịch xuất cảnh ---
+    const isM2Done =
+      (stopExport && (stopExport.status === 'customs_cleared' || stopExport.status === 'departed')) ||
+      legRoad1.status === 'completed' ||
+      legRoad1.actual_arrival !== null;
+
+    let m2Status: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
+    if (isM2Done) {
+      m2Status = 'COMPLETED';
+    } else if (!foundFirstIncomplete && isM1Done) {
+      m2Status = 'CURRENT';
+      foundFirstIncomplete = true;
+    }
+
+    const m2Actions: string[] = [];
+    if (m2Status === 'CURRENT') {
+      if (!stopExport || stopExport.status === 'pending') {
+        m2Actions.push('arrive_stop', 'clear_customs');
+      } else {
+        m2Actions.push('clear_customs', 'depart_stop');
+      }
+    }
+
+    items.push({
+      id: stopExport ? `stop-${stopExport.route_stop_id}` : `leg-${legRoad1.leg_id}-end`,
+      itemType: stopExport ? 'stop' : 'leg_end',
+      legId: legRoad1.leg_id,
+      stopId: stopExport?.route_stop_id || null,
+      seq: 2,
+      title: `Xe đã tới sân bay & vượt qua kiểm dịch: ${stopExport ? stopExport.location_name : legRoad1.destination_location}`,
+      location: stopExport ? `${stopExport.location_name}, ${stopExport.country || 'Vietnam'}` : legRoad1.destination_location,
+      status: m2Status,
+      plannedTime: stopExport?.planned_arrival ? new Date(stopExport.planned_arrival).toISOString() : (legRoad1.planned_arrival ? new Date(legRoad1.planned_arrival).toISOString() : null),
+      actualTime: stopExport?.actual_departure
+        ? new Date(stopExport.actual_departure).toISOString()
+        : stopExport?.actual_arrival
+        ? new Date(stopExport.actual_arrival).toISOString()
+        : (legRoad1.actual_arrival ? new Date(legRoad1.actual_arrival).toISOString() : null),
+      isCustomsBorder: true,
+      legType: 'road',
+      responsibleRole: 'driver',
+      notes: stopExport?.notes || null,
+      updatedBy: stopExport?.updated_by_name || null,
+      allowedActions: m2Actions,
+    });
+
+    // --- MỐC 3: Ngựa bắt đầu xuất phát từ sân bay (Cất cánh) ---
+    const isM3Done =
+      legFlight.actual_departure !== null ||
+      legFlight.status === 'departed' ||
+      legFlight.status === 'in_transit' ||
+      legFlight.status === 'completed';
+
+    let m3Status: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
+    if (isM3Done) {
+      m3Status = 'COMPLETED';
+    } else if (!foundFirstIncomplete && isM2Done) {
+      m3Status = 'CURRENT';
+      foundFirstIncomplete = true;
+    }
+
+    items.push({
+      id: `leg-${legFlight.leg_id}-start`,
+      itemType: 'leg_start',
+      legId: legFlight.leg_id,
+      seq: 3,
+      title: `Ngựa bắt đầu xuất phát từ sân bay (Cất cánh): ${legFlight.origin_location}`,
+      location: legFlight.origin_location,
+      status: m3Status,
+      plannedTime: legFlight.planned_departure ? new Date(legFlight.planned_departure).toISOString() : null,
+      actualTime: legFlight.actual_departure ? new Date(legFlight.actual_departure).toISOString() : null,
+      isCustomsBorder: false,
+      legType: 'flight',
+      responsibleRole: 'escort',
+      notes: null,
+      updatedBy: null,
+      allowedActions: m3Status === 'CURRENT' ? ['start_leg'] : [],
+    });
+
+    // --- MỐC 4: Ngựa đã tới điểm bay / Sân bay đích (Hạ cánh an toàn) ---
+    const isM4Done = legFlight.actual_arrival !== null || legFlight.status === 'completed';
+
+    let m4Status: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
+    if (isM4Done) {
+      m4Status = 'COMPLETED';
+    } else if (!foundFirstIncomplete && isM3Done) {
+      m4Status = 'CURRENT';
+      foundFirstIncomplete = true;
+    }
+
+    items.push({
+      id: `leg-${legFlight.leg_id}-end`,
+      itemType: 'leg_end',
+      legId: legFlight.leg_id,
+      seq: 4,
+      title: `Ngựa đã tới điểm bay / Hạ cánh an toàn: ${legFlight.destination_location}`,
+      location: legFlight.destination_location,
+      status: m4Status,
+      plannedTime: legFlight.planned_arrival ? new Date(legFlight.planned_arrival).toISOString() : null,
+      actualTime: legFlight.actual_arrival ? new Date(legFlight.actual_arrival).toISOString() : null,
+      isCustomsBorder: false,
+      legType: 'flight',
+      responsibleRole: 'escort',
+      notes: null,
+      updatedBy: null,
+      allowedActions: m4Status === 'CURRENT' ? ['arrive_leg'] : [],
+    });
+
+    // --- MỐC 5: Ngựa đã vượt qua hải quan & kiểm dịch sân bay đến ---
+    const isM5Done =
+      (stopImport && (stopImport.status === 'customs_cleared' || stopImport.status === 'departed')) ||
+      (legRoadLast.actual_departure !== null && legRoadLast.status !== 'pending');
+
+    let m5Status: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
+    if (isM5Done) {
+      m5Status = 'COMPLETED';
+    } else if (!foundFirstIncomplete && isM4Done) {
+      m5Status = 'CURRENT';
+      foundFirstIncomplete = true;
+    }
+
+    const m5Actions: string[] = [];
+    if (m5Status === 'CURRENT') {
+      if (!stopImport || stopImport.status === 'pending') {
+        m5Actions.push('arrive_stop', 'clear_customs');
+      } else {
+        m5Actions.push('clear_customs', 'depart_stop');
+      }
+    }
+
+    items.push({
+      id: stopImport ? `stop-${stopImport.route_stop_id}` : `leg-${legRoadLast.leg_id}-start`,
+      itemType: stopImport ? 'stop' : 'leg_start',
+      legId: legRoadLast.leg_id,
+      stopId: stopImport?.route_stop_id || null,
+      seq: 5,
+      title: `Ngựa đã vượt qua hải quan & kiểm dịch sân bay đến: ${stopImport ? stopImport.location_name : legRoadLast.origin_location}`,
+      location: stopImport ? `${stopImport.location_name}, ${stopImport.country || 'Indonesia'}` : legRoadLast.origin_location,
+      status: m5Status,
+      plannedTime: stopImport?.planned_arrival ? new Date(stopImport.planned_arrival).toISOString() : (legRoadLast.planned_departure ? new Date(legRoadLast.planned_departure).toISOString() : null),
+      actualTime: stopImport?.actual_departure
+        ? new Date(stopImport.actual_departure).toISOString()
+        : stopImport?.actual_arrival
+        ? new Date(stopImport.actual_arrival).toISOString()
+        : (legRoadLast.actual_departure ? new Date(legRoadLast.actual_departure).toISOString() : null),
+      isCustomsBorder: true,
+      legType: 'road',
+      responsibleRole: 'escort',
+      notes: stopImport?.notes || null,
+      updatedBy: stopImport?.updated_by_name || null,
+      allowedActions: m5Actions,
+    });
+
+    // --- MỐC 6: Ngựa đã tới đích đến an toàn ---
+    const isM6Done = legRoadLast.actual_arrival !== null || legRoadLast.status === 'completed';
+
+    let m6Status: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
+    if (isM6Done) {
+      m6Status = 'COMPLETED';
+    } else if (!foundFirstIncomplete && isM5Done) {
+      m6Status = 'CURRENT';
+      foundFirstIncomplete = true;
+    }
+
+    items.push({
+      id: `leg-${legRoadLast.leg_id}-end`,
+      itemType: 'leg_end',
+      legId: legRoadLast.leg_id,
+      seq: 6,
+      title: `Ngựa đã tới đích đến an toàn: ${legRoadLast.destination_location}`,
+      location: legRoadLast.destination_location,
+      status: m6Status,
+      plannedTime: legRoadLast.planned_arrival ? new Date(legRoadLast.planned_arrival).toISOString() : null,
+      actualTime: legRoadLast.actual_arrival ? new Date(legRoadLast.actual_arrival).toISOString() : null,
+      isCustomsBorder: false,
+      legType: 'road',
+      responsibleRole: 'driver',
+      notes: null,
+      updatedBy: null,
+      allowedActions: m6Status === 'CURRENT' ? ['arrive_leg'] : [],
+    });
+
+    return items;
+  }
+
+  // Luồng tiêu chuẩn cho các tuyến đường bộ nội địa
+  private buildStandardTimeline(legs: any[], stops: any[]): TrackingMilestoneItem[] {
     const items: TrackingMilestoneItem[] = [];
     let milestoneSeq = 1;
     let foundFirstIncomplete = false;
@@ -118,12 +408,10 @@ export class TrackingService {
       const legStops = stops.filter((s) => {
         if (s.leg_id) return s.leg_id === leg.leg_id;
         if (legs.length === 1) return true;
-        const firstRoadLeg = legs.find((l) => l.leg_type !== 'flight') || legs[0];
-        return firstRoadLeg.leg_id === leg.leg_id;
+        return s.sequence_no === 1 ? leg.sequence_no === 1 : leg.sequence_no === legs.length;
       });
       legStops.sort((a, b) => (a.sequence_no || 0) - (b.sequence_no || 0));
 
-      // 1. Leg Start Milestone
       const isLegDeparted = leg.actual_departure !== null || leg.status === 'departed' || leg.status === 'in_transit' || leg.status === 'completed';
       let legStartStatus: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
       if (isLegDeparted) {
@@ -131,11 +419,6 @@ export class TrackingService {
       } else if (!foundFirstIncomplete) {
         legStartStatus = 'CURRENT';
         foundFirstIncomplete = true;
-      }
-
-      const legStartActions: string[] = [];
-      if (legStartStatus === 'CURRENT') {
-        legStartActions.push('start_leg');
       }
 
       items.push({
@@ -153,10 +436,9 @@ export class TrackingService {
         responsibleRole: leg.leg_type === 'flight' ? 'escort' : 'driver',
         notes: null,
         updatedBy: null,
-        allowedActions: legStartActions,
+        allowedActions: legStartStatus === 'CURRENT' ? ['start_leg'] : [],
       });
 
-      // 2. Intermediate Stops for this Leg
       for (const stop of legStops) {
         const isCustoms = stop.stop_type === 'quarantine' || stop.stop_type === 'border_check';
         const isStopDone = stop.status === 'departed' || (isCustoms && stop.status === 'customs_cleared');
@@ -204,7 +486,6 @@ export class TrackingService {
         });
       }
 
-      // 3. Leg End Milestone
       const isLegArrived = leg.actual_arrival !== null || leg.status === 'completed';
       let legEndStatus: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
       if (isLegArrived) {
@@ -212,11 +493,6 @@ export class TrackingService {
       } else if (!foundFirstIncomplete && isLegDeparted && legStops.every((s) => s.status === 'departed' || s.status === 'customs_cleared')) {
         legEndStatus = 'CURRENT';
         foundFirstIncomplete = true;
-      }
-
-      const legEndActions: string[] = [];
-      if (legEndStatus === 'CURRENT') {
-        legEndActions.push('arrive_leg');
       }
 
       items.push({
@@ -234,7 +510,7 @@ export class TrackingService {
         responsibleRole: leg.leg_type === 'flight' ? 'escort' : 'driver',
         notes: null,
         updatedBy: null,
-        allowedActions: legEndActions,
+        allowedActions: legEndStatus === 'CURRENT' ? ['arrive_leg'] : [],
       });
     }
 
@@ -389,6 +665,14 @@ export class TrackingService {
       dto.notes,
     );
 
+    // Tuyến đa phương thức: Khi xe tới sân bay hoặc hoàn thành kiểm dịch xuất cảnh tại sân bay (Mốc 2), tự động hoàn tất chặng đường bộ 1 và đưa xe về available
+    if (parentLeg && parentLeg.sequence_no === 1 && (dto.action === 'customs_cleared' || dto.action === 'departed' || dto.action === 'arrived')) {
+      await this.trackingStore.updateLegStatus(parentLeg.leg_id, 'completed', undefined, now);
+      if (parentLeg.vehicle_id) {
+        await this.trackingStore.updateVehicleStatus(parentLeg.vehicle_id, 'available');
+      }
+    }
+
     // If customs cleared, send notification to Customer
     if (dto.action === 'customs_cleared') {
       await this.notificationsService.createNotification(
@@ -458,6 +742,22 @@ export class TrackingService {
 
     // Complete this leg
     await this.trackingStore.updateLegStatus(legId, 'completed', undefined, now);
+
+    // Tuyến đa phương thức: Khi chặng đường bộ 1 tới sân bay hoàn thành, giải phóng xe tải về available
+    if (targetLeg.leg_type === 'road' && targetLeg.sequence_no < legs.length) {
+      const nextLeg = legs.find((l) => l.sequence_no === targetLeg.sequence_no + 1);
+      if (nextLeg && nextLeg.leg_type === 'flight' && targetLeg.vehicle_id) {
+        await this.trackingStore.updateVehicleStatus(targetLeg.vehicle_id, 'available');
+      }
+    }
+
+    // Tuyến đa phương thức: Khi chặng bay hạ cánh an toàn (Mốc 4), tự động kích hoạt chặng đường bộ tiếp theo
+    if (targetLeg.leg_type === 'flight' && targetLeg.sequence_no < legs.length) {
+      const nextLeg = legs.find((l) => l.sequence_no === targetLeg.sequence_no + 1);
+      if (nextLeg && !nextLeg.actual_departure) {
+        await this.trackingStore.updateLegStatus(nextLeg.leg_id, 'active', now, null);
+      }
+    }
 
     // Check if this is the final leg of the entire trip
     const isFinalLeg = targetLeg.sequence_no === legs.length;
@@ -572,10 +872,23 @@ export class TrackingService {
     const shipment = await this.trackingStore.findShipmentById(shipmentId);
     if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
 
+    let finalLegName = dto.legName;
+    if (!finalLegName) {
+      const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
+      if (route?.route_id) {
+        const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
+        const stops = await this.trackingStore.findStopsByRouteId(route.route_id);
+        const milestones = this.buildMilestonesTimeline(legs, stops);
+        const activeM = milestones.find((m) => m.status === 'CURRENT') || milestones.find((m) => m.status === 'COMPLETED');
+        if (activeM) finalLegName = activeM.title;
+      }
+    }
+
     const logId = await this.trackingStore.createHorseHealthLog({
       shipmentId,
       horseId: dto.horseId,
       horseName: dto.horseName,
+      legName: finalLegName || null,
       recordedBy: Number(user.id),
       conditionStatus: dto.conditionStatus,
       temperatureC: dto.temperatureC,

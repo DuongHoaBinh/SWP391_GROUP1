@@ -91,6 +91,15 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
         `UPDATE \`user\` SET \`specialization\` = 'driver'
          WHERE \`role_id\` = 5 AND \`specialization\` IS NULL`,
       );
+
+      const [vehCols] = await this.pool.query<any[]>(
+        "SHOW COLUMNS FROM `vehicle` LIKE 'current_location'",
+      );
+      if (vehCols.length === 0) {
+        await this.pool.execute(
+          'ALTER TABLE `vehicle` ADD COLUMN `current_location` VARCHAR(255) NULL DEFAULT "Fleet Operations Depot"',
+        );
+      }
     } catch (e: any) {
       // Ignore migration errors on init
     }
@@ -104,7 +113,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
 
   async findAllVehicles(status?: VehicleStatus, type?: VehicleType): Promise<VehicleEntity[]> {
     let sql = `
-      SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity,
+      SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity, v.current_location,
              CASE 
                WHEN active_leg.shipment_id IS NOT NULL THEN 'in_use'
                WHEN active_sv.shipment_id IS NOT NULL THEN 'in_use'
@@ -120,13 +129,18 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
         JOIN shipment s ON s.shipment_id = r.shipment_id
         WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit')
           AND rl.vehicle_id IS NOT NULL
+          AND rl.status != 'completed'
+          AND rl.actual_arrival IS NULL
         GROUP BY rl.vehicle_id
       ) active_leg ON active_leg.vehicle_id = v.vehicle_id
       LEFT JOIN (
         SELECT sv.vehicle_id, MIN(sv.shipment_id) as shipment_id
         FROM shipment_vehicle sv
         JOIN shipment s ON s.shipment_id = sv.shipment_id
+        LEFT JOIN route r ON r.shipment_id = s.shipment_id
+        LEFT JOIN route_leg rl ON rl.route_id = r.route_id AND rl.vehicle_id = sv.vehicle_id
         WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit')
+          AND (rl.leg_id IS NULL OR (rl.status != 'completed' AND rl.actual_arrival IS NULL))
         GROUP BY sv.vehicle_id
       ) active_sv ON active_sv.vehicle_id = v.vehicle_id
       WHERE 1=1
@@ -149,7 +163,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
 
   async findVehicleById(id: number): Promise<VehicleEntity | undefined> {
     const [rows] = await this.pool.execute<VehicleRow[]>(
-      'SELECT vehicle_id, vehicle_type, plate_or_code, capacity, status, created_at FROM vehicle WHERE vehicle_id = ? LIMIT 1',
+      'SELECT vehicle_id, vehicle_type, plate_or_code, capacity, status, current_location, created_at FROM vehicle WHERE vehicle_id = ? LIMIT 1',
       [id],
     );
     const r = rows[0];
@@ -160,7 +174,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) return [];
     const placeholders = ids.map(() => '?').join(',');
     const [rows] = await this.pool.query<VehicleRow[]>(
-      `SELECT vehicle_id, vehicle_type, plate_or_code, capacity, status, created_at FROM vehicle WHERE vehicle_id IN (${placeholders})`,
+      `SELECT vehicle_id, vehicle_type, plate_or_code, capacity, status, current_location, created_at FROM vehicle WHERE vehicle_id IN (${placeholders})`,
       ids,
     );
     return rows.map((r) => this.mapVehicleRow(r));
@@ -168,8 +182,14 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
 
   async createVehicle(dto: CreateVehicleDto): Promise<number> {
     const [result] = await this.pool.execute(
-      'INSERT INTO vehicle (vehicle_type, plate_or_code, capacity, status) VALUES (?, ?, ?, ?)',
-      [dto.vehicleType, dto.plateOrCode, dto.capacity, dto.status ?? VehicleStatus.AVAILABLE],
+      'INSERT INTO vehicle (vehicle_type, plate_or_code, capacity, status, current_location) VALUES (?, ?, ?, ?, ?)',
+      [
+        dto.vehicleType, 
+        dto.plateOrCode, 
+        dto.capacity, 
+        dto.status ?? VehicleStatus.AVAILABLE,
+        dto.currentLocation || 'Fleet Operations Depot'
+      ],
     );
     return (result as { insertId: number }).insertId;
   }
@@ -376,6 +396,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       capacity: Number(r.capacity),
       status: computedStatus,
       createdAt: new Date(r.created_at).toISOString(),
+      currentLocation: r.current_location || 'Fleet Operations Depot',
       assignedShipmentId: assignedId,
       assignedTripCode: assignedId ? `REQ-${String(assignedId).padStart(3, '0')}` : null,
     };

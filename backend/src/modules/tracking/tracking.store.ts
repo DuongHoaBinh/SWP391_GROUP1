@@ -92,6 +92,13 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         ) ENGINE=InnoDB
       `);
 
+      // 4b. Ensure leg_name column in horse_health_log
+      const [hhlCols] = await this.pool.query<any[]>("SHOW COLUMNS FROM `horse_health_log`");
+      const hhlColNames = hhlCols.map((c: any) => c.Field);
+      if (!hhlColNames.includes('leg_name')) {
+        await this.pool.execute('ALTER TABLE `horse_health_log` ADD COLUMN `leg_name` VARCHAR(255) NULL AFTER `horse_name`');
+      }
+
       // 5. Seed test data for Flow 4 (1 domestic, 1 international in ready_to_depart)
       await this.seedFlow4TestData();
     } catch (e: any) {
@@ -466,6 +473,10 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  async updateVehicleStatus(vehicleId: number, status: string): Promise<void> {
+    await this.pool.execute('UPDATE vehicle SET status = ? WHERE vehicle_id = ?', [status, vehicleId]);
+  }
+
   async updateStopStatus(
     stopId: number,
     status: string,
@@ -561,6 +572,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     shipmentId: number;
     horseId?: number | null;
     horseName: string;
+    legName?: string | null;
     recordedBy: number;
     conditionStatus: HorseConditionStatus;
     temperatureC?: number | null;
@@ -569,12 +581,13 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     attachmentsJson?: string | null;
   }): Promise<number> {
     const [res] = await this.pool.execute<any>(
-      `INSERT INTO horse_health_log (shipment_id, horse_id, horse_name, recorded_by, condition_status, temperature_c, heart_rate_bpm, notes, attachments_json, recorded_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO horse_health_log (shipment_id, horse_id, horse_name, leg_name, recorded_by, condition_status, temperature_c, heart_rate_bpm, notes, attachments_json, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         log.shipmentId,
         log.horseId || null,
         log.horseName,
+        log.legName || null,
         log.recordedBy,
         log.conditionStatus,
         log.temperatureC ?? null,
@@ -616,6 +629,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         shipmentId: r.shipment_id,
         horseId: r.horse_id,
         horseName: r.horse_name,
+        legName: r.leg_name || 'Chặng vận chuyển thực địa',
         recordedBy: r.recorded_by,
         recordedByName: r.recorded_by_name,
         recordedByRole: r.recorded_by_role,
