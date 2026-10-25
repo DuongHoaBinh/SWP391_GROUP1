@@ -52,12 +52,27 @@ function CreateTransportRequestForm() {
   // Validation errors
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
+  // Get today at midnight for date comparison
+  const getTodayMidnight = () => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
   const validateStep1 = () => {
     const errs: { [key: string]: string } = {};
     if (!title.trim()) errs.title = 'Request title is required.';
     if (!origin.trim()) errs.origin = 'Origin is required.';
     if (!destination.trim()) errs.destination = 'Destination is required.';
-    if (!departureDate) errs.departureDate = 'Departure date is required.';
+    if (!departureDate) {
+      errs.departureDate = 'Departure date is required.';
+    } else {
+      // Ch?n ch?n ng�y xu?t ph�t trong qu� kh?
+      const selected = new Date(departureDate);
+      if (selected < getTodayMidnight()) {
+        errs.departureDate = 'Departure date cannot be in the past. Please select today or a future date.';
+      }
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -377,6 +392,7 @@ function CreateTransportRequestForm() {
                   <input
                     type="date"
                     value={departureDate}
+                    min={new Date().toISOString().split('T')[0]}
                     onChange={(e) => setDepartureDate(e.target.value)}
                     style={{
                       width: '100%',

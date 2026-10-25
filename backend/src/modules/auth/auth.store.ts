@@ -12,6 +12,7 @@ interface SeedAccount {
 interface UserRow extends RowDataPacket {
   user_id: number;
   email: string;
+  full_name: string;
   password_hash: string;
   role_name: string;
   email_verified: number;
@@ -87,6 +88,7 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
     return {
       id: String((result as { insertId: number }).insertId),
       email: normalizedEmail,
+      fullName: normalizedEmail,
       passwordHash,
       role,
       emailVerified: true,
@@ -122,6 +124,7 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
     return {
       id: String(row.user_id),
       email: row.email,
+      fullName: row.full_name,
       passwordHash: row.password_hash,
       role: this.userRole(row.role_name),
       emailVerified: Boolean(row.email_verified),

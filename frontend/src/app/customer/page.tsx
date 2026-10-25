@@ -23,9 +23,11 @@ import { DocumentUploadModal } from '@/features/documents/components/DocumentUpl
 import { TripTrackingModal } from '@/features/tracking/components/TripTrackingModal';
 import { useCustomerStore } from '@/lib/customer-store';
 import { TransportRequest } from '@/lib/types';
+import { getCurrentUser } from '@/lib/auth';
 
 export default function CustomerDashboardPage() {
   const router = useRouter();
+  const user = getCurrentUser();
 
   const {
     requests,
@@ -96,7 +98,7 @@ export default function CustomerDashboardPage() {
               margin: 0,
             }}
           >
-            Good morning, Alex
+            Good morning, {user.name}
           </h2>
           <p
             style={{

@@ -113,7 +113,7 @@ export default function RegisterPage() {
         setSuccessMessage('Account verified successfully! Logging you in...');
         setAuthSession(data.accessToken || 'mock-token-registered', {
           id: data.user?.id || 'usr-reg-new',
-          name: email.split('@')[0],
+          name: data.user?.fullName || data.user?.name || email.split('@')[0],
           email: email.trim().toLowerCase(),
           role: 'CUSTOMER',
         });

@@ -3,6 +3,24 @@ import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
 import { CreateOrderDto } from './dto/create-order.dto';
 
+export interface OrderQueryParams {
+  status?: ShipmentStatus;
+  departureDateFrom?: string;   // ISO date string
+  departureDateTo?: string;     // ISO date string
+  sortBy?: 'createdAt' | 'totalCost' | 'requestedDate';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginatedOrders {
+  data: TransportOrder[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 interface ShipmentRow extends RowDataPacket {
   shipment_id: number;
   customer_id: number;
@@ -42,6 +60,14 @@ interface HorseRow extends RowDataPacket {
   breed: string | null;
   gender: 'male' | 'female' | 'gelding' | null;
   age: number | null;
+}
+
+interface HorseInsertData {
+  name: string;
+  breed: string | null;
+  gender: 'male' | 'female' | 'gelding' | null;
+  age: number | null;
+  microchipNumber: string | null;
 }
 
 @Injectable()
@@ -98,12 +124,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     }
 
     // 3. Lưu thông tin con ngựa vào bảng horse và liên kết qua shipment_horse
-    const horsesToInsert: Array<{
-      name: string;
-      breed: string | null;
-      gender: 'male' | 'female' | 'gelding' | null;
-      age: number | null;
-    }> = [];
+    const horsesToInsert: HorseInsertData[] = [];
 
     if (dto.horses && dto.horses.length > 0) {
       for (const h of dto.horses) {
@@ -112,6 +133,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
           breed: h.breed ?? null,
           gender: h.gender ?? null,
           age: h.age ?? null,
+          microchipNumber: h.microchipNumber ?? null,
         });
       }
     } else if (dto.horseName) {
@@ -120,13 +142,14 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         breed: dto.horseBreed ?? null,
         gender: dto.horseGender ?? null,
         age: dto.horseAge ?? null,
+        microchipNumber: null,
       });
     }
 
     for (const h of horsesToInsert) {
       const [hResult] = await this.pool.execute(
-        'INSERT INTO horse (owner_id, name, breed, gender, age, status) VALUES (?, ?, ?, ?, ?, ?)',
-        [customerId, h.name, h.breed, h.gender, h.age, 'active'],
+        'INSERT INTO horse (owner_id, name, breed, gender, age, status, microchip_number) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [customerId, h.name, h.breed, h.gender, h.age, 'active', h.microchipNumber ?? null],
       );
       const horseId = (hResult as { insertId: number }).insertId;
       await this.pool.execute(
@@ -151,38 +174,111 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return (result as { insertId: number }).insertId;
   }
 
-  async findShipmentsByCustomer(customerId: number): Promise<TransportOrder[]> {
-    const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.email as customer_email, a.full_name as approver_name
-       FROM shipment s
-       JOIN \`user\` u ON u.user_id = s.customer_id
-       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
-       WHERE s.customer_id = ?
-       ORDER BY s.created_at DESC`,
-      [customerId],
-    );
-
-    return Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
+  async checkMicrochipExists(microchipNumber: string, excludeHorseId?: number): Promise<boolean> {
+    let query = 'SELECT COUNT(*) as cnt FROM horse WHERE microchip_number = ?';
+    const params: (string | number)[] = [microchipNumber];
+    if (excludeHorseId) {
+      query += ' AND horse_id != ?';
+      params.push(excludeHorseId);
+    }
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
+    return (rows[0] as any).cnt > 0;
   }
 
-  async findAllShipments(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
-    let query = `
+  async findShipmentsByCustomer(customerId: number, params: OrderQueryParams = {}): Promise<PaginatedOrders> {
+    const { page = 1, limit = 10, sortBy = 'createdAt', sortOrder = 'desc', departureDateFrom, departureDateTo, status } = params;
+    const offset = (page - 1) * limit;
+
+    const sortColumn = sortBy === 'totalCost' ? 's.total_cost' : sortBy === 'requestedDate' ? 's.requested_date' : 's.created_at';
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
+
+    let whereClause = 'WHERE s.customer_id = ?';
+    const queryParams: (string | number)[] = [customerId];
+
+    if (status) {
+      whereClause += ' AND s.status = ?';
+      queryParams.push(status);
+    }
+    if (departureDateFrom) {
+      whereClause += ' AND DATE(s.requested_date) >= ?';
+      queryParams.push(departureDateFrom);
+    }
+    if (departureDateTo) {
+      whereClause += ' AND DATE(s.requested_date) <= ?';
+      queryParams.push(departureDateTo);
+    }
+
+    // Count total
+    const [countRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) as total FROM shipment s JOIN \`user\` u ON u.user_id = s.customer_id ${whereClause}`,
+      queryParams,
+    );
+    const total = (countRows[0] as any).total as number;
+
+    // Fetch data
+    const dataQuery = `
       SELECT s.*, u.email as customer_email, a.full_name as approver_name
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+      ${whereClause}
+      ORDER BY ${sortColumn} ${order}
+      LIMIT ? OFFSET ?
     `;
-    const params: (string | number)[] = [];
+    const [rows] = await this.pool.execute<ShipmentRow[]>(dataQuery, [...queryParams, limit, offset]);
 
-    if (statusFilter) {
-      query += ' WHERE s.status = ?';
-      params.push(statusFilter);
+    const data = await Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async findAllShipments(params: OrderQueryParams = {}): Promise<PaginatedOrders> {
+    const { page = 1, limit = 10, sortBy = 'createdAt', sortOrder = 'desc', departureDateFrom, departureDateTo, status } = params;
+    const offset = (page - 1) * limit;
+
+    const sortColumn = sortBy === 'totalCost' ? 's.total_cost' : sortBy === 'requestedDate' ? 's.requested_date' : 's.created_at';
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
+
+    let whereClause = '';
+    const queryParams: (string | number)[] = [];
+
+    const conditions: string[] = [];
+    if (status) {
+      conditions.push('s.status = ?');
+      queryParams.push(status);
+    }
+    if (departureDateFrom) {
+      conditions.push('DATE(s.requested_date) >= ?');
+      queryParams.push(departureDateFrom);
+    }
+    if (departureDateTo) {
+      conditions.push('DATE(s.requested_date) <= ?');
+      queryParams.push(departureDateTo);
+    }
+    if (conditions.length > 0) {
+      whereClause = 'WHERE ' + conditions.join(' AND ');
     }
 
-    query += ' ORDER BY s.created_at DESC';
+    // Count total
+    const [countRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) as total FROM shipment s JOIN \`user\` u ON u.user_id = s.customer_id ${whereClause}`,
+      queryParams,
+    );
+    const total = (countRows[0] as any).total as number;
 
-    const [rows] = await this.pool.execute<ShipmentRow[]>(query, params);
-    return Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
+    // Fetch data
+    const dataQuery = `
+      SELECT s.*, u.email as customer_email, a.full_name as approver_name
+      FROM shipment s
+      JOIN \`user\` u ON u.user_id = s.customer_id
+      LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+      ${whereClause}
+      ORDER BY ${sortColumn} ${order}
+      LIMIT ? OFFSET ?
+    `;
+    const [rows] = await this.pool.execute<ShipmentRow[]>(dataQuery, [...queryParams, limit, offset]);
+
+    const data = await Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findShipmentById(shipmentId: number): Promise<TransportOrder | undefined> {

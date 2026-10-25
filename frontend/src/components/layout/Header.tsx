@@ -265,10 +265,10 @@ export const Header: React.FC<HeaderProps> = ({
                 fontSize: '12px',
               }}
             >
-              AM
+              {user.initials}
             </div>
             <div style={{ textAlign: 'left', lineHeight: 1.2 }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Alex Morgan</div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{user.name}</div>
               <div style={{ fontSize: '11px', color: '#64748b' }}>Customer</div>
             </div>
             <ChevronDown size={14} color="#64748b" style={{ marginLeft: '4px' }} />
