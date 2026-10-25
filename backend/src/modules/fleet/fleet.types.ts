@@ -24,6 +24,7 @@ export interface VehicleEntity {
   capacity: number;
   status: VehicleStatus;
   createdAt: string;
+  currentLocation?: string | null;
   assignedShipmentId?: number | null;
   assignedTripCode?: string | null;
 }

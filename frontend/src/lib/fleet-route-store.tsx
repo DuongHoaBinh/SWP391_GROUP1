@@ -12,10 +12,20 @@ export interface AvailableStaff {
   specialization?: string | null;
 }
 
+export type VehicleEquipmentType =
+  | 'Xe thùng chuyên dụng điều hòa 18°C'
+  | 'Xe van chuyên dụng 2-4 Stall'
+  | 'Xe tải hạng nặng điều hòa 6-8 Stall'
+  | 'Thùng container chuyên dụng cho ngựa'
+  | 'Chuồng bay chuyên dụng máy bay (Air Cargo Stall)'
+  | 'Climate-Controlled Truck'
+  | 'Air Cargo Stall'
+  | 'Specialized Container';
+
 export interface Vehicle {
   id: string;
   code: string;
-  type: 'Climate-Controlled Truck' | 'Air Cargo Stall' | 'Specialized Container';
+  type: VehicleEquipmentType;
   capacity: number;
   status: 'available' | 'in_use' | 'maintenance';
   lastInspection: string;
@@ -158,12 +168,12 @@ interface FleetRouteStoreContextType {
 }
 
 const INITIAL_VEHICLES: Vehicle[] = [
-  { id: 'v-1', code: 'TRK-VN-089', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', lastInspection: '2026-09-20', location: 'HCMC Depot' },
-  { id: 'v-2', code: 'TRK-VN-102', type: 'Climate-Controlled Truck', capacity: 6, status: 'in_use', lastInspection: '2026-09-25', location: 'Transit: Moc Bai Border', assignedTripCode: 'TR-2026-002' },
-  { id: 'v-3', code: 'AIR-SG-330', type: 'Air Cargo Stall', capacity: 2, status: 'available', lastInspection: '2026-09-18', location: 'Tan Son Nhat Airport' },
-  { id: 'v-4', code: 'TRK-TH-501', type: 'Climate-Controlled Truck', capacity: 4, status: 'maintenance', lastInspection: '2026-09-10', location: 'Bangkok Service Yard' },
-  { id: 'v-5', code: 'CNT-FEI-09', type: 'Specialized Container', capacity: 3, status: 'available', lastInspection: '2026-09-28', location: 'Changi Logistics Hub' },
-  { id: 'v-6', code: 'TRK-VN-115', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', lastInspection: '2026-09-22', location: 'Hanoi Depot' },
+  { id: 'v-1', code: 'TRK-VN-089', type: 'Xe thùng chuyên dụng điều hòa 18°C', capacity: 4, status: 'available', lastInspection: '2026-09-20', location: 'HCMC Depot' },
+  { id: 'v-2', code: 'TRK-VN-102', type: 'Xe tải hạng nặng điều hòa 6-8 Stall', capacity: 6, status: 'in_use', lastInspection: '2026-09-25', location: 'Transit: Moc Bai Border', assignedTripCode: 'TR-2026-002' },
+  { id: 'v-3', code: 'AIR-SG-330', type: 'Chuồng bay chuyên dụng máy bay (Air Cargo Stall)', capacity: 2, status: 'available', lastInspection: '2026-09-18', location: 'Tan Son Nhat Airport' },
+  { id: 'v-4', code: 'TRK-TH-501', type: 'Xe van chuyên dụng 2-4 Stall', capacity: 4, status: 'maintenance', lastInspection: '2026-09-10', location: 'Bangkok Service Yard' },
+  { id: 'v-5', code: 'CNT-FEI-09', type: 'Thùng container chuyên dụng cho ngựa', capacity: 3, status: 'available', lastInspection: '2026-09-28', location: 'Changi Logistics Hub' },
+  { id: 'v-6', code: 'TRK-VN-115', type: 'Xe thùng chuyên dụng điều hòa 18°C', capacity: 4, status: 'available', lastInspection: '2026-09-22', location: 'Hanoi Depot' },
 ];
 
 const INITIAL_ROUTES: RouteItem[] = [
@@ -492,21 +502,28 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
     try {
       const backendVehicles = await apiClient<any[]>('/fleet/vehicles');
       if (Array.isArray(backendVehicles) && backendVehicles.length > 0) {
-        const typeReverseMap: Record<string, Vehicle['type']> = {
-          truck: 'Climate-Controlled Truck',
-          aircraft_stall: 'Air Cargo Stall',
-          container: 'Specialized Container',
+        const resolveDisplayType = (bType: string, cap: number): Vehicle['type'] => {
+          if (bType === 'aircraft_stall') return 'Chuồng bay chuyên dụng máy bay (Air Cargo Stall)';
+          if (bType === 'container') return 'Thùng container chuyên dụng cho ngựa';
+          if (cap <= 2) return 'Xe van chuyên dụng 2-4 Stall';
+          if (cap >= 6) return 'Xe tải hạng nặng điều hòa 6-8 Stall';
+          return 'Xe thùng chuyên dụng điều hòa 18°C';
         };
-        const mapped: Vehicle[] = backendVehicles.map((v) => ({
-          id: String(v.id),
-          code: v.plateOrCode,
-          type: typeReverseMap[v.vehicleType] || 'Climate-Controlled Truck',
-          capacity: Number(v.capacity) || 4,
-          status: v.status || 'available',
-          lastInspection: v.createdAt ? v.createdAt.split('T')[0] : '2026-10-01',
-          location: v.status === 'in_use' ? `Active: ${v.assignedTripCode || 'On Road'}` : 'Fleet Operations Depot',
-          assignedTripCode: v.assignedTripCode || undefined,
-        }));
+
+        const mapped: Vehicle[] = backendVehicles.map((v) => {
+          const cap = Number(v.capacity) || 4;
+          const baseLoc = v.currentLocation || 'Fleet Operations Depot';
+          return {
+            id: String(v.id),
+            code: v.plateOrCode,
+            type: resolveDisplayType(v.vehicleType, cap),
+            capacity: cap,
+            status: v.status || 'available',
+            lastInspection: v.createdAt ? v.createdAt.split('T')[0] : '2026-10-01',
+            location: v.status === 'in_use' ? `Active: ${v.assignedTripCode || 'On Road'} (${baseLoc})` : baseLoc,
+            assignedTripCode: v.assignedTripCode || undefined,
+          };
+        });
         setVehicles(mapped);
         try {
           localStorage.setItem(STORAGE_KEYS.VEHICLES, JSON.stringify(mapped));
@@ -551,9 +568,39 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
     }
     setIsLoaded(true);
 
+    // Cross-tab live synchronization listener
+    const handleStorageChange = (e: StorageEvent) => {
+      try {
+        if (!e.newValue) return;
+        if (e.key === STORAGE_KEYS.ROUTES) {
+          setRoutes(JSON.parse(e.newValue));
+        } else if (e.key === STORAGE_KEYS.VEHICLES) {
+          setVehicles(JSON.parse(e.newValue));
+        } else if (e.key === STORAGE_KEYS.SCHEDULES) {
+          setSchedules(JSON.parse(e.newValue));
+        } else if (e.key === STORAGE_KEYS.ALERTS) {
+          setAlerts(JSON.parse(e.newValue));
+        } else if (e.key === STORAGE_KEYS.MILESTONES) {
+          setMilestones(JSON.parse(e.newValue));
+        } else if (e.key === STORAGE_KEYS.HEALTH_LOGS) {
+          setHealthLogs(JSON.parse(e.newValue));
+        } else if (e.key === STORAGE_KEYS.TELEMETRIES) {
+          setTelemetries(JSON.parse(e.newValue));
+        }
+      } catch (err) {
+        console.warn('Cross-tab sync error:', err);
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
     // Live sync with Backend
     refreshVehicles();
     refreshStaff();
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, [refreshVehicles, refreshStaff]);
 
   const saveVehicles = useCallback((items: Vehicle[]) => {
@@ -784,6 +831,11 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
       let createdId = `v-${Date.now()}`;
       try {
         const typeMapping: Record<string, string> = {
+          'Xe thùng chuyên dụng điều hòa 18°C': 'truck',
+          'Xe van chuyên dụng 2-4 Stall': 'truck',
+          'Xe tải hạng nặng điều hòa 6-8 Stall': 'truck',
+          'Thùng container chuyên dụng cho ngựa': 'container',
+          'Chuồng bay chuyên dụng máy bay (Air Cargo Stall)': 'aircraft_stall',
           'Climate-Controlled Truck': 'truck',
           'Air Cargo Stall': 'aircraft_stall',
           'Specialized Container': 'container',
@@ -796,6 +848,7 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
             plateOrCode: data.code,
             capacity: Number(data.capacity) || 4,
             status: data.status || 'available',
+            currentLocation: data.location || 'Fleet Operations Depot',
           }),
         });
         if (res?.id) {

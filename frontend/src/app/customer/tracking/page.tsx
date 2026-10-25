@@ -17,6 +17,8 @@ import {
   RefreshCw,
   Radio,
   FileCheck2,
+  FileText,
+  UserCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -309,9 +311,16 @@ export default function CustomerTrackingPage() {
             </div>
             <div>
               <span className="text-slate-400 font-bold uppercase block">Đội ngũ trên xe</span>
-              <span className="font-extrabold text-slate-800 text-sm mt-0.5 block">
-                {trackingDetails?.assignedDriver ? 'Tài xế + Bác sĩ thú y' : 'Chuyên nghiệp'}
-              </span>
+              <div className="text-xs mt-1 space-y-0.5">
+                <div className="truncate">
+                  <span className="text-slate-500 font-semibold">Tài xế: </span>
+                  <strong className="text-slate-900">{trackingDetails?.assignedDriver || 'Đang điều phối'}</strong>
+                </div>
+                <div className="truncate">
+                  <span className="text-slate-500 font-semibold">Bác sĩ/Hộ tống: </span>
+                  <strong className="text-blue-900">{trackingDetails?.assignedEscort || 'Bác sĩ thú y chuyên trách'}</strong>
+                </div>
+              </div>
             </div>
             <div>
               <span className="text-slate-400 font-bold uppercase block">Lần đồng bộ gần nhất</span>
@@ -470,6 +479,21 @@ export default function CustomerTrackingPage() {
                             <span className="text-slate-400 italic text-[11px]">Xác nhận bởi: {m.updatedBy}</span>
                           )}
                         </div>
+
+                        {/* Ghi chú thực địa của tài xế / bác sĩ thú y */}
+                        {m.notes && (
+                          <div className="mt-2.5 bg-amber-50/90 border border-amber-200/90 rounded-lg p-2.5 text-xs text-amber-950 flex items-start gap-2 shadow-2xs">
+                            <FileText size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                              <span className="font-bold text-amber-800 text-[11px] uppercase tracking-wide block">
+                                Ghi chú thực địa:
+                              </span>
+                              <p className="mt-0.5 m-0 text-slate-800 font-medium italic">
+                                &ldquo;{m.notes}&rdquo;
+                              </p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -496,7 +520,7 @@ export default function CustomerTrackingPage() {
                     className="p-3 bg-white rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                   >
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-extrabold text-slate-900">{log.horseName}</span>
                         <span
                           className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -507,6 +531,12 @@ export default function CustomerTrackingPage() {
                         >
                           {log.conditionStatusVi || log.conditionStatus}
                         </span>
+                        {log.legName && (
+                          <span className="bg-blue-50 text-blue-800 border border-blue-200 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                            <MapPin size={10} className="text-blue-600 shrink-0" />
+                            <span>{log.legName}</span>
+                          </span>
+                        )}
                       </div>
                       <p className="text-slate-600 mt-1 m-0">{log.notes || 'Sức khỏe ổn định'}</p>
                     </div>

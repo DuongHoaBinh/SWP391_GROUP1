@@ -20,6 +20,7 @@ import {
   X,
   UserCheck,
   Sparkles,
+  FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -537,6 +538,21 @@ export default function TripMonitoringPage() {
                                 </span>
                               )}
                             </div>
+
+                            {/* Ghi chú thực địa của tài xế / bác sĩ thú y */}
+                            {m.notes && (
+                              <div className="mt-2.5 bg-amber-50/90 border border-amber-200/90 rounded-lg p-2.5 text-xs text-amber-950 flex items-start gap-2 shadow-2xs">
+                                <FileText size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                                <div className="flex-1">
+                                  <span className="font-bold text-amber-800 text-[11px] uppercase tracking-wide block">
+                                    Ghi chú thực địa:
+                                  </span>
+                                  <p className="mt-0.5 m-0 text-slate-800 font-medium italic">
+                                    &ldquo;{m.notes}&rdquo;
+                                  </p>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -607,7 +623,7 @@ export default function TripMonitoringPage() {
                             <Heart size={18} />
                           </div>
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className="font-extrabold text-sm text-slate-900">{log.horseName}</span>
                               <span
                                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -618,6 +634,12 @@ export default function TripMonitoringPage() {
                               >
                                 {log.conditionStatusVi || log.conditionStatus}
                               </span>
+                              {log.legName && (
+                                <span className="bg-blue-50 text-blue-800 border border-blue-200 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                                  <MapPin size={10} className="text-blue-600 shrink-0" />
+                                  <span>{log.legName}</span>
+                                </span>
+                              )}
                               {isAlert && (
                                 <span className="text-[10px] font-bold text-amber-800 bg-amber-200/80 px-2 py-0.5 rounded">
                                   ⚠️ Cần chú ý

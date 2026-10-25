@@ -475,10 +475,24 @@ export default function DriverStatusPage() {
           <div className="flex flex-col gap-4 text-xs">
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 leading-relaxed">
               <strong className="block text-sm mb-1">{activeMilestone.title}</strong>
-              <p className="m-0 text-slate-600">
-                Địa điểm: <strong>{activeMilestone.location}</strong> • Vai trò phụ trách:{' '}
-                <strong>{activeMilestone.responsibleRole === 'driver' ? 'Tài xế lái xe' : 'Hộ tống y tế/bay'}</strong>
-              </p>
+              <div className="flex flex-col gap-1 text-slate-600 mt-1">
+                <p className="m-0">
+                  Địa điểm: <strong>{activeMilestone.location}</strong> • Phương thức:{' '}
+                  <strong>{activeMilestone.legType === 'flight' ? '✈️ Chặng hàng không' : '🚚 Chặng đường bộ'}</strong>
+                </p>
+                <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                  <span className="text-slate-600">Người báo cáo:</span>
+                  <span className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 ${
+                    isEscort ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-blue-100 text-blue-800 border border-blue-200'
+                  }`}>
+                    {isEscort ? <Stethoscope size={12} /> : <Truck size={12} />}
+                    <strong>{currentUser?.fullName || (isEscort ? 'Bác sĩ Thú y' : 'Tài xế')}</strong> ({isEscort ? 'Bác sĩ Thú y / Escort' : 'Tài xế lái xe'})
+                  </span>
+                  <span className="text-slate-400 text-[11px]">
+                    • Phối hợp: {activeMilestone.legType === 'flight' ? 'Bác sĩ Thú y / Escort' : 'Tài xế lái xe & Bác sĩ Thú y'}
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Action Select for Stops */}
@@ -546,11 +560,15 @@ export default function DriverStatusPage() {
 
             <div>
               <label className="font-bold text-slate-700 block mb-1">
-                Ghi chú thực địa của Tài xế / Hộ tống viên:
+                Ghi chú thực địa của {isEscort ? 'Bác sĩ Thú y / Hộ tống viên' : 'Tài xế lái xe'}:
               </label>
               <textarea
                 rows={3}
-                placeholder="Ví dụ: Xe đã qua trạm an toàn, nhiệt độ thùng xe ổn định 18°C, các chiến mã được uống nước đầy đủ..."
+                placeholder={
+                  isEscort
+                    ? 'Ví dụ: Đã kiểm tra thể trạng ngựa tốt, sinh hiệu ổn định, nhiệt độ thùng xe duy trì 18°C...'
+                    : 'Ví dụ: Xe đã qua trạm an toàn, nhiệt độ thùng xe ổn định 18°C, các chiến mã được uống nước đầy đủ...'
+                }
                 value={checkInNotes}
                 onChange={(e) => setCheckInNotes(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:border-blue-500 text-xs font-medium"

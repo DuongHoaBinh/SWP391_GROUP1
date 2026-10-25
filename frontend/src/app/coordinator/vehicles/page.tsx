@@ -26,7 +26,7 @@ export default function VehicleManagementPage() {
   // Form State
   const [formData, setFormData] = useState<Partial<Vehicle>>({
     code: '',
-    type: 'Climate-Controlled Truck',
+    type: 'Xe thùng chuyên dụng điều hòa 18°C',
     capacity: 4,
     status: 'available',
     location: '',
@@ -34,25 +34,25 @@ export default function VehicleManagementPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.code || !formData.location) {
-      toast.error('Please enter vehicle plate/code and current location.');
+    if (!formData.code) {
+      toast.error('Vui lòng nhập biển số xe / mã thiết bị.');
       return;
     }
     setIsSubmitting(true);
     try {
       const created = await addVehicle({
         code: formData.code.trim().toUpperCase(),
-        type: formData.type as any || 'Climate-Controlled Truck',
+        type: (formData.type as any) || 'Xe thùng chuyên dụng điều hòa 18°C',
         capacity: Number(formData.capacity) || 4,
         status: (formData.status as any) || 'available',
         lastInspection: new Date().toISOString().split('T')[0],
-        location: formData.location.trim(),
+        location: 'Fleet Operations Depot',
       });
-      toast.success(`Vehicle ${created.code} saved to Backend Database!`);
+      toast.success(`Phương tiện ${created.code} (${created.type}) đã được lưu vào hệ thống!`);
       setIsAddOpen(false);
-      setFormData({ code: '', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', location: '' });
+      setFormData({ code: '', type: 'Xe thùng chuyên dụng điều hòa 18°C', capacity: 4, status: 'available', location: 'Fleet Operations Depot' });
     } catch {
-      toast.error('Could not save vehicle');
+      toast.error('Không thể lưu phương tiện');
     } finally {
       setIsSubmitting(false);
     }
@@ -82,7 +82,12 @@ export default function VehicleManagementPage() {
   const filteredVehicles = vehicles.filter(v => {
     const matchesSearch = v.code.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           v.location.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesType = filterType === 'ALL' || v.type === filterType;
+    const matchesType = filterType === 'ALL' || v.type === filterType || 
+      (filterType.includes('Xe thùng') && (v.type.includes('Truck') || v.type.includes('thùng'))) ||
+      (filterType.includes('van') && v.type.includes('van')) ||
+      (filterType.includes('hạng nặng') && v.type.includes('hạng nặng')) ||
+      (filterType.includes('Chuồng bay') && (v.type.includes('Stall') || v.type.includes('Chuồng bay'))) ||
+      (filterType.includes('container') && (v.type.includes('Container') || v.type.includes('container')));
     return matchesSearch && matchesType;
   });
 
@@ -93,7 +98,7 @@ export default function VehicleManagementPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 m-0">Specialized Fleet Management</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Manage air-conditioned horse vans, air transport stalls, and international containers.
+            Quản lý đội xe thùng điều hòa nhiệt độ, xe van chuyên dụng, container đường bộ và chuồng bay quốc tế.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -110,12 +115,12 @@ export default function VehicleManagementPage() {
           <Button 
             variant="primary" 
             onClick={() => {
-              setFormData({ code: '', type: 'Climate-Controlled Truck', capacity: 4, status: 'available', location: '' });
+              setFormData({ code: '', type: 'Xe thùng chuyên dụng điều hòa 18°C', capacity: 4, status: 'available', location: '' });
               setIsAddOpen(true);
             }}
             className="shadow-sm"
           >
-            <Plus size={18} className="mr-1.5" /> Add New Vehicle
+            <Plus size={18} className="mr-1.5" /> Thêm Phương Tiện Mới
           </Button>
         </div>
       </div>
@@ -180,10 +185,12 @@ export default function VehicleManagementPage() {
               onChange={(e) => setFilterType(e.target.value)}
               className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white font-medium text-slate-700 outline-none"
             >
-              <option value="ALL">All Fleet Types</option>
-              <option value="Climate-Controlled Truck">Climate-Controlled Truck</option>
-              <option value="Air Cargo Stall">Air Cargo Stall</option>
-              <option value="Specialized Container">Specialized Container</option>
+              <option value="ALL">Tất cả loại phương tiện</option>
+              <option value="Xe thùng chuyên dụng điều hòa 18°C">Xe thùng chuyên dụng điều hòa (18°C - 20°C)</option>
+              <option value="Xe van chuyên dụng 2-4 Stall">Xe van chuyên dụng vận tải ngựa thể thao (2 - 4 Stall)</option>
+              <option value="Xe tải hạng nặng điều hòa 6-8 Stall">Xe tải hạng nặng điều hòa 6 - 8 Stall</option>
+              <option value="Thùng container chuyên dụng cho ngựa">Thùng container đường bộ chuyên dụng</option>
+              <option value="Chuồng bay chuyên dụng máy bay (Air Cargo Stall)">Chuồng bay chuyên dụng máy bay (Air Cargo Stall)</option>
             </select>
           </div>
         </div>
@@ -268,33 +275,53 @@ export default function VehicleManagementPage() {
 
       {/* Modal Add Vehicle */}
       {isAddOpen && (
-        <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Register New Vehicle" subtitle="Add transport equipment to the cross-border fleet" maxWidth="500px">
+        <Modal 
+          isOpen={isAddOpen} 
+          onClose={() => setIsAddOpen(false)} 
+          title="Đăng ký phương tiện mới" 
+          subtitle="Thêm phương tiện vận tải chuẩn định hướng Logistics Manager (REQ-039)" 
+          maxWidth="550px"
+        >
           <form onSubmit={handleCreate} className="flex flex-col gap-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Plate / Equipment Code *</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Biển số xe / Mã thiết bị (Plate / Code) *</label>
               <input 
                 type="text" 
-                placeholder="e.g. TRK-VN-202"
+                placeholder="Ví dụ: 51C-888.99 hoặc TRK-VN-202"
                 value={formData.code}
                 onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 uppercase font-semibold"
+                required
               />
             </div>
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Vehicle Type</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Loại phương tiện (Vehicle Type) *</label>
               <select
                 value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 bg-white"
+                onChange={(e) => {
+                  const selectedType = e.target.value as any;
+                  let autoCap = 4;
+                  if (selectedType.includes('2-4') || selectedType.includes('van')) autoCap = 2;
+                  else if (selectedType.includes('6-8') || selectedType.includes('hạng nặng')) autoCap = 6;
+                  else if (selectedType.includes('Air Cargo') || selectedType.includes('Chuồng bay')) autoCap = 2;
+                  else if (selectedType.includes('container')) autoCap = 4;
+                  setFormData({ ...formData, type: selectedType, capacity: autoCap });
+                }}
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 bg-white font-medium"
               >
-                <option value="Climate-Controlled Truck">Climate-Controlled Truck</option>
-                <option value="Air Cargo Stall">Air Cargo Stall</option>
-                <option value="Specialized Container">Specialized Container</option>
+                <option value="Xe thùng chuyên dụng điều hòa 18°C">Xe thùng chuyên dụng điều hòa nhiệt độ (18°C - 20°C)</option>
+                <option value="Xe van chuyên dụng 2-4 Stall">Xe van chuyên dụng vận tải ngựa thể thao (2 - 4 Stall)</option>
+                <option value="Xe tải hạng nặng điều hòa 6-8 Stall">Xe tải hạng nặng điều hòa 6 - 8 Stall</option>
+                <option value="Thùng container chuyên dụng cho ngựa">Thùng container đường bộ chuyên dụng</option>
+                <option value="Chuồng bay chuyên dụng máy bay (Air Cargo Stall)">Chuồng bay chuyên dụng máy bay (Air Cargo Stall)</option>
               </select>
+              <p className="text-[11px] text-slate-500 mt-1 mb-0 italic">
+                * Khớp 100% với định hướng phương tiện của Logistics Manager trong Kế hoạch vận chuyển (REQ-039).
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Capacity (Stalls)</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Sức chứa (Số ngựa / Stall)</label>
                 <input 
                   type="number" 
                   min="1" 
@@ -305,30 +332,22 @@ export default function VehicleManagementPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Initial Status</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Trạng thái ban đầu</label>
                 <select
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 bg-white"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 bg-white font-medium"
                 >
-                  <option value="available">Available</option>
-                  <option value="maintenance">Maintenance</option>
+                  <option value="available">Sẵn sàng điều phối (Available)</option>
+                  <option value="maintenance">Đang bảo trì / Kiểm tra (Maintenance)</option>
                 </select>
               </div>
             </div>
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Base Location *</label>
-              <input 
-                type="text" 
-                placeholder="e.g. Tan Son Nhat Airport Hub"
-                value={formData.location}
-                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500"
-              />
-            </div>
             <div className="flex justify-end gap-3 mt-3">
-              <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
-              <Button type="submit" variant="primary">Register Vehicle</Button>
+              <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>Hủy</Button>
+              <Button type="submit" variant="primary" disabled={isSubmitting}>
+                {isSubmitting ? 'Đang lưu...' : 'Đăng ký phương tiện'}
+              </Button>
             </div>
           </form>
         </Modal>
@@ -336,31 +355,44 @@ export default function VehicleManagementPage() {
 
       {/* Modal Edit Vehicle */}
       {isEditOpen && selectedVehicle && (
-        <Modal isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} title={`Edit Vehicle: ${selectedVehicle.code}`} maxWidth="500px">
+        <Modal 
+          isOpen={isEditOpen} 
+          onClose={() => setIsEditOpen(false)} 
+          title={`Chỉnh sửa phương tiện: ${selectedVehicle.code}`} 
+          maxWidth="550px"
+        >
           <form onSubmit={handleEdit} className="flex flex-col gap-4">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Current Status</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Loại phương tiện (Vehicle Type)</label>
               <select
-                value={formData.status}
-                onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 bg-white"
+                value={formData.type}
+                onChange={(e) => {
+                  const selectedType = e.target.value as any;
+                  setFormData({ ...formData, type: selectedType });
+                }}
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 bg-white font-medium"
               >
-                <option value="available">Available (Ready for assignment)</option>
-                <option value="in_use">In Active Transit</option>
-                <option value="maintenance">Maintenance / Inspection</option>
+                <option value="Xe thùng chuyên dụng điều hòa 18°C">Xe thùng chuyên dụng điều hòa nhiệt độ (18°C - 20°C)</option>
+                <option value="Xe van chuyên dụng 2-4 Stall">Xe van chuyên dụng vận tải ngựa thể thao (2 - 4 Stall)</option>
+                <option value="Xe tải hạng nặng điều hòa 6-8 Stall">Xe tải hạng nặng điều hòa 6 - 8 Stall</option>
+                <option value="Thùng container chuyên dụng cho ngựa">Thùng container đường bộ chuyên dụng</option>
+                <option value="Chuồng bay chuyên dụng máy bay (Air Cargo Stall)">Chuồng bay chuyên dụng máy bay (Air Cargo Stall)</option>
               </select>
             </div>
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Location</label>
-              <input 
-                type="text" 
-                value={formData.location}
-                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500"
-              />
+              <label className="text-xs font-bold text-slate-700 block mb-1">Trạng thái hoạt động</label>
+              <select
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 bg-white font-medium"
+              >
+                <option value="available">Sẵn sàng (Available - Ready for assignment)</option>
+                <option value="in_use">Đang di chuyển chuyến đi (In Active Transit)</option>
+                <option value="maintenance">Bảo trì / Kiểm định (Maintenance / Inspection)</option>
+              </select>
             </div>
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Stall Capacity</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1">Sức chứa (Stall Capacity)</label>
               <input 
                 type="number" 
                 min="1" 
@@ -371,8 +403,8 @@ export default function VehicleManagementPage() {
               />
             </div>
             <div className="flex justify-end gap-3 mt-3">
-              <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
-              <Button type="submit" variant="primary">Save Changes</Button>
+              <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>Hủy</Button>
+              <Button type="submit" variant="primary">Lưu thay đổi</Button>
             </div>
           </form>
         </Modal>

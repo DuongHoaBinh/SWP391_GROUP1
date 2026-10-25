@@ -24,6 +24,7 @@ export interface HorseHealthLogItem {
   shipmentId: number;
   horseId: number | null;
   horseName: string;
+  legName?: string | null;
   recordedBy: number;
   recordedByName?: string;
   recordedByRole?: string;
@@ -153,6 +154,7 @@ export const trackingApi = {
     data: {
       horseId?: number;
       horseName: string;
+      legName?: string;
       conditionStatus: 'stable' | 'not_eating' | 'stressed' | 'climate_change' | 'other';
       temperatureC?: number;
       heartRateBpm?: number;

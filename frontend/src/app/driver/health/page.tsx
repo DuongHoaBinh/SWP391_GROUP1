@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Stethoscope, Plus, Thermometer, Heart, AlertTriangle, 
-  CheckCircle2, RefreshCw, AlertCircle, ShieldAlert, Image as ImageIcon
+  CheckCircle2, RefreshCw, AlertCircle, ShieldAlert, Image as ImageIcon, MapPin
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -34,6 +34,7 @@ export default function HorseHealthPage() {
   const [formData, setFormData] = useState<{
     horseName: string;
     horseId: number | undefined;
+    legName: string;
     conditionStatus: 'stable' | 'not_eating' | 'stressed' | 'climate_change' | 'other';
     tempC: number;
     heartRateBpm: number;
@@ -42,6 +43,7 @@ export default function HorseHealthPage() {
   }>({
     horseName: '',
     horseId: undefined,
+    legName: '',
     conditionStatus: 'stable',
     tempC: 38.0,
     heartRateBpm: 40,
@@ -95,9 +97,17 @@ export default function HorseHealthPage() {
   const handleOpenAdd = () => {
     const horses = trackingDetails?.assignedHorses || [];
     const firstHorse = horses[0];
+    const currentMilestone = trackingDetails?.milestones.find((m) => m.status === 'CURRENT');
+    const defaultLegName = currentMilestone
+      ? `#${currentMilestone.seq} - ${currentMilestone.title}`
+      : trackingDetails?.milestones && trackingDetails.milestones.length > 0
+      ? `#${trackingDetails.milestones[0].seq} - ${trackingDetails.milestones[0].title}`
+      : 'Chặng 1: Xuất phát thực địa';
+
     setFormData({
       horseName: firstHorse?.name || 'Chiến mã',
       horseId: firstHorse?.id,
+      legName: defaultLegName,
       conditionStatus: 'stable',
       tempC: 38.0,
       heartRateBpm: 40,
@@ -116,6 +126,7 @@ export default function HorseHealthPage() {
       await trackingApi.createHealthLog(selectedShipmentId, {
         horseId: formData.horseId,
         horseName: formData.horseName,
+        legName: formData.legName,
         conditionStatus: formData.conditionStatus,
         temperatureC: Number(formData.tempC) || 38.0,
         heartRateBpm: Number(formData.heartRateBpm) || 40,
@@ -327,6 +338,12 @@ export default function HorseHealthPage() {
                         }`}>
                           {log.conditionStatusVi || log.conditionStatus}
                         </span>
+                        {log.legName && (
+                          <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1 shadow-2xs">
+                            <MapPin size={11} className="text-blue-600" />
+                            {log.legName}
+                          </span>
+                        )}
                       </div>
 
                       <p className="text-slate-700 mt-1 m-0 leading-relaxed font-medium">
@@ -358,7 +375,7 @@ export default function HorseHealthPage() {
                     <span className="font-extrabold text-sm text-slate-900 block">
                       {log.temperatureC ? `${log.temperatureC}°C` : 'N/A'} • {log.heartRateBpm ? `${log.heartRateBpm} bpm` : 'N/A'}
                     </span>
-                    <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    <span suppressHydrationWarning className="text-[10px] text-slate-400 mt-0.5 block">
                       {new Date(log.recordedAt).toLocaleTimeString('vi-VN')} {new Date(log.recordedAt).toLocaleDateString('vi-VN')}
                     </span>
                     <span className="text-[10px] text-slate-500 font-medium block">
@@ -404,6 +421,35 @@ export default function HorseHealthPage() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Select Leg / Milestone */}
+            <div>
+              <label className="font-bold text-slate-700 block mb-1 flex items-center gap-1">
+                <MapPin size={13} className="text-emerald-600" />
+                <span>Chặng vận chuyển / Điểm kiểm tra thực địa *</span>
+              </label>
+              <select
+                value={formData.legName}
+                onChange={(e) => setFormData({ ...formData, legName: e.target.value })}
+                className="w-full p-2.5 border border-slate-300 rounded-lg outline-none font-bold text-xs bg-white focus:border-emerald-500"
+                required
+              >
+                {trackingDetails?.milestones && trackingDetails.milestones.length > 0 ? (
+                  trackingDetails.milestones.map((m) => (
+                    <option key={m.id} value={`#${m.seq} - ${m.title}`}>
+                      #{m.seq}: {m.title} {m.status === 'CURRENT' ? '⭐ (Mốc hiện tại)' : m.status === 'COMPLETED' ? '✓ (Đã qua)' : ''}
+                    </option>
+                  ))
+                ) : (
+                  <option value="Chặng 1: Xuất phát thực địa">
+                    Chặng 1: Xuất phát thực địa
+                  </option>
+                )}
+              </select>
+              <p className="text-[10px] text-slate-500 mt-1 m-0">
+                Được liên kết với các chặng di chuyển và trạm dừng để theo dõi diễn biến sức khỏe ngựa qua từng mốc.
+              </p>
             </div>
 
             {/* Condition Status */}

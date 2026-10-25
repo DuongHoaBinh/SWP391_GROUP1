@@ -37,4 +37,12 @@ export class CreateVehicleDto {
   @IsEnum(VehicleStatus)
   @IsOptional()
   status?: VehicleStatus;
+
+  @ApiPropertyOptional({
+    description: 'Vị trí hiện tại hoặc căn cứ đỗ của phương tiện',
+    example: 'Tan Son Nhat Airport Hub',
+  })
+  @IsString()
+  @IsOptional()
+  currentLocation?: string;
 }

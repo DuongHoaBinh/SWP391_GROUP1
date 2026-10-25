@@ -391,6 +391,7 @@ export default function DriverLayout({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
               <div
+                suppressHydrationWarning
                 style={{
                   width: '34px',
                   height: '34px',
@@ -408,10 +409,10 @@ export default function DriverLayout({
                 {activeUser?.initials || activeUser?.name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || 'DR'}
               </div>
               <div style={{ minWidth: 0 }}>
-                <p style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={activeUser?.name}>
+                <p suppressHydrationWarning style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={activeUser?.name}>
                   {activeUser?.name || 'Tài xế'}
                 </p>
-                <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <p suppressHydrationWarning style={{ fontSize: '10px', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {currentPersona === 'escort' ? 'Bác sĩ thú y / Hộ tống' : 'Tài xế lái xe'}
                 </p>
               </div>
@@ -696,6 +697,7 @@ export default function DriverLayout({
               }}
             >
               <div
+                suppressHydrationWarning
                 style={{
                   width: '30px',
                   height: '30px',
@@ -712,10 +714,10 @@ export default function DriverLayout({
                 {activeUser?.initials || (currentPersona === 'escort' ? 'HY' : 'TL')}
               </div>
               <div style={{ textAlign: 'left', lineHeight: 1.2 }}>
-                <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0 }}>
+                <p suppressHydrationWarning style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0 }}>
                   {activeUser?.name || (currentPersona === 'escort' ? 'BS. Hoàng Văn Y' : 'Trần Văn Lái')}
                 </p>
-                <p style={{ fontSize: '10px', color: currentPersona === 'escort' ? '#059669' : '#2563eb', margin: 0, fontWeight: 700 }}>
+                <p suppressHydrationWarning style={{ fontSize: '10px', color: currentPersona === 'escort' ? '#059669' : '#2563eb', margin: 0, fontWeight: 700 }}>
                   {currentPersona === 'escort' ? 'Bác sĩ Thú y / Hộ tống' : 'Tài xế Lái xe'}
                 </p>
               </div>

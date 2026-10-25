@@ -49,7 +49,7 @@ interface OrderItem {
 export default function ManagerPlanningPage() {
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterTab, setFilterTab] = useState<'ALL' | 'NEED_FRAMEWORK' | 'PENDING_APPROVAL' | 'APPROVED' | 'READY'>('ALL');
+  const [filterTab, setFilterTab] = useState<'ALL' | 'NEED_FRAMEWORK' | 'PENDING_APPROVAL' | 'APPROVED' | 'READY' | 'IN_TRANSIT'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Master Data
@@ -182,7 +182,9 @@ export default function ManagerPlanningPage() {
           o.status === 'approved' ||
           o.status === 'planning' ||
           o.status === 'confirmed' ||
-          o.status === 'ready_to_depart'
+          o.status === 'ready_to_depart' ||
+          o.status === 'in_transit' ||
+          o.status === 'completed'
       );
 
       // Enhance orders with route and readiness info
@@ -241,24 +243,28 @@ export default function ManagerPlanningPage() {
     if (!matchSearch) return false;
 
     if (filterTab === 'NEED_FRAMEWORK') {
-      return !o.routePlan || o.routePlan.planStatus === 'draft';
+      return (!o.routePlan || o.routePlan.planStatus === 'draft') && o.status !== 'in_transit' && o.status !== 'completed';
     }
     if (filterTab === 'PENDING_APPROVAL') {
       return o.routePlan?.planStatus === 'pending_approval';
     }
     if (filterTab === 'APPROVED') {
-      return o.routePlan?.planStatus === 'approved' || o.routePlan?.planStatus === 'confirmed';
+      return (o.routePlan?.planStatus === 'approved' || o.routePlan?.planStatus === 'confirmed') && o.status !== 'in_transit' && o.status !== 'completed';
     }
     if (filterTab === 'READY') {
-      return o.routePlan?.planStatus === 'ready_to_depart' || o.status === 'ready_to_depart';
+      return (o.routePlan?.planStatus === 'ready_to_depart' || o.status === 'ready_to_depart') && o.status !== 'in_transit' && o.status !== 'completed';
+    }
+    if (filterTab === 'IN_TRANSIT') {
+      return o.status === 'in_transit' || o.routePlan?.planStatus === 'in_transit';
     }
     return true;
   });
 
   // KPI Metrics
-  const needFrameworkCount = orders.filter((o) => !o.routePlan || o.routePlan.planStatus === 'draft').length;
+  const needFrameworkCount = orders.filter((o) => (!o.routePlan || o.routePlan.planStatus === 'draft') && o.status !== 'in_transit' && o.status !== 'completed').length;
   const pendingApprovalCount = orders.filter((o) => o.routePlan?.planStatus === 'pending_approval').length;
-  const readyToDepartCount = orders.filter((o) => o.routePlan?.planStatus === 'ready_to_depart' || o.status === 'ready_to_depart').length;
+  const readyToDepartCount = orders.filter((o) => (o.routePlan?.planStatus === 'ready_to_depart' || o.status === 'ready_to_depart') && o.status !== 'in_transit' && o.status !== 'completed').length;
+  const inTransitCount = orders.filter((o) => o.status === 'in_transit' || o.routePlan?.planStatus === 'in_transit').length;
 
   // --- Handlers for Step 1a: Strategic Framework ---
   const handleOpenFrameworkModal = (order: OrderItem) => {
@@ -706,6 +712,14 @@ export default function ManagerPlanningPage() {
             >
               Đủ điều kiện xuất phát ({readyToDepartCount})
             </button>
+            <button
+              onClick={() => setFilterTab('IN_TRANSIT')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
+                filterTab === 'IN_TRANSIT' ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              Đang di chuyển ({inTransitCount})
+            </button>
           </div>
 
           <div className="flex items-center bg-white border border-slate-200 rounded-lg px-3 py-1.5 w-full md:w-64">
@@ -801,36 +815,48 @@ export default function ManagerPlanningPage() {
 
                       {/* Plan Status */}
                       <td className="p-4 align-middle">
-                        {planStatus === 'draft' && (
+                        {(planStatus === 'in_transit' || order.status === 'in_transit') ? (
+                          <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-cyan-50 text-cyan-700 border border-cyan-300">
+                            <Truck size={12} className="text-cyan-600 animate-pulse" /> Đang di chuyển 🚚
+                          </span>
+                        ) : (planStatus === 'completed' || order.status === 'completed') ? (
+                          <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                            <CheckCircle2 size={12} className="text-emerald-600" /> Đã hoàn thành 🏁
+                          </span>
+                        ) : planStatus === 'draft' ? (
                           <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
                             <Clock size={12} /> Bản nháp (Draft)
                           </span>
-                        )}
-                        {planStatus === 'pending_approval' && (
+                        ) : planStatus === 'pending_approval' ? (
                           <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 animate-pulse">
                             <Clock size={12} /> Chờ phê duyệt
                           </span>
-                        )}
-                        {planStatus === 'approved' && (
+                        ) : planStatus === 'approved' ? (
                           <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                             <Check size={12} /> Đã duyệt (Chờ tài xế)
                           </span>
-                        )}
-                        {planStatus === 'confirmed' && (
+                        ) : planStatus === 'confirmed' ? (
                           <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                             <CheckCircle2 size={12} /> Đã nhận chuyến
                           </span>
-                        )}
-                        {planStatus === 'ready_to_depart' && (
+                        ) : planStatus === 'ready_to_depart' ? (
                           <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-emerald-600 text-white shadow-xs">
                             <CheckCircle2 size={12} /> Ready to Depart ⚡
                           </span>
-                        )}
+                        ) : null}
                       </td>
 
                       {/* Gate Readiness */}
                       <td className="p-4 align-middle">
-                        {order.readiness?.isReadyToDepart ? (
+                        {(order.status === 'in_transit' || planStatus === 'in_transit') ? (
+                          <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-cyan-100 text-cyan-800 border border-cyan-300">
+                            <CheckCircle2 size={13} /> Đã xuất phát cổng
+                          </span>
+                        ) : (order.status === 'completed' || planStatus === 'completed') ? (
+                          <span className="inline-flex items-center justify-center w-[160px] h-[30px] gap-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                            <CheckCircle2 size={13} className="text-emerald-600" /> Đã cập bến đích
+                          </span>
+                        ) : order.readiness?.isReadyToDepart ? (
                           <button
                             onClick={() => {
                               setCurrentReadiness(order.readiness || null);
@@ -858,40 +884,106 @@ export default function ManagerPlanningPage() {
                       <td className="p-4 align-middle text-right">
                         <div className="flex items-center justify-end gap-2">
                           {/* Strategic Plan Button */}
-                          <button
-                            onClick={() => handleOpenFrameworkModal(order)}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 ${
-                              plan?.managerVehicleType
-                                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
-                                : 'bg-blue-600 hover:bg-blue-700 text-white'
-                            }`}
-                            title="Thiết lập kế hoạch vận chuyển tổng thể"
-                          >
-                            <Truck size={13} />
-                            {plan?.managerVehicleType ? 'Sửa kế hoạch' : 'Thiết lập kế hoạch'}
-                          </button>
+                          {(() => {
+                            const isCompleted = order.status === 'completed' || planStatus === 'completed';
+                            const isPlanApproved = planStatus === 'approved' || planStatus === 'confirmed' || planStatus === 'ready_to_depart' || order.status === 'in_transit' || isCompleted;
+                            const hasActiveIncident = Boolean(plan?.activeIncident) && !isCompleted;
+
+                            // Nếu kế hoạch đã hoàn thành HOẶC đã duyệt (và KHÔNG có sự cố): ẨN hoàn toàn nút "Sửa kế hoạch"
+                            if (isPlanApproved && !hasActiveIncident) {
+                              return null;
+                            }
+
+                            return (
+                              <button
+                                onClick={() => handleOpenFrameworkModal(order)}
+                                className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 ${
+                                  hasActiveIncident
+                                    ? 'bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 animate-pulse'
+                                    : plan?.managerVehicleType
+                                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                }`}
+                                title={hasActiveIncident ? 'Lộ trình gặp sự cố - Bấm để hiệu chỉnh lại định hướng kế hoạch' : 'Thiết lập kế hoạch vận chuyển tổng thể'}
+                              >
+                                {hasActiveIncident ? <AlertCircle size={13} className="text-rose-600" /> : <Truck size={13} />}
+                                {hasActiveIncident
+                                  ? 'Sửa kế hoạch (Sự cố)'
+                                  : plan?.managerVehicleType
+                                  ? 'Sửa kế hoạch'
+                                  : 'Thiết lập kế hoạch'}
+                              </button>
+                            );
+                          })()}
+
+                          {/* Completed Trip View Route Button */}
+                          {(order.status === 'completed' || planStatus === 'completed') && (
+                            <button
+                              onClick={() => handleOpenReviewModal(order)}
+                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-2xs transition-colors inline-flex items-center gap-1.5"
+                              title="Chuyến đi đã cập bến đích an toàn - Bấm để xem chi tiết lộ trình"
+                            >
+                              <Eye size={13} className="text-slate-500" /> Xem lộ trình
+                            </button>
+                          )}
 
                           {/* Review Button */}
                           {planStatus === 'pending_approval' && (
                             <button
                               onClick={() => handleOpenReviewModal(order)}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5"
+                              className={`px-3 py-1.5 text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 ${
+                                Boolean(plan?.activeIncident)
+                                  ? 'bg-rose-600 hover:bg-rose-700 animate-pulse'
+                                  : 'bg-emerald-600 hover:bg-emerald-700'
+                              }`}
                               title="Xem chi tiết các chặng và phê duyệt kế hoạch"
                             >
-                              <Eye size={13} /> Duyệt kế hoạch
+                              <Eye size={13} />
+                              {Boolean(plan?.activeIncident) ? 'Duyệt kế hoạch (Sự cố)' : 'Duyệt kế hoạch'}
                             </button>
                           )}
 
-                          {/* Assign Staff Button */}
-                          {(planStatus === 'approved' || planStatus === 'confirmed' || planStatus === 'ready_to_depart') && (
-                            <button
-                              onClick={() => handleOpenAssignModal(order)}
-                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5"
-                              title="Phân công tài xế và bác sĩ hộ tống"
-                            >
-                              <UserCheck size={13} /> Phân công nhân sự
-                            </button>
-                          )}
+                          {/* Assign Staff Button (Ẩn đối với đơn đã hoàn thành) */}
+                          {!(order.status === 'completed' || planStatus === 'completed') &&
+                            (planStatus === 'approved' || planStatus === 'confirmed' || planStatus === 'ready_to_depart' || order.status === 'in_transit' || planStatus === 'in_transit') && (() => {
+                            const isInTransit = order.status === 'in_transit' || planStatus === 'in_transit';
+
+                            if (isInTransit) {
+                              return (
+                                <button
+                                  onClick={() => handleOpenAssignModal(order)}
+                                  className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5"
+                                  title="Xem nhân sự đang phụ trách chuyến đi"
+                                >
+                                  <UserCheck size={13} /> Xem nhân sự
+                                </button>
+                              );
+                            }
+
+                            const isFullyReady = Boolean(order.readiness?.isReadyToDepart) || planStatus === 'ready_to_depart';
+
+                            if (isFullyReady) {
+                              return (
+                                <button
+                                  onClick={() => handleOpenAssignModal(order)}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5"
+                                  title="Đã phân công đầy đủ nhân sự và đạt 100% điều kiện xuất phát - Bấm để xem hoặc cập nhật nhân sự"
+                                >
+                                  <CheckCircle2 size={13} /> Phân công thành công
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <button
+                                onClick={() => handleOpenAssignModal(order)}
+                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5"
+                                title="Phân công tài xế và bác sĩ hộ tống"
+                              >
+                                <UserCheck size={13} /> Phân công nhân sự
+                              </button>
+                            );
+                          })()}
                         </div>
                       </td>
                     </tr>
@@ -1186,7 +1278,11 @@ export default function ManagerPlanningPage() {
       <Modal
         isOpen={isReviewModalOpen}
         onClose={() => setIsReviewModalOpen(false)}
-        title={`Phê duyệt kế hoạch lộ trình chi tiết - ${selectedOrderForReview?.requestCode}`}
+        title={
+          selectedOrderForReview?.status === 'completed' || selectedOrderForReview?.routePlan?.planStatus === 'completed'
+            ? `Chi tiết lộ trình vận chuyển (Chuyến đi đã hoàn tất 🏁) - ${selectedOrderForReview?.requestCode}`
+            : `Phê duyệt kế hoạch lộ trình chi tiết - ${selectedOrderForReview?.requestCode}`
+        }
       >
         <div className="flex flex-col gap-4 text-xs">
           {loadingRouteDetail ? (
@@ -1273,7 +1369,16 @@ export default function ManagerPlanningPage() {
 
               {/* Action Buttons */}
               <div className="border-t border-slate-200 pt-3 mt-2">
-                {!isRejecting ? (
+                {selectedOrderForReview?.status === 'completed' || selectedOrderForReview?.routePlan?.planStatus === 'completed' ? (
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                      <CheckCircle2 size={15} className="text-emerald-600" /> Chuyến đi đã cập bến đích an toàn (Chế độ lưu trữ & đối soát).
+                    </span>
+                    <Button variant="outline" onClick={() => setIsReviewModalOpen(false)}>
+                      Đóng
+                    </Button>
+                  </div>
+                ) : !isRejecting ? (
                   <div className="flex justify-between items-center">
                     <button
                       type="button"
