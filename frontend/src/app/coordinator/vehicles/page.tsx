@@ -15,6 +15,10 @@ export default function VehicleManagementPage() {
   const { vehicles, addVehicle, updateVehicle, deleteVehicle, refreshVehicles } = useFleetRouteStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('ALL');
+  const [filterCapacity, setFilterCapacity] = useState('ALL');
+  const [filterStatus, setFilterStatus] = useState('ALL');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Modal states
@@ -83,8 +87,13 @@ export default function VehicleManagementPage() {
     const matchesSearch = v.code.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           v.location.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = filterType === 'ALL' || v.type === filterType;
-    return matchesSearch && matchesType;
+    const matchesCapacity = filterCapacity === 'ALL' || v.capacity === Number(filterCapacity);
+    const matchesStatus = filterStatus === 'ALL' || v.status === filterStatus;
+    return matchesSearch && matchesType && matchesCapacity && matchesStatus;
   });
+  const pageCount = Math.ceil(filteredVehicles.length / pageSize);
+  const visiblePage = Math.min(currentPage, Math.max(pageCount, 1));
+  const paginatedVehicles = filteredVehicles.slice((visiblePage - 1) * pageSize, visiblePage * pageSize);
 
   return (
     <div className="flex flex-col gap-6 pb-12">
@@ -168,7 +177,10 @@ export default function VehicleManagementPage() {
               type="text" 
               placeholder="Search plate or location..." 
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
               className="border-none outline-none text-sm w-full bg-transparent" 
             />
           </div>
@@ -177,13 +189,44 @@ export default function VehicleManagementPage() {
             <Filter size={16} className="text-slate-500 shrink-0" />
             <select
               value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
+              onChange={(e) => {
+                setFilterType(e.target.value);
+                setCurrentPage(1);
+              }}
               className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white font-medium text-slate-700 outline-none"
             >
-              <option value="ALL">All Fleet Types</option>
+              <option value="ALL">Tất cả loại xe</option>
               <option value="Climate-Controlled Truck">Climate-Controlled Truck</option>
               <option value="Air Cargo Stall">Air Cargo Stall</option>
               <option value="Specialized Container">Specialized Container</option>
+            </select>
+            <select
+              aria-label="Lọc theo sức chứa"
+              value={filterCapacity}
+              onChange={(e) => {
+                setFilterCapacity(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white font-medium text-slate-700 outline-none"
+            >
+              <option value="ALL">Tất cả sức chứa</option>
+              <option value="2">2 stall</option>
+              <option value="4">4 stall</option>
+              <option value="6">6 stall</option>
+            </select>
+            <select
+              aria-label="Lọc theo trạng thái"
+              value={filterStatus}
+              onChange={(e) => {
+                setFilterStatus(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white font-medium text-slate-700 outline-none"
+            >
+              <option value="ALL">Tất cả trạng thái</option>
+              <option value="available">Available</option>
+              <option value="in_use">In Use</option>
+              <option value="maintenance">Maintenance</option>
             </select>
           </div>
         </div>
@@ -202,7 +245,7 @@ export default function VehicleManagementPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredVehicles.map(v => (
+              {paginatedVehicles.map(v => (
                 <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
                   <td className="p-4 font-bold text-slate-900">{v.code}</td>
                   <td className="p-4 text-slate-700 font-medium">{v.type}</td>
@@ -216,7 +259,7 @@ export default function VehicleManagementPage() {
                     )}
                     {v.status === 'in_use' && (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
-                        <Truck size={13} /> In Transit
+                        <Truck size={13} /> In Use
                       </span>
                     )}
                     {v.status === 'maintenance' && (
@@ -263,6 +306,32 @@ export default function VehicleManagementPage() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-sm">
+          <span className="text-slate-500">
+            {filteredVehicles.length === 0
+              ? 'Không có phương tiện'
+              : `Hiển thị ${(visiblePage - 1) * pageSize + 1}-${Math.min(visiblePage * pageSize, filteredVehicles.length)} trong ${filteredVehicles.length} phương tiện`}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
+              disabled={visiblePage <= 1}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Trước
+            </button>
+            <span className="text-slate-600">Trang {visiblePage} / {Math.max(pageCount, 1)}</span>
+            <button
+              type="button"
+              onClick={() => setCurrentPage((page) => Math.min(page + 1, pageCount))}
+              disabled={visiblePage >= pageCount}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Sau
+            </button>
+          </div>
         </div>
       </div>
 

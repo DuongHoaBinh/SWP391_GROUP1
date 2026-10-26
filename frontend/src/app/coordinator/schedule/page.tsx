@@ -14,10 +14,13 @@ import {
   Play,
   CheckCircle2,
   Calendar,
+  ChevronLeft,
+  ChevronRight,
   AlertCircle,
   Plane,
   Radio,
   Eye,
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -26,6 +29,35 @@ import { useTranslation } from '@/lib/i18n/LanguageContext';
 import { trackingApi, TripTrackingDetails } from '@/features/tracking/api/tracking.api';
 import toast from 'react-hot-toast';
 
+type CalendarMode = 'week' | 'month';
+type ScheduleView = 'calendar' | 'list';
+
+function getTripRange(trip: TripTrackingDetails): { start: Date; end: Date } | null {
+  const startMilestone = trip.milestones.find((milestone) => milestone.itemType === 'leg_start');
+  const endMilestone = [...trip.milestones].reverse().find((milestone) => milestone.itemType === 'leg_end');
+  const startValue = startMilestone?.actualTime || startMilestone?.plannedTime;
+  const endValue = endMilestone?.actualTime || endMilestone?.plannedTime || startValue;
+  if (!startValue || !endValue) return null;
+
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  return { start, end: end < start ? start : end };
+}
+
+function escapePrintText(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const escaped: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return escaped[character];
+  });
+}
+
 export default function TripSchedulePage() {
   const { t, translateStatus } = useTranslation();
 
@@ -33,8 +65,11 @@ export default function TripSchedulePage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<string>('ready_to_depart'); // Default: Chờ xuất phát
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [scheduleView, setScheduleView] = useState<ScheduleView>('calendar');
+  const [calendarMode, setCalendarMode] = useState<CalendarMode>('week');
+  const [calendarDate, setCalendarDate] = useState(() => new Date());
 
   // Custom Confirmation Modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -211,6 +246,133 @@ export default function TripSchedulePage() {
     return matchesSearch && matchesStatus;
   });
 
+  const calendarDates = (() => {
+    const anchor = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate());
+    if (calendarMode === 'week') {
+      const weekday = (anchor.getDay() + 6) % 7;
+      anchor.setDate(anchor.getDate() - weekday);
+      return Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(anchor);
+        date.setDate(anchor.getDate() + index);
+        return date;
+      });
+    }
+
+    const firstOfMonth = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    const weekday = (firstOfMonth.getDay() + 6) % 7;
+    const firstVisibleDate = new Date(firstOfMonth);
+    firstVisibleDate.setDate(firstOfMonth.getDate() - weekday);
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(firstVisibleDate);
+      date.setDate(firstVisibleDate.getDate() + index);
+      return date;
+    });
+  })();
+
+  const isVehicleConflict = (trip: TripTrackingDetails) => {
+    const tripRange = getTripRange(trip);
+    if (!tripRange || !trip.assignedVehicle || trip.shipmentStatus === 'completed' || trip.shipmentStatus === 'cancelled') {
+      return false;
+    }
+
+    return trips.some((otherTrip) => {
+      if (
+        otherTrip.shipmentId === trip.shipmentId ||
+        otherTrip.assignedVehicle !== trip.assignedVehicle ||
+        otherTrip.shipmentStatus === 'completed' ||
+        otherTrip.shipmentStatus === 'cancelled'
+      ) {
+        return false;
+      }
+      const otherRange = getTripRange(otherTrip);
+      return Boolean(
+        otherRange &&
+          tripRange.start < otherRange.end &&
+          otherRange.start < tripRange.end,
+      );
+    });
+  };
+
+  const exportDispatchOrder = (trip: TripTrackingDetails) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('Trình duyệt đã chặn cửa sổ xuất PDF. Vui lòng cho phép cửa sổ bật lên rồi thử lại.');
+      return;
+    }
+
+    const safe = escapePrintText;
+    const milestones = trip.milestones
+      .map((milestone) => {
+        const planned = milestone.actualTime || milestone.plannedTime;
+        const time = planned ? new Date(planned).toLocaleString('vi-VN') : 'Chưa xếp lịch';
+        return `<tr><td>${milestone.seq}</td><td>${safe(milestone.title)}</td><td>${safe(milestone.location)}</td><td>${safe(time)}</td></tr>`;
+      })
+      .join('');
+    const horses = trip.assignedHorses.map((horse) => safe(horse.name)).join(', ') || 'Chưa có thông tin';
+
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html>
+      <html lang="vi">
+        <head>
+          <meta charset="utf-8" />
+          <title>Lệnh điều động ${safe(trip.requestCode)}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #172033; margin: 32px; }
+            h1 { margin: 0 0 6px; font-size: 22px; }
+            .subtitle { color: #536174; margin-bottom: 24px; }
+            .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-bottom: 24px; }
+            .field { border-bottom: 1px solid #d6dce5; padding: 8px 0; }
+            .label { display: block; color: #536174; font-size: 11px; text-transform: uppercase; margin-bottom: 4px; }
+            table { border-collapse: collapse; width: 100%; font-size: 12px; }
+            th, td { border: 1px solid #cbd3df; padding: 8px; text-align: left; }
+            th { background: #eef2f7; }
+            .signatures { display: flex; justify-content: space-between; margin-top: 56px; text-align: center; }
+            .signatures div { width: 42%; }
+            @media print { body { margin: 16mm; } }
+          </style>
+        </head>
+        <body>
+          <h1>LỆNH ĐIỀU ĐỘNG VẬN CHUYỂN</h1>
+          <div class="subtitle">Mã chuyến: ${safe(trip.requestCode)} · Ngày lập: ${safe(new Date().toLocaleDateString('vi-VN'))}</div>
+          <div class="summary">
+            <div class="field"><span class="label">Điểm xuất phát</span>${safe(trip.origin)}</div>
+            <div class="field"><span class="label">Điểm đến</span>${safe(trip.destination)}</div>
+            <div class="field"><span class="label">Phương tiện</span>${safe(trip.assignedVehicle || 'Chưa phân bổ')}</div>
+            <div class="field"><span class="label">Tài xế</span>${safe(trip.assignedDriver || 'Chưa phân công')}</div>
+            <div class="field"><span class="label">Hộ tống</span>${safe(trip.assignedEscort || 'Chưa phân công')}</div>
+            <div class="field"><span class="label">Ngựa vận chuyển</span>${horses}</div>
+          </div>
+          <h2>Chặng đường và trạm dừng</h2>
+          <table>
+            <thead><tr><th>Thứ tự</th><th>Chặng / trạm</th><th>Địa điểm</th><th>Thời gian</th></tr></thead>
+            <tbody>${milestones || '<tr><td colspan="4">Chưa có dữ liệu chặng hoặc trạm dừng.</td></tr>'}</tbody>
+          </table>
+          <div class="signatures">
+            <div>Điều phối viên<br /><br /><br />________________________</div>
+            <div>Tài xế nhận chuyến<br /><br /><br />________________________</div>
+          </div>
+          <script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 250); });</script>
+        </body>
+      </html>`);
+    printWindow.document.close();
+  };
+
+  const moveCalendar = (direction: number) => {
+    setCalendarDate((date) => {
+      const next = new Date(date);
+      if (calendarMode === 'week') {
+        next.setDate(next.getDate() + direction * 7);
+      } else {
+        next.setMonth(next.getMonth() + direction);
+      }
+      return next;
+    });
+  };
+
+  const calendarTitle = calendarMode === 'week'
+    ? `${calendarDates[0].toLocaleDateString('vi-VN')} – ${calendarDates[6].toLocaleDateString('vi-VN')}`
+    : calendarDate.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' });
+
   const readyToDepartCount = trips.filter((t) => t.shipmentStatus === 'ready_to_depart').length;
   const inTransitCount = trips.filter((t) => t.shipmentStatus === 'in_transit' || t.shipmentStatus === 'arrived').length;
   const completedCount = trips.filter((t) => t.shipmentStatus === 'completed').length;
@@ -307,6 +469,69 @@ export default function TripSchedulePage() {
         </div>
       </div>
 
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setScheduleView('calendar')}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${scheduleView === 'calendar' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            Lịch trực quan
+          </button>
+          <button
+            type="button"
+            onClick={() => setScheduleView('list')}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${scheduleView === 'list' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            Danh sách
+          </button>
+        </div>
+        {scheduleView === 'calendar' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setCalendarMode('week')}
+                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${calendarMode === 'week' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+              >
+                Tuần
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalendarMode('month')}
+                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${calendarMode === 'month' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+              >
+                Tháng
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => moveCalendar(-1)}
+              aria-label="Khoảng thời gian trước"
+              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
+            >
+              <ChevronLeft size={17} />
+            </button>
+            <strong className="min-w-36 text-center text-sm text-slate-700">{calendarTitle}</strong>
+            <button
+              type="button"
+              onClick={() => moveCalendar(1)}
+              aria-label="Khoảng thời gian tiếp theo"
+              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
+            >
+              <ChevronRight size={17} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setCalendarDate(new Date())}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Hôm nay
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Schedule Table */}
       {loading ? (
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-sm">
@@ -320,6 +545,98 @@ export default function TripSchedulePage() {
           <p className="text-xs text-slate-500 mt-1 max-w-sm">
             Hiện tại không có chuyến đi nào trong mục lọc này. Các chuyến đã hoàn thành Flow 3 (Route Planning) sẽ xuất hiện tại đây.
           </p>
+        </div>
+      ) : scheduleView === 'calendar' ? (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <CalendarDays size={17} className="text-blue-600" />
+              Lịch xe và tài xế theo {calendarMode === 'week' ? 'tuần' : 'tháng'}
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700">
+              <AlertCircle size={14} /> Cảnh báo khi cùng xe có chuyến bị trùng thời gian
+            </span>
+          </div>
+          <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
+            {['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật'].map((day) => (
+              <div key={day} className="px-2 py-2 text-center text-xs font-bold text-slate-500">{day}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {calendarDates.map((date) => {
+              const dayTrips = filteredTrips
+                .filter((trip) => {
+                  const range = getTripRange(trip);
+                  const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+                  const dayEnd = new Date(dayStart);
+                  dayEnd.setDate(dayEnd.getDate() + 1);
+                  return Boolean(
+                    range &&
+                      range.start < dayEnd &&
+                      range.end >= dayStart,
+                  );
+                })
+                .sort((a, b) => (getTripRange(a)?.start.getTime() || 0) - (getTripRange(b)?.start.getTime() || 0));
+              const isOutsideMonth = date.getMonth() !== calendarDate.getMonth();
+              return (
+                <div
+                  key={date.toISOString()}
+                  className={`min-h-36 border-b border-r border-slate-100 p-2 ${isOutsideMonth && calendarMode === 'month' ? 'bg-slate-50/70' : ''}`}
+                >
+                  <div className={`mb-2 text-xs font-bold ${isOutsideMonth && calendarMode === 'month' ? 'text-slate-300' : 'text-slate-600'}`}>
+                    {date.getDate()}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {dayTrips.map((trip) => {
+                      const range = getTripRange(trip);
+                      const hasConflict = isVehicleConflict(trip);
+                      const isDepartureDate = Boolean(
+                        range &&
+                          range.start.getFullYear() === date.getFullYear() &&
+                          range.start.getMonth() === date.getMonth() &&
+                          range.start.getDate() === date.getDate(),
+                      );
+                      return (
+                        <div
+                          key={trip.shipmentId}
+                          className={`rounded-lg border p-2 text-xs ${hasConflict ? 'border-rose-300 bg-rose-50' : 'border-blue-100 bg-blue-50/70'}`}
+                        >
+                          <div className="flex items-start justify-between gap-1">
+                            <span className="font-extrabold text-slate-800">{trip.requestCode}</span>
+                            {hasConflict && <AlertCircle size={14} className="shrink-0 text-rose-600" aria-label="Trùng lịch xe" />}
+                          </div>
+                          <div className="mt-1 text-slate-600">
+                            {isDepartureDate
+                              ? range?.start.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) || 'Chưa xếp giờ'
+                              : 'Đang trên hành trình'}
+                            {isDepartureDate && range?.end && range.end.getTime() !== range.start.getTime()
+                              ? ` – ${range.end.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`
+                              : ''}
+                          </div>
+                          <div className="mt-1 truncate font-semibold text-slate-700" title={trip.assignedVehicle || 'Chưa phân bổ xe'}>
+                            <Truck size={12} className="mr-1 inline" />{trip.assignedVehicle || 'Chưa phân bổ xe'}
+                          </div>
+                          <div className="mt-0.5 truncate text-slate-600" title={trip.assignedDriver || 'Chưa phân công tài xế'}>
+                            <User size={12} className="mr-1 inline" />{trip.assignedDriver || 'Chưa phân công tài xế'}
+                          </div>
+                          {hasConflict && (
+                            <div className="mt-1 font-bold text-rose-700">Trùng lịch phương tiện</div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => exportDispatchOrder(trip)}
+                            className="mt-2 inline-flex items-center gap-1 font-bold text-blue-700 hover:text-blue-900"
+                          >
+                            <Download size={12} /> Lệnh điều động
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -445,6 +762,14 @@ export default function TripSchedulePage() {
 
                       {/* Actions */}
                       <td className="p-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() => exportDispatchOrder(trip)}
+                          className="mb-2 inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                        >
+                          <Download size={13} />
+                          Xuất lệnh PDF
+                        </button>
                         {isReady && (
                           <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-xs font-medium">
                             <Radio size={13} className="text-amber-500 animate-pulse" />

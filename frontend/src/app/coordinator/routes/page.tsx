@@ -94,6 +94,9 @@ export default function RoutePlanningPage() {
   
   // Search & Map
   const [searchTerm, setSearchTerm] = useState('');
+  const [originFilter, setOriginFilter] = useState('');
+  const [destinationFilter, setDestinationFilter] = useState('');
+  const [planStatusFilter, setPlanStatusFilter] = useState('ALL');
   const [activeMapRoute, setActiveMapRoute] = useState<RouteItem | null>(null);
   const [showMap, setShowMap] = useState<boolean>(true);
 
@@ -798,13 +801,20 @@ export default function RoutePlanningPage() {
   };
 
   // Filter Orders
-  const filteredOrders = planningOrders.filter(
-    (o) =>
-      o.requestCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      o.horseName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      o.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      o.destination.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredOrders = planningOrders.filter((order) => {
+    const query = searchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      order.requestCode.toLowerCase().includes(query) ||
+      order.horseName.toLowerCase().includes(query) ||
+      order.origin.toLowerCase().includes(query) ||
+      order.destination.toLowerCase().includes(query);
+    const matchesOrigin = order.origin.toLowerCase().includes(originFilter.trim().toLowerCase());
+    const matchesDestination = order.destination.toLowerCase().includes(destinationFilter.trim().toLowerCase());
+    const planStatus = order.routeDetail?.planStatus || 'draft';
+    const matchesPlanStatus = planStatusFilter === 'ALL' || planStatus === planStatusFilter;
+    return matchesSearch && matchesOrigin && matchesDestination && matchesPlanStatus;
+  });
 
   // Status Badge Helper
   const renderPlanStatusBadge = (status?: string, activeIncident?: any) => {
@@ -937,17 +947,46 @@ export default function RoutePlanningPage() {
       {/* TAB 1: FLOW 3 DETAILED PLANNING */}
       {activeTab === 'flow3_planning' && (
         <div className="flex flex-col gap-5">
-          {/* Search bar */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center justify-between">
-            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 w-full sm:w-96">
-              <Search size={16} className="text-slate-400 mr-2 shrink-0" />
+          {/* Route filters */}
+          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              <label className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                <Search size={16} className="text-slate-400 mr-2 shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Mã đơn hoặc tên ngựa..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="border-none outline-none text-sm w-full bg-transparent"
+                />
+              </label>
               <input
                 type="text"
-                placeholder="Tìm mã đơn, tên ngựa, điểm đi, điểm đến..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="border-none outline-none text-sm w-full bg-transparent"
+                aria-label="Lọc theo điểm xuất phát"
+                placeholder="Lọc điểm xuất phát..."
+                value={originFilter}
+                onChange={(e) => setOriginFilter(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 outline-none"
               />
+              <input
+                type="text"
+                aria-label="Lọc theo điểm đến"
+                placeholder="Lọc điểm đến..."
+                value={destinationFilter}
+                onChange={(e) => setDestinationFilter(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 outline-none"
+              />
+              <select
+                aria-label="Lọc theo trạng thái duyệt"
+                value={planStatusFilter}
+                onChange={(e) => setPlanStatusFilter(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 font-medium text-slate-700 outline-none"
+              >
+                <option value="ALL">Tất cả trạng thái duyệt</option>
+                <option value="draft">Draft</option>
+                <option value="pending_approval">Pending Approval</option>
+                <option value="approved">Approved</option>
+              </select>
             </div>
             <div className="text-xs text-slate-500 flex items-center gap-1.5">
               <span>Định hướng từ Manager</span>
