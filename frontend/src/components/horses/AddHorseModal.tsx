@@ -53,6 +53,37 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const resetForm = React.useCallback(() => {
+    const freshDob = new Date(Date.now() - 5 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    setName('');
+    setBreed('Thoroughbred');
+    setDateOfBirth(freshDob);
+    setAge(5);
+    setGender('Stallion');
+    setPassportNumber('');
+    setMicrochipNumber('');
+    setMedicalStatus('Healthy');
+    setColor('Bay');
+    setWeight('480 kg');
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    setError('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      resetForm();
+    }
+  }, [isOpen, resetForm]);
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedName = name.trim();
@@ -137,11 +168,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
       }
 
       // Reset form
-      setName('');
-      setPassportNumber('');
-      setMicrochipNumber('');
-      setPhotoFile(null);
-      setPhotoPreview(null);
+      resetForm();
       onClose();
     } catch (err: any) {
       setError(err?.message || 'Không thể tạo hồ sơ ngựa. Vui lòng thử lại.');
@@ -153,7 +180,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title="Add New Racehorse"
       subtitle="Register a new horse profile to include in transport shipments."
       maxWidth="1000px"
@@ -478,7 +505,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px', paddingTop: '16px', borderTop: '1px solid #f1f5f9' }}>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             style={{
               padding: '9px 18px',
               borderRadius: '8px',

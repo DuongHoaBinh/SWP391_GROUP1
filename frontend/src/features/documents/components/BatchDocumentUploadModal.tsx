@@ -39,6 +39,19 @@ export const BatchDocumentUploadModal: React.FC<BatchDocumentUploadModalProps> =
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
 
+  React.useEffect(() => {
+    if (!isOpen) {
+      setSelectedFiles({});
+      setUploadProgress(null);
+    }
+  }, [isOpen]);
+
+  const handleClose = () => {
+    setSelectedFiles({});
+    setUploadProgress(null);
+    onClose();
+  };
+
   if (!isOpen) return null;
 
   const handleFileChange = (regId: number, file: File | null) => {
@@ -134,7 +147,7 @@ export const BatchDocumentUploadModal: React.FC<BatchDocumentUploadModalProps> =
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title={`Nộp Trọn Bộ Hồ Sơ Kiểm Dịch — ${horseName}`}
       subtitle={`Hành trình đi ${destinationCountry || 'Quốc tế'} • Tải lên cùng lúc toàn bộ các chứng từ bắt buộc`}
       maxWidth="680px"
@@ -268,7 +281,7 @@ export const BatchDocumentUploadModal: React.FC<BatchDocumentUploadModalProps> =
             <button
               type="button"
               disabled={isUploading}
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors"
             >
               Hủy bỏ

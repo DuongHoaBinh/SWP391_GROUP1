@@ -343,6 +343,25 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       'UPDATE shipment SET status = ?, updated_at = NOW() WHERE shipment_id = ?',
       [status, shipmentId],
     );
+
+    if (status === ShipmentStatus.COMPLETED || (status as string) === 'completed') {
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'delivered'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+           AND status NOT IN ('retired', 'deceased')`,
+        [shipmentId],
+      );
+    } else if (status === ShipmentStatus.CANCELLED || status === ShipmentStatus.REJECTED) {
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'active'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+           AND status NOT IN ('delivered', 'retired', 'deceased')`,
+        [shipmentId],
+      );
+    }
+
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 

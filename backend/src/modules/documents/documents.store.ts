@@ -61,6 +61,8 @@ interface OrderHorseInfoRow extends RowDataPacket {
   horse_id: number;
   name: string;
   owner_id: number;
+  microchip_no: string | null;
+  passport_no: string | null;
 }
 
 interface OrderDestinationRow extends RowDataPacket {
@@ -384,15 +386,18 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     status: DocumentStatus,
     notes?: string,
     expiryDate?: string,
+    docNumber?: string,
   ): Promise<boolean> {
     const newExpiryDate = expiryDate ? new Date(expiryDate) : null;
+    const cleanDocNumber = docNumber && docNumber.trim().length > 0 ? docNumber.trim() : null;
     const [result] = await this.pool.execute(
       `UPDATE transport_document
        SET status = ?,
            reviewer_notes = ?,
-           expiry_date = COALESCE(?, expiry_date)
+           expiry_date = COALESCE(?, expiry_date),
+           doc_number = COALESCE(?, doc_number)
        WHERE document_id = ?`,
-      [status, notes ?? null, newExpiryDate, documentId],
+      [status, notes ?? null, newExpiryDate, cleanDocNumber, documentId],
     );
     return (result as { affectedRows: number }).affectedRows > 0;
   }
@@ -421,6 +426,14 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       [documentId, specialistId, dto.authorityName, dto.status, approvalDate, dto.notes ?? null],
     );
+
+    if (dto.referenceNumber && dto.referenceNumber.trim().length > 0) {
+      await this.pool.execute(
+        `UPDATE transport_document SET doc_number = ? WHERE document_id = ?`,
+        [dto.referenceNumber.trim(), documentId],
+      );
+    }
+
     return (result as { insertId: number }).insertId;
   }
 
@@ -459,7 +472,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
 
   async findHorsesInOrder(orderId: number): Promise<OrderHorseInfoRow[]> {
     const [rows] = await this.pool.execute<OrderHorseInfoRow[]>(
-      `SELECT h.horse_id, h.name, h.owner_id
+      `SELECT h.horse_id, h.name, h.owner_id, h.microchip_no, h.passport_no
        FROM shipment_horse sh
        JOIN horse h ON h.horse_id = sh.horse_id
        WHERE sh.shipment_id = ?`,

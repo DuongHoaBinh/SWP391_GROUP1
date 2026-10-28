@@ -111,7 +111,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               weight: weight.trim() || undefined,
               medicalStatus: medicalStatus || undefined,
               specialRequirements: specialRequirements.trim() || undefined,
-              status: 'active',
             }),
           });
         } catch (apiErr: any) {
