@@ -318,12 +318,12 @@ export default function RequestsPage() {
           totalCost: 15000000,
           createdAt: new Date().toISOString(),
           customerEmail: 'customer@equitransit.com',
-          horses: r.horses?.map((h, hIdx) => ({
+          horses: r.horses?.map((h: any, hIdx: number) => ({
             horseId: hIdx + 1,
-            name: h.horse.name,
-            breed: h.horse.breed,
-            gender: h.horse.gender,
-            age: h.horse.age,
+            name: h.horse?.name || h.name || 'Horse',
+            breed: h.horse?.breed || h.breed || null,
+            gender: h.horse?.gender || h.gender || null,
+            age: h.horse?.age ?? h.age ?? null,
           })) || [
             {
               horseId: 1,
