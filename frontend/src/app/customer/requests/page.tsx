@@ -71,7 +71,7 @@ type SortOrder = 'asc' | 'desc';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
-  requested: 'Requested',
+  requested: 'Pending Approval',
   under_review: 'Under Review',
   approved: 'Approved',
   rejected: 'Rejected',
@@ -490,9 +490,12 @@ export default function RequestsPage() {
               [
                 'all',
                 'requested',
-                'under_review',
                 'approved',
                 'rejected',
+                'planning',
+                'in_transit',
+                'completed',
+                'cancelled',
               ] as const
             ).map((s) => (
               <button

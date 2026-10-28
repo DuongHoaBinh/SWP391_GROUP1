@@ -61,7 +61,7 @@ type SortOrder = 'asc' | 'desc';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
-  requested: 'Requested',
+  requested: 'Pending Approval',
   under_review: 'Under Review',
   approved: 'Approved',
   rejected: 'Rejected',
@@ -488,7 +488,7 @@ export default function ManagerRequestsPage() {
           {/* Status Filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
             <Filter size={14} color="#64748b" />
-            {(['all', 'requested', 'under_review', 'approved', 'rejected'] as const).map((s) => (
+            {(['all', 'requested', 'approved', 'rejected', 'planning', 'in_transit', 'completed', 'cancelled'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setFilterStatus(s)}
