@@ -1,35 +1,106 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, ChevronDown, Search, LogOut, Check, ExternalLink } from 'lucide-react';
+import { Bell, ChevronDown, Search, LogOut, Check, ExternalLink, Settings, Menu } from 'lucide-react';
 import { getCurrentUser, clearAuthSession } from '@/lib/auth';
-import { mockNotifications } from '@/lib/mock-data';
+import { apiClient } from '@/lib/api-client';
+import { mockCurrentUser, mockNotifications } from '@/lib/mock-data';
+import { UserProfile, NotificationItem } from '@/lib/types';
 import Link from 'next/link';
+import { LogoutConfirmModal } from './LogoutConfirmModal';
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
+
+function formatHeaderTimeAgo(dateStr: string) {
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
 
 interface HeaderProps {
   title?: string;
   subtitle?: string;
+  onMenuClick?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   title = 'Dashboard',
   subtitle = 'Overview of your racehorse transportation activities.',
+  onMenuClick,
 }) => {
   const router = useRouter();
-  const user = getCurrentUser();
+  const { t } = useLanguage();
+  const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [searchValue, setSearchValue] = useState('');
+
+  const fetchNotifications = async () => {
+    try {
+      const data = await apiClient<any[]>('/notifications');
+      if (Array.isArray(data)) {
+        const mapped: NotificationItem[] = data.map((item) => ({
+          id: String(item.id),
+          type: item.notifType === 'health_alert' ? 'CRITICAL' : 'INFO',
+          title: item.title,
+          message: item.message,
+          timeAgo: item.createdAt ? formatHeaderTimeAgo(item.createdAt) : 'Recently',
+          isRead: Boolean(item.isRead),
+          relatedRequestCode: item.shipmentId ? `REQ-${String(item.shipmentId).padStart(3, '0')}` : undefined,
+          actionUrl: item.shipmentId ? `/customer/requests/${item.shipmentId}` : undefined,
+        }));
+        setNotifications(mapped);
+      } else {
+        setNotifications([]);
+      }
+    } catch {
+      setNotifications([]);
+    }
+  };
+
+  useEffect(() => {
+    setCurrentUser(getCurrentUser());
+    fetchNotifications();
+
+    const handleUserUpdate = () => {
+      setCurrentUser(getCurrentUser());
+      fetchNotifications();
+    };
+    window.addEventListener('auth-user-updated', handleUserUpdate);
+    window.addEventListener('notifications-updated', fetchNotifications);
+    return () => {
+      window.removeEventListener('auth-user-updated', handleUserUpdate);
+      window.removeEventListener('notifications-updated', fetchNotifications);
+    };
+  }, []);
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
-  const handleMarkAllRead = () => {
+  const handleMarkAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    try {
+      await apiClient('/notifications/read-all', { method: 'PATCH' });
+      window.dispatchEvent(new CustomEvent('notifications-updated'));
+    } catch {
+      // ignore
+    }
   };
 
-  const handleLogout = () => {
+  const handleLogoutClick = () => {
     setShowUserMenu(false);
+    setShowLogoutModal(true);
+  };
+
+  const handleConfirmLogout = () => {
+    setShowLogoutModal(false);
     clearAuthSession();
     router.push('/login');
   };
@@ -50,37 +121,48 @@ export const Header: React.FC<HeaderProps> = ({
       }}
     >
       {/* Title & Subtitle */}
-      <div>
-        <h1
-          style={{
-            fontSize: '20px',
-            fontWeight: 800,
-            color: '#0f172a',
-            letterSpacing: '-0.02em',
-            margin: 0,
-            lineHeight: 1.2,
-          }}
-        >
-          {title}
-        </h1>
-        <p
-          style={{
-            fontSize: '13px',
-            color: '#64748b',
-            marginTop: '2px',
-            marginBottom: 0,
-          }}
-        >
-          {subtitle}
-        </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {onMenuClick && (
+          <button
+            onClick={onMenuClick}
+            className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shrink-0"
+            aria-label="Open navigation menu"
+          >
+            <Menu size={20} />
+          </button>
+        )}
+        <div>
+          <h1
+            style={{
+              fontSize: '20px',
+              fontWeight: 800,
+              color: '#0f172a',
+              letterSpacing: '-0.02em',
+              margin: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            {title}
+          </h1>
+          <p
+            style={{
+              fontSize: '13px',
+              color: '#64748b',
+              marginTop: '2px',
+              marginBottom: 0,
+            }}
+          >
+            {subtitle}
+          </p>
+        </div>
       </div>
 
       {/* Right Controls: Search Bar + Notifications + User Profile */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
         {/* Search Bar */}
         <div
+          className="hidden sm:flex"
           style={{
-            display: 'flex',
             alignItems: 'center',
             backgroundColor: '#ffffff',
             border: '1px solid #e2e8f0',
@@ -93,7 +175,14 @@ export const Header: React.FC<HeaderProps> = ({
           <Search size={16} color="#94a3b8" style={{ marginRight: '8px', flexShrink: 0 }} />
           <input
             type="text"
-            placeholder="Search requests, horses, do..."
+            placeholder={t('common.search', 'Search requests, horses...')}
+            value={searchValue}
+            onChange={(e) => setSearchValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && searchValue.trim()) {
+                router.push(`/customer/requests?search=${encodeURIComponent(searchValue.trim())}`);
+              }
+            }}
             style={{
               border: 'none',
               outline: 'none',
@@ -118,6 +207,9 @@ export const Header: React.FC<HeaderProps> = ({
             ⌘K
           </span>
         </div>
+
+        {/* Language Switcher */}
+        <LanguageSwitcher variant="pill" />
 
         {/* Notification Bell Dropdown */}
         <div style={{ position: 'relative' }}>
@@ -185,13 +277,13 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
               >
                 <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
-                  Notifications ({unreadCount})
+                  {t('common.notifications', 'Notifications')} ({unreadCount})
                 </div>
                 <button
                   onClick={handleMarkAllRead}
                   style={{ fontSize: '12px', color: '#2563eb', fontWeight: 600, cursor: 'pointer' }}
                 >
-                  Mark all read
+                  {t('common.markAllRead', 'Mark all read')}
                 </button>
               </div>
 
@@ -226,7 +318,7 @@ export const Header: React.FC<HeaderProps> = ({
                   backgroundColor: '#fafbfc',
                 }}
               >
-                View all notifications
+                {t('common.viewDetails', 'View all notifications')}
               </Link>
             </div>
           )}
@@ -252,6 +344,7 @@ export const Header: React.FC<HeaderProps> = ({
             }}
           >
             <div
+              suppressHydrationWarning
               style={{
                 width: '32px',
                 height: '32px',
@@ -265,11 +358,21 @@ export const Header: React.FC<HeaderProps> = ({
                 fontSize: '12px',
               }}
             >
-              {user.initials}
+              {currentUser.initials || 'CU'}
             </div>
-            <div style={{ textAlign: 'left', lineHeight: 1.2 }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{user.name}</div>
-              <div style={{ fontSize: '11px', color: '#64748b' }}>Customer</div>
+            <div style={{ textAlign: 'left', lineHeight: 1.2, maxWidth: '140px', overflow: 'hidden' }}>
+              <div
+                suppressHydrationWarning
+                style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}
+              >
+                {currentUser.name || currentUser.email}
+              </div>
+              <div
+                suppressHydrationWarning
+                style={{ fontSize: '11px', color: '#64748b' }}
+              >
+                {currentUser.role === 'CUSTOMER' ? 'Customer' : currentUser.role}
+              </div>
             </div>
             <ChevronDown size={14} color="#64748b" style={{ marginLeft: '4px' }} />
           </button>
@@ -290,8 +393,29 @@ export const Header: React.FC<HeaderProps> = ({
                 zIndex: 100,
               }}
             >
+              <Link
+                href="/customer/settings"
+                onClick={() => setShowUserMenu(false)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '9px 12px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  color: '#334155',
+                  textDecoration: 'none',
+                  textAlign: 'left',
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f1f5f9')}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
+              >
+                <Settings size={15} />
+                <span>{t('common.settings', 'Profile Settings')}</span>
+              </Link>
               <button
-                onClick={handleLogout}
+                onClick={handleLogoutClick}
                 style={{
                   width: '100%',
                   display: 'flex',
@@ -305,17 +429,23 @@ export const Header: React.FC<HeaderProps> = ({
                   border: 'none',
                   background: 'none',
                   textAlign: 'left',
+                  borderTop: '1px solid #f1f5f9',
                 }}
                 onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#fef2f2')}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
               >
                 <LogOut size={15} />
-                <span>Log out</span>
+                <span>{t('common.logout', 'Log out')}</span>
               </button>
             </div>
           )}
         </div>
       </div>
+      <LogoutConfirmModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleConfirmLogout}
+      />
     </header>
   );
 };

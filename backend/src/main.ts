@@ -2,10 +2,23 @@ import 'dotenv/config';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
+import * as fs from 'fs';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const uploadDir = join(process.cwd(), 'uploads', 'documents');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+  const horsesUploadDir = join(process.cwd(), 'uploads', 'horses');
+  if (!fs.existsSync(horsesUploadDir)) {
+    fs.mkdirSync(horsesUploadDir, { recursive: true });
+  }
+
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
   app.setGlobalPrefix('api');
   app.enableCors({
     origin: [

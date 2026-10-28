@@ -1,25 +1,8 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
 import { CreateOrderDto } from './dto/create-order.dto';
-
-export interface OrderQueryParams {
-  status?: ShipmentStatus;
-  departureDateFrom?: string;   // ISO date string
-  departureDateTo?: string;     // ISO date string
-  sortBy?: 'createdAt' | 'totalCost' | 'requestedDate';
-  sortOrder?: 'asc' | 'desc';
-  page?: number;
-  limit?: number;
-}
-
-export interface PaginatedOrders {
-  data: TransportOrder[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-}
+import { UpdateOrderDto } from './dto/update-order.dto';
 
 interface ShipmentRow extends RowDataPacket {
   shipment_id: number;
@@ -39,12 +22,15 @@ interface ShipmentRow extends RowDataPacket {
   actual_arrival_date: Date | null;
   special_requirements: string | null;
   rejection_reason: string | null;
+  change_request_notes: string | null;
   status: ShipmentStatus;
   total_cost: number | string;
   created_at: Date;
   updated_at: Date;
   customer_email?: string;
   approver_name?: string;
+  request_code?: string;
+  customer_request_code?: string;
 }
 
 interface AttachmentRow extends RowDataPacket {
@@ -60,14 +46,12 @@ interface HorseRow extends RowDataPacket {
   breed: string | null;
   gender: 'male' | 'female' | 'gelding' | null;
   age: number | null;
-}
-
-interface HorseInsertData {
-  name: string;
-  breed: string | null;
-  gender: 'male' | 'female' | 'gelding' | null;
-  age: number | null;
-  microchipNumber: string | null;
+  color?: string | null;
+  weight?: string | null;
+  medical_status?: string | null;
+  microchip_no?: string | null;
+  passport_no?: string | null;
+  special_requirements?: string | null;
 }
 
 @Injectable()
@@ -123,38 +107,96 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       await this.createAttachment(shipmentId, dto.medicalDocumentUrl, customerId);
     }
 
-    // 3. Lưu thông tin con ngựa vào bảng horse và liên kết qua shipment_horse
-    const horsesToInsert: HorseInsertData[] = [];
+    // 3. Xử lý các con ngựa trong đơn vận chuyển: bắt buộc chọn từ My Horses và chuyển trạng thái sang in_transit
+    const horsesToProcess: Array<{
+      horseId?: number;
+      name: string;
+      breed: string | null;
+      gender: 'male' | 'female' | 'gelding' | null;
+      age: number | null;
+      quantity: number;
+    }> = [];
 
     if (dto.horses && dto.horses.length > 0) {
       for (const h of dto.horses) {
-        horsesToInsert.push({
+        horsesToProcess.push({
+          horseId: h.horseId,
           name: h.name,
           breed: h.breed ?? null,
           gender: h.gender ?? null,
           age: h.age ?? null,
-          microchipNumber: h.microchipNumber ?? null,
+          quantity: h.quantity && h.quantity > 0 ? h.quantity : 1,
         });
       }
     } else if (dto.horseName) {
-      horsesToInsert.push({
+      horsesToProcess.push({
         name: dto.horseName,
         breed: dto.horseBreed ?? null,
         gender: dto.horseGender ?? null,
         age: dto.horseAge ?? null,
-        microchipNumber: null,
+        quantity: dto.requestedHorseCount || 1,
       });
     }
 
-    for (const h of horsesToInsert) {
-      const [hResult] = await this.pool.execute(
-        'INSERT INTO horse (owner_id, name, breed, gender, age, status, microchip_number) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [customerId, h.name, h.breed, h.gender, h.age, 'active', h.microchipNumber ?? null],
+    if (horsesToProcess.length === 0) {
+      throw new BadRequestException('Vui lòng chọn ít nhất một con ngựa cho đơn vận chuyển.');
+    }
+
+    for (const h of horsesToProcess) {
+      let targetHorseId = h.horseId;
+
+      if (!targetHorseId) {
+        const [existing] = await this.pool.execute<RowDataPacket[]>(
+          'SELECT horse_id, name, status FROM horse WHERE owner_id = ? AND name = ? AND (status IS NULL OR status != "deleted") ORDER BY horse_id DESC LIMIT 1',
+          [customerId, h.name],
+        );
+        if (existing.length > 0) {
+          targetHorseId = existing[0].horse_id;
+        }
+      }
+
+      if (!targetHorseId) {
+        throw new BadRequestException(
+          `Ngựa "${h.name}" không tồn tại trong danh sách "My Horses" của bạn. Vui lòng tạo hồ sơ ngựa trước khi gửi yêu cầu vận chuyển.`,
+        );
+      }
+
+      const [horseRows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT horse_id, name, status FROM horse WHERE horse_id = ? AND owner_id = ?',
+        [targetHorseId, customerId],
       );
-      const horseId = (hResult as { insertId: number }).insertId;
+
+      if (horseRows.length === 0) {
+        throw new BadRequestException(`Không tìm thấy hồ sơ hợp lệ của ngựa "${h.name}" thuộc tài khoản của bạn.`);
+      }
+
+      const horse = horseRows[0];
+      if (horse.status === 'in_transit') {
+        throw new BadRequestException(
+          `Ngựa "${horse.name}" hiện đang trong chuyến vận chuyển khác. Không thể chọn vận chuyển nhiều đơn cùng lúc.`,
+        );
+      }
+      if (horse.status === 'delivered') {
+        throw new BadRequestException(
+          `Ngựa "${horse.name}" đã hoàn tất chuyến vận chuyển trước đó (đã bàn giao).`,
+        );
+      }
+      if (horse.status !== 'active') {
+        throw new BadRequestException(
+          `Ngựa "${horse.name}" hiện không sẵn sàng để vận chuyển (trạng thái: ${horse.status}).`,
+        );
+      }
+
+      // Liên kết vào shipment
       await this.pool.execute(
-        'INSERT INTO shipment_horse (shipment_id, horse_id) VALUES (?, ?)',
-        [shipmentId, horseId],
+        'INSERT INTO shipment_horse (shipment_id, horse_id, quantity) VALUES (?, ?, ?)',
+        [shipmentId, targetHorseId, h.quantity],
+      );
+
+      // Cập nhật trạng thái con ngựa sang in_transit để khóa con ngựa không thể đi đơn khác
+      await this.pool.execute(
+        'UPDATE horse SET status = "in_transit" WHERE horse_id = ?',
+        [targetHorseId],
       );
     }
 
@@ -174,116 +216,54 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return (result as { insertId: number }).insertId;
   }
 
-  async checkMicrochipExists(microchipNumber: string, excludeHorseId?: number): Promise<boolean> {
-    let query = 'SELECT COUNT(*) as cnt FROM horse WHERE microchip_number = ?';
-    const params: (string | number)[] = [microchipNumber];
-    if (excludeHorseId) {
-      query += ' AND horse_id != ?';
-      params.push(excludeHorseId);
-    }
-    const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
-    return (rows[0] as any).cnt > 0;
+  async findShipmentsByCustomer(customerId: number): Promise<TransportOrder[]> {
+    const [rows] = await this.pool.execute<ShipmentRow[]>(
+      `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+              CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code
+       FROM shipment s
+       JOIN \`user\` u ON u.user_id = s.customer_id
+       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+       WHERE s.customer_id = ?
+       ORDER BY s.created_at DESC`,
+      [customerId],
+    );
+
+    return Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
   }
 
-  async findShipmentsByCustomer(customerId: number, params: OrderQueryParams = {}): Promise<PaginatedOrders> {
-    const { page = 1, limit = 10, sortBy = 'createdAt', sortOrder = 'desc', departureDateFrom, departureDateTo, status } = params;
-    const offset = (page - 1) * limit;
-
-    const sortColumn = sortBy === 'totalCost' ? 's.total_cost' : sortBy === 'requestedDate' ? 's.requested_date' : 's.created_at';
-    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
-
-    let whereClause = 'WHERE s.customer_id = ?';
-    const queryParams: (string | number)[] = [customerId];
-
-    if (status) {
-      whereClause += ' AND s.status = ?';
-      queryParams.push(status);
-    }
-    if (departureDateFrom) {
-      whereClause += ' AND DATE(s.requested_date) >= ?';
-      queryParams.push(departureDateFrom);
-    }
-    if (departureDateTo) {
-      whereClause += ' AND DATE(s.requested_date) <= ?';
-      queryParams.push(departureDateTo);
-    }
-
-    // Count total
-    const [countRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as total FROM shipment s JOIN \`user\` u ON u.user_id = s.customer_id ${whereClause}`,
-      queryParams,
-    );
-    const total = (countRows[0] as any).total as number;
-
-    // Fetch data
-    const dataQuery = `
-      SELECT s.*, u.email as customer_email, a.full_name as approver_name
+  async findAllShipments(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
+    let query = `
+      SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+             CONCAT('REQ-', LPAD(
+               (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+               3, '0'
+             )) as customer_request_code,
+             CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
-      ${whereClause}
-      ORDER BY ${sortColumn} ${order}
-      LIMIT ? OFFSET ?
     `;
-    const [rows] = await this.pool.execute<ShipmentRow[]>(dataQuery, [...queryParams, limit, offset]);
+    const params: (string | number)[] = [];
 
-    const data = await Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
-  }
-
-  async findAllShipments(params: OrderQueryParams = {}): Promise<PaginatedOrders> {
-    const { page = 1, limit = 10, sortBy = 'createdAt', sortOrder = 'desc', departureDateFrom, departureDateTo, status } = params;
-    const offset = (page - 1) * limit;
-
-    const sortColumn = sortBy === 'totalCost' ? 's.total_cost' : sortBy === 'requestedDate' ? 's.requested_date' : 's.created_at';
-    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
-
-    let whereClause = '';
-    const queryParams: (string | number)[] = [];
-
-    const conditions: string[] = [];
-    if (status) {
-      conditions.push('s.status = ?');
-      queryParams.push(status);
-    }
-    if (departureDateFrom) {
-      conditions.push('DATE(s.requested_date) >= ?');
-      queryParams.push(departureDateFrom);
-    }
-    if (departureDateTo) {
-      conditions.push('DATE(s.requested_date) <= ?');
-      queryParams.push(departureDateTo);
-    }
-    if (conditions.length > 0) {
-      whereClause = 'WHERE ' + conditions.join(' AND ');
+    if (statusFilter) {
+      query += ' WHERE s.status = ?';
+      params.push(statusFilter);
     }
 
-    // Count total
-    const [countRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as total FROM shipment s JOIN \`user\` u ON u.user_id = s.customer_id ${whereClause}`,
-      queryParams,
-    );
-    const total = (countRows[0] as any).total as number;
+    query += ' ORDER BY s.created_at DESC';
 
-    // Fetch data
-    const dataQuery = `
-      SELECT s.*, u.email as customer_email, a.full_name as approver_name
-      FROM shipment s
-      JOIN \`user\` u ON u.user_id = s.customer_id
-      LEFT JOIN \`user\` a ON a.user_id = s.approved_by
-      ${whereClause}
-      ORDER BY ${sortColumn} ${order}
-      LIMIT ? OFFSET ?
-    `;
-    const [rows] = await this.pool.execute<ShipmentRow[]>(dataQuery, [...queryParams, limit, offset]);
-
-    const data = await Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    const [rows] = await this.pool.execute<ShipmentRow[]>(query, params);
+    return Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
   }
 
   async findShipmentById(shipmentId: number): Promise<TransportOrder | undefined> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.email as customer_email, a.full_name as approver_name
+      `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+              CONCAT('REQ-', LPAD(
+                (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+                3, '0'
+              )) as customer_request_code,
+              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
@@ -314,6 +294,170 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       [status, approvedBy, rejectionReason, totalCost, totalCost, shipmentId],
     );
 
+    if (status === ShipmentStatus.REJECTED) {
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'active'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)`,
+        [shipmentId],
+      );
+    }
+
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async completeShipment(shipmentId: number): Promise<boolean> {
+    const [result] = await this.pool.execute(
+      `UPDATE shipment
+       SET status = 'completed', actual_arrival_date = NOW()
+       WHERE shipment_id = ?`,
+      [shipmentId],
+    );
+
+    await this.pool.execute(
+      `UPDATE horse
+       SET status = 'delivered'
+       WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)`,
+      [shipmentId],
+    );
+
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async updateShipmentChangeRequest(
+    shipmentId: number,
+    notes: string,
+  ): Promise<boolean> {
+    const [result] = await this.pool.execute(
+      `UPDATE shipment
+       SET status = ?, change_request_notes = ?
+       WHERE shipment_id = ?`,
+      [ShipmentStatus.CHANGE_REQUESTED, notes, shipmentId],
+    );
+
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async updateShipmentStatus(shipmentId: number, status: ShipmentStatus): Promise<boolean> {
+    const [result] = await this.pool.execute(
+      'UPDATE shipment SET status = ?, updated_at = NOW() WHERE shipment_id = ?',
+      [status, shipmentId],
+    );
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async findById(shipmentId: number): Promise<TransportOrder | undefined> {
+    return this.findShipmentById(shipmentId);
+  }
+
+  async updateStatus(shipmentId: number, status: ShipmentStatus): Promise<boolean> {
+    return this.updateShipmentStatus(shipmentId, status);
+  }
+
+  async cancelShipment(shipmentId: number): Promise<boolean> {
+    // 1. Revert horse statuses back to active
+    await this.pool.execute(
+      `UPDATE horse h
+       JOIN shipment_horse sh ON sh.horse_id = h.horse_id
+       SET h.status = 'active'
+       WHERE sh.shipment_id = ?`,
+      [shipmentId],
+    );
+
+    // 2. Set shipment status to cancelled
+    const [result] = await this.pool.execute(
+      'UPDATE shipment SET status = ? WHERE shipment_id = ?',
+      [ShipmentStatus.CANCELLED, shipmentId],
+    );
+
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async updateAndResubmitShipment(
+    customerId: number,
+    shipmentId: number,
+    dto: UpdateOrderDto,
+  ): Promise<boolean> {
+    const requestedDate = dto.requestedDate ? new Date(dto.requestedDate) : null;
+
+    // 1. Cập nhật các thông tin của đơn vận chuyển và chuyển status về requested
+    const [result] = await this.pool.execute(
+      `UPDATE shipment
+       SET
+         contact_name = COALESCE(?, contact_name),
+         contact_address = COALESCE(?, contact_address),
+         contact_phone = COALESCE(?, contact_phone),
+         contact_email = COALESCE(?, contact_email),
+         requested_horse_count = COALESCE(?, requested_horse_count),
+         origin_location = COALESCE(?, origin_location),
+         destination_location = COALESCE(?, destination_location),
+         requested_date = COALESCE(?, requested_date),
+         special_requirements = COALESCE(?, special_requirements),
+         change_request_notes = NULL,
+         status = ?
+       WHERE shipment_id = ?`,
+      [
+        dto.contactName ?? null,
+        dto.contactAddress ?? null,
+        dto.contactPhone ?? null,
+        dto.contactEmail ?? null,
+        dto.requestedHorseCount ?? null,
+        dto.originLocation ?? null,
+        dto.destinationLocation ?? null,
+        requestedDate,
+        dto.specialRequirements ?? null,
+        ShipmentStatus.REQUESTED,
+        shipmentId,
+      ],
+    );
+
+    // 2. Lưu file tài liệu y tế mới nếu có
+    if (dto.medicalDocumentUrl) {
+      await this.createAttachment(shipmentId, dto.medicalDocumentUrl, customerId);
+    }
+
+    // 3. Cập nhật thông tin ngựa nếu có gửi mới
+    const horsesToInsert: Array<{
+      name: string;
+      breed: string | null;
+      gender: 'male' | 'female' | 'gelding' | null;
+      age: number | null;
+    }> = [];
+
+    if (dto.horses && dto.horses.length > 0) {
+      for (const h of dto.horses) {
+        horsesToInsert.push({
+          name: h.name,
+          breed: h.breed ?? null,
+          gender: h.gender ?? null,
+          age: h.age ?? null,
+        });
+      }
+    } else if (dto.horseName) {
+      horsesToInsert.push({
+        name: dto.horseName,
+        breed: dto.horseBreed ?? null,
+        gender: dto.horseGender ?? null,
+        age: dto.horseAge ?? null,
+      });
+    }
+
+    if (horsesToInsert.length > 0) {
+      await this.pool.execute('DELETE FROM shipment_horse WHERE shipment_id = ?', [shipmentId]);
+
+      for (const h of horsesToInsert) {
+        const [hResult] = await this.pool.execute(
+          'INSERT INTO horse (owner_id, name, breed, gender, age, status) VALUES (?, ?, ?, ?, ?, ?)',
+          [customerId, h.name, h.breed, h.gender, h.age, 'active'],
+        );
+        const horseId = (hResult as { insertId: number }).insertId;
+        await this.pool.execute(
+          'INSERT INTO shipment_horse (shipment_id, horse_id) VALUES (?, ?)',
+          [shipmentId, horseId],
+        );
+      }
+    }
+
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
@@ -324,15 +468,20 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     );
 
     const [horses] = await this.pool.execute<HorseRow[]>(
-      `SELECT h.horse_id, h.name, h.breed, h.gender, h.age
+      `SELECT h.horse_id, h.name, h.breed, h.gender, h.age, h.color, h.weight,
+              h.medical_status, h.microchip_no, h.passport_no, h.special_requirements, sh.quantity
        FROM shipment_horse sh
        JOIN horse h ON h.horse_id = sh.horse_id
        WHERE sh.shipment_id = ?`,
       [row.shipment_id],
     );
 
+    const requestCode = row.request_code || `REQ-${String(row.shipment_id).padStart(3, '0')}`;
+
     return {
       id: row.shipment_id,
+      requestCode,
+      customerRequestCode: row.customer_request_code,
       customerId: row.customer_id,
       requestedBy: row.requested_by,
       approvedBy: row.approved_by,
@@ -349,11 +498,13 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       actualArrivalDate: row.actual_arrival_date ? new Date(row.actual_arrival_date).toISOString() : null,
       specialRequirements: row.special_requirements,
       rejectionReason: row.rejection_reason,
+      changeRequestNotes: row.change_request_notes ?? null,
       status: row.status,
       totalCost: Number(row.total_cost ?? 0),
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       customerEmail: row.customer_email,
+      customerName: (row as any).customer_name || row.contact_name || undefined,
       approverName: row.approver_name,
       attachments: attachments.map((att) => ({
         id: att.attachment_id,
@@ -361,12 +512,19 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         fileType: att.file_type,
         uploadedAt: new Date(att.uploaded_at).toISOString(),
       })),
-      horses: horses.map((h) => ({
+      horses: (horses as any[]).map((h) => ({
         horseId: h.horse_id,
         name: h.name,
         breed: h.breed,
         gender: h.gender,
         age: h.age !== null ? Number(h.age) : null,
+        quantity: h.quantity !== null && h.quantity !== undefined ? Number(h.quantity) : 1,
+        color: h.color ?? null,
+        weight: h.weight ?? null,
+        medicalStatus: h.medical_status ?? null,
+        microchipNo: h.microchip_no ?? null,
+        passportNo: h.passport_no ?? null,
+        specialRequirements: h.special_requirements ?? null,
       })),
     };
   }
