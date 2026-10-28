@@ -551,7 +551,7 @@ export default function ManagerRequestsPage() {
                               </span>
                             </div>
 
-                            <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-600">
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-slate-600">
                               <div>
                                 <span className="text-slate-400">Tuổi / Giới tính:</span>{' '}
                                 <strong className="text-slate-800">
@@ -565,9 +565,15 @@ export default function ManagerRequestsPage() {
                                 </strong>
                               </div>
                               <div>
-                                <span className="text-slate-400">Microchip/Passport:</span>{' '}
-                                <strong className="text-slate-800 font-mono text-[10px]">
-                                  {horse.microchipNo || horse.passportNo || 'Chờ cấp'}
+                                <span className="text-slate-400">Microchip ID:</span>{' '}
+                                <strong className="text-slate-800 font-mono text-[10.5px]">
+                                  {horse.microchipNo || ''}
+                                </strong>
+                              </div>
+                              <div>
+                                <span className="text-slate-400">Passport Number:</span>{' '}
+                                <strong className="text-slate-800 font-mono text-[10.5px]">
+                                  {horse.passportNo || ''}
                                 </strong>
                               </div>
                             </div>

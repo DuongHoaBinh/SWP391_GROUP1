@@ -495,6 +495,32 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async updateShipmentStatus(shipmentId: number, status: string): Promise<void> {
+    if (status === 'completed') {
+      await this.pool.execute(
+        'UPDATE shipment SET status = ?, actual_arrival_date = COALESCE(actual_arrival_date, NOW()) WHERE shipment_id = ?',
+        [status, shipmentId],
+      );
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'delivered'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+           AND status NOT IN ('retired', 'deceased')`,
+        [shipmentId],
+      );
+      await this.pool.execute(
+        `UPDATE vehicle
+         SET status = 'available'
+         WHERE vehicle_id IN (
+           SELECT rl.vehicle_id
+           FROM route_leg rl
+           JOIN route r ON rl.route_id = r.route_id
+           WHERE r.shipment_id = ? AND rl.vehicle_id IS NOT NULL
+         )`,
+        [shipmentId],
+      );
+      return;
+    }
+
     await this.pool.execute(
       'UPDATE shipment SET status = ? WHERE shipment_id = ?',
       [status, shipmentId],

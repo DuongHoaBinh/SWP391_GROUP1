@@ -58,20 +58,35 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { reviewDocument } = useDocumentStore();
 
+  const getDefaultReviewValues = React.useCallback((): ReviewFormData => ({
+    status: 'APPROVED',
+    expiryDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    authorityName: 'Cục Thú Y & Hải Quan Cửa Khẩu',
+    referenceNumber: 'HQ-SG-2026-9812',
+    rejectionReason: '',
+  }), []);
+
   const {
     register,
     handleSubmit,
     watch,
+    reset,
     formState: { errors },
   } = useForm<ReviewFormData>({
     resolver: zodResolver(reviewSchema),
-    defaultValues: {
-      status: 'APPROVED',
-      expiryDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      authorityName: 'Cục Thú Y & Hải Quan Cửa Khẩu',
-      referenceNumber: 'HQ-SG-2026-9812',
-    },
+    defaultValues: getDefaultReviewValues(),
   });
+
+  React.useEffect(() => {
+    if (isOpen) {
+      reset(getDefaultReviewValues());
+    }
+  }, [isOpen, documentId, reset, getDefaultReviewValues]);
+
+  const handleClose = () => {
+    reset(getDefaultReviewValues());
+    onClose();
+  };
 
   const selectedStatus = watch('status');
 
@@ -97,6 +112,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             status: data.status === 'APPROVED' ? 'approved' : 'rejected',
             expiryDate: data.status === 'APPROVED' ? data.expiryDate : undefined,
             notes: data.status === 'REJECTED' ? data.rejectionReason : undefined,
+            docNumber: data.status === 'APPROVED' ? data.referenceNumber?.trim() : undefined,
           });
         } catch (revErr: any) {
           console.warn('Backend API review notice:', revErr);
@@ -111,7 +127,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
           ? `Đã duyệt hồ sơ & ghi nhận phê duyệt từ ${data.authorityName || 'Cơ quan chức năng'}!`
           : 'Đã từ chối hồ sơ. Yêu cầu khách hàng tải lại bản hợp lệ.'
       );
-      onClose();
+      handleClose();
     } catch (e: any) {
       setIsSubmitting(false);
       toast.error(e.message || 'Error processing review');
@@ -134,7 +150,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title="Review Transport Document"
       subtitle={`Reviewing ${docTitle} for ${horseName}`}
       maxWidth="860px"
@@ -307,7 +323,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             )}
 
             <div className="flex justify-end gap-3 mt-4">
-              <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+              <Button type="button" variant="outline" onClick={handleClose} disabled={isSubmitting}>
                 Cancel
               </Button>
               <Button type="submit" variant="primary" disabled={isSubmitting} className={selectedStatus === 'APPROVED' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}>

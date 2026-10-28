@@ -254,6 +254,8 @@ export class DocumentsService {
       horseItems.push({
         horseId: h.horse_id,
         horseName: h.name,
+        microchipNo: h.microchip_no ?? null,
+        passportNo: h.passport_no ?? null,
         documents: docs,
         missingRegulations: missingRegs,
         isCompliant,
@@ -380,6 +382,7 @@ export class DocumentsService {
       dto.status,
       dto.notes,
       dto.expiryDate,
+      dto.docNumber,
     );
 
     // Gửi thông báo đến người đã nộp tài liệu
@@ -434,6 +437,8 @@ export class DocumentsService {
         documentId,
         DocumentStatus.APPROVED,
         `Phê duyệt bởi cơ quan: ${dto.authorityName}. ${dto.notes ?? ''}`.trim(),
+        undefined,
+        dto.referenceNumber,
       );
     }
 
