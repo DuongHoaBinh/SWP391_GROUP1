@@ -32,6 +32,7 @@ import { BuildDetailedPlanDto } from './dto/build-detailed-plan.dto';
 import { ReviewPlanDto } from './dto/review-plan.dto';
 import { ConfirmAssignmentDto } from './dto/confirm-assignment.dto';
 import { ShipmentStatus } from '../orders/orders.types';
+import { MomoPaymentStore } from '../orders/momo-payment.store';
 
 @Injectable()
 export class RoutesService {
@@ -41,6 +42,7 @@ export class RoutesService {
     private readonly fleetStore: FleetStore,
     private readonly documentsService: DocumentsService,
     private readonly notificationsService: NotificationsService,
+    private readonly momoPaymentStore: MomoPaymentStore,
   ) {}
 
   // --- Master Data for Flow 3 ---
@@ -437,6 +439,16 @@ export class RoutesService {
       isLegalCompliant = false;
     }
 
+    // Điều kiện 3: Thanh toán cước vận chuyển (MoMo/Thẻ ngân hàng)
+    let isPaymentSucceeded = false;
+    const totalCost = Number(order.totalCost || 0);
+    if (totalCost > 0) {
+      isPaymentSucceeded = await this.momoPaymentStore.isPaymentSucceeded(shipmentId);
+    } else {
+      // Nếu đơn hàng không có cước hoặc cước = 0 thì coi như đã thỏa mãn
+      isPaymentSucceeded = true;
+    }
+
     const pendingConditions: string[] = [];
     if (!isPlanConfirmed) {
       if (route?.planStatus === PlanStatus.DRAFT) {
@@ -454,9 +466,15 @@ export class RoutesService {
       pendingConditions.push('Hồ sơ pháp lý, xét nghiệm và kiểm dịch (Flow 2) chưa được duyệt hoàn tất 100%.');
     }
 
-    const isReadyToDepart = isPlanConfirmed && isLegalCompliant;
+    if (!isPaymentSucceeded) {
+      pendingConditions.push(
+        `Đang chờ khách hàng hoàn tất thanh toán cước vận chuyển qua MoMo / Thẻ (${totalCost.toLocaleString('vi-VN')} VND).`,
+      );
+    }
 
-    // Tự động chuyển trạng thái khi cả 2 điều kiện thỏa mãn
+    const isReadyToDepart = isPlanConfirmed && isLegalCompliant && isPaymentSucceeded;
+
+    // Tự động chuyển trạng thái khi CẢ 3 điều kiện thỏa mãn
     if (
       isReadyToDepart &&
       route &&
@@ -470,7 +488,7 @@ export class RoutesService {
       await this.notificationsService.createNotification(
         order.customerId,
         `Chuyến đi ${code} ĐÃ ĐỦ ĐIỀU KIỆN XUẤT PHÁT (Ready to depart)`,
-        `Hồ sơ kiểm dịch đã đạt chuẩn 100% và kế hoạch lộ trình phương tiện đã hoàn tất. Đoàn vận chuyển sẵn sàng khởi hành.`,
+        `Kế hoạch lộ trình, hồ sơ kiểm dịch và thanh toán cước vận chuyển đã hoàn tất 100%. Đoàn vận chuyển sẵn sàng khởi hành.`,
         'status_update',
         shipmentId,
       );
@@ -481,6 +499,7 @@ export class RoutesService {
       orderCode: code,
       isPlanConfirmed,
       isLegalCompliant,
+      isPaymentSucceeded,
       isReadyToDepart,
       currentShipmentStatus: order.status,
       currentPlanStatus: route?.planStatus || PlanStatus.DRAFT,
