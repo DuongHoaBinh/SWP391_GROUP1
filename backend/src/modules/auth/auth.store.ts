@@ -3,6 +3,8 @@ import * as bcrypt from 'bcryptjs';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { AuthUser, PendingRegistration, UserRole } from './auth.types';
 
+import { UpdateProfileDto } from './dto/update-profile.dto';
+
 interface SeedAccount {
   email: string;
   password: string;
@@ -11,12 +13,16 @@ interface SeedAccount {
 
 interface UserRow extends RowDataPacket {
   user_id: number;
-  email: string;
   full_name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  avatar_url: string | null;
   password_hash: string;
   role_name: string;
   email_verified: number;
   created_at: Date;
+  specialization?: string | null;
 }
 
 interface PendingRow extends RowDataPacket {
@@ -88,7 +94,6 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
     return {
       id: String((result as { insertId: number }).insertId),
       email: normalizedEmail,
-      fullName: normalizedEmail,
       passwordHash,
       role,
       emailVerified: true,
@@ -116,7 +121,7 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
 
   async findUser(email: string): Promise<AuthUser | undefined> {
     const [rows] = await this.pool.execute<UserRow[]>(
-      'SELECT u.user_id, u.email, u.password_hash, u.email_verified, u.created_at, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.email = ? LIMIT 1',
+      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.email = ? LIMIT 1',
       [email.trim().toLowerCase()],
     );
     const row = rows[0];
@@ -125,11 +130,76 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       id: String(row.user_id),
       email: row.email,
       fullName: row.full_name,
+      phone: row.phone,
+      address: row.address,
+      avatarUrl: row.avatar_url,
       passwordHash: row.password_hash,
       role: this.userRole(row.role_name),
       emailVerified: Boolean(row.email_verified),
+      specialization: row.specialization ?? null,
       createdAt: new Date(row.created_at).toISOString(),
     };
+  }
+
+  async findUserById(userId: string | number): Promise<AuthUser | undefined> {
+    const [rows] = await this.pool.execute<UserRow[]>(
+      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.user_id = ? LIMIT 1',
+      [Number(userId)],
+    );
+    const row = rows[0];
+    if (!row) return undefined;
+    return {
+      id: String(row.user_id),
+      email: row.email,
+      fullName: row.full_name,
+      phone: row.phone,
+      address: row.address,
+      avatarUrl: row.avatar_url,
+      passwordHash: row.password_hash,
+      role: this.userRole(row.role_name),
+      emailVerified: Boolean(row.email_verified),
+      specialization: row.specialization ?? null,
+      createdAt: new Date(row.created_at).toISOString(),
+    };
+  }
+
+  async updateUserProfile(userId: string | number, dto: UpdateProfileDto): Promise<AuthUser | undefined> {
+    const fields: string[] = [];
+    const values: (string | null | number)[] = [];
+
+    if (dto.fullName !== undefined) {
+      fields.push('full_name = ?');
+      values.push(dto.fullName.trim());
+    }
+    if (dto.phone !== undefined) {
+      fields.push('phone = ?');
+      values.push(dto.phone.trim() || null);
+    }
+    if (dto.address !== undefined) {
+      fields.push('address = ?');
+      values.push(dto.address.trim() || null);
+    }
+    if (dto.avatarUrl !== undefined) {
+      fields.push('avatar_url = ?');
+      values.push(dto.avatarUrl.trim() || null);
+    }
+
+    if (fields.length > 0) {
+      values.push(Number(userId));
+      await this.pool.execute(
+        `UPDATE \`user\` SET ${fields.join(', ')} WHERE user_id = ?`,
+        values,
+      );
+    }
+
+    return this.findUserById(userId);
+  }
+
+  async updateUserPassword(userId: string | number, passwordHash: string): Promise<void> {
+    await this.pool.execute(
+      'UPDATE `user` SET password_hash = ? WHERE user_id = ?',
+      [passwordHash, Number(userId)],
+    );
   }
 
   async findPending(email: string): Promise<PendingRegistration | undefined> {

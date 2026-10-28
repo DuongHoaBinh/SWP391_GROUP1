@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -10,6 +11,8 @@ import { randomInt, randomUUID } from 'crypto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { AuthStore } from './auth.store';
 import { AuthUser, PendingRegistration, UserRole } from './auth.types';
 import { MailService } from './mail.service';
@@ -68,7 +71,6 @@ export class AuthService {
     const user: AuthUser = {
       id: randomUUID(),
       email,
-      fullName: email,
       passwordHash: pending.passwordHash,
       role: UserRole.CUSTOMER,
       emailVerified: true,
@@ -87,7 +89,7 @@ export class AuthService {
       message: 'Registration completed. You can now log in.',
       email,
       accessToken,
-      user: { id: userId, email, fullName: user.fullName, role: user.role },
+      user: { id: userId, email, role: user.role },
     };
   }
 
@@ -108,7 +110,86 @@ export class AuthService {
     });
     return {
       accessToken,
-      user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role },
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        fullName: user.fullName || '',
+        name: user.fullName || user.email.split('@')[0],
+        phone: user.phone || '',
+        address: user.address || '',
+        avatarUrl: user.avatarUrl || '',
+        specialization: user.specialization ?? null,
+        persona: user.specialization || (user.email.includes('escort') ? 'escort' : 'driver'),
+      },
+    };
+  }
+
+  async getProfile(userId: string) {
+    const user = await this.authStore.findUserById(userId);
+    if (!user) {
+      throw new NotFoundException('User profile not found');
+    }
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      fullName: user.fullName || '',
+      name: user.fullName || user.email.split('@')[0],
+      phone: user.phone || '',
+      address: user.address || '',
+      avatarUrl: user.avatarUrl || '',
+      specialization: user.specialization ?? null,
+      persona: user.specialization || (user.email.includes('escort') ? 'escort' : 'driver'),
+      createdAt: user.createdAt,
+    };
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const updated = await this.authStore.updateUserProfile(userId, dto);
+    if (!updated) {
+      throw new NotFoundException('User not found');
+    }
+    return {
+      message: 'Profile updated successfully',
+      user: {
+        id: updated.id,
+        email: updated.email,
+        role: updated.role,
+        fullName: updated.fullName || '',
+        name: updated.fullName || updated.email.split('@')[0],
+        phone: updated.phone || '',
+        address: updated.address || '',
+        avatarUrl: updated.avatarUrl || '',
+        createdAt: updated.createdAt,
+      },
+    };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException('Mật khẩu xác nhận không khớp');
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('Mật khẩu mới không được trùng với mật khẩu hiện tại');
+    }
+
+    const user = await this.authStore.findUserById(userId);
+    if (!user) {
+      throw new NotFoundException('Người dùng không tồn tại');
+    }
+
+    const isMatch = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!isMatch) {
+      throw new BadRequestException('Mật khẩu hiện tại không chính xác');
+    }
+
+    const newHash = await bcrypt.hash(dto.newPassword, 12);
+    await this.authStore.updateUserPassword(userId, newHash);
+
+    return {
+      message: 'Mật khẩu đã được thay đổi thành công',
     };
   }
 }

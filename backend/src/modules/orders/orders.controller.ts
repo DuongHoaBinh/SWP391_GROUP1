@@ -6,6 +6,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -14,6 +15,8 @@ import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ApproveOrderDto } from './dto/approve-order.dto';
 import { RejectOrderDto } from './dto/reject-order.dto';
+import { RequestChangesDto } from './dto/request-changes.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
 import { ShipmentStatus } from './orders.types';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -41,63 +44,17 @@ export class OrdersController {
 
   @Get('my-orders')
   @Roles(UserRole.CUSTOMER)
-  @ApiOperation({ summary: 'Customer views their own transport requests with pagination, filter and sort' })
-  @ApiQuery({ name: 'status', enum: ShipmentStatus, required: false })
-  @ApiQuery({ name: 'departureDateFrom', required: false, description: 'Filter by departure date from (YYYY-MM-DD)' })
-  @ApiQuery({ name: 'departureDateTo', required: false, description: 'Filter by departure date to (YYYY-MM-DD)' })
-  @ApiQuery({ name: 'sortBy', enum: ['createdAt', 'totalCost', 'requestedDate'], required: false })
-  @ApiQuery({ name: 'sortOrder', enum: ['asc', 'desc'], required: false })
-  @ApiQuery({ name: 'page', required: false, description: 'Page number (default: 1)' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (10 or 20, default: 10)' })
-  getMyOrders(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query('status') status?: ShipmentStatus,
-    @Query('departureDateFrom') departureDateFrom?: string,
-    @Query('departureDateTo') departureDateTo?: string,
-    @Query('sortBy') sortBy?: 'createdAt' | 'totalCost' | 'requestedDate',
-    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
-    return this.ordersService.getMyOrders(user, {
-      status,
-      departureDateFrom,
-      departureDateTo,
-      sortBy,
-      sortOrder,
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
-    });
+  @ApiOperation({ summary: 'Customer views their own transport requests' })
+  getMyOrders(@CurrentUser() user: AuthenticatedUser) {
+    return this.ordersService.getMyOrders(user);
   }
 
   @Get()
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Logistics Manager views all transport requests with pagination, filter and sort' })
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.DRIVER_ESCORT)
+  @ApiOperation({ summary: 'Logistics Manager, Coordinator and Driver view transport requests' })
   @ApiQuery({ name: 'status', enum: ShipmentStatus, required: false })
-  @ApiQuery({ name: 'departureDateFrom', required: false })
-  @ApiQuery({ name: 'departureDateTo', required: false })
-  @ApiQuery({ name: 'sortBy', enum: ['createdAt', 'totalCost', 'requestedDate'], required: false })
-  @ApiQuery({ name: 'sortOrder', enum: ['asc', 'desc'], required: false })
-  @ApiQuery({ name: 'page', required: false })
-  @ApiQuery({ name: 'limit', required: false })
-  getAllOrders(
-    @Query('status') status?: ShipmentStatus,
-    @Query('departureDateFrom') departureDateFrom?: string,
-    @Query('departureDateTo') departureDateTo?: string,
-    @Query('sortBy') sortBy?: 'createdAt' | 'totalCost' | 'requestedDate',
-    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
-    return this.ordersService.getAllOrders({
-      status,
-      departureDateFrom,
-      departureDateTo,
-      sortBy,
-      sortOrder,
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
-    });
+  getAllOrders(@Query('status') status?: ShipmentStatus) {
+    return this.ordersService.getAllOrders(status);
   }
 
   @Get(':id')
@@ -129,5 +86,47 @@ export class OrdersController {
     @Body() dto: RejectOrderDto,
   ) {
     return this.ordersService.rejectOrder(user, id, dto);
+  }
+
+  @Patch(':id/request-changes')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Logistics Manager requests changes on a transport request' })
+  requestChanges(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RequestChangesDto,
+  ) {
+    return this.ordersService.requestChanges(user, id, dto);
+  }
+
+  @Put(':id')
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({ summary: 'Customer updates and resubmits a transport request after changes requested' })
+  updateOrder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateOrderDto,
+  ) {
+    return this.ordersService.updateOrder(user, id, dto);
+  }
+
+  @Patch(':id/complete')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.DRIVER_ESCORT)
+  @ApiOperation({ summary: 'Mark shipment completed and horses delivered' })
+  completeOrder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.completeOrder(user, id);
+  }
+
+  @Patch(':id/cancel')
+  @Roles(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.LOGISTICS_MANAGER)
+  @ApiOperation({ summary: 'Cancel a transport request' })
+  cancelOrder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.cancelOrder(user, id);
   }
 }

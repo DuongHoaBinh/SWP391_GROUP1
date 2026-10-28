@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -13,8 +13,14 @@ import {
   LogOut,
   BarChart3,
   Settings,
+  X,
 } from 'lucide-react';
 import { clearAuthSession, getCurrentUser } from '@/lib/auth';
+import { apiClient } from '@/lib/api-client';
+import { mockCurrentUser } from '@/lib/mock-data';
+import { UserProfile } from '@/lib/types';
+import { LogoutConfirmModal } from './LogoutConfirmModal';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface NavItem {
   label: string;
@@ -24,29 +30,58 @@ interface NavItem {
 }
 
 interface SidebarProps {
-  role?: 'customer' | 'manager' | string;
+  mobileOpen?: boolean;
+  onClose?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose }) => {
   const pathname = usePathname();
   const router = useRouter();
-  const user = getCurrentUser();
+  const { t } = useLanguage();
+  const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
 
-  const activeRole = role || (user?.role === 'LOGISTICS_MANAGER' ? 'manager' : 'customer');
+  useEffect(() => {
+    setCurrentUser(getCurrentUser());
 
-  const customerNavItems: NavItem[] = [
+    const fetchUnread = async () => {
+      try {
+        const notifs = await apiClient<any[]>('/notifications');
+        if (Array.isArray(notifs)) {
+          setUnreadNotifs(notifs.filter((n) => !n.isRead).length);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    fetchUnread();
+
+    const handleUserUpdate = () => {
+      setCurrentUser(getCurrentUser());
+      fetchUnread();
+    };
+    window.addEventListener('auth-user-updated', handleUserUpdate);
+    window.addEventListener('notifications-updated', fetchUnread);
+    return () => {
+      window.removeEventListener('auth-user-updated', handleUserUpdate);
+      window.removeEventListener('notifications-updated', fetchUnread);
+    };
+  }, []);
+
+  const navItems: NavItem[] = [
     {
-      label: 'Dashboard',
+      label: t('nav.dashboard', 'Dashboard'),
       href: '/customer',
       icon: <LayoutDashboard size={18} />,
     },
     {
-      label: 'Transport Requests',
+      label: t('nav.requests', 'Transport Requests'),
       href: '/customer/requests',
       icon: <Truck size={18} />,
     },
     {
-      label: 'My Horses',
+      label: t('nav.horses', 'My Horses'),
       href: '/customer/horses',
       icon: (
         <svg
@@ -67,70 +102,211 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
       ),
     },
     {
-      label: 'Documents',
+      label: t('nav.documents', 'Documents'),
       href: '/customer/documents',
       icon: <FolderClosed size={18} />,
       badge: 2,
     },
     {
-      label: 'Trip Tracking',
+      label: t('nav.tracking', 'Trip Tracking'),
       href: '/customer/tracking',
       icon: <Navigation size={18} />,
     },
     {
-      label: 'Notifications',
+      label: t('common.notifications', 'Notifications'),
       href: '/customer/notifications',
       icon: <Bell size={18} />,
-      badge: 3,
+      badge: unreadNotifs > 0 ? unreadNotifs : undefined,
     },
   ];
-
-  const managerNavItems: NavItem[] = [
-    {
-      label: 'Transport Requests',
-      href: '/manager/requests',
-      icon: <Truck size={18} />,
-    },
-  ];
-
-  const navItems: NavItem[] = activeRole === 'manager' ? managerNavItems : customerNavItems;
 
   const managementItems: NavItem[] = [
     {
-      label: 'Reports',
+      label: t('nav.reports', 'Reports'),
       href: '/customer/reports',
       icon: <BarChart3 size={18} />,
     },
     {
-      label: 'Settings',
+      label: t('common.settings', 'Settings'),
       href: '/customer/settings',
       icon: <Settings size={18} />,
     },
   ];
 
-  const handleLogout = () => {
-    if (confirm('Are you sure you want to log out?')) {
-      clearAuthSession();
-      router.push('/login');
-    }
+  const handleLogoutClick = () => {
+    setShowLogoutModal(true);
+  };
+
+  const handleConfirmLogout = () => {
+    setShowLogoutModal(false);
+    clearAuthSession();
+    router.push('/login');
   };
 
   return (
-    <aside
-      style={{
-        width: '260px',
-        backgroundColor: '#0c121e',
-        color: '#94a3b8',
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        position: 'sticky',
-        top: 0,
-        zIndex: 40,
-        borderRight: '1px solid #192233',
-        flexShrink: 0,
-      }}
-    >
+    <>
+      <LogoutConfirmModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleConfirmLogout}
+      />
+      {/* Mobile Drawer */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+            onClick={onClose}
+          />
+          <aside
+            style={{
+              width: '260px',
+              backgroundColor: '#0c121e',
+              color: '#94a3b8',
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100vh',
+              position: 'relative',
+              zIndex: 51,
+              borderRight: '1px solid #192233',
+            }}
+            className="animate-fade-in shadow-2xl"
+          >
+            <div
+              style={{
+                padding: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                borderBottom: '1px solid #162030',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    backgroundColor: '#0c1a2e',
+                  }}
+                >
+                  <img src="/logo.png" alt="RaceHorse Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '16px', fontWeight: 800, color: '#ffffff', lineHeight: 1.1 }}>RaceHorse</div>
+                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, letterSpacing: '0.06em', marginTop: '2px' }}>Logistics</div>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+                aria-label="Close navigation menu"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: '20px 14px', display: 'flex', flexDirection: 'column', gap: '24px', overflowY: 'auto' }}>
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', padding: '0 10px', marginBottom: '8px' }}>
+                  Navigation
+                </div>
+                <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  {navItems.map((item) => {
+                    const isActive = item.href === '/customer' ? pathname === '/customer' : pathname?.startsWith(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={onClose}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          fontSize: '13.5px',
+                          fontWeight: isActive ? 600 : 500,
+                          color: isActive ? '#ffffff' : '#94a3b8',
+                          backgroundColor: isActive ? '#1c283c' : 'transparent',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ color: isActive ? '#3b82f6' : '#64748b' }}>{item.icon}</span>
+                          <span>{item.label}</span>
+                        </div>
+                        {item.badge !== undefined && (
+                          <span style={{ padding: '2px 7px', borderRadius: '999px', fontSize: '11px', fontWeight: 700, backgroundColor: '#ef4444', color: '#ffffff' }}>
+                            {item.badge}
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', padding: '0 10px', marginBottom: '8px' }}>
+                  Management
+                </div>
+                <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  {managementItems.map((item) => {
+                    const isActive = pathname?.startsWith(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={onClose}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          fontSize: '13.5px',
+                          fontWeight: isActive ? 600 : 500,
+                          color: isActive ? '#ffffff' : '#94a3b8',
+                          backgroundColor: isActive ? '#1c283c' : 'transparent',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ color: isActive ? '#3b82f6' : '#64748b' }}>{item.icon}</span>
+                          <span>{item.label}</span>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop Sidebar */}
+      <aside
+        className="hidden md:flex"
+        style={{
+          width: '260px',
+          backgroundColor: '#0c121e',
+          color: '#94a3b8',
+          flexDirection: 'column',
+          height: '100vh',
+          position: 'sticky',
+          top: 0,
+          zIndex: 40,
+          borderRight: '1px solid #192233',
+          flexShrink: 0,
+        }}
+      >
       {/* Brand Header */}
       <div
         style={{
@@ -146,20 +322,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
             width: '36px',
             height: '36px',
             borderRadius: '10px',
-            background: 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)',
+            overflow: 'hidden',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#ffffff',
             boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
             border: '1px solid rgba(255, 255, 255, 0.15)',
+            backgroundColor: '#0c1a2e',
           }}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="5" cy="19" r="2" fill="#fff" />
-            <path d="M5 17c0-5 4-9 9-9h5" />
-            <polyline points="15 4 19 8 15 12" />
-          </svg>
+          <img src="/logo.png" alt="RaceHorse Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </div>
         <div>
           <div style={{ fontSize: '16px', fontWeight: 800, color: '#ffffff', lineHeight: 1.1 }}>
@@ -360,6 +532,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
             <div
+              suppressHydrationWarning
               style={{
                 width: '34px',
                 height: '34px',
@@ -374,10 +547,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
                 flexShrink: 0,
               }}
             >
-              {user.initials}
+              {currentUser.initials || 'CU'}
             </div>
             <div style={{ minWidth: 0 }}>
               <div
+                suppressHydrationWarning
                 style={{
                   fontSize: '13px',
                   fontWeight: 600,
@@ -387,9 +561,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
                   textOverflow: 'ellipsis',
                 }}
               >
-                {user.name}
+                {currentUser.name || currentUser.email}
               </div>
               <div
+                suppressHydrationWarning
                 style={{
                   fontSize: '11px',
                   color: '#64748b',
@@ -398,13 +573,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
                   textOverflow: 'ellipsis',
                 }}
               >
-                {user.email}
+                {currentUser.email}
               </div>
             </div>
           </div>
 
           <button
-            onClick={handleLogout}
+            onClick={handleLogoutClick}
             title="Log out"
             style={{
               padding: '6px',
@@ -424,5 +599,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
         </div>
       </div>
     </aside>
+    </>
   );
 };
