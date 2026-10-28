@@ -276,8 +276,13 @@ export default function DriverStatusPage() {
               trackingDetails.shipmentStatus === 'in_transit' ? 'bg-blue-100 text-blue-800' :
               trackingDetails.shipmentStatus === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
             }`}>
-              {trackingDetails.shipmentStatus === 'in_transit' ? 'Đang trên đường (In transit)' :
-               trackingDetails.shipmentStatus === 'ready_to_depart' ? 'Sẵn sàng xuất phát' : trackingDetails.shipmentStatus}
+              {trackingDetails.shipmentStatus === 'in_transit'
+                ? 'Đang trên đường (In transit)'
+                : trackingDetails.shipmentStatus === 'completed'
+                ? 'Đã hoàn thành (Completed)'
+                : trackingDetails.shipmentStatus === 'ready_to_depart'
+                ? 'Sẵn sàng xuất phát'
+                : trackingDetails.shipmentStatus}
             </span>
           </div>
 
