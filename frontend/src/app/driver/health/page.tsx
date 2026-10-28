@@ -95,6 +95,10 @@ export default function HorseHealthPage() {
   }, [selectedShipmentId, loadDetails]);
 
   const handleOpenAdd = () => {
+    if (!isEscort) {
+      toast.error('Chức năng này chỉ dành riêng cho Bác sĩ Thú y / Nhân viên Hộ tống (Escort/Vet). Tài xế không có quyền ghi chép.');
+      return;
+    }
     const horses = trackingDetails?.assignedHorses || [];
     const firstHorse = horses[0];
     const currentMilestone = trackingDetails?.milestones.find((m) => m.status === 'CURRENT');
@@ -119,6 +123,10 @@ export default function HorseHealthPage() {
 
   const handleCreateLog = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isEscort) {
+      toast.error('Chức năng này chỉ dành riêng cho Bác sĩ Thú y / Nhân viên Hộ tống (Escort/Vet).');
+      return;
+    }
     if (!selectedShipmentId) return;
 
     setIsSubmitting(true);
@@ -181,16 +189,20 @@ export default function HorseHealthPage() {
     <div className="flex flex-col gap-6 pb-12">
       {/* Role Banner */}
       <div className={`p-4 rounded-xl border flex items-center justify-between text-xs transition-all ${
-        isEscort ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-blue-50 border-blue-200 text-blue-900'
+        isEscort ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'
       }`}>
         <div className="flex items-center gap-2.5">
-          <Stethoscope size={20} className={isEscort ? 'text-emerald-600' : 'text-blue-600'} />
+          <Stethoscope size={20} className={isEscort ? 'text-emerald-600' : 'text-amber-600'} />
           <div>
             <span className="font-bold block text-sm">
-              🩺 Chuyên môn Theo dõi Thú y: Bác Sĩ Thú Y / Hộ Tống (Escort/Vet)
+              {isEscort
+                ? '🩺 Chuyên môn Theo dõi Thú y: Bác Sĩ Thú Y / Hộ Tống (Escort/Vet)'
+                : '🛡️ Quyền Hạn: Tài khoản Tài xế Lái xe (Chế độ xem nhật ký - Chỉ đọc)'}
             </span>
             <p className="m-0 mt-0.5 opacity-90 text-xs">
-              Theo quy chuẩn quốc tế, bạn có trách nhiệm theo dõi thân nhiệt, nhịp tim và biểu hiện hành vi của đàn ngựa trong suốt chuyến đi.
+              {isEscort
+                ? 'Theo quy chuẩn quốc tế, bạn có trách nhiệm theo dõi thân nhiệt, nhịp tim và biểu hiện hành vi của đàn ngựa trong suốt chuyến đi.'
+                : 'Quyền ghi chép và cập nhật sinh hiệu thú y (Flow 4) chỉ dành riêng cho Bác Sĩ Thú Y / Nhân Viên Hộ Tống (Escort/Vet). Tài xế chỉ xem thông tin để phối hợp vận hành xe.'}
             </p>
           </div>
         </div>
@@ -215,14 +227,22 @@ export default function HorseHealthPage() {
           >
             {trips.map((s) => (
               <option key={s.shipment_id} value={s.shipment_id}>
-                #{s.request_code} ({s.shipment_status.toUpperCase()})
+                #{s.request_code} (
+                {s.shipment_status === 'completed'
+                  ? 'ĐÃ HOÀN THÀNH'
+                  : s.shipment_status === 'in_transit'
+                  ? 'ĐANG DI CHUYỂN'
+                  : s.shipment_status.toUpperCase()}
+                )
               </option>
             ))}
           </select>
 
-          <Button variant="primary" onClick={handleOpenAdd} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
-            <Plus size={18} className="mr-1.5" /> Ghi Nhật Ký Mới
-          </Button>
+          {isEscort && (
+            <Button variant="primary" onClick={handleOpenAdd} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
+              <Plus size={18} className="mr-1.5" /> Ghi Nhật Ký Mới
+            </Button>
+          )}
 
           <Button
             variant="outline"
@@ -390,7 +410,7 @@ export default function HorseHealthPage() {
       </div>
 
       {/* Record Observation Modal */}
-      {isAddOpen && (
+      {isEscort && isAddOpen && (
         <Modal
           isOpen={isAddOpen}
           onClose={() => setIsAddOpen(false)}

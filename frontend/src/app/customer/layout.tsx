@@ -1,24 +1,24 @@
 'use client';
 
 import React, { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { CustomerStoreProvider } from '@/lib/customer-store';
-import { getAuthToken, setAuthSession } from '@/lib/auth';
-import { mockCurrentUser } from '@/lib/mock-data';
+import { getAuthToken } from '@/lib/auth';
 
 export default function CustomerLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const router = useRouter();
+
   useEffect(() => {
-    // Ensure active session exists so user never gets blocked or stuck
-    const token = getAuthToken();
-    if (!token) {
-      setAuthSession('mock-jwt-token-customer', mockCurrentUser);
+    if (!getAuthToken()) {
+      router.replace('/login?redirect=/customer');
     }
-  }, []);
+  }, [router]);
 
   return (
     <CustomerStoreProvider>
