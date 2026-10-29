@@ -92,6 +92,18 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
       return;
     }
 
+    const trimmedPassport = passportNumber.trim();
+    if (!trimmedPassport) {
+      setError('Vui lòng nhập FEI Passport Number (Số hộ chiếu FEI).');
+      return;
+    }
+
+    const trimmedMicrochip = microchipNumber.trim();
+    if (!trimmedMicrochip) {
+      setError('Vui lòng nhập Microchip Number (Số vi mạch).');
+      return;
+    }
+
     const isDuplicate = horses.some(
       (h) =>
         h.name.trim().toLowerCase() === trimmedName.toLowerCase() &&
@@ -128,8 +140,8 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
           dateOfBirth: dateOfBirth || undefined,
           quantity: 1,
           gender: gender === 'Stallion' ? 'male' : gender === 'Mare' ? 'female' : 'gelding',
-          passportNo: passportNumber.trim() || undefined,
-          microchipNo: microchipNumber.trim() || undefined,
+          passportNo: trimmedPassport,
+          microchipNo: trimmedMicrochip,
           status: 'active',
           color: color.trim() || undefined,
           weight: weight.trim() || undefined,
@@ -152,8 +164,8 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         dateOfBirth: dateOfBirth || undefined,
         quantity: 1,
         gender,
-        passportNumber: passportNumber.trim() || undefined,
-        microchipNumber: microchipNumber.trim() || undefined,
+        passportNumber: trimmedPassport,
+        microchipNumber: trimmedMicrochip,
         medicalStatus,
         color,
         weight: weight.trim() || '480 kg',
@@ -463,13 +475,14 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           <div>
             <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              FEI Passport Number
+              FEI Passport Number <span style={{ color: '#dc2626' }}>*</span>
             </label>
             <input
               type="text"
               placeholder="e.g. FEI-VN-2026-888"
               value={passportNumber}
               onChange={(e) => setPassportNumber(e.target.value)}
+              required
               style={{
                 width: '100%',
                 padding: '10px 14px',
@@ -482,13 +495,14 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
           </div>
           <div>
             <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Microchip Number
+              Microchip Number <span style={{ color: '#dc2626' }}>*</span>
             </label>
             <input
               type="text"
               placeholder="e.g. 985141001248999"
               value={microchipNumber}
               onChange={(e) => setMicrochipNumber(e.target.value)}
+              required
               style={{
                 width: '100%',
                 padding: '10px 14px',

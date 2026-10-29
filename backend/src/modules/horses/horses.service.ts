@@ -36,6 +36,13 @@ export class HorsesService {
   async createHorse(user: AuthenticatedUser, dto: CreateHorseDto): Promise<HorseEntity> {
     const ownerId = Number(user.id);
 
+    if (!dto.passportNo?.trim()) {
+      throw new BadRequestException('Vui lòng nhập FEI Passport Number (Số hộ chiếu FEI).');
+    }
+    if (!dto.microchipNo?.trim()) {
+      throw new BadRequestException('Vui lòng nhập Microchip Number (Số vi mạch).');
+    }
+
     // Kiểm tra không được trùng tên ngựa trong tài khoản của khách
     const existingHorses = await this.horsesStore.findByOwnerId(ownerId);
     const isDuplicate = existingHorses.some(
