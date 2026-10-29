@@ -916,14 +916,25 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          {/* 2.1 MOMO PAYMENT */}
-          {Number(request.totalCost) > 0 && ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(String(request.status).toLowerCase()) && (
-            <DemoMomoPayment
-              shipmentId={Number(request.id || request.shipmentId || requestId)}
-              requestCode={request.requestCode}
-              amount={Number(request.totalCost) < 100000 ? Math.round(Number(request.totalCost) * 25400) : Math.round(Number(request.totalCost))}
-            />
-          )}
+          {/* 2.1 MOMO PAYMENT - Chỉ hiển thị sau khi toàn bộ hồ sơ kiểm dịch đã được duyệt 100% */}
+          {Boolean(checklist?.isFullyCompliant) &&
+            Number(request.totalCost) > 0 &&
+            ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(
+              String(request.status).toLowerCase()
+            ) && (
+              <DemoMomoPayment
+                shipmentId={Number(request.id || request.shipmentId || requestId)}
+                requestCode={request.requestCode}
+                amount={
+                  Number(request.totalCost) < 100000
+                    ? Math.round(Number(request.totalCost) * 25400)
+                    : Math.round(Number(request.totalCost))
+                }
+                onPaymentSuccess={() => {
+                  mutate();
+                }}
+              />
+            )}
 
           {/* 3. TRANSPORT ROUTE */}
           <div
