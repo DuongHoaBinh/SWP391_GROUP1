@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import { config } from 'dotenv';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -8,12 +7,7 @@ import { join } from 'path';
 import * as fs from 'fs';
 import { AppModule } from './app.module';
 
-config({ path: join(__dirname, '../.env.sepay.local'), quiet: true });
-
 async function bootstrap() {
-  if (process.env.SEPAY_ENABLED === 'true' && (process.env.JWT_SECRET?.length ?? 0) < 32) {
-    throw new Error('SePay requires a JWT_SECRET with at least 32 characters.');
-  }
   const uploadDir = join(process.cwd(), 'uploads', 'documents');
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -23,7 +17,7 @@ async function bootstrap() {
     fs.mkdirSync(horsesUploadDir, { recursive: true });
   }
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads' });
   app.setGlobalPrefix('api');
   app.enableCors({

@@ -39,7 +39,7 @@ import { OrderComplianceChecklist } from '@/features/documents/api/documents.api
 import { buildEquineRoute } from '@/lib/geo-corridors';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
-import { SepayPayment } from '@/features/orders/components/SepayPayment';
+import { DemoMomoPayment } from '@/features/orders/components/DemoMomoPayment';
 
 const fetcher = async (url: string) => {
   const data = await apiClient<any>(url);
@@ -828,7 +828,7 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          {(isApproved && Number(request.totalCost) > 0 || request.paymentStatus && request.paymentStatus !== 'unpaid') && <SepayPayment shipmentId={Number(request.id)} requestCode={request.requestCode} amount={Number(request.totalCost)} eligible={isApproved && Number(request.totalCost) > 0} />}
+          {isApproved && Number(request.totalCost) > 0 && <DemoMomoPayment shipmentId={Number(request.id)} requestCode={request.requestCode} amount={Number(request.totalCost)} />}
 
           {/* 3. TRANSPORT ROUTE */}
           <div

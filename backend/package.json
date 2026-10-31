@@ -6,8 +6,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "test:tracking": "node --test test/tracking.integration.cjs",
-    "test:sepay": "npm run build && node --test test/sepay.integration.cjs",
-    "migrate:sepay": "node ../database/apply-sepay-migration.cjs"
+    "test:momo": "node --test test/momo.integration.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

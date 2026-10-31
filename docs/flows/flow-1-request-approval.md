@@ -20,16 +20,9 @@ Customer, Logistics Manager
 - Only the Logistics Manager can approve or reject a submitted order.
 - Customer edits after a change request create a new revision and preserve the previous version.
 - Approval does not mean the trip can depart; document readiness and operational planning are separate gates.
-
-## SePay payment rules
-
-- After approval and a positive integer VND quote, the customer creates/reuses one transfer QR for the order. Backend checks ownership and uses the database amount.
-- Default code is DH plus eight digits, matching SePay's numeric recognition pattern. Code, account and amount are persisted before displaying QR.
-- Only a fresh HMAC-signed incoming transfer matching bank, account, exact code, amount and eligible shipment marks payment succeeded. Samples and browser actions never settle.
-- Retries never double-credit. Partial/extra money, changed quotes and unavailable orders require review. No automatic second collection or installment summation.
-- Status polling rechecks the current quote, shipment eligibility and receiving configuration; obsolete transfer instructions are hidden before any transfer. Once review is required, later transfers remain auditable and cannot automatically confirm payment.
-- MySQL stores receipt audit, payment state and notification atomically. Payment does not change transport state or introduce new gates in Flows 1-4. Historical sandbox data is retained but never counts as real money.
-- Order detail links to `/customer/requests/:id/payment` for QR checkout. Verified success is displayed there with links back to order detail and the order list. Closing checkout returns to `/customer/requests/:id#sepay-payment`; it does not cancel the order, invalidate an issued transfer code, refund money or stop later bank confirmation. The order remains pending until the webhook confirms receipt, and reopening reuses the same instructions.
+- Customers may try MoMo sandbox payment from their approved/operational order detail using its persisted VND quote. Amount and ownership are checked by the orders backend. ATM card session creation (`payWithATM`) is pending until a verified IPN or backend query confirms the sandbox result; browser redirects cannot mark payment success.
+- Sandbox payment records and append-only payment events are separate from shipment status and real settlement. This optional demo does not block approval, compliance, departure or tracking. Pending/uncertain transactions are reused to avoid duplicate creation.
+- A query reporting a terminal failure (including expired session code `1005`) may omit the amount. Partner, order and query request IDs must still match; a supplied amount must match the stored quote. Pending/success responses require the matching amount. An expired session is recorded as failed with its history retained, allowing a new card session.
 
 ## Outputs
 
@@ -37,3 +30,5 @@ Approved order, assigned work items, order status history, and customer notifica
 
 **Owner:** `backend/src/modules/orders`  
 **Primary UI:** `frontend/src/app/customer`, `frontend/src/app/manager`
+
+- ATM sandbox accepts integer quotes from 10,000 to 50,000,000 VND (verified against the test gateway). Payment card data stays on the hosted MoMo page. Migration 014 preserves legacy wallet attempts and their events; the UI offers card checkout only.

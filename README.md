@@ -69,10 +69,3 @@ For local development, start the backend on port `5000` and the Next.js frontend
 ## Suggested ownership
 
 The first implementation slice is `auth`, `orders`, and `documents`, plus the `manager` and `customer` application routes. Other modules can be developed independently against the documented contracts.
-
-## SePay bank transfers
-
-Real VND checkout replaces the sandbox checkout. See [SePay setup](docs/sepay-local.md)
-for environment variables, migration 015, local start instructions and deployment.
-Uses DH codes, database VND quotes, signed idempotent bank receipts and durable
-payment status.
