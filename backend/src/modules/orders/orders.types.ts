@@ -48,6 +48,9 @@ export interface TransportOrder {
   changeRequestNotes: string | null;
   status: ShipmentStatus;
   totalCost: number;
+  paymentStatus: 'unpaid' | 'pending' | 'review' | 'succeeded';
+  paymentCode: string | null;
+  paidAt: string | null;
   createdAt: string;
   updatedAt: string;
   attachments?: ShipmentAttachment[];

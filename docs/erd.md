@@ -25,11 +25,12 @@ The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with
 
 The database schema is the executable source of truth; this document explains ownership and relationships at a business level.
 
-## MoMo sandbox persistence (migrations 013–014)
+## SePay settlement (migration 015)
 
-- `shipment_sandbox_payment` belongs to a shipment and its customer. It holds immutable gateway order/request identifiers, partner code, request type (`captureWallet` legacy / `payWithATM`), order description and VND amount; sandbox status, gateway URLs, result and timestamps are projections. It contains no merchant keys. Unique order/request IDs and a shipment lock prevent duplicate active creation.
-- `shipment_sandbox_payment_event` references a sandbox payment. Creation, query and verified IPN append source/status/result events. `(payment_id, event_key)` is unique for idempotent IPN handling. A successful sandbox result cannot be downgraded by delayed events.
-- These tables do not represent real settlement and never update shipment execution state. Credentials stay in server environment configuration.
+- shipment_sepay_payment belongs to a shipment and customer. Unique shipment_id, payment_code and settled transaction_id prevent duplicate collection. Stores immutable VND amount, bank/account snapshot, pending/review/succeeded state and settlement timestamps.
+- sepay_webhook_receipt is the append-only authenticated receipt ledger, keyed by transaction ID. Nullable payment_id links matched receipts; identity_hash identifies equivalent retries and outcome records paid/ignored/unmatched/review results.
+- Receipt, payment projection and customer notification commit together. Neither table stores webhook secrets or changes trip execution state.
+- Tables from migrations 013-014 remain historical only. Sandbox successes are never migrated to real settlement.
 
 ## Flow 4 persistence (migration 012)
 

@@ -17,7 +17,7 @@
 - Only the Fleet & Route Coordinator can publish route legs, capacity assignments, and planned schedules.
 - Drivers/escorts can update execution events and health logs only for assigned trips.
 - Customers cannot edit an approved request or operational status; they can submit requested corrections/documents.
-- Customers may create, read and reconcile MoMo sandbox payments only for their own quoted, approved/operational orders. Server-side ownership and stored amounts apply; sandbox results do not change shipment status or real settlement.
+- Customers create/read SePay payments only for their own quoted, approved/operational orders. Managers/admins may read payment state. Only verified matching bank webhooks confirm real payment; payment and transport states stay separate.
 
 All authorization checks belong to `backend/src/modules/auth` and must be enforced server-side. The frontend route grouping is a usability boundary, not a security boundary.
 

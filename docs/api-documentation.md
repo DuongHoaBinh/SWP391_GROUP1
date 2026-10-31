@@ -492,37 +492,59 @@ Tracking `requestCode` is derived from the actual `shipment_id` (`REQ-001`, etc.
 
 Coordinator overrides validate the action against the milestone identifier. `leg-<id>-start` accepts `start_leg`; `leg-<id>-end` accepts `arrive_leg` or the compatible alias `complete_leg`. `stop-<id>` accepts `arrive_stop`, `depart_stop`, `clear_customs` and their status aliases. A mismatch returns 400 without changing shipment state or writing history. The current milestone and assignment rules still apply.
 
-## Customer MoMo sandbox
+## SePay bank-transfer payments
 
-The customer order detail panel uses the MoMo test gateway. It creates a domestic ATM card session (`requestType=payWithATM`) and opens MoMo's hosted `payUrl`. Card details are entered only on MoMo; this application neither accepts nor stores card numbers or OTPs. Browser-local success simulation has been removed. Sandbox results are stored separately and never mark a shipment as paid with real money or change execution status. The optional payment flow does not block Flows 1–4.
+Real VND transfers replace the sandbox checkout. Only a fresh signed webhook
+matching the persisted quote, bank, account and payment code confirms payment.
+Browser actions and id=0 Dashboard samples cannot settle an order.
 
-| Method | Path under `/api` | Authorization / purpose |
+| Method | Endpoint | Behavior |
 |---|---|---|
-| GET | `/orders/:id/payments/momo` | Customer owns shipment; returns `{ enabled, sandbox: true, payment }` |
-| POST | `/orders/:id/payments/momo` | Customer owns approved/operational shipment; creates or reuses a sandbox payment |
-| POST | `/orders/:id/payments/momo/refresh` | Customer owns shipment; backend queries MoMo for the persisted transaction |
-| POST | `/orders/payments/momo/ipn` | No JWT; verifies MoMo HMAC signature and persisted transaction fields; acknowledges with HTTP 204 |
+| GET | /orders/:id/payments/sepay | Customer owns order; manager/admin may read. Returns enabled, provider, payment. |
+| POST | /orders/:id/payments/sepay | Customer only; creates/reuses transfer instructions from stored VND quote. No body. |
+| POST | /payments/sepay/webhook | HMAC authenticated. HTTP 200 with {"success":true} after DB commit. |
+| GET | /payments/sepay/webhook | Configuration readiness without private transaction data. |
 
-Create and refresh require no body. Amount is read from MySQL `shipment.total_cost`, an integer VND quote between 10,000 and 50,000,000. Clients cannot override amount, callbacks, merchant credentials or transaction IDs. Creation locks the shipment while reserving the transaction; concurrent/repeated requests reuse the existing creating/pending/unknown/succeeded payment. Only a failed payment permits a new attempt. Quote/partner changes while an existing payment is unresolved return 409.
+Payment fields: id, shipmentId, provider=sepay, currency=VND, paymentCode, amount,
+status (pending/review/succeeded), bankCode, accountNumber, accountName, qrUrl,
+transactionId, paidAt, updatedAt. Only pending payments expose QR. The customer
+polls GET every three seconds while pending; refresh never simulates a transfer.
+Order APIs add paymentStatus (unpaid/pending/review/succeeded), paymentCode, paidAt.
+The manager order list displays payment status separately from transport status.
 
-Payment response fields: `id`, `shipmentId`, `orderId`, `amount`, `status`, `payUrl`, `method`, `resultCode`, `message`, `transactionId`, `updatedAt`, `sandbox: true`. Status is `creating`, `pending`, `succeeded`, `failed`, or `unknown`. Create `resultCode=0` means card session created, **not payment completed**. Verified query/IPN codes 0 or 9000 mean sandbox success for this one-step auto-capture flow. Timeouts retain `unknown` to prevent an unsafe duplicate attempt. Successful records cannot be downgraded by delayed notifications. IPN retries are deduplicated, and changes append to `shipment_sandbox_payment_event`.
+Creation reads positive integer VND from shipment.total_cost and checks ownership
+and approved/operational state. One shipment has one immutable payment code and
+bank/amount snapshot. Concurrent creation reuses it. Quote/account changes return
+409; historical sandbox successes do not count as money received.
 
-IPN requires `partnerCode`, `orderId`, `requestId`, `amount`, `orderInfo`, `orderType`, `transId`, `resultCode`, `message`, `payType`, `responseTime`, `extraData`, `signature`. HMAC-SHA256 uses the alphabetically ordered documented IPN fields plus `accessKey`; identity and amount are matched with MySQL. Redirect query parameters never determine payment status. On return, the browser requests server-side reconciliation.
+Webhook headers: X-SePay-Timestamp (Unix seconds) and X-SePay-Signature containing
+sha256=hex HMAC-SHA256 over timestamp + '.' + original raw JSON bytes. Timestamp
+window +/-300 seconds. NestJS rawBody is preserved. Invalid/expired signatures
+return 401; invalid payloads return 400; id=0 samples return 200 with no financial
+writes. Required payload fields: id, gateway, accountNumber, transferType,
+transferAmount, content. Optional code must agree with the single exact payment
+code in content; ambiguous/embedded codes cannot settle. Default code: DH and
+eight digits, configurable to match SePay's numeric pattern.
 
-### Setup and verification
+Only incoming money for the configured bank/account can settle. Receipts with
+wrong/missing codes remain unmatched; outgoing or wrong bank/account receipts are
+ignored. Under/overpayments, changed quotes and cancelled/unavailable shipments
+require review. Partial payments are not summed. Customers in review are told
+not to transfer again until staff reconcile. Success never downgrades.
 
-1. Apply migrations 013–014: `node database/apply-momo-migration.cjs` from the root. It preserves existing orders.
-2. Set the backend-only variables from `.env.example`: `MOMO_SANDBOX_ENABLED=true`, `MOMO_ENDPOINT=https://test-payment.momo.vn/v2/gateway/api/create`, `MOMO_PARTNER_CODE`, `MOMO_ACCESS_KEY`, `MOMO_SECRET_KEY`, `MOMO_REDIRECT_ORIGIN`, `MOMO_IPN_URL`. Never put keys in `NEXT_PUBLIC_*` variables or commit `.env`.
-3. MoMo publishes shared test credentials in its [official Node.js sample](https://github.com/momo-wallet/payment/blob/master/nodejs/MoMo.js). On 2026-10-21 the user-supplied sample credentials were verified against ATM create (code 0, pay URL without QR) and query (code 1000, awaiting confirmation). Merchant-owned testing credentials can also be obtained from [MoMo Business](https://developers.momo.vn/v3/vi/docs/payment/api/other/postman/).
-4. For push callbacks, `MOMO_IPN_URL` must be a reachable HTTPS endpoint. A localhost URL works for local request signing but cannot receive MoMo's external IPN; use the authenticated **Kiểm tra kết quả** button to query instead. Enter only official ATM test card details on the MoMo sandbox page. Public success fixture: 9704 0000 0000 0018, NGUYEN VAN A, date 03/07, OTP `OTP`; see [MoMo test instructions](https://developers.momo.vn/v3/vi/docs/payment/onboarding/test-instructions/).
-5. Build backend and run `npm run test:momo` in `backend/`. Tests use isolated MySQL fixtures and stub the external gateway. They do not perform a real card payment. Live sandbox creation/query are checked separately.
+sepay_webhook_receipt durably records authenticated receipts and outcomes. Unique
+transaction IDs deduplicate retries, including concurrent first delivery and JSON
+formatting changes. Changed identity under the same ID returns 409. Receipt,
+settlement and one customer notification commit atomically. Storage failure
+remains non-2xx so SePay retries. Payment and transport state remain separate.
 
-Only the exact MoMo sandbox endpoint is accepted; production mode disables this feature. Public demo credentials do not establish trustworthy real settlement. This implementation is intentionally limited to sandbox records. Query signing includes `requestId`, as required and verified by the current test gateway. Official references: [one-time ATM API](https://developers.momo.vn/v3/docs/payment/api/atm/onetime/), [IPN](https://developers.momo.vn/v3/docs/payment/api/result-handling/notification/).
+Apply migration 015 with node database/apply-sepay-migration.cjs. Configure backend
+SEPAY_* values in .env or .env.sepay.local, never NEXT_PUBLIC_*. Real JWTs and a
+32+ character JWT_SECRET are required; mock bearer tokens are rejected. No SePay
+API access token is needed. See [local setup](sepay-local.md). Start backend then
+run npm run test:sepay in backend for isolated HTTP/MySQL fixtures, with no bank
+funds transferred.
 
-### ATM method migration and tracking read additions
-
-Query reconciliation accepts an omitted/null amount only for recognized terminal failure codes (1001–1007, 1017, 1026), with matching partner, order and query request IDs. Any supplied amount must match MySQL; pending and successful results always require the stored amount. Sandbox code `1005` is persisted as `failed` with an expiry message so the customer can create a fresh card session. Previous payment rows and events remain in history. This handles the live sandbox's expired-session response, which omits `amount` and `transId`.
-
-Migration 014 adds immutable `request_type`; legacy rows remain `captureWallet`. New sessions use `payWithATM`; legacy pending wallet sessions are retained as history and are not presented as card sessions. Any verified successful payment, including a legacy wallet payment, prevents a new attempt. Successful ATM IPNs must have `payType=napas`.
+### Tracking read additions
 
 Tracking detail additionally returns `latestHorseHealth`: the latest observation for each assigned horse, independent of the ten-item health history page. Customer responses omit internal notes here too. Milestone `allowedActions` are empty for unconfirmed driver/escort assignments.

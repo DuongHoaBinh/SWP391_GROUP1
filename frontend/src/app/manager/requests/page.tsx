@@ -18,6 +18,7 @@ export default function ManagerRequestsPage() {
   // Fetch orders from backend
   const { data: orders = [], isLoading, mutate } = useSWR('/orders', fetcher, {
     revalidateOnFocus: true,
+    refreshInterval: 15000,
   });
 
   // Modal states
@@ -237,6 +238,9 @@ export default function ManagerRequestsPage() {
                 <tr key={order.id} className="hover:bg-slate-50/70 transition-colors">
                   <td className="px-6 py-4 font-bold text-blue-600 whitespace-nowrap">
                     {order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`}
+                    <span className={`mt-2 block text-xs font-medium ${order.paymentStatus === 'succeeded' ? 'text-green-700' : order.paymentStatus === 'review' ? 'text-amber-700' : 'text-slate-500'}`}>
+                      {order.paymentStatus === 'succeeded' ? 'SePay: Đã thanh toán' : order.paymentStatus === 'review' ? 'SePay: Cần đối soát' : order.paymentStatus === 'pending' ? 'SePay: Chờ chuyển khoản' : 'Chưa thanh toán'}
+                    </span>
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-bold text-slate-900 m-0">{order.contactName || 'Customer'}</p>

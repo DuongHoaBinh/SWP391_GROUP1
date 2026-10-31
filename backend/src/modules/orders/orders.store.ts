@@ -25,6 +25,9 @@ interface ShipmentRow extends RowDataPacket {
   change_request_notes: string | null;
   status: ShipmentStatus;
   total_cost: number | string;
+  payment_status?: 'pending' | 'review' | 'succeeded';
+  payment_code?: string | null;
+  paid_at?: Date | null;
   created_at: Date;
   updated_at: Date;
   customer_email?: string;
@@ -218,9 +221,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findShipmentsByCustomer(customerId: number): Promise<TransportOrder[]> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+      `SELECT s.*, p.status as payment_status, p.payment_code, p.paid_at, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
               CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code
        FROM shipment s
+       LEFT JOIN shipment_sepay_payment p ON p.shipment_id = s.shipment_id
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
        WHERE s.customer_id = ?
@@ -233,9 +237,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findAllShipments(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
     let query = `
-      SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+      SELECT s.*, p.status as payment_status, p.payment_code, p.paid_at, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
       FROM shipment s
+      LEFT JOIN shipment_sepay_payment p ON p.shipment_id = s.shipment_id
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
     `;
@@ -254,13 +259,14 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findShipmentById(shipmentId: number): Promise<TransportOrder | undefined> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+      `SELECT s.*, p.status as payment_status, p.payment_code, p.paid_at, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
               CONCAT('REQ-', LPAD(
                 (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                 3, '0'
               )) as customer_request_code,
               CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
        FROM shipment s
+       LEFT JOIN shipment_sepay_payment p ON p.shipment_id = s.shipment_id
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
        WHERE s.shipment_id = ?
@@ -478,6 +484,9 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       changeRequestNotes: row.change_request_notes ?? null,
       status: row.status,
       totalCost: Number(row.total_cost ?? 0),
+      paymentStatus: row.payment_status ?? 'unpaid',
+      paymentCode: row.payment_code ?? null,
+      paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       customerEmail: row.customer_email,
