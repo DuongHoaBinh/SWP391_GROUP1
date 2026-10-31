@@ -16,6 +16,7 @@ interface Payment {
   accountNumber: string;
   accountName: string;
   qrUrl: string | null;
+  blockedReason: string | null;
   transactionId: string | null;
   paidAt: string | null;
 }
@@ -36,7 +37,7 @@ export function SepayPayment({ shipmentId, requestCode, amount }: { shipmentId: 
   );
   const payment = data?.payment;
   const quoteChanged = !!payment && payment.status !== 'succeeded' && payment.amount !== amount;
-  const canPay = data?.enabled && payment?.status === 'pending' && !quoteChanged;
+  const canPay = data?.enabled && !loadError && payment?.status === 'pending' && !!payment.qrUrl && !payment.blockedReason && !quoteChanged;
 
   async function create() {
     setBusy(true); setError('');
@@ -66,7 +67,7 @@ export function SepayPayment({ shipmentId, requestCode, amount }: { shipmentId: 
         <CheckCircle2 className="mt-0.5 shrink-0" size={22} aria-hidden="true" />
         <div><p className="font-semibold">Đã nhận {money(payment.amount)}</p><p className="mt-1 text-sm">Mã thanh toán: <strong>{payment.paymentCode}</strong></p><p className="mt-1 break-all text-xs">Giao dịch SePay: {payment.transactionId}{payment.paidAt ? ` · ${new Date(payment.paidAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` : ''}</p></div>
       </div> : <>
-        {quoteChanged && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Báo giá đã thay đổi. Vui lòng liên hệ bộ phận vận chuyển để đối soát; chưa chuyển tiền theo thông tin cũ.</p>}
+        {payment?.blockedReason ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{payment.blockedReason}</p> : quoteChanged && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Báo giá đã thay đổi. Vui lòng liên hệ bộ phận vận chuyển để đối soát; chưa chuyển tiền theo thông tin cũ.</p>}
         {payment?.status === 'review' && <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p className="font-semibold">Giao dịch cần đối soát</p><p className="mt-1">Thông tin chuyển khoản chưa khớp hoàn toàn với đơn hàng. Vui lòng liên hệ bộ phận vận chuyển và cung cấp mã {payment.paymentCode}. Chưa chuyển thêm tiền cho đến khi được xác nhận.</p></div>}
         {!payment && data?.enabled && <div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm text-slate-500">Số tiền theo báo giá</p><p className="mt-1 text-xl font-bold tabular-nums text-slate-900">{money(amount)}</p><p className="mt-2 max-w-lg text-sm text-slate-600">Quét QR bằng ứng dụng ngân hàng. Số tiền và nội dung chuyển khoản sẽ được điền sẵn.</p></div><button type="button" disabled={busy || !Number.isSafeInteger(amount) || amount <= 0} className={`${buttonStyle} bg-blue-600 text-white hover:bg-blue-700`} onClick={create}><QrCode size={18} aria-hidden="true" />{busy ? 'Đang tạo mã…' : 'Tạo mã QR thanh toán'}</button></div>}
         {canPay && <div className="grid min-w-0 gap-6 md:grid-cols-[240px_minmax(0,1fr)]">

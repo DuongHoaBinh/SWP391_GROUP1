@@ -71,8 +71,10 @@ Dashboard id=0 samples check connectivity without financial writes. A real
 payment requires the configured bank/account, a unique exact code in content and
 the exact amount. Verify with a small real bank transfer on an actual quoted order
 when ready. Partial/extra amounts, changed quotes and cancelled orders need staff
-review; customers are told not to transfer again while in review. Unmatched and
-ignored transfers remain in sepay_webhook_receipt. This version does not sum
+review; customers are told not to transfer again while in review.
+Later exact transfers also remain in review for staff reconciliation. Status
+polling hides obsolete QR/instructions when the quote, order or configuration changes.
+Unmatched and ignored transfers remain in sepay_webhook_receipt. This version does not sum
 installments, auto-refund or count sandbox results as real money.
 
 The pre-integration backend/.local/sepay/inbox.ndjson remains historical and is not

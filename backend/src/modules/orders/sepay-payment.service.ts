@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { SepayPaymentStore } from './sepay-payment.store';
-import { SepayConfig, SepayPayment, SepayTransaction } from './sepay-payment.types';
+import { PAYABLE_SHIPMENT_STATUSES, SepayConfig, SepayPayment, SepayTransaction } from './sepay-payment.types';
 
 @Injectable()
 export class SepayPaymentService {
@@ -29,14 +29,32 @@ export class SepayPaymentService {
     return Number(user.id);
   }
 
-  private view(payment: SepayPayment | null) {
+  private blockedReason(payment: SepayPayment, config: SepayConfig | null): string | null {
+    if (payment.status !== 'pending') return null;
+    if (!config) return 'Thanh toán đang tạm ngưng. Vui lòng liên hệ bộ phận vận chuyển trước khi chuyển tiền.';
+    if ((payment.shipment_status !== undefined && !PAYABLE_SHIPMENT_STATUSES.includes(payment.shipment_status)) ||
+        (payment.shipment_customer_id !== undefined && Number(payment.shipment_customer_id) !== Number(payment.customer_id))) {
+      return 'Đơn hàng hiện không còn đủ điều kiện thanh toán. Chưa chuyển tiền; vui lòng liên hệ bộ phận vận chuyển.';
+    }
+    if (payment.current_amount !== undefined && Number(payment.current_amount) !== Number(payment.amount)) {
+      return 'Báo giá đã thay đổi. Chưa chuyển tiền theo thông tin cũ; vui lòng liên hệ bộ phận vận chuyển để đối soát.';
+    }
+    if (payment.account_number !== config.accountNumber || payment.bank_code !== config.bankCode ||
+        !new RegExp(`^${config.prefix}[0-9]{${config.suffixLength}}$`).test(payment.payment_code)) {
+      return 'Thông tin nhận thanh toán đã thay đổi. Chưa chuyển tiền theo thông tin cũ; vui lòng liên hệ bộ phận vận chuyển.';
+    }
+    return null;
+  }
+
+  private view(payment: SepayPayment | null, config: SepayConfig | null) {
     if (!payment) return null;
+    const blockedReason = this.blockedReason(payment, config);
     const query = new URLSearchParams({ acc: payment.account_number, bank: payment.bank_code, amount: String(payment.amount),
       des: payment.payment_code, template: 'compact', holder: payment.account_name });
     return { id: payment.payment_id, shipmentId: payment.shipment_id, provider: 'sepay' as const, currency: 'VND' as const,
       paymentCode: payment.payment_code, amount: Number(payment.amount), status: payment.status,
       bankCode: payment.bank_code, accountNumber: payment.account_number, accountName: payment.account_name,
-      qrUrl: payment.status === 'pending' ? `https://vietqr.app/img?${query}` : null,
+      qrUrl: payment.status === 'pending' && !blockedReason ? `https://vietqr.app/img?${query}` : null, blockedReason,
       transactionId: payment.transaction_id === null ? null : String(payment.transaction_id),
       paidAt: payment.paid_at ? new Date(payment.paid_at).toISOString() : null, updatedAt: new Date(payment.updated_at).toISOString() };
   }
@@ -44,13 +62,14 @@ export class SepayPaymentService {
   async get(user: AuthenticatedUser, shipmentId: number) {
     const staff = [UserRole.ADMIN, UserRole.LOGISTICS_MANAGER].includes(user.role);
     const payment = await this.store.latest(shipmentId, staff ? null : this.customer(user));
-    let enabled = true;
-    try { this.config(); } catch { enabled = false; }
-    return { enabled, provider: 'sepay', payment: this.view(payment) };
+    let config: SepayConfig | null = null;
+    try { config = this.config(); } catch {}
+    return { enabled: config !== null, provider: 'sepay', payment: this.view(payment, config) };
   }
 
   async create(user: AuthenticatedUser, shipmentId: number) {
-    return this.view(await this.store.reserve(shipmentId, this.customer(user), this.config()));
+    const config = this.config();
+    return this.view(await this.store.reserve(shipmentId, this.customer(user), config), config);
   }
 
   async webhook(raw: Buffer | undefined, signature: string | undefined, timestamp: string | undefined): Promise<{ success: true }> {

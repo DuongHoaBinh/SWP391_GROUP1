@@ -14,6 +14,9 @@ export interface SepayPayment extends RowDataPacket {
   paid_at: Date | null;
   created_at: Date;
   updated_at: Date;
+  shipment_status?: string;
+  current_amount?: number | string;
+  shipment_customer_id?: number;
 }
 
 export interface SepayTransaction {

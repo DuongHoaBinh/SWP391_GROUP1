@@ -27,6 +27,7 @@ Customer, Logistics Manager
 - Default code is DH plus eight digits, matching SePay's numeric recognition pattern. Code, account and amount are persisted before displaying QR.
 - Only a fresh HMAC-signed incoming transfer matching bank, account, exact code, amount and eligible shipment marks payment succeeded. Samples and browser actions never settle.
 - Retries never double-credit. Partial/extra money, changed quotes and unavailable orders require review. No automatic second collection or installment summation.
+- Status polling rechecks the current quote, shipment eligibility and receiving configuration; obsolete transfer instructions are hidden before any transfer. Once review is required, later transfers remain auditable and cannot automatically confirm payment.
 - MySQL stores receipt audit, payment state and notification atomically. Payment does not change transport state or introduce new gates in Flows 1-4. Historical sandbox data is retained but never counts as real money.
 
 ## Outputs

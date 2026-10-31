@@ -507,7 +507,11 @@ Browser actions and id=0 Dashboard samples cannot settle an order.
 
 Payment fields: id, shipmentId, provider=sepay, currency=VND, paymentCode, amount,
 status (pending/review/succeeded), bankCode, accountNumber, accountName, qrUrl,
-transactionId, paidAt, updatedAt. Only pending payments expose QR. The customer
+transactionId, paidAt, updatedAt, blockedReason (nullable customer-facing text).
+Only eligible pending payments expose QR. GET rechecks the current quote,
+shipment state/owner and receiving account/code configuration; obsolete instructions
+have qrUrl=null and a blockedReason without changing the financial status.
+The customer
 polls GET every three seconds while pending; refresh never simulates a transfer.
 Order APIs add paymentStatus (unpaid/pending/review/succeeded), paymentCode, paidAt.
 The manager order list displays payment status separately from transport status.
@@ -530,7 +534,9 @@ Only incoming money for the configured bank/account can settle. Receipts with
 wrong/missing codes remain unmatched; outgoing or wrong bank/account receipts are
 ignored. Under/overpayments, changed quotes and cancelled/unavailable shipments
 require review. Partial payments are not summed. Customers in review are told
-not to transfer again until staff reconcile. Success never downgrades.
+not to transfer again until staff reconcile. Later transfers against a payment in
+review remain review_required receipts; they do not automatically mark it paid.
+Success never downgrades.
 
 sepay_webhook_receipt durably records authenticated receipts and outcomes. Unique
 transaction IDs deduplicate retries, including concurrent first delivery and JSON

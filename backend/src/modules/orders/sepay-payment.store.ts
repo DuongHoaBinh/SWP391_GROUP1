@@ -24,7 +24,9 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
     const [orders] = await this.pool.execute<RowDataPacket[]>('SELECT customer_id FROM shipment WHERE shipment_id = ?', [shipmentId]);
     if (!orders.length) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (customerId !== null && Number(orders[0].customer_id) !== customerId) throw new ForbiddenException('Đơn hàng không thuộc tài khoản của bạn');
-    const [rows] = await this.pool.execute<SepayPayment[]>('SELECT * FROM shipment_sepay_payment WHERE shipment_id = ?', [shipmentId]);
+    const [rows] = await this.pool.execute<SepayPayment[]>(`SELECT p.*, s.status AS shipment_status,
+      s.total_cost AS current_amount, s.customer_id AS shipment_customer_id
+      FROM shipment_sepay_payment p JOIN shipment s ON s.shipment_id = p.shipment_id WHERE p.shipment_id = ?`, [shipmentId]);
     return rows[0] ?? null;
   }
 
@@ -41,7 +43,8 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
       if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 9999999999999) throw new BadRequestException('Báo giá phải là số nguyên VND lớn hơn 0');
       if (existing.length) {
         const previous = existing[0];
-        if (Number(previous.amount) !== amount || previous.account_number !== config.accountNumber || previous.bank_code !== config.bankCode) {
+        if (Number(previous.amount) !== amount || previous.account_number !== config.accountNumber || previous.bank_code !== config.bankCode ||
+            !new RegExp(`^${config.prefix}[0-9]{${config.suffixLength}}$`).test(previous.payment_code)) {
           throw new ConflictException('Báo giá hoặc tài khoản nhận đã thay đổi. Vui lòng liên hệ bộ phận vận chuyển để đối soát trước khi thanh toán.');
         }
         return previous;
@@ -85,6 +88,7 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
           payload.gateway.replace(/[^A-Z0-9]/gi, '').toUpperCase() !== config.bankCode.replace(/[^A-Z0-9]/gi, '').toUpperCase()) outcome = 'ignored';
       else if (payment) {
         if (payment.status === 'succeeded') outcome = 'already_paid';
+        else if (payment.status === 'review') outcome = 'review_required';
         else if (payment.account_number !== payload.accountNumber || payment.bank_code !== config.bankCode) outcome = 'account_mismatch';
         else if (!order || !PAYABLE_SHIPMENT_STATUSES.includes(order.status) || Number(order.customer_id) !== Number(payment.customer_id)) outcome = 'order_unavailable';
         else if (Number(order.total_cost) !== Number(payment.amount)) outcome = 'quote_changed';

@@ -47,7 +47,7 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
       tokens[actor] = login.accessToken;
       assert.ok(tokens[actor]);
     }
-    for (const status of ['approved', 'requested', 'approved', 'approved', 'approved']) {
+    for (const status of ['approved', 'requested', 'approved', 'approved', 'approved', 'approved']) {
       const [result] = await db.execute(`INSERT INTO shipment (customer_id, requested_by, contact_name, contact_phone, contact_email, origin_location, destination_location, requested_date, requested_horse_count, status, total_cost)
         VALUES (?, ?, 'SePay fixture', '0900000000', ?, 'Fixture origin', 'Fixture destination', CURDATE(), 1, ?, 15000)`, [userIds[0], userIds[0], `${prefix}@example.com`, status]);
       shipmentIds.push(result.insertId);
@@ -91,16 +91,27 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
       }
       assert.equal((await expected('owner', endpoint(sid), 'GET', undefined, 200)).payment.status, 'pending');
     });
-    await t.test('underpayment is auditable and requires review', async () => {
-      const p = await expected('owner', endpoint(shipmentIds[2]), 'POST', {}, 200);
-      const incoming = payload(p, { transferAmount: 1 });
-      assert.equal((await webhook(incoming)).status, 200);
-      assert.equal((await webhook(incoming)).status, 200);
-      const state = await expected('owner', endpoint(shipmentIds[2]), 'GET', undefined, 200);
-      assert.equal(state.payment.status, 'review');
-      assert.equal(state.payment.qrUrl, null);
-      const [[receipt]] = await db.execute('SELECT outcome FROM sepay_webhook_receipt WHERE transaction_id = ?', [incoming.id]);
-      assert.equal(receipt.outcome, 'amount_mismatch');
+    await t.test('under/overpayment remains in review even after another exact transfer', async () => {
+      for (const [index, transferAmount] of [[2, 1], [5, 20000]]) {
+        const p = await expected('owner', endpoint(shipmentIds[index]), 'POST', {}, 200);
+        const incoming = payload(p, { transferAmount });
+        assert.equal((await webhook(incoming)).status, 200);
+        assert.equal((await webhook(incoming)).status, 200);
+        const state = await expected('owner', endpoint(shipmentIds[index]), 'GET', undefined, 200);
+        assert.equal(state.payment.status, 'review');
+        assert.equal(state.payment.qrUrl, null);
+        const [[receipt]] = await db.execute('SELECT outcome FROM sepay_webhook_receipt WHERE transaction_id = ?', [incoming.id]);
+        assert.equal(receipt.outcome, 'amount_mismatch');
+        const extra = payload(p);
+        assert.equal((await webhook(extra)).status, 200);
+        const later = await expected('owner', endpoint(shipmentIds[index]), 'GET', undefined, 200);
+        assert.equal(later.payment.status, 'review');
+        assert.equal(later.payment.transactionId, null);
+        const [[extraReceipt]] = await db.execute('SELECT outcome FROM sepay_webhook_receipt WHERE transaction_id = ?', [extra.id]);
+        assert.equal(extraReceipt.outcome, 'review_required');
+        const [[notifications]] = await db.execute("SELECT COUNT(*) AS count FROM notification WHERE shipment_id = ? AND title = 'Đã nhận thanh toán'", [shipmentIds[index]]);
+        assert.equal(Number(notifications.count), 0);
+      }
     });
     await t.test('matching money settles once, survives retries, and preserves transport status', async () => {
       const incoming = payload(payment);
@@ -131,6 +142,11 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
       for (const [index, sql] of [[3, 'UPDATE shipment SET total_cost = 20000 WHERE shipment_id = ?'], [4, "UPDATE shipment SET status = 'cancelled' WHERE shipment_id = ?"]]) {
         const p = await expected('owner', endpoint(shipmentIds[index]), 'POST', {}, 200);
         await db.execute(sql, [shipmentIds[index]]);
+        const stale = await expected('owner', endpoint(shipmentIds[index]), 'GET', undefined, 200);
+        assert.equal(stale.payment.status, 'pending');
+        assert.equal(stale.payment.qrUrl, null);
+        assert.ok(stale.payment.blockedReason);
+        await expected('owner', endpoint(shipmentIds[index]), 'POST', {}, index === 3 ? 409 : 400);
         assert.equal((await webhook(payload(p))).status, 200);
         assert.equal((await expected('owner', endpoint(shipmentIds[index]), 'GET', undefined, 200)).payment.status, 'review');
       }
