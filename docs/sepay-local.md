@@ -41,6 +41,20 @@ The QR contains the account, exact VND quote and payment code. The browser polls
 every three seconds for bank-confirmed success. Creating QR/checking status does
 not transfer money. This checkout uses real bank transfers.
 
+### Customer navigation
+
+- Order detail `/customer/requests/:id` shows payment status and a checkout link.
+- QR checkout is `/customer/requests/:id/payment`. Success comes only from the
+  verified backend response, never from query parameters or browser navigation.
+- After success, **Về chi tiết đơn** returns to
+  `/customer/requests/:id#sepay-payment`; **Danh sách đơn hàng** opens
+  `/customer/requests`.
+- **Đóng thanh toán và về đơn** returns to the same order detail. This closes the
+  screen only. It does not cancel a transfer/order or issue a refund. An existing
+  pending code stays valid and receives later webhooks. Reopening the checkout
+  reuses it, so a customer who already sent money should wait instead of paying twice.
+- There are no external success/cancel redirect URLs to configure for this QR flow.
+
 ## Another machine or deployment
 
 1. Install Node.js 22+, MySQL 8.0+ and dependencies in backend and frontend.

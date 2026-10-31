@@ -828,7 +828,7 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          {isApproved && Number(request.totalCost) > 0 && <SepayPayment shipmentId={Number(request.id)} requestCode={request.requestCode} amount={Number(request.totalCost)} />}
+          {(isApproved && Number(request.totalCost) > 0 || request.paymentStatus && request.paymentStatus !== 'unpaid') && <SepayPayment shipmentId={Number(request.id)} requestCode={request.requestCode} amount={Number(request.totalCost)} eligible={isApproved && Number(request.totalCost) > 0} />}
 
           {/* 3. TRANSPORT ROUTE */}
           <div

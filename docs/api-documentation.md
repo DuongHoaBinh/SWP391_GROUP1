@@ -513,6 +513,11 @@ shipment state/owner and receiving account/code configuration; obsolete instruct
 have qrUrl=null and a blockedReason without changing the financial status.
 The customer
 polls GET every three seconds while pending; refresh never simulates a transfer.
+Customer QR checkout lives at `/customer/requests/:id/payment`. Success is rendered
+from the backend status and offers links to order detail or the order list. Closing
+the screen returns to `/customer/requests/:id#sepay-payment` without a payment/order
+mutation. Pending instructions remain valid for late webhooks and are reused on
+reopening. URL query parameters never confirm or cancel a bank transfer.
 Order APIs add paymentStatus (unpaid/pending/review/succeeded), paymentCode, paidAt.
 The manager order list displays payment status separately from transport status.
 

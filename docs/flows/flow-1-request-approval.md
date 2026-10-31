@@ -29,6 +29,7 @@ Customer, Logistics Manager
 - Retries never double-credit. Partial/extra money, changed quotes and unavailable orders require review. No automatic second collection or installment summation.
 - Status polling rechecks the current quote, shipment eligibility and receiving configuration; obsolete transfer instructions are hidden before any transfer. Once review is required, later transfers remain auditable and cannot automatically confirm payment.
 - MySQL stores receipt audit, payment state and notification atomically. Payment does not change transport state or introduce new gates in Flows 1-4. Historical sandbox data is retained but never counts as real money.
+- Order detail links to `/customer/requests/:id/payment` for QR checkout. Verified success is displayed there with links back to order detail and the order list. Closing checkout returns to `/customer/requests/:id#sepay-payment`; it does not cancel the order, invalidate an issued transfer code, refund money or stop later bank confirmation. The order remains pending until the webhook confirms receipt, and reopening reuses the same instructions.
 
 ## Outputs
 
