@@ -7,13 +7,13 @@ import { Button } from '@/components/ui/Button';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { documentsApi } from '@/features/documents/api/documents.api';
 import { apiClient } from '@/lib/api-client';
-import { mockDocuments } from '@/lib/mock-data';
 import { DocumentItem } from '@/lib/types';
 import toast from 'react-hot-toast';
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [reuploadTargetDoc, setReuploadTargetDoc] = useState<DocumentItem | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -30,6 +30,7 @@ export default function DocumentsPage() {
 
   const fetchDocs = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const [apiDocs, myOrders] = await Promise.all([
         documentsApi.getDocuments(),
@@ -76,8 +77,10 @@ export default function DocumentsPage() {
         setIsLoading(false);
         return;
       }
+      throw new Error('Dữ liệu hồ sơ trả về không hợp lệ.');
     } catch (e) {
       console.warn('API getDocuments error:', e);
+      setLoadError('Không tải được hồ sơ kiểm dịch. Vui lòng thử lại.');
     }
 
     setDocuments([]);
@@ -309,10 +312,25 @@ export default function DocumentsPage() {
                   </tr>
                 );
               })}
-              {documents.length === 0 && !isLoading && (
+              {loadError && !isLoading && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-red-600" role="alert">
+                    <p>{loadError}</p>
+                    <button
+                      type="button"
+                      onClick={fetchDocs}
+                      className="mt-3 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold hover:bg-red-50"
+                    >
+                      Thử lại
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {documents.length === 0 && !isLoading && !loadError && (
                 <tr>
                   <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
                     Chưa có hồ sơ kiểm dịch nào được tải lên.
+                    <p className="mt-2 text-sm">Chọn Upload Document để tải hồ sơ cho ngựa của bạn.</p>
                   </td>
                 </tr>
               )}

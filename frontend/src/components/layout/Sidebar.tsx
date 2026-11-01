@@ -105,7 +105,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
       label: t('nav.documents', 'Documents'),
       href: '/customer/documents',
       icon: <FolderClosed size={18} />,
-      badge: 2,
     },
     {
       label: t('nav.tracking', 'Trip Tracking'),
