@@ -39,4 +39,18 @@ Payment success does not change shipment status. Closing checkout does not rever
 - Local public webhook health and a signed id=0 sample can be tested without creating a payment. The SePay dashboard still needs the current URL from `backend/.local/sepay/runtime.json` and a successful Send test from SePay itself.
 - This review could not automate browser clicks: Computer Use rejected the current Windows/Coc Coc browser because URL policy enforcement is unsupported. Component rendering and HTTP checks do not replace a manual browser walkthrough.
 - Partial/extra money needs staff reconciliation. There is no automatic refund, installment summation, reconciliation screen or recovery through SePay transaction API when a webhook is permanently missed.
-- Quick-tunnel URLs can change after restart; a running computer/backend/database/tunnel is required for local webhook delivery. Use a stable HTTPS backend URL when deployed.
+- Local startup now uses the ngrok account's fixed dev domain (requires NGROK_AUTHTOKEN in backend/.env) and reuses the saved hostname on restart. Migrate the SePay dashboard URL once from the previous Cloudflare quick tunnel. A running computer/backend/database/tunnel is still required, and ngrok usage quotas apply. Use a stable HTTPS backend URL when deployed.
+
+## ngrok migration verification — 2026-11-01
+
+- Installed the Microsoft Store ngrok agent and validated its configuration.
+- The public ngrok URL returned HTTP 200 with `{"success":true}` for a signed
+  id=0 connectivity sample, HTTP 401 for an unsigned request, and HTTP 404 for
+  `/api/orders`. The sample created no bank receipts or settlements.
+- Restarted the project tunnel once and verified the webhook URL stayed identical.
+  Running the startup script again reused that same active tunnel.
+- The current URL is recorded in the private runtime.json. The previous project
+  Cloudflare tunnel was stopped after the ngrok public health check passed.
+- SePay dashboard migration and replay of actual transaction 95120953 still
+  require the account owner. Its DH19690057 code is absent from this local database;
+  receiving that transfer alone cannot assign it to an order or settle one.

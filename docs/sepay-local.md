@@ -2,8 +2,9 @@
 
 Checkout is integrated into the NestJS orders module and MySQL. The port-5002
 gateway forwards original signed raw requests to port 5000. Only the webhook path
-is tunneled; other backend routes and uploads are not publicly exposed. This
-machine's existing public URL and HMAC secret have been preserved.
+is tunneled; other backend routes and uploads are not publicly exposed. The
+ngrok account's fixed dev domain is used for the public URL. The SePay HMAC
+secret is unchanged when switching tunnel providers.
 
 ## This machine
 
@@ -17,6 +18,17 @@ machine's existing public URL and HMAC secret have been preserved.
 Environment files and .local directories are ignored by Git. Copy the value of
 SEPAY_WEBHOOK_SECRET into SePay's HMAC Secret Key field. Do not rotate only one side.
 
+Before the first ngrok start:
+
+1. Install ngrok from the Microsoft Store: `winget install ngrok -s msstore`.
+2. Sign in at https://dashboard.ngrok.com/get-started/your-authtoken and copy
+   the agent Authtoken into `NGROK_AUTHTOKEN` in backend/.env. Do not paste a CLI
+   command, an API key or a SePay secret into this field; never send tokens in chat.
+3. Optionally set `NGROK_DOMAIN` to the assigned hostname from the ngrok dashboard
+   (without https:// or a path). If blank, ngrok chooses the fixed dev domain
+   assigned to the account. Subsequent starts explicitly reuse the hostname saved
+   in runtime.json. A different account/domain requires updating the SePay URL.
+
 Start the already-built project from the repository root:
 
 ```powershell
@@ -24,10 +36,68 @@ Start the already-built project from the repository root:
 ```
 
 Keep the computer online and processes running. They are not startup services.
-The script reuses the running tunnel. Restarting cloudflared can change its URL;
-update SePay if it changes. The current URL and tunnel PID are saved in
-backend/.local/sepay/runtime.json. Logs are in that directory. MySQL data is
+The script reuses the running ngrok tunnel or starts it with the same hostname.
+Set SePay's webhook URL to the printed HTTPS URL **once after migration from
+Cloudflare**. No dashboard edit is needed for normal restarts on the same domain.
+An existing Cloudflare process is stopped only after the ngrok public health
+check passes. If credentials/startup fail, the previous runtime is preserved.
+The current URL and tunnel PID are saved in backend/.local/sepay/runtime.json.
+Logs are ngrok.log/ngrok-error.log in that directory. The local agent API binds
+only to 127.0.0.1:4043, and request-body inspection is disabled. The public
+tunnel forwards only to the port-5002 gateway, not directly to the whole backend.
+The generated ngrok.yml contains no credentials; the token is passed through
+the child environment, never CLI arguments. MySQL data is
 persistent; do not delete the data directory to restart the server.
+
+The domain staying fixed does not keep the backend online: the computer,
+database, backend, gateway and ngrok must be running with internet access.
+ngrok free-plan HTTP/bandwidth quotas still apply; dashboard Usage tracks them.
+After an outage, replay failed real deliveries from SePay's webhook history.
+A successful Send test checks connectivity only; it does not settle an order.
+
+## Team setup
+
+Pull the latest `feature/tracking-and-momo` before using the ngrok startup script.
+The payment variables alone do not set up MySQL, JWT, dependencies or migrations;
+follow the steps under **Another machine or deployment** as well.
+
+Choose which environment owns the orders and receives bank webhooks:
+
+- **Shared environment:** keep one backend, one MySQL database and one tunnel
+  running. Every customer/tester must use that backend for both creating the
+  payment code and reading payment status. Copying bank/ngrok variables to a
+  separate local database does not share orders or receipts.
+- **Independent local testing:** each developer uses their own ngrok account/token
+  and assigned domain. Configure a separate SePay webhook for the intended
+  environment; a webhook URL points to one receiver. A code created in another
+  database cannot be settled by this receiver. Agree on which environment to use
+  before transferring real funds.
+
+Keep `SEPAY_WEBHOOK_SECRET` consistent with HMAC-SHA256 on the corresponding
+SePay webhook. Share necessary credentials privately, never in Git or a public
+channel. If a token or HMAC secret was exposed, replace it: update the ngrok token
+in backend/.env and restart its process; update the SePay HMAC secret on the
+dashboard, backend/.env, backend and gateway together. Do not rotate only one side.
+
+On a Windows developer machine with dependencies installed and database ready:
+
+```powershell
+winget install ngrok -s msstore
+# Save DB/JWT/SePay settings and your ngrok token in backend/.env, then build.
+cd backend
+npm ci
+npm run build
+cd ../frontend
+npm ci
+npm run build
+cd ..
+powershell -NoProfile -ExecutionPolicy Bypass -File backend/scripts/start-project-local.ps1
+```
+
+Use the printed webhook URL on SePay, enable retries, and send a dashboard test.
+Keep the machine and processes running during testing. The frontend API URL
+must be configured before its build; changes to NEXT_PUBLIC_API_BASE_URL need a
+new frontend build. See the deployment section below for database migrations.
 
 ## SePay Dashboard
 
