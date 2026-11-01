@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -25,6 +25,9 @@ interface ShipmentRow extends RowDataPacket {
   change_request_notes: string | null;
   status: ShipmentStatus;
   total_cost: number | string;
+  payment_status?: 'pending' | 'review' | 'succeeded';
+  payment_code?: string | null;
+  paid_at?: Date | null;
   created_at: Date;
   updated_at: Date;
   customer_email?: string;
@@ -218,9 +221,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findShipmentsByCustomer(customerId: number): Promise<TransportOrder[]> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+      `SELECT s.*, p.status as payment_status, p.payment_code, p.paid_at, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
               CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code
        FROM shipment s
+       LEFT JOIN shipment_sepay_payment p ON p.shipment_id = s.shipment_id
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
        WHERE s.customer_id = ?
@@ -233,9 +237,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findAllShipments(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
     let query = `
-      SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+      SELECT s.*, p.status as payment_status, p.payment_code, p.paid_at, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
       FROM shipment s
+      LEFT JOIN shipment_sepay_payment p ON p.shipment_id = s.shipment_id
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
     `;
@@ -254,13 +259,14 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async findShipmentById(shipmentId: number): Promise<TransportOrder | undefined> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
-      `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+      `SELECT s.*, p.status as payment_status, p.payment_code, p.paid_at, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
               CONCAT('REQ-', LPAD(
                 (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                 3, '0'
               )) as customer_request_code,
               CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
        FROM shipment s
+       LEFT JOIN shipment_sepay_payment p ON p.shipment_id = s.shipment_id
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
        WHERE s.shipment_id = ?
@@ -276,6 +282,32 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return this.mapShipmentWithAttachments(row);
   }
 
+  async cancelRequestedShipment(shipmentId: number, customerId: number): Promise<void> {
+    const db = await this.pool.getConnection();
+    try {
+      await db.beginTransaction();
+      const [orders] = await db.execute<ShipmentRow[]>('SELECT * FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+      const order = orders[0];
+      if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+      if (Number(order.customer_id) !== customerId) throw new ForbiddenException('Bạn chỉ có thể hủy đơn của mình');
+      if (order.status === ShipmentStatus.CANCELLED) { await db.commit(); return; }
+      const [payments] = await db.execute<RowDataPacket[]>('SELECT payment_id FROM shipment_sepay_payment WHERE shipment_id = ?', [shipmentId]);
+      if (![ShipmentStatus.REQUESTED, ShipmentStatus.CHANGE_REQUESTED].includes(order.status) || payments.length) {
+        throw new BadRequestException('Chỉ có thể tự hủy đơn chưa duyệt và chưa tạo thanh toán. Vui lòng liên hệ quản lý để xử lý đơn đã duyệt.');
+      }
+      await db.execute("UPDATE shipment SET status = 'cancelled' WHERE shipment_id = ?", [shipmentId]);
+      await db.execute(`UPDATE horse h JOIN shipment_horse sh ON sh.horse_id = h.horse_id
+        SET h.status = 'active' WHERE sh.shipment_id = ? AND h.status = 'in_transit'
+        AND NOT EXISTS (SELECT 1 FROM shipment_horse other_sh JOIN shipment s ON s.shipment_id = other_sh.shipment_id
+          WHERE other_sh.horse_id = h.horse_id AND s.shipment_id <> ? AND s.status NOT IN ('cancelled', 'rejected', 'completed'))`, [shipmentId, shipmentId]);
+      await db.execute(`INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
+        VALUES (?, ?, 'Đã hủy yêu cầu vận chuyển', ?, 'status_update', FALSE)`,
+        [customerId, shipmentId, `Khách hàng #${customerId} đã hủy yêu cầu vận chuyển #${shipmentId} trước khi phê duyệt.`]);
+      await db.commit();
+    } catch (error) { await db.rollback(); throw error; }
+    finally { db.release(); }
+  }
+
   async updateShipmentApproval(
     shipmentId: number,
     approvedBy: number,
@@ -286,11 +318,11 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     const [result] = await this.pool.execute(
       `UPDATE shipment
        SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = CASE WHEN ? > 0 THEN ? ELSE total_cost END
-       WHERE shipment_id = ?`,
+       WHERE shipment_id = ? AND status = 'requested'`,
       [status, approvedBy, rejectionReason, totalCost, totalCost, shipmentId],
     );
 
-    if (status === ShipmentStatus.REJECTED) {
+    if ((result as { affectedRows: number }).affectedRows > 0 && status === ShipmentStatus.REJECTED) {
       await this.pool.execute(
         `UPDATE horse
          SET status = 'active'
@@ -327,7 +359,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     const [result] = await this.pool.execute(
       `UPDATE shipment
        SET status = ?, change_request_notes = ?
-       WHERE shipment_id = ?`,
+       WHERE shipment_id = ? AND status = 'requested'`,
       [ShipmentStatus.CHANGE_REQUESTED, notes, shipmentId],
     );
 
@@ -372,7 +404,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
          special_requirements = COALESCE(?, special_requirements),
          change_request_notes = NULL,
          status = ?
-       WHERE shipment_id = ?`,
+       WHERE shipment_id = ? AND customer_id = ? AND status IN ('requested', 'change_requested')`,
       [
         dto.contactName ?? null,
         dto.contactAddress ?? null,
@@ -385,8 +417,11 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         dto.specialRequirements ?? null,
         ShipmentStatus.REQUESTED,
         shipmentId,
+        customerId,
       ],
     );
+
+    if ((result as { affectedRows: number }).affectedRows === 0) return false;
 
     // 2. Lưu file tài liệu y tế mới nếu có
     if (dto.medicalDocumentUrl) {
@@ -478,6 +513,9 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       changeRequestNotes: row.change_request_notes ?? null,
       status: row.status,
       totalCost: Number(row.total_cost ?? 0),
+      paymentStatus: row.payment_status ?? 'unpaid',
+      paymentCode: row.payment_code ?? null,
+      paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       customerEmail: row.customer_email,

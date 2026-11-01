@@ -3,14 +3,14 @@ import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OrdersStore } from './orders.store';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { MomoPaymentController } from './momo-payment.controller';
-import { MomoPaymentService } from './momo-payment.service';
-import { MomoPaymentStore } from './momo-payment.store';
+import { SepayPaymentController, SepayWebhookController } from './sepay-payment.controller';
+import { SepayPaymentService } from './sepay-payment.service';
+import { SepayPaymentStore } from './sepay-payment.store';
 
 @Module({
   imports: [NotificationsModule],
-  controllers: [OrdersController, MomoPaymentController],
-  providers: [OrdersService, OrdersStore, MomoPaymentService, MomoPaymentStore],
+  controllers: [OrdersController, SepayPaymentController, SepayWebhookController],
+  providers: [OrdersService, OrdersStore, SepayPaymentService, SepayPaymentStore],
   exports: [OrdersService, OrdersStore],
 })
 export class OrdersModule {}

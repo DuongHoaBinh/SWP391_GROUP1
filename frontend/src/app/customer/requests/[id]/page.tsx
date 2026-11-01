@@ -39,7 +39,7 @@ import { OrderComplianceChecklist } from '@/features/documents/api/documents.api
 import { buildEquineRoute } from '@/lib/geo-corridors';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
-import { DemoMomoPayment } from '@/features/orders/components/DemoMomoPayment';
+import { SepayPayment } from '@/features/orders/components/SepayPayment';
 
 const fetcher = async (url: string) => {
   const data = await apiClient<any>(url);
@@ -258,9 +258,10 @@ export default function RequestDetailPage() {
   const router = useRouter();
   const requestId = params?.id as string;
 
-  const { getRequestById, uploadDocumentForRequest, cancelRequest } = useCustomerStore();
+  const { getRequestById, uploadDocumentForRequest } = useCustomerStore();
   const { data: request, error, isLoading: loading, mutate } = useSWR(`/orders/${requestId}`, fetcher, {
     revalidateOnFocus: true,
+    refreshInterval: 10000,
   });
 
   const { data: checklist, mutate: mutateChecklist } = useSWR<OrderComplianceChecklist>(
@@ -295,6 +296,15 @@ export default function RequestDetailPage() {
   const [resubmitNotes, setResubmitNotes] = useState('');
   const [isResubmitting, setIsResubmitting] = useState(false);
   const [resubmitError, setResubmitError] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  if (error) {
+    return <div role="alert" className="space-y-4 rounded-xl border border-red-200 bg-red-50 p-6 text-red-800">
+      <h2 className="font-bold">Không tải được đơn hàng</h2>
+      <p>{error.message || 'Đơn không tồn tại hoặc bạn không có quyền truy cập.'}</p>
+      <div className="flex gap-4"><button type="button" onClick={() => void mutate()} className="font-semibold underline">Thử lại</button><Link href="/customer/requests" className="font-semibold underline">Về danh sách đơn</Link></div>
+    </div>;
+  }
 
   if (loading || !request) {
     return (
@@ -430,10 +440,16 @@ export default function RequestDetailPage() {
     toast.success('Hồ sơ đã được tải lên thành công!');
   };
 
-  const handleCancel = () => {
-    if (confirm(`Are you sure you want to cancel transport request ${request.requestCode}?`)) {
-      cancelRequest(request.id);
-    }
+  const handleCancel = async () => {
+    if (!confirm(`Hủy yêu cầu vận chuyển ${request.requestCode}?`)) return;
+    setIsCancelling(true);
+    try {
+      await apiClient(`/orders/${request.id}/cancel`, { method: 'PATCH' });
+      await mutate();
+      toast.success('Đã hủy yêu cầu vận chuyển');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Không hủy được yêu cầu');
+    } finally { setIsCancelling(false); }
   };
 
   const submitResubmit = async () => {
@@ -563,9 +579,10 @@ export default function RequestDetailPage() {
           >
             <Plane size={14} /> Live Tracking
           </button>
-          {request.status !== 'CANCELLED' && (
+          {['requested', 'change_requested'].includes(statusLower) && (!request.paymentStatus || request.paymentStatus === 'unpaid') && (
             <button
               onClick={handleCancel}
+              disabled={isCancelling}
               style={{
                 padding: '9px 16px',
                 borderRadius: '8px',
@@ -576,7 +593,7 @@ export default function RequestDetailPage() {
                 color: '#dc2626',
               }}
             >
-              Cancel Request
+              {isCancelling ? 'Đang hủy…' : 'Cancel Request'}
             </button>
           )}
           <button
@@ -828,7 +845,18 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          {isApproved && Number(request.totalCost) > 0 && <DemoMomoPayment shipmentId={Number(request.id)} requestCode={request.requestCode} amount={Number(request.totalCost)} />}
+          <div id="payment" className="scroll-mt-6">
+            {(isApproved && Number(request.totalCost) > 0 || request.paymentStatus && request.paymentStatus !== 'unpaid') ? (
+              <SepayPayment shipmentId={Number(request.id)} requestCode={request.requestCode} amount={Number(request.totalCost)} eligible={isApproved && Number(request.totalCost) > 0} />
+            ) : (
+              <section className="rounded-xl border border-slate-200 bg-white p-5" aria-label="Thanh toán SePay">
+                <h3 className="font-bold text-slate-900">Thanh toán SePay</h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  {isApproved ? 'Đơn đã duyệt, đang chờ quản lý cung cấp báo giá để thanh toán.' : 'Thanh toán khả dụng sau khi quản lý duyệt đơn và cung cấp báo giá.'}
+                </p>
+              </section>
+            )}
+          </div>
 
           {/* 3. TRANSPORT ROUTE */}
           <div

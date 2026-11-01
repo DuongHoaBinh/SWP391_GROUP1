@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -73,6 +74,11 @@ export class OrdersService {
     return order;
   }
 
+  async cancelOrder(user: AuthenticatedUser, orderId: number): Promise<TransportOrder> {
+    await this.ordersStore.cancelRequestedShipment(orderId, Number(user.id));
+    return (await this.ordersStore.findShipmentById(orderId))!;
+  }
+
   async approveOrder(
     manager: AuthenticatedUser,
     orderId: number,
@@ -90,13 +96,14 @@ export class OrdersService {
     }
 
     const managerId = Number(manager.id);
-    await this.ordersStore.updateShipmentApproval(
+    const changed = await this.ordersStore.updateShipmentApproval(
       orderId,
       managerId,
       ShipmentStatus.APPROVED,
       null,
       dto.totalCost ?? 0,
     );
+    if (!changed) throw new ConflictException('Trạng thái đơn đã thay đổi. Vui lòng tải lại danh sách.');
 
     // 1. Gửi thông báo đến customer (dùng mã đơn của riêng khách hàng)
     const customerCode = order.customerRequestCode || order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
@@ -140,12 +147,13 @@ export class OrdersService {
     }
 
     const managerId = Number(manager.id);
-    await this.ordersStore.updateShipmentApproval(
+    const changed = await this.ordersStore.updateShipmentApproval(
       orderId,
       managerId,
       ShipmentStatus.REJECTED,
       dto.reason,
     );
+    if (!changed) throw new ConflictException('Trạng thái đơn đã thay đổi. Vui lòng tải lại danh sách.');
 
     // Gửi thông báo đến customer kèm lý do
     const rejectCode = order.customerRequestCode || order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
@@ -177,7 +185,9 @@ export class OrdersService {
       );
     }
 
-    await this.ordersStore.updateShipmentChangeRequest(orderId, dto.reason);
+    if (!await this.ordersStore.updateShipmentChangeRequest(orderId, dto.reason)) {
+      throw new ConflictException('Trạng thái đơn đã thay đổi. Vui lòng tải lại danh sách.');
+    }
 
     // Gửi thông báo đến customer kèm lý do cần chỉnh sửa
     const changeCode = order.customerRequestCode || order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
@@ -217,7 +227,9 @@ export class OrdersService {
     }
 
     const customerId = Number(user.id);
-    await this.ordersStore.updateAndResubmitShipment(customerId, orderId, dto);
+    if (!await this.ordersStore.updateAndResubmitShipment(customerId, orderId, dto)) {
+      throw new ConflictException('Trạng thái đơn đã thay đổi. Vui lòng tải lại đơn.');
+    }
 
     // Gửi thông báo xác nhận cập nhật cho customer
     await this.notificationsService.createNotification(

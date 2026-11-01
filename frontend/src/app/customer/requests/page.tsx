@@ -1,67 +1,58 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Search, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { useCustomerStore } from '@/lib/customer-store';
+import useSWR from 'swr';
+import { getCurrentUser } from '@/lib/auth';
 import { apiClient } from '@/lib/api-client';
 
 export default function RequestsPage() {
   const router = useRouter();
-  const { requests: mockRequests } = useCustomerStore();
-  const [requests, setRequests] = useState<any[]>([]);
+  const { data, error: loadError, isLoading, mutate } = useSWR<any[]>(
+    ['customer-orders', getCurrentUser().id],
+    () => apiClient<any[]>('/orders/my-orders', { cache: 'no-store' }),
+    { refreshInterval: 15000, revalidateOnFocus: true, shouldRetryOnError: false },
+  );
+  const statusMap: Record<string, { label: string; variant: 'pending' | 'success' | 'danger' | 'transit' | 'neutral' }> = {
+    requested: { label: 'Pending Approval', variant: 'pending' },
+    under_review: { label: 'Under Review', variant: 'pending' },
+    IN_REVIEW: { label: 'Under Review', variant: 'pending' },
+    approved: { label: 'Approved', variant: 'success' },
+    APPROVED: { label: 'Approved', variant: 'success' },
+    change_requested: { label: 'Change Requested', variant: 'pending' },
+    rejected: { label: 'Rejected', variant: 'danger' },
+    REJECTED: { label: 'Rejected', variant: 'danger' },
+    planning: { label: 'Planning', variant: 'neutral' },
+    confirmed: { label: 'Confirmed Plan', variant: 'neutral' },
+    ready_to_depart: { label: 'Ready to Depart', variant: 'success' },
+    ready: { label: 'Ready to Depart', variant: 'success' },
+    in_transit: { label: 'In Transit', variant: 'transit' },
+    IN_TRANSIT: { label: 'In Transit', variant: 'transit' },
+    completed: { label: 'Completed', variant: 'success' },
+    COMPLETED: { label: 'Completed', variant: 'success' },
+    cancelled: { label: 'Cancelled', variant: 'danger' },
+    CANCELLED: { label: 'Cancelled', variant: 'danger' },
+  };
 
-  useEffect(() => {
-    const fetchRequests = async () => {
-      try {
-        const data = await apiClient<any[]>('/orders/my-orders');
-        const statusMap: Record<string, { label: string; variant: 'pending' | 'success' | 'danger' | 'transit' | 'neutral' }> = {
-          requested: { label: 'Pending Approval', variant: 'pending' },
-          under_review: { label: 'Under Review', variant: 'pending' },
-          IN_REVIEW: { label: 'Under Review', variant: 'pending' },
-          approved: { label: 'Approved', variant: 'success' },
-          APPROVED: { label: 'Approved', variant: 'success' },
-          change_requested: { label: 'Change Requested', variant: 'pending' },
-          rejected: { label: 'Rejected', variant: 'danger' },
-          REJECTED: { label: 'Rejected', variant: 'danger' },
-          planning: { label: 'Planning', variant: 'neutral' },
-          confirmed: { label: 'Confirmed Plan', variant: 'neutral' },
-          ready_to_depart: { label: 'Ready to Depart', variant: 'success' },
-          ready: { label: 'Ready to Depart', variant: 'success' },
-          in_transit: { label: 'In Transit', variant: 'transit' },
-          IN_TRANSIT: { label: 'In Transit', variant: 'transit' },
-          completed: { label: 'Completed', variant: 'success' },
-          COMPLETED: { label: 'Completed', variant: 'success' },
-          cancelled: { label: 'Cancelled', variant: 'danger' },
-          CANCELLED: { label: 'Cancelled', variant: 'danger' },
-        };
-
-        const mappedData = data.map((item) => {
-          const statusKey = String(item.status || '').toLowerCase();
-          const statusInfo = statusMap[statusKey] || statusMap[item.status] || { label: item.status || 'Pending', variant: 'pending' as const };
-          return {
-            ...item,
-            requestCode: item.requestCode || `REQ-${String(item.id).padStart(3, '0')}`,
-            horse: item.horses?.[0] || { name: 'Multiple Horses' },
-            origin: item.originLocation,
-            destination: item.destinationLocation,
-            departureDate: item.requestedDate ? new Date(item.requestedDate).toLocaleDateString('en-GB') : '',
-            statusLabel: item.statusLabel || statusInfo.label,
-            statusVariant: statusInfo.variant,
-            requestedHorseCount: item.requestedHorseCount || item.requested_horse_count || (item.horses?.length || 1),
-          };
-        });
-        setRequests(mappedData);
-      } catch (err) {
-        console.error('Failed to fetch requests, falling back to mock:', err);
-        setRequests(mockRequests);
-      }
+  const requests = (data || []).map((item) => {
+    const statusKey = String(item.status || '').toLowerCase();
+    const statusInfo = statusMap[statusKey] || statusMap[item.status] || { label: item.status || 'Pending', variant: 'pending' as const };
+    return {
+      ...item,
+      requestCode: item.requestCode || `REQ-${String(item.id).padStart(3, '0')}`,
+      horse: item.horses?.[0] || { name: 'Multiple Horses' },
+      origin: item.originLocation,
+      destination: item.destinationLocation,
+      departureDate: item.requestedDate ? new Date(item.requestedDate).toLocaleDateString('en-GB') : '',
+      statusLabel: item.statusLabel || statusInfo.label,
+      statusVariant: statusInfo.variant,
+      requestedHorseCount: item.requestedHorseCount || item.requested_horse_count || (item.horses?.length || 1),
     };
-    fetchRequests();
-  }, [mockRequests]);
+  });
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
@@ -127,6 +118,9 @@ export default function RequestsPage() {
       </div>
 
       {/* Filter and Search Bar */}
+      <p className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+        Thanh toán sau khi quản lý duyệt và báo giá. Mở chi tiết đơn, mục Thanh toán để xem báo giá và trạng thái SePay.
+      </p>
       <div
         style={{
           display: 'flex',
@@ -224,6 +218,9 @@ export default function RequestsPage() {
             </tr>
           </thead>
           <tbody>
+            {loadError && <tr><td colSpan={6} className="px-4 py-6 text-center text-red-700" role="alert">Không tải được trạng thái đơn hàng. <button type="button" onClick={() => void mutate()} className="font-semibold underline">Thử lại</button></td></tr>}
+            {isLoading && <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500" role="status">Đang tải đơn hàng…</td></tr>}
+            {!isLoading && !loadError && filtered.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">Không có đơn hàng phù hợp.</td></tr>}
             {filtered.map((req) => (
               <tr key={req.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
                 <td style={{ padding: '16px 14px' }}>
@@ -233,6 +230,9 @@ export default function RequestsPage() {
                   >
                     {req.requestCode}
                   </Link>
+                  <p className={`mt-2 text-xs font-medium ${req.paymentStatus === 'succeeded' ? 'text-green-700' : req.paymentStatus === 'review' ? 'text-amber-700' : 'text-slate-500'}`}>
+                    {req.paymentStatus === 'succeeded' ? 'SePay: Đã thanh toán' : req.paymentStatus === 'review' ? 'SePay: Cần đối soát' : req.paymentStatus === 'pending' ? 'SePay: Chờ chuyển khoản' : 'Chưa thanh toán'}
+                  </p>
                 </td>
                 <td style={{ padding: '16px 14px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -268,6 +268,14 @@ export default function RequestsPage() {
                   >
                     View Details
                   </Button>
+                  {(['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(String(req.status).toLowerCase()) || ['pending', 'review', 'succeeded'].includes(req.paymentStatus)) && (
+                    <Link
+                      href={`/customer/requests/${req.id}#payment`}
+                      className="mt-2 block text-sm font-semibold text-blue-700 underline"
+                    >
+                      {req.paymentStatus === 'succeeded' ? 'Xem biên nhận' : req.paymentStatus === 'review' ? 'Xem đối soát' : 'Xem thanh toán'}
+                    </Link>
+                  )}
                 </td>
               </tr>
             ))}

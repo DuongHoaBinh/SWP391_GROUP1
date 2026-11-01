@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
+    "test:sepay": "node --test test/sepay-payment.test.cjs",
     "start": "next start -p 3000",
     "lint": "next lint"
   },

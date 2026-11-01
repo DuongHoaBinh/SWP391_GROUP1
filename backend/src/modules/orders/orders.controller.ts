@@ -66,6 +66,16 @@ export class OrdersController {
     return this.ordersService.getOrderById(user, id);
   }
 
+  @Patch(':id/cancel')
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({ summary: 'Customer cancels their own unapproved request without an issued payment' })
+  cancelOrder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.cancelOrder(user, id);
+  }
+
   @Patch(':id/approve')
   @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Logistics Manager approves a transport request' })

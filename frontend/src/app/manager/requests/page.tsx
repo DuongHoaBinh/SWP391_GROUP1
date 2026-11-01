@@ -18,6 +18,7 @@ export default function ManagerRequestsPage() {
   // Fetch orders from backend
   const { data: orders = [], isLoading, mutate } = useSWR('/orders', fetcher, {
     revalidateOnFocus: true,
+    refreshInterval: 15000,
   });
 
   // Modal states
@@ -105,11 +106,16 @@ export default function ManagerRequestsPage() {
           setIsSubmitting(false);
           return;
         }
+        const totalCostVnd = Math.round(costCurrency === 'USD' ? cost * 25400 : cost);
+        if (!Number.isSafeInteger(totalCostVnd) || totalCostVnd <= 0) {
+          toast.error('Báo giá quy đổi sang VND không hợp lệ');
+          return;
+        }
         await apiClient(`/orders/${selectedOrder.id}/approve`, {
           method: 'PATCH',
-          body: JSON.stringify({ totalCost: cost }),
+          body: JSON.stringify({ totalCost: totalCostVnd }),
         });
-        toast.success(`Order #${selectedOrder.id} approved!`);
+        toast.success(`Đã duyệt đơn #${selectedOrder.id}. Khách hàng xem mục Thanh toán trong chi tiết đơn.`);
       } else if (activeModal === 'REJECT') {
         if (!inputValue.trim()) {
           toast.error('Rejection reason required');
@@ -237,6 +243,9 @@ export default function ManagerRequestsPage() {
                 <tr key={order.id} className="hover:bg-slate-50/70 transition-colors">
                   <td className="px-6 py-4 font-bold text-blue-600 whitespace-nowrap">
                     {order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`}
+                    <span className={`mt-2 block text-xs font-medium ${order.paymentStatus === 'succeeded' ? 'text-green-700' : order.paymentStatus === 'review' ? 'text-amber-700' : 'text-slate-500'}`}>
+                      {order.paymentStatus === 'succeeded' ? 'SePay: Đã thanh toán' : order.paymentStatus === 'review' ? 'SePay: Cần đối soát' : order.paymentStatus === 'pending' ? 'SePay: Chờ chuyển khoản' : 'Chưa thanh toán'}
+                    </span>
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-bold text-slate-900 m-0">{order.contactName || 'Customer'}</p>
@@ -606,9 +615,10 @@ export default function ManagerRequestsPage() {
                 </div>
 
                 <div className="mt-2 text-xs text-slate-500 flex items-center justify-between">
-                  <span>Quy đổi tham khảo (1 USD ≈ 25,400 VND):</span>
+                  <span>Tỷ lệ quy đổi khi lưu báo giá (1 USD = 25,400 VND):</span>
                   <strong className="text-slate-800 font-semibold">{formatEquivalent(inputValue, costCurrency)}</strong>
                 </div>
+                <p className="mt-2 text-xs text-slate-500">Báo giá được lưu bằng VND. Sau khi duyệt, khách hàng mở chi tiết đơn để xem mục thanh toán SePay.</p>
               </div>
             )}
 
