@@ -10,8 +10,7 @@ machine's existing public URL and HMAC secret have been preserved.
 - Frontend: http://localhost:3000
 - Backend: http://localhost:5000/api
 - Dedicated portable MySQL 8.4.13: 127.0.0.1:3307; data in backend/.local/mysql/data.
-- Database connection and JWT secret: backend/.env.
-- SePay bank details, HMAC secret and forwarding target: backend/.env.sepay.local.
+- Database connection, JWT, SMTP, SePay bank details, HMAC secret and forwarding target: backend/.env.
 - Local customer/manager login: backend/.local/mysql/local-accounts.txt.
 - Root credential backup: backend/.local/mysql/admin.env. Keep this private.
 
@@ -59,7 +58,7 @@ not transfer money. This checkout uses real bank transfers.
 
 1. Install Node.js 22+, MySQL 8.0+ and dependencies in backend and frontend.
 2. Create backend/.env from .env.example, including a strong JWT_SECRET. Configure
-   SEPAY_* values in backend/.env or backend/.env.sepay.local, never NEXT_PUBLIC_*.
+   SEPAY_* values alongside DB/JWT/SMTP in backend/.env, never NEXT_PUBLIC_*.
 3. On an existing project database run node database/apply-sepay-migration.cjs.
    Migration 015 preserves historical sandbox data.
 4. For a new database use database/schema.mysql.sql. The local prerequisites

@@ -4,7 +4,6 @@ const crypto = require('node:crypto');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 require('dotenv').config({ quiet: true });
-require('dotenv').config({ path: '.env.sepay.local', quiet: true });
 
 test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement and retries', async t => {
   assert.notEqual(process.env.NODE_ENV, 'production', 'Fixtures must never run in production');

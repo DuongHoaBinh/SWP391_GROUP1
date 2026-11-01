@@ -76,3 +76,5 @@ Real VND checkout replaces the sandbox checkout. See [SePay setup](docs/sepay-lo
 for environment variables, migration 015, local start instructions and deployment.
 Uses DH codes, database VND quotes, signed idempotent bank receipts and durable
 payment status.
+Keep database, JWT, SMTP and SePay settings together in `backend/.env`; copy the
+variable names from the root `.env.example`. Never commit the actual `.env` file.

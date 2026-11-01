@@ -2,9 +2,9 @@ $ErrorActionPreference = 'Stop'
 $backendRoot = Split-Path -Parent $PSScriptRoot
 $runtimeDir = Join-Path $backendRoot '.local\sepay'
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
-$envFile = Join-Path $backendRoot '.env.sepay.local'
+$envFile = Join-Path $backendRoot '.env'
 if (-not (Test-Path -LiteralPath $envFile)) {
-    throw 'Configure backend/.env.sepay.local using the SePay variables in .env.example first.'
+    throw 'Configure backend/.env using the SePay variables in .env.example first.'
 }
 
 $cloudflared = Join-Path $runtimeDir 'cloudflared.exe'

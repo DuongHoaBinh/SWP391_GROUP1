@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import { config } from 'dotenv';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -7,8 +6,6 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import * as fs from 'fs';
 import { AppModule } from './app.module';
-
-config({ path: join(__dirname, '../.env.sepay.local'), quiet: true });
 
 async function bootstrap() {
   if (process.env.SEPAY_ENABLED === 'true' && (process.env.JWT_SECRET?.length ?? 0) < 32) {

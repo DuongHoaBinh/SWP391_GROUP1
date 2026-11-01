@@ -550,7 +550,7 @@ settlement and one customer notification commit atomically. Storage failure
 remains non-2xx so SePay retries. Payment and transport state remain separate.
 
 Apply migration 015 with node database/apply-sepay-migration.cjs. Configure backend
-SEPAY_* values in .env or .env.sepay.local, never NEXT_PUBLIC_*. Real JWTs and a
+SEPAY_* values in backend/.env alongside DB/JWT/SMTP, never NEXT_PUBLIC_*. Real JWTs and a
 32+ character JWT_SECRET are required; mock bearer tokens are rejected. No SePay
 API access token is needed. See [local setup](sepay-local.md). Start backend then
 run npm run test:sepay in backend for isolated HTTP/MySQL fixtures, with no bank

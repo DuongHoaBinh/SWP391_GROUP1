@@ -115,7 +115,7 @@ function createReceiver({ secret, accountNumber, directory, forwardUrl }) {
 }
 
 if (require.main === module) {
-  const envFile = path.resolve(__dirname, '../.env.sepay.local');
+  const envFile = path.resolve(__dirname, '../.env');
   if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
   const port = Number(process.env.SEPAY_WEBHOOK_PORT || 5002);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid webhook port.');
