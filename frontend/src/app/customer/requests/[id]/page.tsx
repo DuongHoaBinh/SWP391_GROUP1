@@ -39,7 +39,7 @@ import { OrderComplianceChecklist } from '@/features/documents/api/documents.api
 import { buildEquineRoute, geocodeAddress, resolveLocation, GeocodedLocation } from '@/lib/geo-corridors';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
-import { DemoMomoPayment } from '@/features/orders/components/DemoMomoPayment';
+import { SepayQrPayment } from '@/features/orders/components/SepayQrPayment';
 
 const fetcher = async (url: string) => {
   const data = await apiClient<any>(url);
@@ -916,21 +916,15 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          {/* 2.1 MOMO PAYMENT - Chỉ hiển thị sau khi toàn bộ hồ sơ kiểm dịch đã được duyệt 100% */}
+          {/* 2.1 SEPAY VIETQR PAYMENT - Chỉ hiển thị sau khi Flow 2 hoàn tất VÀ Manager đã gửi yêu cầu thanh toán */}
           {Boolean(checklist?.isFullyCompliant) &&
             Number(request.totalCost) > 0 &&
             ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(
               String(request.status).toLowerCase()
             ) && (
-              <DemoMomoPayment
+              <SepayQrPayment
                 shipmentId={Number(request.id || request.shipmentId || requestId)}
-                requestCode={request.requestCode}
-                amount={
-                  Number(request.totalCost) < 100000
-                    ? Math.round(Number(request.totalCost) * 25400)
-                    : Math.round(Number(request.totalCost))
-                }
-                onPaymentSuccess={() => {
+                onPaid={() => {
                   mutate();
                 }}
               />
