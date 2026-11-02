@@ -470,6 +470,27 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     return rows[0];
   }
 
+  async findActiveShipmentIdsByHorseId(horseId: number): Promise<number[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT sh.shipment_id
+       FROM shipment_horse sh
+       JOIN shipment s ON s.shipment_id = sh.shipment_id
+       WHERE sh.horse_id = ? AND s.status NOT IN ('cancelled', 'rejected', 'completed')
+       ORDER BY sh.shipment_id DESC`,
+      [horseId],
+    );
+    return rows.map((r) => Number(r.shipment_id));
+  }
+
+  async hasDocumentsApprovedManagerNotifSent(orderId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) as cnt FROM notification
+       WHERE shipment_id = ? AND title LIKE '%đã đủ hồ sơ, có thể gửi yêu cầu thanh toán%'`,
+      [orderId],
+    );
+    return Number(rows[0]?.cnt ?? 0) > 0;
+  }
+
   async findHorsesInOrder(orderId: number): Promise<OrderHorseInfoRow[]> {
     const [rows] = await this.pool.execute<OrderHorseInfoRow[]>(
       `SELECT h.horse_id, h.name, h.owner_id, h.microchip_no, h.passport_no
