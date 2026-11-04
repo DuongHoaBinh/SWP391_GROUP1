@@ -334,6 +334,14 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     return rows;
   }
 
+  async findUserById(userId: number): Promise<any | null> {
+    const [rows] = await this.pool.execute<any[]>(
+      'SELECT user_id, full_name, email, specialization, role_id FROM `user` WHERE user_id = ? LIMIT 1',
+      [userId],
+    );
+    return rows[0] || null;
+  }
+
   async findAssignedHorses(shipmentId: number): Promise<any[]> {
     const [rows] = await this.pool.execute<any[]>(
       `SELECT h.horse_id, h.name, h.breed, h.gender, h.age, h.microchip_no, h.passport_no

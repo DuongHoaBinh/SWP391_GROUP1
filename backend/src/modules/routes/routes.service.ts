@@ -429,10 +429,10 @@ export class RoutesService {
     let isPaymentSucceeded = false;
     const totalCost = Number(order.totalCost || 0);
     const amountVnd = totalCost > 0 && totalCost < 100000 ? Math.round(totalCost * 25400) : Math.round(totalCost);
-    const paymentRecord = await this.sepayPaymentStore.findByShipmentId(shipmentId);
+    const paymentRecord = await this.sepayPaymentStore.latest(shipmentId, null);
 
     if (amountVnd > 0) {
-      isPaymentSucceeded = await this.sepayPaymentStore.isPaymentPaid(shipmentId);
+      isPaymentSucceeded = paymentRecord?.status === 'succeeded';
     } else {
       isPaymentSucceeded = true;
     }
@@ -457,23 +457,15 @@ export class RoutesService {
     if (!isPaymentSucceeded) {
       if (!paymentRecord) {
         pendingConditions.push(
-          `Chưa gửi yêu cầu thanh toán QR cho khách hàng (${amountVnd.toLocaleString('vi-VN')} VND).`,
+          `Chưa có thông tin thanh toán chuyển khoản SePay cho đơn hàng (${amountVnd.toLocaleString('vi-VN')} VND).`,
         );
-      } else if (paymentRecord.status === 'NEEDS_REVIEW') {
+      } else if (paymentRecord.status === 'review') {
         pendingConditions.push(
-          `Thanh toán QR lệch số tiền (${(paymentRecord.paidAmount ?? 0).toLocaleString('vi-VN')} / ${paymentRecord.amount.toLocaleString('vi-VN')} VND) — Đang chờ Manager kiểm tra.`,
-        );
-      } else if (paymentRecord.status === 'AWAITING_CONFIRMATION') {
-        pendingConditions.push(
-          `Khách báo đã chuyển khoản (${paymentRecord.paymentCode}) — Đang chờ Manager đối chiếu xác nhận.`,
-        );
-      } else if (paymentRecord.status === 'EXPIRED') {
-        pendingConditions.push(
-          `Yêu cầu thanh toán (${paymentRecord.paymentCode}) đã hết hạn — Cần Manager gửi lại yêu cầu.`,
+          `Giao dịch thanh toán SePay (mã ${paymentRecord.payment_code}) đang cần đối soát — Vui lòng kiểm tra lại.`,
         );
       } else {
         pendingConditions.push(
-          `Đang chờ khách hàng hoàn tất thanh toán chuyển khoản QR (${paymentRecord.amount.toLocaleString('vi-VN')} VND - Mã: ${paymentRecord.paymentCode}).`,
+          `Đang chờ khách hàng thanh toán chuyển khoản qua SePay (${Number(paymentRecord.amount).toLocaleString('vi-VN')} VND - Mã: ${paymentRecord.payment_code}).`,
         );
       }
     }

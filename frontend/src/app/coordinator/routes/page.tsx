@@ -266,7 +266,7 @@ export default function RoutePlanningPage() {
               ? new Date(o.requestedDate).toLocaleDateString('vi-VN')
               : 'Oct 20, 2026',
             status: o.status,
-            paymentState: paymentMap[Number(o.id)] || 'WAITING_FLOW2',
+            paymentState: o.paymentStatus === 'succeeded' ? 'PAID' : o.paymentStatus === 'pending' ? 'PENDING' : o.paymentStatus === 'review' ? 'NEEDS_REVIEW' : 'UNPAID',
             routeDetail,
           });
         }

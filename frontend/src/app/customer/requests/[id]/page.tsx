@@ -39,7 +39,7 @@ import { OrderComplianceChecklist } from '@/features/documents/api/documents.api
 import { buildEquineRoute, geocodeAddress, resolveLocation, GeocodedLocation } from '@/lib/geo-corridors';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
-import { SepayQrPayment } from '@/features/orders/components/SepayQrPayment';
+import { SepayPayment } from '@/features/orders/components/SepayPayment';
 
 const fetcher = async (url: string) => {
   const data = await apiClient<any>(url);
@@ -922,11 +922,11 @@ export default function RequestDetailPage() {
             ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(
               String(request.status).toLowerCase()
             ) && (
-              <SepayQrPayment
+              <SepayPayment
                 shipmentId={Number(request.id || request.shipmentId || requestId)}
-                onPaid={() => {
-                  mutate();
-                }}
+                requestCode={request.requestCode}
+                amount={Number(request.totalCost)}
+                eligible={true}
               />
             )}
 
