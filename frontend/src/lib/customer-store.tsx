@@ -69,7 +69,7 @@ const getStorageKey = (key: string) => {
 export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [requests, setRequests] = useState<TransportRequest[]>(initialRequests);
   const [horses, setHorses] = useState<Horse[]>([]);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(initialNotifications);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>(initialDocuments);
   const [isLoaded, setIsLoaded] = useState(false);
 

@@ -75,11 +75,18 @@ export default function SpecialistLayout({
     };
     window.addEventListener('notifications-updated', handleNotificationsUpdated);
     window.addEventListener('auth-user-updated', handleNotificationsUpdated);
+    const interval = setInterval(fetchUnread, 10000);
+
     return () => {
       window.removeEventListener('notifications-updated', handleNotificationsUpdated);
       window.removeEventListener('auth-user-updated', handleNotificationsUpdated);
+      clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    fetchUnread();
+  }, [pathname]);
 
   const navItems: NavItem[] = [
     {
@@ -120,6 +127,7 @@ export default function SpecialistLayout({
       href: '/specialist/notifications',
       icon: <Bell size={18} />,
       badge: unreadNotifs > 0 ? unreadNotifs : undefined,
+      badgeColor: 'brand',
     },
     {
       label: 'Settings',
@@ -223,6 +231,16 @@ export default function SpecialistLayout({
                       <span className={isActive ? 'text-slate-300' : 'text-slate-500'}>{item.icon}</span>
                       <span>{item.label}</span>
                     </div>
+
+                    {item.badge !== undefined && (
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full text-white ${
+                          item.badgeColor === 'danger' ? 'bg-red-500' : 'bg-blue-600'
+                        }`}
+                      >
+                        {item.badge}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -338,10 +356,21 @@ export default function SpecialistLayout({
                       key={item.href}
                       href={item.href}
                       onClick={() => setMobileMenuOpen(false)}
-                      className="flex items-center gap-3 px-3 py-2 rounded-lg text-[13.5px] font-medium text-slate-400 hover:text-white"
+                      className="flex items-center justify-between px-3 py-2 rounded-lg text-[13.5px] font-medium text-slate-400 hover:text-white"
                     >
-                      {item.icon}
-                      <span>{item.label}</span>
+                      <div className="flex items-center gap-3">
+                        {item.icon}
+                        <span>{item.label}</span>
+                      </div>
+                      {item.badge !== undefined && (
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full text-white ${
+                            item.badgeColor === 'danger' ? 'bg-red-500' : 'bg-blue-600'
+                          }`}
+                        >
+                          {item.badge}
+                        </span>
+                      )}
                     </Link>
                   ))}
                 </nav>
@@ -411,11 +440,33 @@ export default function SpecialistLayout({
             <button
               onClick={() => router.push('/specialist/notifications')}
               aria-label="Notifications"
+              title="Notifications"
               className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 bg-white relative cursor-pointer hover:bg-slate-50 transition-colors"
             >
               <Bell size={16} />
               {unreadNotifs > 0 && (
-                <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500 border border-white" />
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    minWidth: '18px',
+                    height: '18px',
+                    padding: '0 4px',
+                    borderRadius: '999px',
+                    backgroundColor: '#ef4444',
+                    color: '#ffffff',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '2px solid #ffffff',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  }}
+                >
+                  {unreadNotifs > 99 ? '99+' : unreadNotifs}
+                </span>
               )}
             </button>
 
