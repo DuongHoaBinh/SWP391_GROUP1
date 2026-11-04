@@ -109,8 +109,6 @@ export default function ManagerLayout({
       label: 'Incident Management',
       href: '/manager/incidents',
       icon: <AlertTriangle size={18} />,
-      badge: 2,
-      badgeColor: 'danger',
     },
   ];
 
