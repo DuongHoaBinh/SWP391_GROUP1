@@ -11,6 +11,7 @@ import {
   ThumbsUp,
   CalendarCheck,
   Plane,
+  Truck,
   Flag,
   MoreVertical,
   ArrowRight,
@@ -1842,21 +1843,49 @@ export default function RequestDetailPage() {
                 }}
               />
               <div style={{ display: 'flex', gap: '12px' }}>
-                {checklist?.isFullyCompliant ? (
-                  <CheckCircle2 size={20} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                {String(request?.status || '').toLowerCase() === 'completed' || String(request?.status || '').toLowerCase() === 'delivered' ? (
+                  <>
+                    <CheckCircle2 size={22} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div>
+                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#166534', margin: 0 }}>
+                        Vận chuyển hoàn thành thành công 100%
+                      </h4>
+                      <p style={{ fontSize: '12.5px', color: '#15803d', margin: '6px 0 0 0', lineHeight: 1.4 }}>
+                        Ngựa đã cập bến an toàn tại điểm đích và hoàn tất toàn bộ quy trình bàn giao cho người nhận. Cảm ơn quý khách đã tin tưởng và sử dụng dịch vụ của EquiTransit Logistics!
+                      </p>
+                    </div>
+                  </>
+                ) : String(request?.status || '').toLowerCase() === 'in_transit' ? (
+                  <>
+                    <Truck size={20} color="#0284c7" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div>
+                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0369a1', margin: 0 }}>
+                        Đoàn xe / Chuyến bay đang di chuyển (In Transit)
+                      </h4>
+                      <p style={{ fontSize: '12.5px', color: '#0284c7', margin: '6px 0 0 0', lineHeight: 1.4 }}>
+                        Chuyến đi đang di chuyển theo đúng lộ trình kế hoạch. Quý khách có thể bấm nút <strong>"Live Tracking"</strong> ở góc trên bên phải để theo dõi trực tiếp vị trí và sinh hiệu ngựa.
+                      </p>
+                    </div>
+                  </>
                 ) : (
-                  <Clock size={20} color="#2563eb" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <>
+                    {checklist?.isFullyCompliant ? (
+                      <CheckCircle2 size={20} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    ) : (
+                      <Clock size={20} color="#2563eb" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    )}
+                    <div>
+                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: checklist?.isFullyCompliant ? '#166534' : '#1e40af', margin: 0 }}>
+                        {checklist?.isFullyCompliant ? 'Hồ sơ đã được phê duyệt 100%' : 'Đã nộp đủ hồ sơ (Chờ duyệt)'}
+                      </h4>
+                      <p style={{ fontSize: '12.5px', color: checklist?.isFullyCompliant ? '#15803d' : '#1e3a8a', margin: '6px 0 0 0', lineHeight: 1.4 }}>
+                        {checklist?.isFullyCompliant
+                          ? 'Tất cả các tài liệu kiểm dịch và pháp lý đã được duyệt hợp lệ. Chuyến đi đã đủ điều kiện xuất phát.'
+                          : `Quý khách đã nộp đầy đủ các chứng từ theo yêu cầu (${checklist?.approvedDocumentsCount || 0}/${checklist?.totalRequiredDocuments || 0} đã duyệt). Chuyên viên kiểm dịch đang trong quá trình thẩm định hồ sơ.`}
+                      </p>
+                    </div>
+                  </>
                 )}
-                <div>
-                  <h4 style={{ fontSize: '15px', fontWeight: 700, color: checklist?.isFullyCompliant ? '#166534' : '#1e40af', margin: 0 }}>
-                    {checklist?.isFullyCompliant ? 'Hồ sơ đã được phê duyệt 100%' : 'Đã nộp đủ hồ sơ (Chờ duyệt)'}
-                  </h4>
-                  <p style={{ fontSize: '12.5px', color: checklist?.isFullyCompliant ? '#15803d' : '#1e3a8a', margin: '6px 0 0 0', lineHeight: 1.4 }}>
-                    {checklist?.isFullyCompliant
-                      ? 'Tất cả các tài liệu kiểm dịch và pháp lý đã được duyệt hợp lệ. Chuyến đi đã đủ điều kiện xuất phát.'
-                      : `Quý khách đã nộp đầy đủ các chứng từ theo yêu cầu (${checklist?.approvedDocumentsCount || 0}/${checklist?.totalRequiredDocuments || 0} đã duyệt). Chuyên viên kiểm dịch đang trong quá trình thẩm định hồ sơ.`}
-                  </p>
-                </div>
               </div>
             </div>
           )}
