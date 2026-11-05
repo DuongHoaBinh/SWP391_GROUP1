@@ -299,9 +299,37 @@ export default function RequestsPage() {
       params.set('page', String(page));
       params.set('limit', String(limit));
 
-      const result = await apiClient<PaginatedOrders>(`/orders/my-orders?${params.toString()}`);
-      setOrders(result.data || []);
-      setPagination({ total: result.total, totalPages: result.totalPages });
+      const result = await apiClient<any>(`/orders/my-orders?${params.toString()}`);
+      if (Array.isArray(result)) {
+        let list: TransportOrder[] = [...result];
+        if (filterStatus !== 'all') {
+          list = list.filter((o) => o.status === filterStatus);
+        }
+        if (departureDateFrom) {
+          list = list.filter((o) => o.departureDate && o.departureDate >= departureDateFrom);
+        }
+        if (departureDateTo) {
+          list = list.filter((o) => o.departureDate && o.departureDate <= departureDateTo);
+        }
+        if (sortBy === 'totalCost') {
+          list.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
+        } else if (sortBy === 'requestedDate') {
+          list.sort((a, b) => (sortOrder === 'asc' ? new Date(a.requestedDate).getTime() - new Date(b.requestedDate).getTime() : new Date(b.requestedDate).getTime() - new Date(a.requestedDate).getTime()));
+        } else {
+          list.sort((a, b) => (sortOrder === 'asc' ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+        }
+        const total = list.length;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const paginated = list.slice((page - 1) * limit, page * limit);
+        setOrders(paginated);
+        setPagination({ total, totalPages });
+      } else if (result && Array.isArray(result.data)) {
+        setOrders(result.data);
+        setPagination({ total: result.total ?? result.data.length, totalPages: result.totalPages ?? 1 });
+      } else {
+        setOrders([]);
+        setPagination({ total: 0, totalPages: 1 });
+      }
     } catch (err: any) {
       // Fallback to local store data if backend is offline or unauthenticated
       if (storeRequests && storeRequests.length > 0) {
