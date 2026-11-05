@@ -41,12 +41,14 @@ export class MomoPaymentStore implements OnModuleInit, OnModuleDestroy {
       const order = orders[0];
       if (Number(order.customer_id) !== customerId) throw new ForbiddenException('Đơn hàng không thuộc tài khoản của bạn');
       if (!['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(order.status)) throw new BadRequestException('Đơn hàng cần được duyệt và có báo giá trước khi thanh toán thử');
-      const amount = Number(order.total_cost);
-      if (!Number.isSafeInteger(amount) || amount < 10000 || amount > 50000000) throw new BadRequestException('MoMo sandbox hỗ trợ báo giá nguyên VND từ 10.000 đến 50.000.000');
+      const rawCost = Number(order.total_cost);
+      const amount = rawCost > 0 && rawCost < 100000 ? Math.round(rawCost * 25400) : Math.round(rawCost);
+      if (!Number.isSafeInteger(amount) || amount < 10000) throw new BadRequestException('Số tiền thanh toán tối thiểu là 10.000 VND');
       const [existing] = await db.execute<any[]>("SELECT * FROM shipment_sandbox_payment WHERE shipment_id = ? AND (request_type = 'payWithATM' OR status = 'succeeded') ORDER BY (status = 'succeeded') DESC, payment_id DESC LIMIT 1", [shipmentId]);
       if (existing.length && existing[0].status !== 'failed') {
-        if (Number(existing[0].amount) !== amount || existing[0].partner_code !== partnerCode) throw new ConflictException('Báo giá hoặc cấu hình đã đổi; cần đối soát giao dịch sandbox trước đó');
-        return { payment: existing[0], created: false };
+        if (Number(existing[0].amount) === amount && existing[0].partner_code === partnerCode) {
+          return { payment: existing[0], created: false };
+        }
       }
       const orderId = `EQ${shipmentId}-${randomUUID()}`;
       const requestId = randomUUID();
@@ -74,6 +76,22 @@ export class MomoPaymentStore implements OnModuleInit, OnModuleDestroy {
           preserveResult ? payment.trans_id : update.transId ?? payment.trans_id, update.payUrl ?? null, update.qrContent ?? null, paymentId]);
       await db.execute(`INSERT INTO shipment_sandbox_payment_event (payment_id, event_key, source, new_status, result_code, result_message)
         VALUES (?, ?, ?, ?, ?, ?)`, [paymentId, update.eventKey, update.source, status, update.code ?? null, update.message]);
+      if (status === 'succeeded') {
+        // Auto-promote shipment and route to 'ready_to_depart' if route plan is already confirmed and all documents are approved
+        const [routes] = await db.execute<any[]>('SELECT route_id, plan_status FROM route WHERE shipment_id = ? ORDER BY route_id DESC LIMIT 1', [payment.shipment_id]);
+        if (routes.length > 0 && routes[0].plan_status === 'confirmed') {
+          const [docs] = await db.execute<any[]>(
+            'SELECT COUNT(*) as total, SUM(CASE WHEN status = \'approved\' THEN 1 ELSE 0 END) as approved FROM transport_document WHERE shipment_id = ?',
+            [payment.shipment_id],
+          );
+          const totalDocs = Number(docs[0]?.total || 0);
+          const approvedDocs = Number(docs[0]?.approved || 0);
+          if (totalDocs > 0 && totalDocs === approvedDocs) {
+            await db.execute("UPDATE route SET plan_status = 'ready_to_depart' WHERE route_id = ?", [routes[0].route_id]);
+            await db.execute("UPDATE shipment SET status = 'ready_to_depart' WHERE shipment_id = ? AND status IN ('approved', 'planning', 'confirmed')", [payment.shipment_id]);
+          }
+        }
+      }
       const [updated] = await db.execute<any[]>('SELECT * FROM shipment_sandbox_payment WHERE payment_id = ?', [paymentId]);
       return updated[0];
     });

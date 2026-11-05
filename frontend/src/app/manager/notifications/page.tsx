@@ -1,10 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Bell, Check, Clock, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Bell, Check, Clock, ArrowRight, CheckCircle2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { apiClient } from '@/lib/api-client';
+import { getCurrentUser } from '@/lib/auth';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 
@@ -35,11 +36,25 @@ function timeAgo(dateString: string): string {
 }
 
 export default function ManagerNotificationsPage() {
-  const { data: notifications = [], isLoading, mutate } = useSWR<NotificationItem[]>(
-    '/notifications',
-    (url: string) => apiClient<NotificationItem[]>(url),
-    { revalidateOnFocus: true }
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+
+  useEffect(() => {
+    const onUserUpdate = () => setCurrentUser(getCurrentUser());
+    window.addEventListener('auth-user-updated', onUserUpdate);
+    return () => window.removeEventListener('auth-user-updated', onUserUpdate);
+  }, []);
+
+  const { data: notifications = [], isLoading, mutate, isValidating } = useSWR<NotificationItem[]>(
+    ['/notifications', currentUser?.id, currentUser?.role],
+    () => apiClient<NotificationItem[]>('/notifications'),
+    { revalidateOnFocus: true, refreshInterval: 10000 }
   );
+
+  useEffect(() => {
+    const onNotifsUpdate = () => { void mutate(); };
+    window.addEventListener('notifications-updated', onNotifsUpdate);
+    return () => window.removeEventListener('notifications-updated', onNotifsUpdate);
+  }, [mutate]);
 
   const markAllRead = async () => {
     try {
@@ -77,7 +92,17 @@ export default function ManagerNotificationsPage() {
             Thông báo đơn hàng mới từ khách hàng, duyệt yêu cầu và vận hành chuyến đi.
           </p>
         </div>
-        <div>
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void mutate()}
+            disabled={isValidating}
+            className="shadow-sm"
+          >
+            <RefreshCw size={14} className={`mr-1.5 ${isValidating ? 'animate-spin' : ''}`} />
+            Làm mới
+          </Button>
           {unreadCount > 0 ? (
             <Button variant="outline" size="sm" onClick={markAllRead} className="shadow-sm">
               <Check size={16} className="mr-1.5" /> Đánh dấu tất cả đã đọc ({unreadCount})

@@ -2,9 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Bell, Check, Trash2, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Bell, Check, Trash2, ExternalLink, CheckCircle2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { mockNotifications } from '@/lib/mock-data';
 import { NotificationItem } from '@/lib/types';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { apiClient } from '@/lib/api-client';
@@ -12,20 +11,23 @@ import { apiClient } from '@/lib/api-client';
 function formatTimeAgo(dateStr: string) {
   const diffMs = Date.now() - new Date(dateStr).getTime();
   const diffMins = Math.floor(diffMs / (1000 * 60));
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
+  if (diffMins < 1) return 'Vừa xong';
+  if (diffMins < 60) return `${diffMins} phút trước`;
+  const diffHours = Math.floor(diffMins / (1000 * 60 * 60));
+  if (diffHours < 24) return `${diffHours} giờ trước`;
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  return `${diffDays} ngày trước`;
 }
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = async (showLoadingSpinner = true) => {
+    if (showLoadingSpinner) setLoading(true);
+    setIsRefreshing(true);
     try {
       const data = await apiClient<any[]>('/notifications');
       if (Array.isArray(data) && data.length > 0) {
@@ -43,7 +45,7 @@ export default function NotificationsPage() {
             type: isCritical ? 'CRITICAL' : isSuccess ? 'SUCCESS' : 'INFO',
             title,
             message,
-            timeAgo: item.createdAt ? formatTimeAgo(item.createdAt) : 'Recently',
+            timeAgo: item.createdAt ? formatTimeAgo(item.createdAt) : 'Gần đây',
             isRead: Boolean(item.isRead),
             relatedRequestCode: item.shipmentId === 21 ? 'REQ-010' : (item.shipmentId ? `REQ-${String(item.shipmentId).padStart(3, '0')}` : undefined),
             actionText: item.shipmentId ? 'Xem chi tiết đơn' : undefined,
@@ -52,18 +54,29 @@ export default function NotificationsPage() {
         });
         setNotifications(mapped);
       } else {
-        setNotifications(mockNotifications);
+        // No notifications yet - keep list empty, do not show mock data
+        setNotifications([]);
       }
     } catch (err) {
-      console.error('Failed to fetch notifications, fallback to mock:', err);
-      setNotifications(mockNotifications);
+      console.warn('Failed to fetch customer notifications:', err);
+      setNotifications([]);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
   useEffect(() => {
     fetchNotifications();
+
+    const handleUpdate = () => fetchNotifications(false);
+    window.addEventListener('notifications-updated', handleUpdate);
+    const interval = setInterval(() => fetchNotifications(false), 10000);
+
+    return () => {
+      window.removeEventListener('notifications-updated', handleUpdate);
+      clearInterval(interval);
+    };
   }, []);
 
   const handleMarkAllRead = async () => {
@@ -117,21 +130,35 @@ export default function NotificationsPage() {
           </Link>
           <div>
             <h2 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-              All Notifications
+              Thông báo (Notifications)
             </h2>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-              Updates on transport approvals, quarantine deadlines, and flight status.
+              Cập nhật phê duyệt đơn vận chuyển, thủ tục kiểm dịch và hành trình của ngựa.
             </p>
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>
-          <Button variant="outline" size="sm" onClick={handleMarkAllRead}>
-            Mark all read
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchNotifications(false)}
+            disabled={isRefreshing}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+            Làm mới
           </Button>
-          <Button variant="outline" size="sm" onClick={handleClear}>
-            Clear all
-          </Button>
+          {notifications.length > 0 && (
+            <>
+              <Button variant="outline" size="sm" onClick={handleMarkAllRead}>
+                Đánh dấu đã đọc
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleClear}>
+                Xóa tất cả
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -146,11 +173,22 @@ export default function NotificationsPage() {
           display: 'flex',
           flexDirection: 'column',
           gap: '16px',
+          minHeight: '200px',
         }}
       >
-        {notifications.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-            No notifications available.
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
+            Đang tải thông báo...
+          </div>
+        ) : notifications.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-muted)' }}>
+            <CheckCircle2 size={36} style={{ margin: '0 auto 12px auto', color: '#10b981' }} />
+            <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '4px' }}>
+              Không có thông báo mới nào
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+              Thông báo về duyệt đơn, danh mục kiểm dịch và hành trình sẽ xuất hiện tại đây.
+            </div>
           </div>
         ) : (
           notifications.map((notif) => (

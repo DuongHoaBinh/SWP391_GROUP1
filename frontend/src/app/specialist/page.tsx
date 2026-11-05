@@ -425,7 +425,7 @@ export default function SpecialistDashboardPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             { title: 'Review Documents', desc: 'Process pending submissions', icon: Search, bg: 'bg-blue-600 text-white hover:bg-blue-700', iconBg: 'bg-white/20', descColor: 'text-blue-100', route: '/specialist/approval' },
-            { title: 'Create Dossier', desc: 'Compile transport documents', icon: FolderOpen, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-blue-50 text-blue-600', descColor: 'text-slate-500', route: '/specialist/documents' },
+            { title: 'Transport Dossiers', desc: 'View & export transport dossiers', icon: FolderOpen, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-blue-50 text-blue-600', descColor: 'text-slate-500', route: '/specialist/documents' },
             { title: 'Request Missing', desc: 'Notify clients of missing docs', icon: FileX, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-red-50 text-red-600', descColor: 'text-slate-500', route: '/specialist/missing' },
             { title: 'View Regulations', desc: 'Check border compliance', icon: Scale, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-emerald-50 text-emerald-600', descColor: 'text-slate-500', route: '/specialist/regulations' },
           ].map((action, idx) => (

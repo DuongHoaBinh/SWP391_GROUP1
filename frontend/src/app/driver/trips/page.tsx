@@ -440,7 +440,7 @@ export default function DriverTripsPage() {
                   )}
 
                   {/* Driver gets prominent Journey Update; Escort gets outline view button */}
-                  <Link href="/driver/status">
+                  <Link href={`/driver/status?shipmentId=${trip.id}`}>
                     <Button
                       variant={!isEscort ? 'primary' : 'outline'}
                       size="sm"

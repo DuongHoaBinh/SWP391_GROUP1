@@ -36,6 +36,13 @@ export class HorsesService {
   async createHorse(user: AuthenticatedUser, dto: CreateHorseDto): Promise<HorseEntity> {
     const ownerId = Number(user.id);
 
+    if (!dto.passportNo?.trim()) {
+      throw new BadRequestException('Vui lòng nhập FEI Passport Number (Số hộ chiếu FEI).');
+    }
+    if (!dto.microchipNo?.trim()) {
+      throw new BadRequestException('Vui lòng nhập Microchip Number (Số vi mạch).');
+    }
+
     // Kiểm tra không được trùng tên ngựa trong tài khoản của khách
     const existingHorses = await this.horsesStore.findByOwnerId(ownerId);
     const isDuplicate = existingHorses.some(
@@ -69,6 +76,14 @@ export class HorsesService {
 
     if (user.role === UserRole.CUSTOMER && horse.ownerId !== Number(user.id)) {
       throw new ForbiddenException('You can only edit horses belonging to your account');
+    }
+
+    // Không cho phép khách hàng tự ý đổi trạng thái ngựa đang vận chuyển hoặc đã hoàn tất về lại 'active'
+    if (
+      (horse.status === HorseStatus.IN_TRANSIT || horse.status === HorseStatus.DELIVERED) &&
+      dto.status === HorseStatus.ACTIVE
+    ) {
+      dto.status = horse.status;
     }
 
     await this.horsesStore.update(horseId, dto);

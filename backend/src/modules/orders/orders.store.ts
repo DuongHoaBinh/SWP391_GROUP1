@@ -26,6 +26,9 @@ interface ShipmentRow extends RowDataPacket {
   change_request_notes: string | null;
   status: ShipmentStatus;
   total_cost: number | string;
+  payment_status?: 'pending' | 'review' | 'succeeded';
+  payment_code?: string | null;
+  paid_at?: Date | null;
   created_at: Date;
   updated_at: Date;
   customer_email?: string;
@@ -221,10 +224,21 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   async findShipmentsByCustomer(customerId: number): Promise<TransportOrder[]> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
       `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
-              CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code
+              CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code,
+              COALESCE(sp.status, mb.status) as payment_status,
+              COALESCE(sp.payment_code, mb.order_id) as payment_code,
+              COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+       LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
+       LEFT JOIN (
+         SELECT shipment_id, status, order_id, last_checked_at
+         FROM shipment_sandbox_payment
+         WHERE (shipment_id, payment_id) IN (
+           SELECT shipment_id, MAX(payment_id) FROM shipment_sandbox_payment GROUP BY shipment_id
+         )
+       ) mb ON mb.shipment_id = s.shipment_id
        WHERE s.customer_id = ?
        ORDER BY s.created_at DESC`,
       [customerId],
@@ -240,10 +254,21 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
                (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                3, '0'
              )) as customer_request_code,
-             CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
+             CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
+             COALESCE(sp.status, mb.status) as payment_status,
+             COALESCE(sp.payment_code, mb.order_id) as payment_code,
+             COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+      LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
+      LEFT JOIN (
+        SELECT shipment_id, status, order_id, last_checked_at
+        FROM shipment_sandbox_payment
+        WHERE (shipment_id, payment_id) IN (
+          SELECT shipment_id, MAX(payment_id) FROM shipment_sandbox_payment GROUP BY shipment_id
+        )
+      ) mb ON mb.shipment_id = s.shipment_id
     `;
     const params: (string | number)[] = [];
 
@@ -265,10 +290,21 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
                 (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                 3, '0'
               )) as customer_request_code,
-              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
+              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
+              COALESCE(sp.status, mb.status) as payment_status,
+              COALESCE(sp.payment_code, mb.order_id) as payment_code,
+              COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+       LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
+       LEFT JOIN (
+         SELECT shipment_id, status, order_id, last_checked_at
+         FROM shipment_sandbox_payment
+         WHERE (shipment_id, payment_id) IN (
+           SELECT shipment_id, MAX(payment_id) FROM shipment_sandbox_payment GROUP BY shipment_id
+         )
+       ) mb ON mb.shipment_id = s.shipment_id
        WHERE s.shipment_id = ?
        LIMIT 1`,
       [shipmentId],
@@ -372,6 +408,25 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       'UPDATE shipment SET status = ?, updated_at = NOW() WHERE shipment_id = ?',
       [status, shipmentId],
     );
+
+    if (status === ShipmentStatus.COMPLETED || (status as string) === 'completed') {
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'delivered'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+           AND status NOT IN ('retired', 'deceased')`,
+        [shipmentId],
+      );
+    } else if (status === ShipmentStatus.CANCELLED || status === ShipmentStatus.REJECTED) {
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'active'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+           AND status NOT IN ('delivered', 'retired', 'deceased')`,
+        [shipmentId],
+      );
+    }
+
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
@@ -531,6 +586,9 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       changeRequestNotes: row.change_request_notes ?? null,
       status: row.status,
       totalCost: Number(row.total_cost ?? 0),
+      paymentStatus: row.payment_status ?? 'unpaid',
+      paymentCode: row.payment_code ?? null,
+      paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       customerEmail: row.customer_email,
