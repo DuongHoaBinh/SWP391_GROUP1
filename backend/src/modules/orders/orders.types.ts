@@ -43,6 +43,7 @@ export interface TransportOrder {
   departureDate: string | null;
   expectedArrivalDate: string | null;
   actualArrivalDate: string | null;
+  transportationType: string | null;
   specialRequirements: string | null;
   rejectionReason: string | null;
   changeRequestNotes: string | null;

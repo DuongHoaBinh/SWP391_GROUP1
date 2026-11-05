@@ -177,32 +177,34 @@ const fetcher = async (url: string) => {
   const savedHours = routeMatch ? Number(routeMatch[3]) : null;
 
   // 4. Determine domestic vs international
-  const hasIntlNote =
-    specialReqLower.includes('quốc tế') ||
-    specialReqLower.includes('international') ||
-    specialReqLower.includes('hàng không') ||
-    specialReqLower.includes('air flight') ||
-    String(data.transportationType || '').toLowerCase() === 'international' ||
-    String(data.transportType || '').toLowerCase() === 'international' ||
-    savedMode === 'air';
-
-  const hasDomesticNote =
-    specialReqLower.includes('nội địa') ||
-    specialReqLower.includes('domestic') ||
-    String(data.transportationType || '').toLowerCase() === 'domestic' ||
-    String(data.transportType || '').toLowerCase() === 'domestic';
+  // Priority 1: use the explicit transportation_type field stored in DB
+  const explicitType = String(data.transportationType || data.transportation_type || '').toLowerCase();
 
   let isDomestic = false;
-  if (hasDomesticNote && !hasIntlNote) {
+  if (explicitType === 'domestic') {
     isDomestic = true;
-  } else if (hasIntlNote) {
+  } else if (explicitType === 'international') {
     isDomestic = false;
   } else {
-    // If geoDest or resolvedDest is foreign, it is international
-    const isForeign =
-      (geoDest && geoDest.country !== 'Việt Nam') ||
-      (!geoDest && !resolvedDest.isVietnam);
-    isDomestic = !isForeign;
+    // Fallback: parse from specialRequirements text (for older records without explicit field)
+    const hasDomesticNote =
+      specialReqLower.includes('nội địa') ||
+      (specialReqLower.includes('domestic') && !specialReqLower.includes('international'));
+    const hasIntlNote =
+      specialReqLower.includes('quốc tế') ||
+      specialReqLower.includes('international') ||
+      savedMode === 'air';
+    if (hasDomesticNote && !hasIntlNote) {
+      isDomestic = true;
+    } else if (hasIntlNote) {
+      isDomestic = false;
+    } else {
+      // Last resort: geocode destination
+      const isForeign =
+        (geoDest && geoDest.country !== 'Việt Nam') ||
+        (!geoDest && !resolvedDest.isVietnam);
+      isDomestic = !isForeign;
+    }
   }
 
   const transportationType = isDomestic ? 'Domestic' : 'International';
@@ -921,7 +923,7 @@ export default function RequestDetailPage() {
             <DemoMomoPayment
               shipmentId={Number(request.id || request.shipmentId || requestId)}
               requestCode={request.requestCode}
-              amount={Number(request.totalCost) < 100000 ? Math.round(Number(request.totalCost) * 25400) : Math.round(Number(request.totalCost))}
+              amount={Math.round(Number(request.totalCost))}
             />
           )}
 

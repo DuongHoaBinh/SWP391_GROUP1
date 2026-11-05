@@ -96,6 +96,7 @@ export class OrdersService {
       ShipmentStatus.APPROVED,
       null,
       dto.totalCost ?? 0,
+      dto.transportMode,
     );
 
     // 1. Gửi thông báo đến customer (dùng mã đơn của riêng khách hàng)
