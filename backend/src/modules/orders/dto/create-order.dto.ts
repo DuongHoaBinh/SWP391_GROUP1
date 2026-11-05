@@ -1,4 +1,4 @@
-﻿import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -42,6 +42,7 @@ export class HorseInfoDto {
   @IsOptional()
   @IsString()
   microchipNumber?: string;
+
   @ApiPropertyOptional({ example: 1, description: 'ID con ngựa đã có trong My Horses' })
   @IsOptional()
   @IsInt()
@@ -94,6 +95,15 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   requestedDate?: string;
+
+  @ApiPropertyOptional({
+    example: 'International',
+    enum: ['International', 'Domestic'],
+    description: 'Loại hình vận chuyển: International (quốc tế) hoặc Domestic (nội địa)',
+  })
+  @IsOptional()
+  @IsIn(['International', 'Domestic'])
+  transportationType?: 'International' | 'Domestic';
 
   @ApiPropertyOptional({ example: 'Cần xe có hệ thống điều hòa đặc biệt cho ngựa thi đấu', description: 'Special requirements' })
   @IsOptional()

@@ -20,6 +20,7 @@ interface ShipmentRow extends RowDataPacket {
   departure_date: Date | null;
   expected_arrival_date: Date | null;
   actual_arrival_date: Date | null;
+  transportation_type: string | null;
   special_requirements: string | null;
   rejection_reason: string | null;
   change_request_notes: string | null;
@@ -83,8 +84,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       `INSERT INTO shipment (
         customer_id, requested_by, contact_name, contact_address, contact_phone, contact_email,
         requested_horse_count, origin_location, destination_location, requested_date,
-        special_requirements, status, total_cost
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0)`,
+        transportation_type, special_requirements, status, total_cost
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0)`,
       [
         customerId,
         customerId,
@@ -96,6 +97,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         dto.originLocation,
         dto.destinationLocation,
         requestedDate,
+        dto.transportationType ?? null,
         dto.specialRequirements ?? null,
       ],
     );
@@ -286,14 +288,41 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     status: ShipmentStatus.APPROVED | ShipmentStatus.REJECTED,
     rejectionReason: string | null = null,
     totalCost: number = 0,
+    transportMode?: "road" | "air",
   ): Promise<boolean> {
-    const [result] = await this.pool.execute(
-      `UPDATE shipment
-       SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = CASE WHEN ? > 0 THEN ? ELSE total_cost END
-       WHERE shipment_id = ?`,
-      [status, approvedBy, rejectionReason, totalCost, totalCost, shipmentId],
-    );
+    let modeType: string | null = null;
+    let modeNote: string | null = null;
+    if (status === ShipmentStatus.APPROVED && transportMode) {
+      if (transportMode === "air") {
+        modeType = "Domestic (Air)";
+        modeNote = "[Phương thức: Đường Hàng Không]";
+      } else {
+        modeType = "Domestic";
+        modeNote = "[Phương thức: Đường Bộ Liên Vận]";
+      }
+    }
 
+    let query = `UPDATE shipment
+       SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = CASE WHEN ? > 0 THEN ? ELSE total_cost END`;
+    const params: any[] = [status, approvedBy, rejectionReason, totalCost, totalCost];
+
+    if (modeType) {
+      query += `, transportation_type = ?`;
+      params.push(modeType);
+    }
+    if (modeNote) {
+      query += `, special_requirements = CASE
+        WHEN special_requirements IS NULL OR special_requirements = '' THEN ?
+        WHEN special_requirements LIKE ? THEN special_requirements
+        ELSE CONCAT(special_requirements, ' | ', ?)
+      END`;
+      const matchKeyword = transportMode === "air" ? "%Hàng không%" : "%Đường bộ%";
+      params.push(modeNote, matchKeyword, modeNote);
+    }
+    query += ` WHERE shipment_id = ?`;
+    params.push(shipmentId);
+
+    const [result] = await this.pool.execute(query, params);
     if (status === ShipmentStatus.REJECTED) {
       await this.pool.execute(
         `UPDATE horse
@@ -496,6 +525,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       departureDate: row.departure_date ? new Date(row.departure_date).toISOString() : null,
       expectedArrivalDate: row.expected_arrival_date ? new Date(row.expected_arrival_date).toISOString() : null,
       actualArrivalDate: row.actual_arrival_date ? new Date(row.actual_arrival_date).toISOString() : null,
+      transportationType: row.transportation_type ?? null,
       specialRequirements: row.special_requirements,
       rejectionReason: row.rejection_reason,
       changeRequestNotes: row.change_request_notes ?? null,
