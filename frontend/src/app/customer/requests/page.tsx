@@ -42,6 +42,8 @@ interface OrderHorse {
 
 interface TransportOrder {
   id: number;
+  requestCode?: string;
+  customerRequestCode?: string;
   customerId: number;
   contactName: string | null;
   contactEmail: string;
@@ -142,7 +144,7 @@ function exportQuotationPDF(order: TransportOrder) {
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Báo Giá Vận Chuyển - #${order.id}</title>
+  <title>Báo Giá Vận Chuyển - ${order.requestCode || `#${order.id}`}</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff}
@@ -183,7 +185,7 @@ function exportQuotationPDF(order: TransportOrder) {
     </div>
     <div>
       <div class="doc-title">BÁO GIÁ VẬN CHUYỂN</div>
-      <div class="doc-id">Mã yêu cầu: #${order.id}</div>
+      <div class="doc-id">Mã yêu cầu: ${order.requestCode || `#${order.id}`}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
       <div style="text-align:right"><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
     </div>
@@ -335,6 +337,8 @@ export default function RequestsPage() {
       if (storeRequests && storeRequests.length > 0) {
         const mappedOrders: TransportOrder[] = storeRequests.map((r, idx) => ({
           id: idx + 1,
+          requestCode: `REQ-${String(idx + 1).padStart(3, '0')}`,
+          customerRequestCode: `REQ-${String(idx + 1).padStart(3, '0')}`,
           customerId: 1,
           contactName: r.horse?.ownerName || 'Customer',
           contactEmail: 'customer@equitransit.com',
@@ -420,6 +424,8 @@ export default function RequestsPage() {
     const q = search.toLowerCase();
     return (
       String(o.id).includes(q) ||
+      (o.requestCode || '').toLowerCase().includes(q) ||
+      (o.customerRequestCode || '').toLowerCase().includes(q) ||
       (o.contactName || '').toLowerCase().includes(q) ||
       o.originLocation.toLowerCase().includes(q) ||
       o.destinationLocation.toLowerCase().includes(q) ||
@@ -655,7 +661,7 @@ export default function RequestsPage() {
                     color: 'var(--text-muted)',
                   }}
                 >
-                  #ID
+                  REQ-ID
                 </th>
                 <th
                   style={{
@@ -791,7 +797,7 @@ export default function RequestsPage() {
                           href={`/customer/requests/${order.id}`}
                           style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '13px' }}
                         >
-                          #{order.id}
+                          {order.requestCode || order.customerRequestCode || `REQ-${String(order.id).padStart(3, '0')}`}
                         </Link>
                       </td>
 

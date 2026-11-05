@@ -225,6 +225,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
       `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
               CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code,
+              CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as customer_request_code,
               COALESCE(sp.status, mb.status) as payment_status,
               COALESCE(sp.payment_code, mb.order_id) as payment_code,
               COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
