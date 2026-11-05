@@ -178,30 +178,19 @@ const fetcher = async (url: string) => {
   const savedHours = routeMatch ? Number(routeMatch[3]) : null;
 
   // 4. Determine domestic vs international
-  const hasIntlNote =
-    specialReqLower.includes('quốc tế') ||
-    specialReqLower.includes('international') ||
-    specialReqLower.includes('hàng không') ||
-    specialReqLower.includes('air flight') ||
-    String(data.transportationType || '').toLowerCase() === 'international' ||
-    String(data.transportType || '').toLowerCase() === 'international' ||
-    savedMode === 'air';
-
-  const hasDomesticNote =
-    specialReqLower.includes('nội địa') ||
-    specialReqLower.includes('domestic') ||
-    String(data.transportationType || '').toLowerCase() === 'domestic' ||
-    String(data.transportType || '').toLowerCase() === 'domestic';
-
+  const rawType = String(data.transportationType || data.transportType || '').toLowerCase();
   let isDomestic = false;
-  if (hasDomesticNote && !hasIntlNote) {
+  if (rawType === 'domestic' || rawType.includes('nội địa')) {
     isDomestic = true;
-  } else if (hasIntlNote) {
+  } else if (rawType === 'international' || rawType.includes('quốc tế')) {
+    isDomestic = false;
+  } else if (specialReqLower.includes('nội địa') || specialReqLower.includes('domestic')) {
+    isDomestic = true;
+  } else if (specialReqLower.includes('quốc tế') || specialReqLower.includes('international')) {
     isDomestic = false;
   } else {
-    // If geoDest or resolvedDest is foreign, it is international
     const isForeign =
-      (geoDest && geoDest.country !== 'Việt Nam') ||
+      (geoDest && geoDest.country !== 'Việt Nam' && geoDest.country !== 'Vietnam') ||
       (!geoDest && !resolvedDest.isVietnam);
     isDomestic = !isForeign;
   }
@@ -908,9 +897,7 @@ export default function RequestDetailPage() {
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Chi phí vận chuyển (Total Cost)</span>
                 <p style={{ fontSize: '14px', fontWeight: 700, color: '#16a34a', margin: '2px 0 0 0' }}>
                   {Number(request.totalCost) > 0
-                    ? Number(request.totalCost) < 100000
-                      ? `$${Number(request.totalCost).toLocaleString('en-US')} USD (~${Math.round(request.totalCost * 25400).toLocaleString('vi-VN')} VND)`
-                      : `${Number(request.totalCost).toLocaleString('vi-VN')} VND (~$${Math.round(request.totalCost / 25400).toLocaleString('en-US')} USD)`
+                    ? `${Number(request.totalCost).toLocaleString('vi-VN')} ₫ (~$${(Math.round((Number(request.totalCost) / 25400) * 100) / 100).toLocaleString('en-US')} USD)`
                     : 'Đang chờ báo giá'}
                 </p>
               </div>
