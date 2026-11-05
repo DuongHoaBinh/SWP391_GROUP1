@@ -46,7 +46,16 @@ export class OrdersService {
   }
 
   async getMyOrders(user: AuthenticatedUser): Promise<TransportOrder[]> {
-    return this.ordersStore.findShipmentsByCustomer(Number(user.id));
+    const orders = await this.ordersStore.findShipmentsByCustomer(Number(user.id));
+    return orders.map((order) => {
+      if (order.customerRequestCode) {
+        return {
+          ...order,
+          requestCode: order.customerRequestCode,
+        };
+      }
+      return order;
+    });
   }
 
   async getAllOrders(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
