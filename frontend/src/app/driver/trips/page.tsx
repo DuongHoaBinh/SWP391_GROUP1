@@ -131,9 +131,14 @@ export default function DriverTripsPage() {
           }
         }
 
-        // Only show orders that have plan or assignments or are in transit/planning
+        // Only show orders that have plan or assignments or are in transit/planning/completed
         const relevantTrips = enriched.filter(
-          (t) => t.planStatus !== 'draft' || t.assignedStaff?.length || t.shipmentStatus === 'in_transit' || t.shipmentStatus === 'planning'
+          (t) =>
+            t.planStatus !== 'draft' ||
+            Boolean(t.assignedStaff?.length) ||
+            t.shipmentStatus === 'in_transit' ||
+            t.shipmentStatus === 'planning' ||
+            t.shipmentStatus === 'completed'
         );
 
         setTrips(relevantTrips.length > 0 ? relevantTrips : enriched);
@@ -349,9 +354,19 @@ export default function DriverTripsPage() {
       ) : (
         <div className="flex flex-col gap-5">
           {filteredTrips.map((trip) => {
-            const isAwaitingConfirmation = !trip.isCurrentDriverConfirmed;
             const legs = trip.routeDetail?.legs || [];
             const stops = trip.routeDetail?.stops || [];
+            const isCompleted =
+              trip.shipmentStatus === 'completed' ||
+              trip.shipmentStatus === 'delivered' ||
+              trip.planStatus === 'completed' ||
+              (legs.length > 0 && legs.every((l) => l.status === 'completed'));
+            const isInTransit =
+              !isCompleted &&
+              (trip.shipmentStatus === 'in_transit' ||
+                trip.planStatus === 'in_transit' ||
+                (legs.length > 0 && legs.some((l) => l.status === 'in_progress' || l.status === 'in_transit')));
+            const isAwaitingConfirmation = !isCompleted && !isInTransit && !trip.isCurrentDriverConfirmed;
 
           return (
             <div
@@ -359,30 +374,38 @@ export default function DriverTripsPage() {
               className={`bg-white rounded-xl border p-6 flex flex-col gap-5 shadow-sm transition-all ${
                 isAwaitingConfirmation
                   ? 'border-amber-300 ring-2 ring-amber-100'
+                  : isCompleted
+                  ? 'border-emerald-200'
                   : 'border-slate-200'
               }`}
             >
               {/* Top Banner */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-extrabold text-blue-600 text-base">{trip.orderCode}</span>
                     <span className="text-xs text-slate-400">• Khách hàng: {trip.customerName}</span>
 
-                    {/* Confirmation Status Badges */}
-                    {trip.isCurrentDriverConfirmed ? (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                    {/* Single Status Badge: Chỉ hiển thị duy nhất 1 trạng thái */}
+                    {isCompleted ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-xs">
+                        <CheckCircle2 size={13} className="text-emerald-600" /> Đã hoàn thành (Completed)
+                      </span>
+                    ) : isInTransit ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1 shadow-xs">
+                        🚚 Đang di chuyển (In Transit)
+                      </span>
+                    ) : trip.planStatus === 'ready_to_depart' ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1 shadow-xs">
+                        🚀 Sẵn sàng xuất phát
+                      </span>
+                    ) : trip.isCurrentDriverConfirmed ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1 shadow-xs">
                         <CheckCircle2 size={13} className="text-emerald-600" /> Đã xác nhận nhận chuyến (Confirmed)
                       </span>
                     ) : (
                       <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 animate-pulse">
                         <AlertCircle size={13} className="text-amber-700" /> Cần xác nhận nhận chuyến
-                      </span>
-                    )}
-
-                    {trip.planStatus === 'ready_to_depart' && (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
-                        🚀 Sẵn sàng xuất phát
                       </span>
                     )}
                   </div>
@@ -417,16 +440,26 @@ export default function DriverTripsPage() {
                   )}
 
                   {/* Driver gets prominent Journey Update; Escort gets outline view button */}
-                  <Link href="/driver/status">
+                  <Link href={`/driver/status?shipmentId=${trip.id}`}>
                     <Button
                       variant={!isEscort ? 'primary' : 'outline'}
                       size="sm"
                       className={`text-xs ${
-                        !isEscort ? 'bg-blue-600 hover:bg-blue-700 text-white font-bold' : ''
+                        isCompleted
+                          ? 'bg-slate-700 hover:bg-slate-800 text-white font-bold'
+                          : !isEscort
+                          ? 'bg-blue-600 hover:bg-blue-700 text-white font-bold'
+                          : ''
                       }`}
                     >
-                      <Navigation size={13} className="mr-1 text-blue-500" />
-                      {!isEscort ? 'Cập nhật hành trình & đến trạm' : 'Xem lộ trình di chuyển'}
+                      {isCompleted ? (
+                        <CheckCircle2 size={13} className="mr-1 text-emerald-400" />
+                      ) : (
+                        <Navigation size={13} className="mr-1 text-blue-500" />
+                      )}
+                      {isCompleted
+                        ? (!isEscort ? 'Xem lại hành trình đã hoàn thành' : 'Xem lại lộ trình đã hoàn thành')
+                        : (!isEscort ? 'Cập nhật hành trình & đến trạm' : 'Xem lộ trình di chuyển')}
                     </Button>
                   </Link>
 
@@ -434,11 +467,16 @@ export default function DriverTripsPage() {
                   {isEscort && (
                     <Link href="/driver/health">
                       <Button
-                        variant="primary"
+                        variant={isCompleted ? 'outline' : 'primary'}
                         size="sm"
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm"
+                        className={
+                          isCompleted
+                            ? 'border-emerald-600 text-emerald-700 hover:bg-emerald-50 font-bold text-xs shadow-xs'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm'
+                        }
                       >
-                        <Stethoscope size={13} className="mr-1" /> Ghi nhật ký sức khỏe ngựa
+                        <Stethoscope size={13} className="mr-1" />
+                        {isCompleted ? 'Xem hồ sơ sức khỏe ngựa' : 'Ghi nhật ký sức khỏe ngựa'}
                       </Button>
                     </Link>
                   )}

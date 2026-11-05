@@ -1,0 +1,6 @@
+﻿version: "3"
+agent:
+  web_addr: 127.0.0.1:4043
+  console_ui: false
+  inspect_db_size: -1
+  update_check: false

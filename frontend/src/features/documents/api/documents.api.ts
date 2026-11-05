@@ -45,6 +45,8 @@ export interface ApiTransportDocument {
 export interface HorseComplianceItem {
   horseId: number;
   horseName: string;
+  microchipNo?: string | null;
+  passportNo?: string | null;
   documents: ApiTransportDocument[];
   missingRegulations: RegulationItem[];
   isCompliant: boolean;
@@ -183,6 +185,7 @@ export const documentsApi = {
       status: 'approved' | 'rejected' | 'expired';
       notes?: string;
       expiryDate?: string;
+      docNumber?: string;
     }
   ): Promise<ApiTransportDocument> => {
     return apiClient<ApiTransportDocument>(`/documents/${id}/review`, {

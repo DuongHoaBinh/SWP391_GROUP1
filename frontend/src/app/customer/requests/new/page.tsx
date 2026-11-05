@@ -217,7 +217,9 @@ function CreateTransportRequestForm() {
         (h) =>
           h.status === 'in_transit' ||
           h.availabilityStatus === 'In Transit' ||
-          h.status === 'delivered'
+          h.status === 'delivered' ||
+          h.availabilityStatus === 'Delivered' ||
+          (Boolean(h.status) && h.status !== 'active')
       );
       if (invalidSelected) {
         alert(`Ngựa "${invalidSelected.name}" đang vận chuyển hoặc đã bàn giao, không thể chọn.`);
@@ -299,9 +301,9 @@ function CreateTransportRequestForm() {
       } catch {}
 
       router.push(`/customer/requests/${newReq.id}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create request:', error);
-      alert('Failed to submit request. Please try again.');
+      alert(error?.message || 'Failed to submit request. Please try again.');
       setIsSubmitting(false);
     }
   };
@@ -754,7 +756,7 @@ function CreateTransportRequestForm() {
                                 </div>
                               ) : isDelivered ? (
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#ecfdf5', color: '#047857', fontSize: '11px', fontWeight: 700 }}>
-                                  <Check size={12} /> Đã bàn giao
+                                  <Check size={12} /> Đã hoàn tất vận chuyển (Không thể chọn lại)
                                 </div>
                               ) : (
                                 <div style={{ fontSize: '11px', fontWeight: 600, color: '#16a34a', marginTop: '2px' }}>

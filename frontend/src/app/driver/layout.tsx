@@ -130,6 +130,8 @@ export default function DriverLayout({
     window.location.reload();
   };
 
+  const isEscortRole = currentPersona === 'escort';
+
   const navItems: NavItem[] = [
     {
       label: 'Dashboard',
@@ -146,11 +148,15 @@ export default function DriverLayout({
       href: '/driver/status',
       icon: <Crosshair size={18} />,
     },
-    {
-      label: 'Horse Health',
-      href: '/driver/health',
-      icon: <Stethoscope size={18} />,
-    },
+    ...(isEscortRole
+      ? [
+          {
+            label: 'Horse Health',
+            href: '/driver/health',
+            icon: <Stethoscope size={18} />,
+          },
+        ]
+      : []),
     {
       label: 'Incident Reports',
       href: '/driver/incidents',

@@ -31,6 +31,48 @@ export class DocumentsService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  /**
+   * ĐIỀU KIỆN KÍCH HOẠT THANH TOÁN DUY NHẤT (Single Source of Truth):
+   * Mọi chứng từ bắt buộc của đơn hàng đã được Specialist duyệt thành công (Flow 2 hoàn tất / Dossier Complete).
+   */
+  async isFlow2CompletedForPayment(orderId: number): Promise<boolean> {
+    try {
+      const systemUser: AuthenticatedUser = {
+        id: '0',
+        email: 'system@equitransit.local',
+        role: UserRole.LOGISTICS_MANAGER,
+      };
+      const checklist = await this.getOrderComplianceChecklist(systemUser, orderId);
+      return Boolean(checklist.isFullyCompliant);
+    } catch {
+      return false;
+    }
+  }
+
+  private async checkAndNotifyManagerWhenFlow2Completed(horseId: number): Promise<void> {
+    try {
+      const shipmentIds = await this.documentsStore.findActiveShipmentIdsByHorseId(horseId);
+      for (const orderId of shipmentIds) {
+        const isComplete = await this.isFlow2CompletedForPayment(orderId);
+        if (!isComplete) continue;
+
+        const alreadyNotified = await this.documentsStore.hasDocumentsApprovedManagerNotifSent(orderId);
+        if (alreadyNotified) continue;
+
+        const code = `REQ-${String(orderId).padStart(3, '0')}`;
+        await this.notificationsService.notifyRole(
+          'Logistics Manager',
+          `Đơn ${code} đã đủ hồ sơ, có thể gửi yêu cầu thanh toán`,
+          `Toàn bộ chứng từ pháp lý và kiểm dịch (Flow 2) của đơn ${code} đã được Chuyên viên thẩm định phê duyệt 100% (Documents approved). Quý quản lý đã có thể gửi yêu cầu thanh toán QR cho khách hàng.`,
+          'status_update',
+          orderId,
+        );
+      }
+    } catch (err) {
+      console.warn('[DocumentsService] Warning notifying manager after Flow 2 completion:', err);
+    }
+  }
+
   // --- Regulations ---
   async getRegulations(countryFilter?: string): Promise<Regulation[]> {
     return this.documentsStore.findRegulations(countryFilter);
@@ -243,7 +285,6 @@ export class DocumentsService {
       totalApprovedDocs += approvedRegIds.size;
 
       // Danh sách quy định thực sự CHƯA TỪNG ĐƯỢC TẢI LÊN lần nào
-      // (Nếu tài liệu đã tải lên mà bị từ chối, nó sẽ nằm trong `docs` với trạng thái 'rejected' để khách hàng xem lý do và bấm 'Nộp lại', không bị nhân đôi dòng 'Tải lên ngay')
       const missingRegs = applicableRegulations.filter((reg) => !uploadedRegIds.has(reg.id));
 
       // Một con ngựa CHỈ ĐẠT CHUẨN (isCompliant) khi TẤT CẢ các quy định đều ĐÃ ĐƯỢC PHÊ DUYỆT (DocumentStatus.APPROVED)
@@ -254,6 +295,8 @@ export class DocumentsService {
       horseItems.push({
         horseId: h.horse_id,
         horseName: h.name,
+        microchipNo: h.microchip_no ?? null,
+        passportNo: h.passport_no ?? null,
         documents: docs,
         missingRegulations: missingRegs,
         isCompliant,
@@ -262,9 +305,7 @@ export class DocumentsService {
 
     const totalRequiredDocs = applicableRegulations.length * horsesInOrder.length;
     const compliantHorsesCount = horseItems.filter((item) => item.isCompliant).length;
-    
-    // Đơn hàng CHỈ ĐẠT CHUẨN 100% (isFullyCompliant) khi TẤT CẢ các con ngựa đều isCompliant
-    // và toàn bộ tài liệu bắt buộc đã được chuyên viên phê duyệt (approvedDocumentsCount === totalRequiredDocuments)
+
     const isFullyCompliant =
       horsesInOrder.length > 0 &&
       totalRequiredDocs > 0 &&
@@ -333,7 +374,6 @@ export class DocumentsService {
     const checklist = await this.getOrderComplianceChecklist(user, orderId);
     const destinationCountry = checklist.destinationCountry;
 
-    // Thu thập danh sách các chứng chỉ cần nộp
     const reqTitles = new Set<string>();
     for (const h of checklist.horses) {
       for (const m of h.missingRegulations) {
@@ -380,9 +420,9 @@ export class DocumentsService {
       dto.status,
       dto.notes,
       dto.expiryDate,
+      dto.docNumber,
     );
 
-    // Gửi thông báo đến người đã nộp tài liệu
     const statusText =
       dto.status === DocumentStatus.APPROVED
         ? 'đã được phê duyệt hợp lệ'
@@ -407,6 +447,10 @@ export class DocumentsService {
       'status_update',
     );
 
+    if (dto.status === DocumentStatus.APPROVED) {
+      await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
+    }
+
     const updated = await this.documentsStore.findDocumentById(documentId);
     return updated!;
   }
@@ -428,16 +472,17 @@ export class DocumentsService {
       dto,
     );
 
-    // Nếu cơ quan chức năng phê duyệt, có thể đồng thời chuyển trạng thái tài liệu sang approved
     if (dto.status === 'approved' && doc.status !== DocumentStatus.APPROVED) {
       await this.documentsStore.updateDocumentReview(
         documentId,
         DocumentStatus.APPROVED,
         `Phê duyệt bởi cơ quan: ${dto.authorityName}. ${dto.notes ?? ''}`.trim(),
+        undefined,
+        dto.referenceNumber,
       );
+      await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
     }
 
-    // Gửi thông báo cho khách hàng
     const docTitleMap: Record<string, string> = {
       health_certificate: 'Giấy chứng nhận kiểm dịch',
       horse_passport: 'Hộ chiếu ngựa FEI',
@@ -480,7 +525,6 @@ export class DocumentsService {
       };
     }
 
-    // Tổng hợp danh sách tài liệu thiếu hoặc bị từ chối theo từng con ngựa
     const missingItemsText = checklist.horses
       .map((h) => {
         const unsubmittedNames = h.missingRegulations.map((r) => r.documentType);

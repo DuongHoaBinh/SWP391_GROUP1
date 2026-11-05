@@ -64,8 +64,9 @@ function LoginFormContent() {
         const data = await response.json();
         authToken = data.accessToken;
         authUser = {
-          ...authUser,
+          ...mockCurrentUser,
           ...data.user,
+          name: data.user?.fullName || data.user?.name || data.user?.email?.split('@')[0] || email.split('@')[0],
         };
       } else if (response.status === 401 || response.status === 400) {
         const errData = await response.json().catch(() => null);

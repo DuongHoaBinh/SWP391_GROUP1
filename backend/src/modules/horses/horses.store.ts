@@ -37,6 +37,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
       password: process.env.DB_PASSWORD ?? '',
       connectionLimit: 10,
     });
+    await this.syncCompletedShipmentHorses();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -45,7 +46,23 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async syncCompletedShipmentHorses(): Promise<void> {
+    try {
+      await this.pool.execute(
+        `UPDATE horse h
+         JOIN shipment_horse sh ON sh.horse_id = h.horse_id
+         JOIN shipment s ON s.shipment_id = sh.shipment_id
+         SET h.status = 'delivered'
+         WHERE s.status = 'completed'
+           AND h.status NOT IN ('delivered', 'retired', 'deceased')`,
+      );
+    } catch {
+      // Ignore sync errors
+    }
+  }
+
   async findByOwnerId(ownerId: number): Promise<HorseEntity[]> {
+    await this.syncCompletedShipmentHorses();
     const [rows] = await this.pool.execute<HorseRow[]>(
       `SELECT horse_id, owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse
@@ -58,6 +75,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async findById(horseId: number): Promise<HorseEntity | undefined> {
+    await this.syncCompletedShipmentHorses();
     const [rows] = await this.pool.execute<HorseRow[]>(
       `SELECT horse_id, owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse

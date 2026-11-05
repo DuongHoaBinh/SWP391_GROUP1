@@ -30,15 +30,15 @@ export class CreateHorseDto {
   @IsOptional()
   dateOfBirth?: string;
 
-  @ApiPropertyOptional({ description: 'Số vi mạch microchip', example: '985141001248999' })
+  @ApiProperty({ description: 'Số vi mạch microchip', example: '985141001248999' })
   @IsString()
-  @IsOptional()
-  microchipNo?: string;
+  @IsNotEmpty({ message: 'Vui lòng nhập Microchip Number (Số vi mạch).' })
+  microchipNo!: string;
 
-  @ApiPropertyOptional({ description: 'Số hộ chiếu FEI', example: 'FEI-VN-2026-888' })
+  @ApiProperty({ description: 'Số hộ chiếu FEI', example: 'FEI-VN-2026-888' })
   @IsString()
-  @IsOptional()
-  passportNo?: string;
+  @IsNotEmpty({ message: 'Vui lòng nhập FEI Passport Number (Số hộ chiếu FEI).' })
+  passportNo!: string;
 
   @ApiPropertyOptional({ description: 'Trạng thái', enum: HorseStatus, example: HorseStatus.ACTIVE })
   @IsEnum(HorseStatus)

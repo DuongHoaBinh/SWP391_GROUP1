@@ -47,6 +47,7 @@ interface PlanningOrder {
   destination: string;
   departureDate?: string;
   status: string;
+  paymentState?: string;
   routeDetail?: RouteDetail;
 }
 
@@ -213,6 +214,16 @@ export default function RoutePlanningPage() {
 
       // 2. Orders from backend
       const rawOrders = await apiClient<any[]>('/orders');
+      let paymentOverviewList: any[] = [];
+      try {
+        paymentOverviewList = await apiClient<any[]>('/orders/payments/overview');
+      } catch {}
+      const paymentMap: Record<number, string> = {};
+      if (Array.isArray(paymentOverviewList)) {
+        for (const p of paymentOverviewList) {
+          paymentMap[Number(p.shipmentId)] = p.paymentState || 'WAITING_FLOW2';
+        }
+      }
       if (Array.isArray(rawOrders)) {
         const enriched: PlanningOrder[] = [];
         for (const o of rawOrders) {
@@ -255,6 +266,7 @@ export default function RoutePlanningPage() {
               ? new Date(o.requestedDate).toLocaleDateString('vi-VN')
               : 'Oct 20, 2026',
             status: o.status,
+            paymentState: o.paymentStatus === 'succeeded' ? 'PAID' : o.paymentStatus === 'pending' ? 'PENDING' : o.paymentStatus === 'review' ? 'NEEDS_REVIEW' : 'UNPAID',
             routeDetail,
           });
         }
@@ -1116,6 +1128,36 @@ export default function RoutePlanningPage() {
 
                     <div className="flex items-center gap-2.5 flex-wrap">
                       {renderPlanStatusBadge(isInTransit ? 'in_transit' : planStatus, activeIncident)}
+                      {order.paymentState === 'PAID' && (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          💳 Đã thanh toán
+                        </span>
+                      )}
+                      {order.paymentState === 'PENDING' && (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                          ⏳ Chờ thanh toán QR
+                        </span>
+                      )}
+                      {order.paymentState === 'AWAITING_CONFIRMATION' && (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          🕒 Chờ xác nhận CK
+                        </span>
+                      )}
+                      {order.paymentState === 'NEEDS_REVIEW' && (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-orange-50 text-orange-700 border border-orange-200">
+                          ⚠️ Cần kiểm tra TT
+                        </span>
+                      )}
+                      {order.paymentState === 'EXPIRED' && (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-50 text-red-700 border border-red-200">
+                          Hết hạn TT
+                        </span>
+                      )}
+                      {(order.paymentState === 'WAITING_FLOW2' || order.paymentState === 'DOCUMENTS_APPROVED') && (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                          Chưa gửi YC TT
+                        </span>
+                      )}
 
                       {/* Phân loại nút hành động: Khi đã duyệt/hoàn thành chỉ xem, chỉ mở lại khi gặp sự cố */}
                       {(() => {
