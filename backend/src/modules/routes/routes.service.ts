@@ -20,7 +20,6 @@ import {
   RouteEntity,
   RouteStatus,
   RouteStopEntity,
-  RouteStopType,
   TripPlanReadiness,
 } from './routes.types';
 import { CreateRouteDto } from './dto/create-route.dto';
@@ -32,7 +31,7 @@ import { BuildDetailedPlanDto } from './dto/build-detailed-plan.dto';
 import { ReviewPlanDto } from './dto/review-plan.dto';
 import { ConfirmAssignmentDto } from './dto/confirm-assignment.dto';
 import { ShipmentStatus } from '../orders/orders.types';
-import { MomoPaymentStore } from '../orders/momo-payment.store';
+import { SepayPaymentStore } from '../orders/sepay-payment.store';
 
 @Injectable()
 export class RoutesService {
@@ -42,7 +41,7 @@ export class RoutesService {
     private readonly fleetStore: FleetStore,
     private readonly documentsService: DocumentsService,
     private readonly notificationsService: NotificationsService,
-    private readonly momoPaymentStore: MomoPaymentStore,
+    private readonly sepayPaymentStore: SepayPaymentStore,
   ) {}
 
   // --- Master Data for Flow 3 ---
@@ -212,7 +211,6 @@ export class RoutesService {
     await this.routesStore.updatePlanStatus(route.id, PlanStatus.PENDING_APPROVAL);
 
     const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
-    // Gửi thông báo đến Logistics Manager
     const staffList = await this.fleetStore.findAvailableStaff();
     const managers = staffList.filter((s) => s.roleName.toLowerCase().includes('manager'));
     for (const m of managers) {
@@ -254,7 +252,6 @@ export class RoutesService {
         Number(user.id),
       );
 
-      // Thông báo cho Coordinator phụ trách
       if (route.assignedCoordinatorId) {
         await this.notificationsService.createNotification(
           route.assignedCoordinatorId,
@@ -276,7 +273,6 @@ export class RoutesService {
         Number(user.id),
       );
 
-      // Thông báo trả về cho Coordinator
       if (route.assignedCoordinatorId) {
         await this.notificationsService.createNotification(
           route.assignedCoordinatorId,
@@ -327,13 +323,11 @@ export class RoutesService {
     const route = await this.routesStore.findRouteByShipmentId(shipmentId);
     const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
 
-    // Kiểm tra xem tất cả tài xế/hộ tống đã xác nhận chưa
     const allConfirmed = await this.routesStore.checkAllDriversConfirmed(shipmentId);
     if (allConfirmed && route) {
       await this.routesStore.updatePlanStatus(route.id, PlanStatus.CONFIRMED);
       await this.ordersStore.updateStatus(shipmentId, 'confirmed' as any);
 
-      // Thông báo cho khách hàng lịch trình dự kiến đã chốt
       await this.notificationsService.createNotification(
         order.customerId,
         `Lịch trình vận chuyển đơn ${code} đã được xác nhận`,
@@ -342,7 +336,6 @@ export class RoutesService {
         shipmentId,
       );
 
-      // Tự động kiểm tra cổng Ready to depart
       await this.evaluateReadyToDepartGate(user, shipmentId);
     }
 
@@ -387,7 +380,6 @@ export class RoutesService {
 
     const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
 
-    // Bắn thông báo khẩn cấp đến các Logistics Manager
     const managers = await this.fleetStore.findAvailableStaff();
     const logisticsManagers = managers.filter((m) => m.roleName.toLowerCase().includes('manager'));
     for (const lm of logisticsManagers) {
@@ -431,21 +423,17 @@ export class RoutesService {
       route?.planStatus === PlanStatus.READY_TO_DEPART ||
       route?.planStatus === PlanStatus.IN_TRANSIT;
 
-    let isLegalCompliant = false;
-    try {
-      const checklist = await this.documentsService.getOrderComplianceChecklist(user, shipmentId);
-      isLegalCompliant = Boolean(checklist.isFullyCompliant);
-    } catch {
-      isLegalCompliant = false;
-    }
+    const isLegalCompliant = await this.documentsService.isFlow2CompletedForPayment(shipmentId);
 
-    // Điều kiện 3: Thanh toán cước vận chuyển (MoMo/Thẻ ngân hàng)
+    // Điều kiện 3: Thanh toán chuyển khoản QR (Payment PAID)
     let isPaymentSucceeded = false;
     const totalCost = Number(order.totalCost || 0);
-    if (totalCost > 0) {
-      isPaymentSucceeded = await this.momoPaymentStore.isPaymentSucceeded(shipmentId);
+    const amountVnd = totalCost > 0 && totalCost < 100000 ? Math.round(totalCost * 25400) : Math.round(totalCost);
+    const paymentRecord = await this.sepayPaymentStore.latest(shipmentId, null);
+
+    if (amountVnd > 0) {
+      isPaymentSucceeded = paymentRecord?.status === 'succeeded';
     } else {
-      // Nếu đơn hàng không có cước hoặc cước = 0 thì coi như đã thỏa mãn
       isPaymentSucceeded = true;
     }
 
@@ -467,9 +455,19 @@ export class RoutesService {
     }
 
     if (!isPaymentSucceeded) {
-      pendingConditions.push(
-        `Đang chờ khách hàng hoàn tất thanh toán cước vận chuyển qua MoMo / Thẻ (${totalCost.toLocaleString('vi-VN')} VND).`,
-      );
+      if (!paymentRecord) {
+        pendingConditions.push(
+          `Chưa có thông tin thanh toán chuyển khoản SePay cho đơn hàng (${amountVnd.toLocaleString('vi-VN')} VND).`,
+        );
+      } else if (paymentRecord.status === 'review') {
+        pendingConditions.push(
+          `Giao dịch thanh toán SePay (mã ${paymentRecord.payment_code}) đang cần đối soát — Vui lòng kiểm tra lại.`,
+        );
+      } else {
+        pendingConditions.push(
+          `Đang chờ khách hàng thanh toán chuyển khoản qua SePay (${Number(paymentRecord.amount).toLocaleString('vi-VN')} VND - Mã: ${paymentRecord.payment_code}).`,
+        );
+      }
     }
 
     const isReadyToDepart = isPlanConfirmed && isLegalCompliant && isPaymentSucceeded;
@@ -484,7 +482,6 @@ export class RoutesService {
       await this.routesStore.updatePlanStatus(route.id, PlanStatus.READY_TO_DEPART);
       await this.ordersStore.updateStatus(shipmentId, 'ready_to_depart' as any);
 
-      // Thông báo chính thức cho khách hàng và tài xế
       await this.notificationsService.createNotification(
         order.customerId,
         `Chuyến đi ${code} ĐÃ ĐỦ ĐIỀU KIỆN XUẤT PHÁT (Ready to depart)`,
@@ -663,7 +660,6 @@ export class RoutesService {
 
     const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
 
-    // Gửi thông báo khẩn tới tất cả Coordinator và Manager
     const staffList = await this.fleetStore.findAvailableStaff();
     const ops = staffList.filter(
       (s) =>
@@ -694,4 +690,3 @@ export class RoutesService {
     };
   }
 }
-

@@ -191,7 +191,7 @@ export default function TripMonitoringPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold text-slate-900 m-0">
-              {t('nav.monitoring', 'Giám sát Hành trình & Nhật ký Lộ trình (Flow 4)')}
+              {t('nav.monitoring', 'Giám sát Hành trình & Nhật ký Lộ trình')}
             </h1>
             <span className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full">
               Coordinator Control

@@ -70,6 +70,14 @@ export default function HorseDetailPage() {
               photoUrl: getFullPhotoUrl(data.photoUrl),
               avatarUrl: getFullPhotoUrl(data.photoUrl),
               status: data.status || 'active',
+              availabilityStatus:
+                data.status === 'in_transit'
+                  ? 'In Transit'
+                  : data.status === 'delivered'
+                  ? 'Delivered'
+                  : data.status === 'active'
+                  ? 'Available'
+                  : 'Not Cleared',
             });
           }
         })
@@ -173,25 +181,49 @@ export default function HorseDetailPage() {
 
         {/* Header Actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button
-            onClick={() => router.push(`/customer/requests/new?horseId=${horse.id}`)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '9px 16px',
-              borderRadius: '8px',
-              backgroundColor: 'var(--primary)',
-              color: '#ffffff',
-              fontSize: '13.5px',
-              fontWeight: 600,
-              border: 'none',
-              boxShadow: 'var(--shadow-sm)',
-              cursor: 'pointer',
-            }}
-          >
-            Ship This Horse
-          </button>
+          {(() => {
+            const isDelivered = horse.status === 'delivered' || horse.availabilityStatus === 'Delivered';
+            const isInTransit = horse.status === 'in_transit' || horse.availabilityStatus === 'In Transit';
+            const canShip = !isDelivered && !isInTransit && (horse.status === 'active' || horse.availabilityStatus === 'Available' || !horse.status);
+
+            return (
+              <button
+                disabled={!canShip}
+                onClick={() => {
+                  if (canShip) {
+                    router.push(`/customer/requests/new?horseId=${horse.id}`);
+                  }
+                }}
+                title={
+                  isDelivered
+                    ? 'Ngựa đã hoàn tất vận chuyển, không thể vận chuyển lại'
+                    : isInTransit
+                    ? 'Ngựa đang trong chuyến vận chuyển khác'
+                    : 'Tạo yêu cầu vận chuyển cho con ngựa này'
+                }
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '9px 16px',
+                  borderRadius: '8px',
+                  backgroundColor: canShip ? 'var(--primary)' : '#e2e8f0',
+                  color: canShip ? '#ffffff' : '#64748b',
+                  fontSize: '13.5px',
+                  fontWeight: 600,
+                  border: 'none',
+                  boxShadow: canShip ? 'var(--shadow-sm)' : 'none',
+                  cursor: canShip ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {isDelivered
+                  ? 'Đã hoàn tất vận chuyển'
+                  : isInTransit
+                  ? 'Đang vận chuyển (In Transit)'
+                  : 'Ship This Horse'}
+              </button>
+            );
+          })()}
           <button
             onClick={() => setIsEditModalOpen(true)}
             style={{

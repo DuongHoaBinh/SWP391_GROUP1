@@ -58,6 +58,8 @@ export interface TransportDocument {
 export interface HorseComplianceItem {
   horseId: number;
   horseName: string;
+  microchipNo?: string | null;
+  passportNo?: string | null;
   documents: TransportDocument[];
   missingRegulations: Regulation[];
   isCompliant: boolean;

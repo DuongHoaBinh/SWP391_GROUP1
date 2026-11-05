@@ -77,6 +77,14 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
       setError('Vui lòng nhập tên con ngựa.');
       return;
     }
+    if (!passportNumber.trim()) {
+      setError('Vui lòng nhập Số hộ chiếu FEI (Passport Number).');
+      return;
+    }
+    if (!microchipNumber.trim()) {
+      setError('Vui lòng nhập Số vi mạch (Microchip Number).');
+      return;
+    }
 
     setIsSubmitting(true);
     setError('');
@@ -111,7 +119,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               weight: weight.trim() || undefined,
               medicalStatus: medicalStatus || undefined,
               specialRequirements: specialRequirements.trim() || undefined,
-              status: 'active',
             }),
           });
         } catch (apiErr: any) {
@@ -454,10 +461,11 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
-              Số hộ chiếu FEI (Passport)
+              Số hộ chiếu FEI (Passport) <span style={{ color: '#dc2626' }}>*</span>
             </label>
             <input
               type="text"
+              required
               value={passportNumber}
               onChange={(e) => setPassportNumber(e.target.value)}
               placeholder="Ví dụ: FEI-VN-2026-888"
@@ -474,10 +482,11 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
 
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', marginBottom: '6px' }}>
-              Số vi mạch (Microchip)
+              Số vi mạch (Microchip) <span style={{ color: '#dc2626' }}>*</span>
             </label>
             <input
               type="text"
+              required
               value={microchipNumber}
               onChange={(e) => setMicrochipNumber(e.target.value)}
               placeholder="Ví dụ: 985141001248999"
@@ -492,8 +501,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
             />
           </div>
         </div>
-
-
 
         {/* Row 5: Special requirements */}
         <div>

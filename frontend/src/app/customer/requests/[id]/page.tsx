@@ -11,6 +11,7 @@ import {
   ThumbsUp,
   CalendarCheck,
   Plane,
+  Truck,
   Flag,
   MoreVertical,
   ArrowRight,
@@ -39,7 +40,7 @@ import { OrderComplianceChecklist } from '@/features/documents/api/documents.api
 import { buildEquineRoute, geocodeAddress, resolveLocation, GeocodedLocation } from '@/lib/geo-corridors';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
-import { DemoMomoPayment } from '@/features/orders/components/DemoMomoPayment';
+import { SepayPayment } from '@/features/orders/components/SepayPayment';
 
 const fetcher = async (url: string) => {
   const data = await apiClient<any>(url);
@@ -177,34 +178,32 @@ const fetcher = async (url: string) => {
   const savedHours = routeMatch ? Number(routeMatch[3]) : null;
 
   // 4. Determine domestic vs international
-  // Priority 1: use the explicit transportation_type field stored in DB
-  const explicitType = String(data.transportationType || data.transportation_type || '').toLowerCase();
+  const hasIntlNote =
+    specialReqLower.includes('quốc tế') ||
+    specialReqLower.includes('international') ||
+    specialReqLower.includes('hàng không') ||
+    specialReqLower.includes('air flight') ||
+    String(data.transportationType || '').toLowerCase() === 'international' ||
+    String(data.transportType || '').toLowerCase() === 'international' ||
+    savedMode === 'air';
+
+  const hasDomesticNote =
+    specialReqLower.includes('nội địa') ||
+    specialReqLower.includes('domestic') ||
+    String(data.transportationType || '').toLowerCase() === 'domestic' ||
+    String(data.transportType || '').toLowerCase() === 'domestic';
 
   let isDomestic = false;
-  if (explicitType === 'domestic') {
+  if (hasDomesticNote && !hasIntlNote) {
     isDomestic = true;
-  } else if (explicitType === 'international') {
+  } else if (hasIntlNote) {
     isDomestic = false;
   } else {
-    // Fallback: parse from specialRequirements text (for older records without explicit field)
-    const hasDomesticNote =
-      specialReqLower.includes('nội địa') ||
-      (specialReqLower.includes('domestic') && !specialReqLower.includes('international'));
-    const hasIntlNote =
-      specialReqLower.includes('quốc tế') ||
-      specialReqLower.includes('international') ||
-      savedMode === 'air';
-    if (hasDomesticNote && !hasIntlNote) {
-      isDomestic = true;
-    } else if (hasIntlNote) {
-      isDomestic = false;
-    } else {
-      // Last resort: geocode destination
-      const isForeign =
-        (geoDest && geoDest.country !== 'Việt Nam') ||
-        (!geoDest && !resolvedDest.isVietnam);
-      isDomestic = !isForeign;
-    }
+    // If geoDest or resolvedDest is foreign, it is international
+    const isForeign =
+      (geoDest && geoDest.country !== 'Việt Nam') ||
+      (!geoDest && !resolvedDest.isVietnam);
+    isDomestic = !isForeign;
   }
 
   const transportationType = isDomestic ? 'Domestic' : 'International';
@@ -918,14 +917,19 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          {/* 2.1 MOMO PAYMENT */}
-          {Number(request.totalCost) > 0 && ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(String(request.status).toLowerCase()) && (
-            <DemoMomoPayment
-              shipmentId={Number(request.id || request.shipmentId || requestId)}
-              requestCode={request.requestCode}
-              amount={Math.round(Number(request.totalCost))}
-            />
-          )}
+          {/* 2.1 SEPAY VIETQR PAYMENT - Chỉ hiển thị sau khi Flow 2 hoàn tất VÀ Manager đã gửi yêu cầu thanh toán */}
+          {Boolean(checklist?.isFullyCompliant) &&
+            Number(request.totalCost) > 0 &&
+            ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(
+              String(request.status).toLowerCase()
+            ) && (
+              <SepayPayment
+                shipmentId={Number(request.id || request.shipmentId || requestId)}
+                requestCode={request.requestCode}
+                amount={Number(request.totalCost)}
+                eligible={true}
+              />
+            )}
 
           {/* 3. TRANSPORT ROUTE */}
           <div
@@ -1839,21 +1843,49 @@ export default function RequestDetailPage() {
                 }}
               />
               <div style={{ display: 'flex', gap: '12px' }}>
-                {checklist?.isFullyCompliant ? (
-                  <CheckCircle2 size={20} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                {String(request?.status || '').toLowerCase() === 'completed' || String(request?.status || '').toLowerCase() === 'delivered' ? (
+                  <>
+                    <CheckCircle2 size={22} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div>
+                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#166534', margin: 0 }}>
+                        Vận chuyển hoàn thành thành công 100%
+                      </h4>
+                      <p style={{ fontSize: '12.5px', color: '#15803d', margin: '6px 0 0 0', lineHeight: 1.4 }}>
+                        Ngựa đã cập bến an toàn tại điểm đích và hoàn tất toàn bộ quy trình bàn giao cho người nhận. Cảm ơn quý khách đã tin tưởng và sử dụng dịch vụ của EquiTransit Logistics!
+                      </p>
+                    </div>
+                  </>
+                ) : String(request?.status || '').toLowerCase() === 'in_transit' ? (
+                  <>
+                    <Truck size={20} color="#0284c7" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div>
+                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0369a1', margin: 0 }}>
+                        Đoàn xe / Chuyến bay đang di chuyển (In Transit)
+                      </h4>
+                      <p style={{ fontSize: '12.5px', color: '#0284c7', margin: '6px 0 0 0', lineHeight: 1.4 }}>
+                        Chuyến đi đang di chuyển theo đúng lộ trình kế hoạch. Quý khách có thể bấm nút <strong>"Live Tracking"</strong> ở góc trên bên phải để theo dõi trực tiếp vị trí và sinh hiệu ngựa.
+                      </p>
+                    </div>
+                  </>
                 ) : (
-                  <Clock size={20} color="#2563eb" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <>
+                    {checklist?.isFullyCompliant ? (
+                      <CheckCircle2 size={20} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    ) : (
+                      <Clock size={20} color="#2563eb" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    )}
+                    <div>
+                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: checklist?.isFullyCompliant ? '#166534' : '#1e40af', margin: 0 }}>
+                        {checklist?.isFullyCompliant ? 'Hồ sơ đã được phê duyệt 100%' : 'Đã nộp đủ hồ sơ (Chờ duyệt)'}
+                      </h4>
+                      <p style={{ fontSize: '12.5px', color: checklist?.isFullyCompliant ? '#15803d' : '#1e3a8a', margin: '6px 0 0 0', lineHeight: 1.4 }}>
+                        {checklist?.isFullyCompliant
+                          ? 'Tất cả các tài liệu kiểm dịch và pháp lý đã được duyệt hợp lệ. Chuyến đi đã đủ điều kiện xuất phát.'
+                          : `Quý khách đã nộp đầy đủ các chứng từ theo yêu cầu (${checklist?.approvedDocumentsCount || 0}/${checklist?.totalRequiredDocuments || 0} đã duyệt). Chuyên viên kiểm dịch đang trong quá trình thẩm định hồ sơ.`}
+                      </p>
+                    </div>
+                  </>
                 )}
-                <div>
-                  <h4 style={{ fontSize: '15px', fontWeight: 700, color: checklist?.isFullyCompliant ? '#166534' : '#1e40af', margin: 0 }}>
-                    {checklist?.isFullyCompliant ? 'Hồ sơ đã được phê duyệt 100%' : 'Đã nộp đủ hồ sơ (Chờ duyệt)'}
-                  </h4>
-                  <p style={{ fontSize: '12.5px', color: checklist?.isFullyCompliant ? '#15803d' : '#1e3a8a', margin: '6px 0 0 0', lineHeight: 1.4 }}>
-                    {checklist?.isFullyCompliant
-                      ? 'Tất cả các tài liệu kiểm dịch và pháp lý đã được duyệt hợp lệ. Chuyến đi đã đủ điều kiện xuất phát.'
-                      : `Quý khách đã nộp đầy đủ các chứng từ theo yêu cầu (${checklist?.approvedDocumentsCount || 0}/${checklist?.totalRequiredDocuments || 0} đã duyệt). Chuyên viên kiểm dịch đang trong quá trình thẩm định hồ sơ.`}
-                  </p>
-                </div>
               </div>
             </div>
           )}
