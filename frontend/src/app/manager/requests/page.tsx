@@ -495,7 +495,10 @@ export default function ManagerRequestsPage() {
     try {
       await apiClient(`/orders/${approveOrder.id}/approve`, {
         method: 'PATCH',
-        body: JSON.stringify({ totalCost: Number(totalCostInput) || 0 }),
+        body: JSON.stringify({
+          totalCost: Number(totalCostInput) || 0,
+          transportMode: selectedTransportMode,
+        }),
       });
       setApproveOrder(null);
       setTotalCostInput('');

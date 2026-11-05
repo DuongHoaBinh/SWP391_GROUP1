@@ -105,7 +105,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
         corridor: `${c.origin_location} → ${c.destination_location}`,
         trips,
         revenue: rev,
-        revenueFormatted: rev > 0 ? `$${rev.toLocaleString('en-US')}` : '$3,000',
+        revenueFormatted: rev > 0 ? `${rev.toLocaleString('vi-VN')} ₫` : '0 ₫',
         percentage: Math.min(100, Math.round((trips / maxTrips) * 100)),
         completedTrips: Number(c.completed_count || 0),
       };
@@ -144,8 +144,8 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
         status: st,
         statusLabel: meta.label,
         totalCost: cost,
-        totalCostFormatted: cost > 0 ? `$${cost.toLocaleString('en-US')}` : '$3,000',
-        currency: 'USD',
+        totalCostFormatted: cost > 0 ? `${cost.toLocaleString('vi-VN')} ₫` : '0 ₫',
+        currency: 'VND',
         horseCount: Math.max(1, Number(r.horse_count || 1)),
         createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
       };
@@ -154,7 +154,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     return {
       metrics: {
         grossRevenue,
-        grossRevenueFormatted: `$${grossRevenue.toLocaleString('en-US')}`,
+        grossRevenueFormatted: `${grossRevenue.toLocaleString('vi-VN')} ₫`,
         onTimeDeliveryRate: 98.6,
         completedTrips: completedTrips > 0 ? completedTrips : 2,
         totalHorsesTransported: totalHorses,
