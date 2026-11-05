@@ -114,6 +114,16 @@ function formatDate(iso: string | null) {
   });
 }
 
+function toLocalDateString(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function formatCurrency(n: number) {
   if (!n || n === 0) return '—';
   return n.toLocaleString('vi-VN') + ' ₫';
@@ -308,10 +318,16 @@ export default function RequestsPage() {
           list = list.filter((o) => o.status === filterStatus);
         }
         if (departureDateFrom) {
-          list = list.filter((o) => o.departureDate && o.departureDate >= departureDateFrom);
+          list = list.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr >= departureDateFrom;
+          });
         }
         if (departureDateTo) {
-          list = list.filter((o) => o.departureDate && o.departureDate <= departureDateTo);
+          list = list.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr <= departureDateTo;
+          });
         }
         if (sortBy === 'totalCost') {
           list.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
@@ -371,6 +387,18 @@ export default function RequestsPage() {
         let filtered = mappedOrders;
         if (filterStatus !== 'all') {
           filtered = filtered.filter((o) => o.status === filterStatus);
+        }
+        if (departureDateFrom) {
+          filtered = filtered.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr >= departureDateFrom;
+          });
+        }
+        if (departureDateTo) {
+          filtered = filtered.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr <= departureDateTo;
+          });
         }
         if (sortBy === 'totalCost') {
           filtered.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
