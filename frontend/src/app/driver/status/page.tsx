@@ -51,10 +51,28 @@ export default function DriverStatusPage() {
       const list = await trackingApi.getMyTrips();
       setTrips(list);
 
+      // Check URL query parameter first: ?shipmentId=...
+      let targetId: number | null = null;
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const qId = params.get('shipmentId');
+        if (qId && !isNaN(Number(qId))) {
+          targetId = Number(qId);
+        }
+      }
+
       if (list.length > 0) {
-        // Default to first active trip or first trip in list
-        const active = list.find((t) => t.shipment_status === 'in_transit') || list[0];
-        setSelectedShipmentId((prev) => prev ?? active.shipment_id);
+        if (targetId && list.some((t) => t.shipment_id === targetId)) {
+          setSelectedShipmentId(targetId);
+        } else {
+          // Prioritize active trips: in_transit -> ready_to_depart -> confirmed -> first in list
+          const active =
+            list.find((t) => t.shipment_status === 'in_transit') ||
+            list.find((t) => t.shipment_status === 'ready_to_depart') ||
+            list.find((t) => t.shipment_status === 'confirmed') ||
+            list[0];
+          setSelectedShipmentId((prev) => (prev && list.some((t) => t.shipment_id === prev) ? prev : active.shipment_id));
+        }
       }
     } catch (err: any) {
       console.warn('Failed to load assigned trips:', err);
@@ -179,6 +197,24 @@ export default function DriverStatusPage() {
     firstLegMilestone &&
     firstLegMilestone.status !== 'COMPLETED';
 
+  // Phương án 2: Phân quyền mốc giữa Tài xế và Y tế
+  const canUserCheckinMilestone = (m: TrackingMilestoneItem) => {
+    // Escort / Bác sĩ thú y bay cùng ngựa được cập nhật mọi mốc
+    if (isEscort) return true;
+
+    // Nếu chuyến đi có chặng bay (quốc tế đa phương thức)
+    const hasFlight = milestones.some((item) => item.legType === 'flight');
+    if (hasFlight) {
+      // Tài xế xe đường bộ ở VN chỉ cập nhật mốc 1 (xuất phát trang trại) và mốc 2 (xe tới sân bay VN)
+      // Mốc 3, 4, 5, 6 là chặng bay và các mốc tại nước ngoài -> Chỉ Escort / Coordinator cập nhật
+      if (m.seq > 2 || m.legType === 'flight' || m.responsibleRole === 'escort') {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
   return (
     <div className="flex flex-col gap-6 pb-12">
       {/* Role Banner */}
@@ -197,8 +233,8 @@ export default function DriverStatusPage() {
             </span>
             <p className="m-0 mt-0.5 opacity-90 text-xs">
               {!isEscort
-                ? 'Bạn trực tiếp điều khiển xe vận tải và xác nhận các trạm dừng, mốc kiểm tra thực địa của chặng đường bộ.'
-                : 'Bạn phụ trách quan sát sức khỏe ngựa, xác nhận các mốc tại sân bay / chặng bay và phối hợp cùng tài xế.'}
+                ? 'Bạn phụ trách lái xe chuyên dụng chở ngựa từ trang trại đến sân bay trong nước. Các mốc cất cánh, bay và kiểm dịch quốc tế do Nhân viên y tế/áp tải phụ trách.'
+                : 'Bạn phụ trách bay cùng ngựa, quan sát sức khỏe, xác nhận các mốc tại sân bay quốc tế và các trạm kiểm dịch nước ngoài.'}
             </p>
           </div>
         </div>
@@ -208,7 +244,7 @@ export default function DriverStatusPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 m-0">
-            {t('driver.checkInTitle', 'Cập nhật Mốc Trạng thái Lộ trình (Flow 4)')}
+            {t('driver.checkInTitle', 'Cập nhật Mốc Trạng thái Lộ trình')}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             Chuyến: <strong className="text-blue-600">#{currentTrip?.request_code || 'Chưa chọn'}</strong> • Tuyến: {currentTrip?.origin_location} → {currentTrip?.destination_location}
@@ -276,8 +312,13 @@ export default function DriverStatusPage() {
               trackingDetails.shipmentStatus === 'in_transit' ? 'bg-blue-100 text-blue-800' :
               trackingDetails.shipmentStatus === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
             }`}>
-              {trackingDetails.shipmentStatus === 'in_transit' ? 'Đang trên đường (In transit)' :
-               trackingDetails.shipmentStatus === 'ready_to_depart' ? 'Sẵn sàng xuất phát' : trackingDetails.shipmentStatus}
+              {trackingDetails.shipmentStatus === 'in_transit'
+                ? 'Đang trên đường (In transit)'
+                : trackingDetails.shipmentStatus === 'completed'
+                ? 'Đã hoàn thành (Completed)'
+                : trackingDetails.shipmentStatus === 'ready_to_depart'
+                ? 'Sẵn sàng xuất phát'
+                : trackingDetails.shipmentStatus}
             </span>
           </div>
 
@@ -344,7 +385,7 @@ export default function DriverStatusPage() {
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-base font-bold text-slate-900 m-0 flex items-center gap-2">
-            <Crosshair size={20} className="text-blue-600" /> Tiến độ Mốc Hành Trình Thực Tế (Tái sử dụng Flow 3)
+            <Crosshair size={20} className="text-blue-600" /> Tiến độ Mốc Hành Trình Thực Tế
           </h3>
           <span className="text-xs font-bold text-slate-500">
             {milestones.filter((m) => m.status === 'COMPLETED').length} / {milestones.length} Mốc hoàn thành
@@ -353,7 +394,7 @@ export default function DriverStatusPage() {
 
         <div className="relative border-l-2 border-slate-200 ml-4 pl-6 flex flex-col gap-8">
           {milestones.length === 0 ? (
-            <p className="text-sm text-slate-500 py-4">Chưa có chặng và trạm dừng nào được tạo ở Flow 3 cho đơn này.</p>
+            <p className="text-sm text-slate-500 py-4">Chưa có chặng và trạm dừng nào được thiết lập cho đơn này.</p>
           ) : (
             milestones.map((m) => {
               const isCurrent = m.status === 'CURRENT';
@@ -431,26 +472,30 @@ export default function DriverStatusPage() {
                     </div>
 
                     {/* Action Button for Current Milestone */}
-                    {isCurrent && m.allowedActions.length > 0 && (
-                      <Button
-                        variant="primary"
-                        onClick={() => handleOpenCheckin(m)}
-                        className={`font-bold text-xs shrink-0 shadow-sm transition-all ${
-                          m.itemType === 'leg_start' && m.seq === 1
-                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2'
-                            : 'bg-blue-600 hover:bg-blue-700 text-white'
-                        }`}
-                      >
-                        {m.itemType === 'leg_start' && m.seq === 1 ? (
-                          <>
-                            <Play size={14} fill="currentColor" className="mr-1.5" /> Bắt đầu chuyến đi (Xuất phát)
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 size={15} className="mr-1.5" /> Báo cáo mốc này
-                          </>
-                        )}
-                      </Button>
+                    {isCurrent && (
+                      canUserCheckinMilestone(m) ? (
+                        m.allowedActions.length > 0 && (
+                          <Button
+                            variant="primary"
+                            onClick={() => handleOpenCheckin(m)}
+                            className={`font-bold text-xs shrink-0 shadow-sm transition-all ${
+                              m.itemType === 'leg_start' && m.seq === 1
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white'
+                            }`}
+                          >
+                            {m.itemType === 'leg_start' && m.seq === 1 ? (
+                              <>
+                                <Play size={14} fill="currentColor" className="mr-1.5" /> Bắt đầu chuyến đi (Xuất phát)
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 size={15} className="mr-1.5" /> Báo cáo mốc này
+                              </>
+                            )}
+                          </Button>
+                        )
+                      ) : null
                     )}
                   </div>
                 </div>

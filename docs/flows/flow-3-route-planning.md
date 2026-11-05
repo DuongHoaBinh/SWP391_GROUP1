@@ -68,11 +68,12 @@
 - Khách hàng nhận được thông báo lộ trình dự kiến chính thức của chuyến đi.
 
 ### Bước 4. Cổng hội tụ kiểm soát xuất phát (Ready to depart)
-- Chuyến đi tự động chuyển sang trạng thái **`Ready to depart`** khi và chỉ khi **CẢ HAI** điều kiện song song được thỏa mãn:
-  1. Kế hoạch lộ trình & phương tiện ở trạng thái **`Confirmed`** (Flow 3 xong).
+- Chuyến đi tự động chuyển sang trạng thái **`Ready to depart`** khi và chỉ khi **CẢ BA** điều kiện được thỏa mãn:
+  1. Kế hoạch lộ trình & phương tiện ở trạng thái **`Confirmed`** (Flow 3 xong - đã phân công và tài xế xác nhận).
   2. Toàn bộ hồ sơ kiểm dịch, hải quan của đàn ngựa đã được Chuyên viên & Cơ quan chức năng phê duyệt đạt chuẩn 100% (`isFullyCompliant === true`, Flow 2 xong).
-- Nếu thiếu một trong hai điều kiện:
-  - Hệ thống **chặn xuất phát** và hiển thị rõ lý do đang chờ: *"Đang chờ phê duyệt đủ hồ sơ kiểm dịch"* hoặc *"Đang chờ xác nhận từ đội ngũ tài xế"*.
+  3. Cước phí vận chuyển đã được khách hàng thanh toán thành công qua MoMo/Thẻ ngân hàng (`isPaymentSucceeded === true`).
+- Nếu thiếu một trong ba điều kiện:
+  - Hệ thống **chặn xuất phát** và hiển thị rõ lý do đang chờ: *"Đang chờ phê duyệt đủ hồ sơ kiểm dịch"*, *"Đang chờ xác nhận từ đội ngũ tài xế"* hoặc *"Đang chờ khách hàng hoàn tất thanh toán cước vận chuyển"*.
 - **Đầu ra:** Khi đạt `Ready to depart`, chuyến đi sẵn sàng cho Flow 4 (Tài xế bấm bắt đầu xuất phát và cập nhật nhật ký hành trình).
 
 ---

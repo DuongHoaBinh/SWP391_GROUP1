@@ -95,9 +95,17 @@ export default function HorseHealthPage() {
   }, [selectedShipmentId, loadDetails]);
 
   const handleOpenAdd = () => {
+    if (!isEscort) {
+      toast.error('Chức năng này chỉ dành riêng cho Bác sĩ Thú y / Nhân viên Hộ tống (Escort/Vet). Tài xế không có quyền ghi chép.');
+      return;
+    }
     const horses = trackingDetails?.assignedHorses || [];
     const firstHorse = horses[0];
     const currentMilestone = trackingDetails?.milestones.find((m) => m.status === 'CURRENT');
+    if (!currentMilestone && (currentTrip?.shipment_status === 'completed' || trackingDetails?.shipmentStatus === 'completed')) {
+      toast.error('Chuyến đi đã hoàn tất, không thể ghi thêm nhật ký sức khỏe!');
+      return;
+    }
     const defaultLegName = currentMilestone
       ? `#${currentMilestone.seq} - ${currentMilestone.title}`
       : trackingDetails?.milestones && trackingDetails.milestones.length > 0
@@ -119,6 +127,10 @@ export default function HorseHealthPage() {
 
   const handleCreateLog = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isEscort) {
+      toast.error('Chức năng này chỉ dành riêng cho Bác sĩ Thú y / Nhân viên Hộ tống (Escort/Vet).');
+      return;
+    }
     if (!selectedShipmentId) return;
 
     setIsSubmitting(true);
@@ -160,7 +172,7 @@ export default function HorseHealthPage() {
 
   const handleReportIncident = (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success('Báo cáo sự cố khẩn cấp đã được gửi tới Logistics Manager (Flow 5). Đang duy trì ổn định cho ngựa!');
+    toast.success('Báo cáo sự cố khẩn cấp đã được gửi tới Logistics Manager. Đang duy trì ổn định cho ngựa!');
     setIsIncidentOpen(false);
     setIncidentNotes('');
   };
@@ -181,16 +193,20 @@ export default function HorseHealthPage() {
     <div className="flex flex-col gap-6 pb-12">
       {/* Role Banner */}
       <div className={`p-4 rounded-xl border flex items-center justify-between text-xs transition-all ${
-        isEscort ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-blue-50 border-blue-200 text-blue-900'
+        isEscort ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'
       }`}>
         <div className="flex items-center gap-2.5">
-          <Stethoscope size={20} className={isEscort ? 'text-emerald-600' : 'text-blue-600'} />
+          <Stethoscope size={20} className={isEscort ? 'text-emerald-600' : 'text-amber-600'} />
           <div>
             <span className="font-bold block text-sm">
-              🩺 Chuyên môn Theo dõi Thú y: Bác Sĩ Thú Y / Hộ Tống (Escort/Vet)
+              {isEscort
+                ? '🩺 Chuyên môn Theo dõi Thú y: Bác Sĩ Thú Y / Hộ Tống (Escort/Vet)'
+                : '🛡️ Quyền Hạn: Tài khoản Tài xế Lái xe (Chế độ xem nhật ký - Chỉ đọc)'}
             </span>
             <p className="m-0 mt-0.5 opacity-90 text-xs">
-              Theo quy chuẩn quốc tế, bạn có trách nhiệm theo dõi thân nhiệt, nhịp tim và biểu hiện hành vi của đàn ngựa trong suốt chuyến đi.
+              {isEscort
+                ? 'Theo quy chuẩn quốc tế, bạn có trách nhiệm theo dõi thân nhiệt, nhịp tim và biểu hiện hành vi của đàn ngựa trong suốt chuyến đi.'
+                : 'Quyền ghi chép và cập nhật sinh hiệu thú y chỉ dành riêng cho Bác Sĩ Thú Y / Nhân Viên Hộ Tống (Escort/Vet). Tài xế chỉ xem thông tin để phối hợp vận hành xe.'}
             </p>
           </div>
         </div>
@@ -200,7 +216,7 @@ export default function HorseHealthPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 m-0">
-            {t('driver.healthTitle', 'Nhật ký Sức khỏe & Sinh hiệu Ngựa Đua (Flow 4)')}
+            {t('driver.healthTitle', 'Nhật ký Sức khỏe & Sinh hiệu Ngựa Đua')}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             Chuyến: <strong className="text-blue-600">#{currentTrip?.request_code}</strong> • Đàn ngựa: {assignedHorses.map((h) => h.name).join(', ') || 'Chưa gán ngựa'}
@@ -215,14 +231,27 @@ export default function HorseHealthPage() {
           >
             {trips.map((s) => (
               <option key={s.shipment_id} value={s.shipment_id}>
-                #{s.request_code} ({s.shipment_status.toUpperCase()})
+                #{s.request_code} (
+                {s.shipment_status === 'completed'
+                  ? 'ĐÃ HOÀN THÀNH'
+                  : s.shipment_status === 'in_transit'
+                  ? 'ĐANG DI CHUYỂN'
+                  : s.shipment_status.toUpperCase()}
+                )
               </option>
             ))}
           </select>
 
-          <Button variant="primary" onClick={handleOpenAdd} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
-            <Plus size={18} className="mr-1.5" /> Ghi Nhật Ký Mới
-          </Button>
+          {isEscort && (
+            <Button
+              variant="primary"
+              onClick={handleOpenAdd}
+              disabled={currentTrip?.shipment_status === 'completed' || trackingDetails?.shipmentStatus === 'completed'}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus size={18} className="mr-1.5" /> Ghi Nhật Ký Mới
+            </Button>
+          )}
 
           <Button
             variant="outline"
@@ -254,7 +283,7 @@ export default function HorseHealthPage() {
             }}
             className="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs shrink-0 flex items-center gap-1.5"
           >
-            <AlertTriangle size={14} /> Kích hoạt Báo sự cố (Flow 5)
+            <AlertTriangle size={14} /> Kích hoạt Báo sự cố khẩn cấp
           </button>
         </div>
       )}
@@ -390,11 +419,11 @@ export default function HorseHealthPage() {
       </div>
 
       {/* Record Observation Modal */}
-      {isAddOpen && (
+      {isEscort && isAddOpen && (
         <Modal
           isOpen={isAddOpen}
           onClose={() => setIsAddOpen(false)}
-          title="Ghi nhật ký tình trạng sức khỏe ngựa (Flow 4)"
+          title="Ghi nhật ký tình trạng sức khỏe ngựa"
           maxWidth="540px"
         >
           <form onSubmit={handleCreateLog} className="flex flex-col gap-4 text-xs">
@@ -429,26 +458,14 @@ export default function HorseHealthPage() {
                 <MapPin size={13} className="text-emerald-600" />
                 <span>Chặng vận chuyển / Điểm kiểm tra thực địa *</span>
               </label>
-              <select
-                value={formData.legName}
-                onChange={(e) => setFormData({ ...formData, legName: e.target.value })}
-                className="w-full p-2.5 border border-slate-300 rounded-lg outline-none font-bold text-xs bg-white focus:border-emerald-500"
-                required
-              >
-                {trackingDetails?.milestones && trackingDetails.milestones.length > 0 ? (
-                  trackingDetails.milestones.map((m) => (
-                    <option key={m.id} value={`#${m.seq} - ${m.title}`}>
-                      #{m.seq}: {m.title} {m.status === 'CURRENT' ? '⭐ (Mốc hiện tại)' : m.status === 'COMPLETED' ? '✓ (Đã qua)' : ''}
-                    </option>
-                  ))
-                ) : (
-                  <option value="Chặng 1: Xuất phát thực địa">
-                    Chặng 1: Xuất phát thực địa
-                  </option>
-                )}
-              </select>
+              <div className="w-full p-2.5 border border-slate-200 rounded-lg font-bold text-xs bg-slate-100 text-slate-800 flex items-center justify-between">
+                <span className="truncate">{formData.legName}</span>
+                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-semibold shrink-0 ml-2">
+                  Mốc hiện tại
+                </span>
+              </div>
               <p className="text-[10px] text-slate-500 mt-1 m-0">
-                Được liên kết với các chặng di chuyển và trạm dừng để theo dõi diễn biến sức khỏe ngựa qua từng mốc.
+                Hệ thống chỉ cho phép ghi nhận sinh hiệu tại mốc/trạm đang thực hiện hiện tại, không ghi bù cho các chặng đã qua.
               </p>
             </div>
 

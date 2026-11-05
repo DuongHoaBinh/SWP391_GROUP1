@@ -29,4 +29,12 @@ export class ReviewDocumentDto {
   @IsOptional()
   @IsString()
   expiryDate?: string;
+
+  @ApiPropertyOptional({
+    example: 'HQ-SG-2026-9812',
+    description: 'Số công văn / Mã phê duyệt Hải quan cập nhật vào số hiệu văn bản',
+  })
+  @IsOptional()
+  @IsString()
+  docNumber?: string;
 }

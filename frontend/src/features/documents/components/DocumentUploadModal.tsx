@@ -114,7 +114,12 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
 
   // Fetch orders, horses, and regulations when modal opens
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      reset({ docNumber: '', file: undefined });
+      setIsDone(false);
+      setShowAllRegulations(false);
+      return;
+    }
 
     const loadData = async () => {
       try {
@@ -401,10 +406,17 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     }
   };
 
+  const handleClose = () => {
+    reset({ docNumber: '', file: undefined });
+    setIsDone(false);
+    setShowAllRegulations(false);
+    onClose();
+  };
+
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title={reuploadDocId ? `Cập Nhật / Nộp Lại: ${reuploadTitle || 'Hồ Sơ'}` : 'Tải Lên Hồ Sơ Kiểm Dịch & Pháp Lý'}
       subtitle={
         reuploadDocId
@@ -659,7 +671,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
 
         {/* Actions */}
         <div className="flex justify-end gap-3 mt-2 pt-2 border-t border-slate-100">
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={handleClose}>
             Hủy Bỏ
           </Button>
           <Button
