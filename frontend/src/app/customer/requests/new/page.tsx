@@ -301,9 +301,9 @@ function CreateTransportRequestForm() {
       } catch {}
 
       router.push(`/customer/requests/${newReq.id}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create request:', error);
-      alert('Failed to submit request. Please try again.');
+      alert(error?.message || 'Failed to submit request. Please try again.');
       setIsSubmitting(false);
     }
   };
