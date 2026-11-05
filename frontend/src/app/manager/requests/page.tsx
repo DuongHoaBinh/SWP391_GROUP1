@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Search,
@@ -98,6 +99,16 @@ function formatDate(iso: string | null) {
   return new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+function toLocalDateString(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function formatCurrency(n: number) {
   if (!n || n === 0) return '—';
   return n.toLocaleString('vi-VN') + ' ₫';
@@ -121,7 +132,7 @@ function exportQuotationPDF(order: TransportOrder) {
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Báo Giá Vận Chuyển - #${order.id}</title>
+  <title>Báo Giá Vận Chuyển - ${order.requestCode || `#${order.id}`}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; background: #fff; }
@@ -165,7 +176,7 @@ function exportQuotationPDF(order: TransportOrder) {
     </div>
     <div class="doc-info">
       <div class="doc-title">BÁO GIÁ VẬN CHUYỂN</div>
-      <div class="doc-id">Mã yêu cầu: #${order.id}</div>
+      <div class="doc-id">Mã yêu cầu: ${order.requestCode || `#${order.id}`}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
       <div><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
     </div>
@@ -362,10 +373,16 @@ export default function ManagerRequestsPage() {
           list = list.filter((o) => o.status === filterStatus);
         }
         if (departureDateFrom) {
-          list = list.filter((o) => o.departureDate && o.departureDate >= departureDateFrom);
+          list = list.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr >= departureDateFrom;
+          });
         }
         if (departureDateTo) {
-          list = list.filter((o) => o.departureDate && o.departureDate <= departureDateTo);
+          list = list.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr <= departureDateTo;
+          });
         }
         if (sortBy === 'totalCost') {
           list.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
@@ -449,6 +466,18 @@ export default function ManagerRequestsPage() {
       let filtered = sampleOrders;
       if (filterStatus !== 'all') {
         filtered = filtered.filter((o) => o.status === filterStatus);
+      }
+      if (departureDateFrom) {
+        filtered = filtered.filter((o) => {
+          const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+          return dateStr && dateStr >= departureDateFrom;
+        });
+      }
+      if (departureDateTo) {
+        filtered = filtered.filter((o) => {
+          const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+          return dateStr && dateStr <= departureDateTo;
+        });
       }
       if (sortBy === 'totalCost') {
         filtered.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
@@ -534,6 +563,7 @@ export default function ManagerRequestsPage() {
     const q = search.toLowerCase();
     return (
       String(o.id).includes(q) ||
+      (o.requestCode || '').toLowerCase().includes(q) ||
       (o.customerEmail || '').toLowerCase().includes(q) ||
       (o.contactName || '').toLowerCase().includes(q) ||
       o.originLocation.toLowerCase().includes(q) ||
@@ -661,7 +691,7 @@ export default function ManagerRequestsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead style={{ backgroundColor: '#f8fafc' }}>
               <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>#ID</th>
+                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>REQ-ID</th>
                 <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>Customer</th>
                 <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>Route</th>
                 <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
@@ -695,7 +725,11 @@ export default function ManagerRequestsPage() {
                   const sc = STATUS_COLORS[order.status] || STATUS_COLORS.cancelled;
                   return (
                     <tr key={order.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '14px 16px', fontWeight: 700, color: '#1d4ed8', fontSize: '13px' }}>#{order.id}</td>
+                      <td style={{ padding: '14px 16px', fontWeight: 700, color: '#1d4ed8', fontSize: '13px' }}>
+                        <Link href={`/manager/requests/${order.id}`} style={{ color: '#1d4ed8', textDecoration: 'none' }}>
+                          {order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`}
+                        </Link>
+                      </td>
                       <td style={{ padding: '14px 16px' }}>
                         <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>{order.contactName || '—'}</div>
                         <div style={{ fontSize: '11px', color: '#94a3b8' }}>{order.customerEmail}</div>
