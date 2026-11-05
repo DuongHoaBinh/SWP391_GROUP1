@@ -782,14 +782,34 @@ export default function ManagerPlanningPage() {
                           <span className="text-slate-400 font-bold shrink-0 text-sm">→</span>
                           <span className="truncate max-w-[140px] text-blue-700" title={order.destinationLocation}>{order.destinationLocation}</span>
                         </div>
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold mt-1.5 ${
-                            isIntl ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          }`}
-                        >
-                          {isIntl ? <Plane size={10} /> : <Truck size={10} />}
-                          {isIntl ? 'Quốc tế (Đa phương thức)' : 'Nội địa (Đường bộ)'}
-                        </span>
+                        {(() => {
+                          const isAir = Boolean(
+                            order.routePlan?.managerAirlineId ||
+                            order.routePlan?.managerAirlineName ||
+                            (order.transportType || "").toLowerCase().includes("air") ||
+                            (order.specialRequirements || "").toLowerCase().includes("hàng không") ||
+                            (order.specialRequirements || "").toLowerCase().includes("air flight") ||
+                            (order.specialRequirements || "").toLowerCase().includes("bay")
+                          );
+                          return (
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold mt-1.5 ${
+                                isIntl
+                                  ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                  : isAir
+                                  ? "bg-sky-50 text-sky-700 border border-sky-200"
+                                  : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              }`}
+                            >
+                              {isIntl || isAir ? <Plane size={10} /> : <Truck size={10} />}
+                              {isIntl
+                                ? "Quốc tế (Đa phương thức)"
+                                : isAir
+                                ? "Nội địa (Hàng không)"
+                                : "Nội địa (Đường bộ)"}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* Strategic Framework */}

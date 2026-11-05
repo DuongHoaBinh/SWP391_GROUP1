@@ -29,6 +29,14 @@ export class RecordAuthorityApprovalDto {
   approvalDate?: string;
 
   @ApiPropertyOptional({
+    example: 'HQ-SG-2026-9812',
+    description: 'Số công văn / Mã phê duyệt Hải quan (sẽ được lưu vào số hiệu văn bản doc_number)',
+  })
+  @IsOptional()
+  @IsString()
+  referenceNumber?: string;
+
+  @ApiPropertyOptional({
     example: 'Đã cấp Giấy phép kiểm dịch số KD-2026/8991.',
     description: 'Ghi chú hoặc số quyết định của cơ quan',
   })

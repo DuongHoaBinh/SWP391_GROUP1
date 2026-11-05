@@ -334,6 +334,14 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     return rows;
   }
 
+  async findUserById(userId: number): Promise<any | null> {
+    const [rows] = await this.pool.execute<any[]>(
+      'SELECT user_id, full_name, email, specialization, role_id FROM `user` WHERE user_id = ? LIMIT 1',
+      [userId],
+    );
+    return rows[0] || null;
+  }
+
   async findAssignedHorses(shipmentId: number): Promise<any[]> {
     const [rows] = await this.pool.execute<any[]>(
       `SELECT h.horse_id, h.name, h.breed, h.gender, h.age, h.microchip_no, h.passport_no
@@ -495,6 +503,32 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async updateShipmentStatus(shipmentId: number, status: string): Promise<void> {
+    if (status === 'completed') {
+      await this.pool.execute(
+        'UPDATE shipment SET status = ?, actual_arrival_date = COALESCE(actual_arrival_date, NOW()) WHERE shipment_id = ?',
+        [status, shipmentId],
+      );
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'delivered'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+           AND status NOT IN ('retired', 'deceased')`,
+        [shipmentId],
+      );
+      await this.pool.execute(
+        `UPDATE vehicle
+         SET status = 'available'
+         WHERE vehicle_id IN (
+           SELECT rl.vehicle_id
+           FROM route_leg rl
+           JOIN route r ON rl.route_id = r.route_id
+           WHERE r.shipment_id = ? AND rl.vehicle_id IS NOT NULL
+         )`,
+        [shipmentId],
+      );
+      return;
+    }
+
     await this.pool.execute(
       'UPDATE shipment SET status = ? WHERE shipment_id = ?',
       [status, shipmentId],

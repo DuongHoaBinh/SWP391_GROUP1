@@ -128,9 +128,9 @@ export default function HorsesPage() {
           </div>
           <div>
             <div style={{ fontSize: '28px', fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
-              {String(displayHorses.filter((h) => h.availabilityStatus === 'Available' || h.availabilityStatus === 'In Transit').length).padStart(2, '0')}
+              {String(displayHorses.filter((h) => h.availabilityStatus === 'Available' || h.status === 'active').length).padStart(2, '0')}
             </div>
-            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px' }}>Active for Transport</div>
+            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px' }}>Active for Transport (Sẵn sàng)</div>
           </div>
         </div>
 
@@ -272,7 +272,11 @@ export default function HorsesPage() {
                 {horse.availabilityStatus && (
                   <div style={{ position: 'absolute', top: '12px', right: '12px', backgroundColor: availColor.bg, color: availColor.text, fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '6px', border: `1px solid ${availColor.bg}` }}>
                     <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: availColor.dot }} />
-                    {horse.availabilityStatus}
+                    {horse.availabilityStatus === 'Delivered'
+                      ? 'Completed (Đã hoàn tất)'
+                      : horse.availabilityStatus === 'Available'
+                      ? 'Available (Sẵn sàng)'
+                      : horse.availabilityStatus}
                   </div>
                 )}
               </div>

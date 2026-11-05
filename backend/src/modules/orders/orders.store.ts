@@ -20,11 +20,15 @@ interface ShipmentRow extends RowDataPacket {
   departure_date: Date | null;
   expected_arrival_date: Date | null;
   actual_arrival_date: Date | null;
+  transportation_type: string | null;
   special_requirements: string | null;
   rejection_reason: string | null;
   change_request_notes: string | null;
   status: ShipmentStatus;
   total_cost: number | string;
+  payment_status?: 'pending' | 'review' | 'succeeded';
+  payment_code?: string | null;
+  paid_at?: Date | null;
   created_at: Date;
   updated_at: Date;
   customer_email?: string;
@@ -83,8 +87,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       `INSERT INTO shipment (
         customer_id, requested_by, contact_name, contact_address, contact_phone, contact_email,
         requested_horse_count, origin_location, destination_location, requested_date,
-        special_requirements, status, total_cost
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0)`,
+        transportation_type, special_requirements, status, total_cost
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0)`,
       [
         customerId,
         customerId,
@@ -96,6 +100,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         dto.originLocation,
         dto.destinationLocation,
         requestedDate,
+        dto.transportationType ?? null,
         dto.specialRequirements ?? null,
       ],
     );
@@ -219,10 +224,22 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   async findShipmentsByCustomer(customerId: number): Promise<TransportOrder[]> {
     const [rows] = await this.pool.execute<ShipmentRow[]>(
       `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
-              CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code
+              CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code,
+              CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as customer_request_code,
+              COALESCE(sp.status, mb.status) as payment_status,
+              COALESCE(sp.payment_code, mb.order_id) as payment_code,
+              COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+       LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
+       LEFT JOIN (
+         SELECT shipment_id, status, order_id, last_checked_at
+         FROM shipment_sandbox_payment
+         WHERE (shipment_id, payment_id) IN (
+           SELECT shipment_id, MAX(payment_id) FROM shipment_sandbox_payment GROUP BY shipment_id
+         )
+       ) mb ON mb.shipment_id = s.shipment_id
        WHERE s.customer_id = ?
        ORDER BY s.created_at DESC`,
       [customerId],
@@ -238,10 +255,21 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
                (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                3, '0'
              )) as customer_request_code,
-             CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
+             CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
+             COALESCE(sp.status, mb.status) as payment_status,
+             COALESCE(sp.payment_code, mb.order_id) as payment_code,
+             COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+      LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
+      LEFT JOIN (
+        SELECT shipment_id, status, order_id, last_checked_at
+        FROM shipment_sandbox_payment
+        WHERE (shipment_id, payment_id) IN (
+          SELECT shipment_id, MAX(payment_id) FROM shipment_sandbox_payment GROUP BY shipment_id
+        )
+      ) mb ON mb.shipment_id = s.shipment_id
     `;
     const params: (string | number)[] = [];
 
@@ -263,10 +291,21 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
                 (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                 3, '0'
               )) as customer_request_code,
-              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
+              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
+              COALESCE(sp.status, mb.status) as payment_status,
+              COALESCE(sp.payment_code, mb.order_id) as payment_code,
+              COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+       LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
+       LEFT JOIN (
+         SELECT shipment_id, status, order_id, last_checked_at
+         FROM shipment_sandbox_payment
+         WHERE (shipment_id, payment_id) IN (
+           SELECT shipment_id, MAX(payment_id) FROM shipment_sandbox_payment GROUP BY shipment_id
+         )
+       ) mb ON mb.shipment_id = s.shipment_id
        WHERE s.shipment_id = ?
        LIMIT 1`,
       [shipmentId],
@@ -286,14 +325,41 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     status: ShipmentStatus.APPROVED | ShipmentStatus.REJECTED,
     rejectionReason: string | null = null,
     totalCost: number = 0,
+    transportMode?: "road" | "air",
   ): Promise<boolean> {
-    const [result] = await this.pool.execute(
-      `UPDATE shipment
-       SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = CASE WHEN ? > 0 THEN ? ELSE total_cost END
-       WHERE shipment_id = ?`,
-      [status, approvedBy, rejectionReason, totalCost, totalCost, shipmentId],
-    );
+    let modeType: string | null = null;
+    let modeNote: string | null = null;
+    if (status === ShipmentStatus.APPROVED && transportMode) {
+      if (transportMode === "air") {
+        modeType = "Domestic (Air)";
+        modeNote = "[Phương thức: Đường Hàng Không]";
+      } else {
+        modeType = "Domestic";
+        modeNote = "[Phương thức: Đường Bộ Liên Vận]";
+      }
+    }
 
+    let query = `UPDATE shipment
+       SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = CASE WHEN ? > 0 THEN ? ELSE total_cost END`;
+    const params: any[] = [status, approvedBy, rejectionReason, totalCost, totalCost];
+
+    if (modeType) {
+      query += `, transportation_type = ?`;
+      params.push(modeType);
+    }
+    if (modeNote) {
+      query += `, special_requirements = CASE
+        WHEN special_requirements IS NULL OR special_requirements = '' THEN ?
+        WHEN special_requirements LIKE ? THEN special_requirements
+        ELSE CONCAT(special_requirements, ' | ', ?)
+      END`;
+      const matchKeyword = transportMode === "air" ? "%Hàng không%" : "%Đường bộ%";
+      params.push(modeNote, matchKeyword, modeNote);
+    }
+    query += ` WHERE shipment_id = ?`;
+    params.push(shipmentId);
+
+    const [result] = await this.pool.execute(query, params);
     if (status === ShipmentStatus.REJECTED) {
       await this.pool.execute(
         `UPDATE horse
@@ -343,6 +409,25 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       'UPDATE shipment SET status = ?, updated_at = NOW() WHERE shipment_id = ?',
       [status, shipmentId],
     );
+
+    if (status === ShipmentStatus.COMPLETED || (status as string) === 'completed') {
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'delivered'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+           AND status NOT IN ('retired', 'deceased')`,
+        [shipmentId],
+      );
+    } else if (status === ShipmentStatus.CANCELLED || status === ShipmentStatus.REJECTED) {
+      await this.pool.execute(
+        `UPDATE horse
+         SET status = 'active'
+         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+           AND status NOT IN ('delivered', 'retired', 'deceased')`,
+        [shipmentId],
+      );
+    }
+
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
@@ -496,11 +581,15 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       departureDate: row.departure_date ? new Date(row.departure_date).toISOString() : null,
       expectedArrivalDate: row.expected_arrival_date ? new Date(row.expected_arrival_date).toISOString() : null,
       actualArrivalDate: row.actual_arrival_date ? new Date(row.actual_arrival_date).toISOString() : null,
+      transportationType: row.transportation_type ?? null,
       specialRequirements: row.special_requirements,
       rejectionReason: row.rejection_reason,
       changeRequestNotes: row.change_request_notes ?? null,
       status: row.status,
       totalCost: Number(row.total_cost ?? 0),
+      paymentStatus: row.payment_status ?? 'unpaid',
+      paymentCode: row.payment_code ?? null,
+      paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       customerEmail: row.customer_email,

@@ -388,7 +388,7 @@ export class TrackingService {
       actualTime: legRoadLast.actual_arrival ? new Date(legRoadLast.actual_arrival).toISOString() : null,
       isCustomsBorder: false,
       legType: 'road',
-      responsibleRole: 'driver',
+      responsibleRole: 'escort',
       notes: null,
       updatedBy: null,
       allowedActions: m6Status === 'CURRENT' ? ['arrive_leg'] : [],
@@ -585,9 +585,9 @@ export class TrackingService {
       );
 
       // Send auto notification to Coordinator
-      const actorRoleName = user.role?.toLowerCase().includes('escort') ? 'Bác sĩ thú y / Hộ tống' : 'Tài xế';
+      const actor = await this.resolveStaffActor(shipmentId, user);
       const coordTitle = `Chuyến đi #${shipment.request_code} đã xuất phát thực tế`;
-      const coordMessage = `${actorRoleName} (${user.fullName || user.email}) đã bấm xác nhận xuất phát tại trang trại của khách (${targetLeg.origin_location}). Hệ thống đã kích hoạt giám sát thời gian thực.`;
+      const coordMessage = `${actor.displayName} đã bấm xác nhận xuất phát tại trang trại của khách (${targetLeg.origin_location}). Hệ thống đã kích hoạt giám sát thời gian thực.`;
       if (route.assigned_coordinator_id) {
         await this.notificationsService.createNotification(
           route.assigned_coordinator_id,
@@ -642,6 +642,25 @@ export class TrackingService {
 
     const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
     const parentLeg = legs.find((l) => l.leg_id === targetStop.leg_id) || (legs.length === 1 ? legs[0] : (legs.find((l) => l.leg_type !== 'flight') || legs[0]));
+
+    // Phân quyền: Trạm kiểm dịch / dừng chân tại nước ngoài chỉ do Escort / Coordinator báo cáo
+    const roleStr = String(user.role).toUpperCase();
+    const isManagerOrCoordinator =
+      roleStr.includes('COORDINATOR') ||
+      roleStr.includes('MANAGER') ||
+      roleStr.includes('ADMIN');
+    if (!isManagerOrCoordinator) {
+      const isDomesticStop =
+        (targetStop.country || '').toLowerCase().includes('vietnam') ||
+        (targetStop.country || '').toLowerCase().includes('việt nam') ||
+        targetStop.sequence_no === 1;
+      const isOnlyDriver =
+        (user.specialization === 'driver' || user.email.toLowerCase().includes('driver')) &&
+        !(user.specialization === 'escort' || user.email.toLowerCase().includes('escort') || roleStr.includes('ESCORT'));
+      if (!isDomesticStop && isOnlyDriver) {
+        throw new ForbiddenException('Trạm kiểm dịch / dừng chân tại nước ngoài do nhân sự áp tải / y tế (Escort) đi cùng phụ trách báo cáo!');
+      }
+    }
 
     // Rule: Chặng phải bắt đầu rồi mới được check-in trạm dừng
     if (!parentLeg || (!parentLeg.actual_departure && parentLeg.status === 'pending')) {
@@ -776,9 +795,9 @@ export class TrackingService {
       );
 
       // Send auto notification to Coordinator
-      const actorRoleName = user.role?.toLowerCase().includes('escort') ? 'Bác sĩ thú y / Hộ tống' : 'Tài xế';
+      const actor = await this.resolveStaffActor(shipmentId, user);
       const coordEndTitle = `Chuyến đi #${shipment.request_code} đã hoàn thành bàn giao`;
-      const coordEndMessage = `${actorRoleName} (${user.fullName || user.email}) đã xác nhận cập bến an toàn tại điểm đích (${targetLeg.destination_location}) và bàn giao ngựa thành công.`;
+      const coordEndMessage = `${actor.displayName} đã xác nhận cập bến an toàn tại điểm đích (${targetLeg.destination_location}) và bàn giao ngựa thành công.`;
       if (route.assigned_coordinator_id) {
         await this.notificationsService.createNotification(
           route.assigned_coordinator_id,
@@ -872,15 +891,20 @@ export class TrackingService {
     const shipment = await this.trackingStore.findShipmentById(shipmentId);
     if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
 
+    if (shipment.status === 'completed') {
+      throw new BadRequestException('Chuyến đi đã hoàn tất toàn bộ lộ trình, không thể ghi thêm nhật ký sức khỏe!');
+    }
+
+    // Luôn khóa cứng nhật ký sức khỏe theo mốc hiện tại đang diễn ra, không cho phép ghi nhận cho mốc quá khứ
+    const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
     let finalLegName = dto.legName;
-    if (!finalLegName) {
-      const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
-      if (route?.route_id) {
-        const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
-        const stops = await this.trackingStore.findStopsByRouteId(route.route_id);
-        const milestones = this.buildMilestonesTimeline(legs, stops);
-        const activeM = milestones.find((m) => m.status === 'CURRENT') || milestones.find((m) => m.status === 'COMPLETED');
-        if (activeM) finalLegName = activeM.title;
+    if (route?.route_id) {
+      const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
+      const stops = await this.trackingStore.findStopsByRouteId(route.route_id);
+      const milestones = this.buildMilestonesTimeline(legs, stops);
+      const activeM = milestones.find((m) => m.status === 'CURRENT');
+      if (activeM) {
+        finalLegName = `#${activeM.seq} - ${activeM.title}`;
       }
     }
 
@@ -949,6 +973,49 @@ export class TrackingService {
     });
   }
 
+    private async resolveStaffActor(shipmentId: number, user: AuthenticatedUser) {
+    const assignedStaff = await this.trackingStore.findAssignedStaff(shipmentId);
+    const currentStaff =
+      assignedStaff.find((s) => Number(s.user_id) === Number(user.id)) ||
+      (user.email ? assignedStaff.find((s) => s.email?.toLowerCase() === user.email.toLowerCase()) : null);
+
+    let staffName = currentStaff?.full_name || user.fullName;
+    if (!staffName && user.id) {
+      const dbUser = await this.trackingStore.findUserById(Number(user.id));
+      if (dbUser?.full_name) staffName = dbUser.full_name;
+    }
+    if (!staffName) {
+      staffName = user.email ? user.email.split('@')[0] : 'Nhân sự vận hành';
+    }
+
+    const roleStr = String(user.role || '').toUpperCase();
+    const isEscortStaff =
+      currentStaff?.role_in_shipment === 'escort' ||
+      currentStaff?.specialization === 'escort' ||
+      user.specialization === 'escort' ||
+      user.email.toLowerCase().includes('escort');
+
+    const isDriverStaff =
+      currentStaff?.role_in_shipment === 'driver' ||
+      currentStaff?.specialization === 'driver' ||
+      user.specialization === 'driver' ||
+      user.email.toLowerCase().includes('driver');
+
+    const actorRoleName = isEscortStaff
+      ? 'Bác sĩ thú y / Nhân viên áp tải'
+      : isDriverStaff
+      ? 'Tài xế lái xe'
+      : roleStr.includes('COORDINATOR')
+      ? 'Điều phối viên'
+      : 'Quản lý';
+
+    return {
+      actorRoleName,
+      staffName,
+      displayName: `${actorRoleName} ${staffName}`,
+    };
+  }
+
   private assertStaffCanUpdateLeg(user: AuthenticatedUser, leg: any): void {
     const roleStr = String(user.role).toUpperCase();
     const isManagerOrCoordinator =
@@ -968,6 +1035,16 @@ export class TrackingService {
         user.email.toLowerCase().includes('escort');
       if (!isDriverOrEscort) {
         throw new ForbiddenException('Chỉ Tài xế lái xe hoặc Bác sĩ thú y áp tải (Escort) mới được cập nhật chặng đường bộ!');
+      }
+
+      // Đối với chặng đường bộ ở nước ngoài (sequence_no > 1 trong chuyến bay quốc tế): Chỉ Escort đi cùng mới báo cáo
+      if (leg.sequence_no > 1) {
+        const isOnlyDriver =
+          (user.specialization === 'driver' || user.email.toLowerCase().includes('driver')) &&
+          !(user.specialization === 'escort' || user.email.toLowerCase().includes('escort') || roleStr.includes('ESCORT'));
+        if (isOnlyDriver) {
+          throw new ForbiddenException('Chặng tại nước ngoài do nhân sự áp tải / y tế (Escort) đi cùng phụ trách báo cáo!');
+        }
       }
     } else if (leg.leg_type === 'flight') {
       const isEscort =
