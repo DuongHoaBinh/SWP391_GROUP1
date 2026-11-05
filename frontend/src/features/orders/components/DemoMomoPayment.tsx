@@ -21,24 +21,62 @@ interface SandboxPayment {
 interface PaymentState { enabled: boolean; sandbox: true; payment: SandboxPayment | null }
 const labels = { creating: 'Đang tạo giao dịch', pending: 'Chờ thanh toán bằng thẻ ATM', succeeded: 'Thanh toán sandbox thành công', failed: 'Giao dịch sandbox thất bại', unknown: 'Chưa xác minh được kết quả' };
 
-export function DemoMomoPayment({ shipmentId, requestCode, amount }: { shipmentId: number; requestCode: string; amount: number }) {
+export function DemoMomoPayment({
+  shipmentId,
+  requestCode,
+  amount,
+  onPaymentSuccess,
+}: {
+  shipmentId: number;
+  requestCode: string;
+  amount: number;
+  onPaymentSuccess?: () => void;
+}) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [cardNumber, setCardNumber] = useState('9704 0000 0000 0018');
+  const [cardHolder, setCardHolder] = useState('NGUYEN VAN A');
+  const [issueDate, setIssueDate] = useState('03/07');
+  const [otp, setOtp] = useState('OTP');
+
   const endpoint = `/orders/${shipmentId}/payments/momo`;
   const userId = getCurrentUser().id;
   const { data, error: loadError, mutate, isLoading } = useSWR(['momo-sandbox', userId, shipmentId], () => apiClient<PaymentState>(endpoint), { refreshInterval: 5000 });
   const payment = data?.payment;
-  const validAmount = Number.isSafeInteger(amount) && amount >= 10000 && amount <= 50000000;
+  const validAmount = Number.isSafeInteger(amount) && amount >= 10000;
   const pending = payment && ['creating', 'pending', 'unknown'].includes(payment.status);
+
   async function perform(refresh: boolean) {
     setBusy(true); setError('');
     try {
       const result = await apiClient<SandboxPayment | null>(`${endpoint}${refresh ? '/refresh' : ''}`, { method: 'POST' });
       await mutate({ enabled: true, sandbox: true, payment: result }, false);
+      if (result?.status === 'succeeded') {
+        onPaymentSuccess?.();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không kết nối được MoMo sandbox');
       await mutate().catch(() => undefined);
     } finally { setBusy(false); }
+  }
+
+  async function confirmAtmCard() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await apiClient<SandboxPayment | null>(`${endpoint}/confirm-atm`, {
+        method: 'POST',
+        body: JSON.stringify({ cardNumber, cardHolder, issueDate, otp }),
+      });
+      await mutate({ enabled: true, sandbox: true, payment: result }, false);
+      if (result?.status === 'succeeded') {
+        onPaymentSuccess?.();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Không thể xác nhận thanh toán thẻ ATM');
+    } finally {
+      setBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -81,13 +119,74 @@ export function DemoMomoPayment({ shipmentId, requestCode, amount }: { shipmentI
       <p className="text-xs mt-1 break-all">Mã giao dịch: {payment.orderId}</p>
       {payment.transactionId && payment.transactionId !== '0' && <p className="text-xs mt-1">Mã MoMo: {payment.transactionId}</p>}
     </div>}
-    {!validAmount && <p className="text-sm text-amber-800">Thẻ ATM sandbox hỗ trợ báo giá nguyên VND từ 10.000đ đến 50.000.000đ.</p>}
-    {data?.enabled && (!payment || payment.status === 'failed') && <button disabled={busy || !validAmount} className="rounded-lg bg-pink-700 text-white font-semibold py-2 px-4 self-start disabled:opacity-50" onClick={() => perform(false)}>{busy ? 'Đang kết nối MoMo…' : payment ? 'Tạo giao dịch thẻ mới' : 'Thanh toán bằng thẻ ATM'}</button>}
-    {data?.enabled && pending && <div className="flex flex-wrap gap-2">
-      {payment.payUrl && /^https:\/\/test-payment\.momo\.vn\//.test(payment.payUrl) && <a href={payment.payUrl} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-pink-700 text-white font-semibold py-2 px-4 text-sm">Nhập thẻ trên MoMo</a>}
-      <button disabled={busy} className="rounded-lg border border-pink-300 bg-white text-pink-900 font-semibold py-2 px-4 text-sm disabled:opacity-50" onClick={() => perform(true)}>{busy ? 'Đang kiểm tra…' : 'Kiểm tra kết quả'}</button>
-    </div>}
+    {!validAmount && <p className="text-sm text-amber-800">Số tiền thanh toán tối thiểu là 10.000đ.</p>}
+    {data?.enabled && (!payment || payment.status === 'failed') && <button disabled={busy || !validAmount} className="rounded-lg bg-pink-700 text-white font-semibold py-2 px-4 self-start disabled:opacity-50 cursor-pointer" onClick={() => perform(false)}>{busy ? 'Đang khởi tạo giao dịch…' : payment ? 'Thanh toán bằng thẻ ATM (Thử lại)' : 'Thanh toán bằng thẻ ATM'}</button>}
+    {data?.enabled && pending && (
+      <div className="rounded-xl border border-pink-200 bg-white p-4 flex flex-col gap-3 shadow-2xs">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+          <span className="text-xs font-bold uppercase tracking-wider text-pink-800">Cổng xác thực thẻ ATM nội địa (NAPAS / MoMo Sandbox)</span>
+          <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">Bảo mật 3D-Secure</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Số thẻ ATM nội địa</label>
+            <input
+              type="text"
+              value={cardNumber}
+              onChange={(e) => setCardNumber(e.target.value)}
+              placeholder="9704 0000 0000 0018"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900 outline-none focus:border-pink-600"
+            />
+          </div>
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Tên chủ thẻ (Không dấu)</label>
+            <input
+              type="text"
+              value={cardHolder}
+              onChange={(e) => setCardHolder(e.target.value)}
+              placeholder="NGUYEN VAN A"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 uppercase text-sm text-slate-900 outline-none focus:border-pink-600"
+            />
+          </div>
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Ngày phát hành (MM/YY)</label>
+            <input
+              type="text"
+              value={issueDate}
+              onChange={(e) => setIssueDate(e.target.value)}
+              placeholder="03/07"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900 outline-none focus:border-pink-600"
+            />
+          </div>
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Mã xác thực OTP Sandbox</label>
+            <input
+              type="text"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value)}
+              placeholder="OTP"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900 outline-none focus:border-pink-600"
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={confirmAtmCard}
+            className="rounded-lg bg-pink-700 hover:bg-pink-800 text-white font-bold py-2.5 px-5 text-sm disabled:opacity-50 cursor-pointer shadow-xs"
+          >
+            {busy ? 'Đang xử lý thanh toán…' : `Xác nhận thanh toán ${(payment?.amount ?? amount).toLocaleString('vi-VN')} VND`}
+          </button>
+          {payment.payUrl && /^https:\/\/test-payment\.momo\.vn\//.test(payment.payUrl) && (
+            <>
+              <a href={payment.payUrl} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-pink-300 bg-pink-50 text-pink-900 font-semibold py-2 px-4 text-sm">Mở trang MoMo ngoài</a>
+              <button type="button" disabled={busy} className="rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold py-2 px-4 text-sm disabled:opacity-50" onClick={() => perform(true)}>Kiểm tra kết quả</button>
+            </>
+          )}
+        </div>
+      </div>
+    )}
     {data?.enabled && <details className="text-xs text-slate-600"><summary className="cursor-pointer font-semibold">Thẻ thử nghiệm ATM</summary><p className="mt-2">Số thẻ: 9704 0000 0000 0018 · Tên: NGUYEN VAN A · Ngày phát hành: 03/07 · OTP: OTP</p><a className="underline" href="https://developers.momo.vn/v3/vi/docs/payment/onboarding/test-instructions/" target="_blank" rel="noopener noreferrer">Hướng dẫn thẻ thử từ MoMo</a></details>}
-    {pending && <p className="text-xs text-slate-600">Sau khi thanh toán thử, bấm “Kiểm tra kết quả” để cập nhật trạng thái.</p>}
   </section>;
 }

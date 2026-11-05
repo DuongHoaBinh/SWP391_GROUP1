@@ -770,7 +770,13 @@ export default function RegulationsPage() {
       {isModalOpen && (
         <Modal
           isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
+          onClose={() => {
+            setNewCountry('');
+            setNewDocType('');
+            setNewDesc('');
+            setNewEffectiveDate(new Date().toISOString().split('T')[0]);
+            setIsModalOpen(false);
+          }}
           title="Thêm Quy định Kiểm dịch Riêng lẻ"
           subtitle="Tạo thêm yêu cầu chứng từ pháp lý đặc thù cho một quốc gia cụ thể."
           maxWidth="520px"
@@ -831,7 +837,17 @@ export default function RegulationsPage() {
             </div>
 
             <div className="flex justify-end gap-3 mt-2">
-              <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setNewCountry('');
+                  setNewDocType('');
+                  setNewDesc('');
+                  setNewEffectiveDate(new Date().toISOString().split('T')[0]);
+                  setIsModalOpen(false);
+                }}
+              >
                 Hủy bỏ
               </Button>
               <Button type="submit" variant="primary" disabled={isSubmitting}>

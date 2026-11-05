@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class ApproveOrderDto {
   @ApiPropertyOptional({ example: 15000000, description: 'Estimated initial transport cost in VND' })
@@ -12,4 +12,13 @@ export class ApproveOrderDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @ApiPropertyOptional({
+    example: 'air',
+    enum: ['road', 'air'],
+    description: 'Phương thức vận tải: road (đường bộ) hoặc air (hàng không)',
+  })
+  @IsOptional()
+  @IsIn(['road', 'air'])
+  transportMode?: 'road' | 'air';
 }

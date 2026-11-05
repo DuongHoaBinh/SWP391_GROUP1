@@ -1,8 +1,15 @@
 import { Transform } from 'class-transformer';
-import { IsInt, IsString, Matches, MaxLength, Min } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export type SandboxPaymentStatus = 'creating' | 'pending' | 'succeeded' | 'failed' | 'unknown';
+
+export class ConfirmAtmSandboxDto {
+  @IsOptional() @IsString() @MaxLength(50) @ApiPropertyOptional() cardNumber?: string;
+  @IsOptional() @IsString() @MaxLength(100) @ApiPropertyOptional() cardHolder?: string;
+  @IsOptional() @IsString() @MaxLength(20) @ApiPropertyOptional() issueDate?: string;
+  @IsOptional() @IsString() @MaxLength(20) @ApiPropertyOptional() otp?: string;
+}
 
 export interface SandboxPayment {
   payment_id: number;

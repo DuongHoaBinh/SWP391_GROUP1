@@ -42,6 +42,8 @@ interface OrderHorse {
 
 interface TransportOrder {
   id: number;
+  requestCode?: string;
+  customerRequestCode?: string;
   customerId: number;
   contactName: string | null;
   contactEmail: string;
@@ -112,6 +114,16 @@ function formatDate(iso: string | null) {
   });
 }
 
+function toLocalDateString(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function formatCurrency(n: number) {
   if (!n || n === 0) return '—';
   return n.toLocaleString('vi-VN') + ' ₫';
@@ -142,7 +154,7 @@ function exportQuotationPDF(order: TransportOrder) {
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Báo Giá Vận Chuyển - #${order.id}</title>
+  <title>Báo Giá Vận Chuyển - ${order.requestCode || `#${order.id}`}</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff}
@@ -183,7 +195,7 @@ function exportQuotationPDF(order: TransportOrder) {
     </div>
     <div>
       <div class="doc-title">BÁO GIÁ VẬN CHUYỂN</div>
-      <div class="doc-id">Mã yêu cầu: #${order.id}</div>
+      <div class="doc-id">Mã yêu cầu: ${order.requestCode || `#${order.id}`}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
       <div style="text-align:right"><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
     </div>
@@ -299,14 +311,50 @@ export default function RequestsPage() {
       params.set('page', String(page));
       params.set('limit', String(limit));
 
-      const result = await apiClient<PaginatedOrders>(`/orders/my-orders?${params.toString()}`);
-      setOrders(result.data || []);
-      setPagination({ total: result.total, totalPages: result.totalPages });
+      const result = await apiClient<any>(`/orders/my-orders?${params.toString()}`);
+      if (Array.isArray(result)) {
+        let list: TransportOrder[] = [...result];
+        if (filterStatus !== 'all') {
+          list = list.filter((o) => o.status === filterStatus);
+        }
+        if (departureDateFrom) {
+          list = list.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr >= departureDateFrom;
+          });
+        }
+        if (departureDateTo) {
+          list = list.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr <= departureDateTo;
+          });
+        }
+        if (sortBy === 'totalCost') {
+          list.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
+        } else if (sortBy === 'requestedDate') {
+          list.sort((a, b) => (sortOrder === 'asc' ? new Date(a.requestedDate).getTime() - new Date(b.requestedDate).getTime() : new Date(b.requestedDate).getTime() - new Date(a.requestedDate).getTime()));
+        } else {
+          list.sort((a, b) => (sortOrder === 'asc' ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+        }
+        const total = list.length;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const paginated = list.slice((page - 1) * limit, page * limit);
+        setOrders(paginated);
+        setPagination({ total, totalPages });
+      } else if (result && Array.isArray(result.data)) {
+        setOrders(result.data);
+        setPagination({ total: result.total ?? result.data.length, totalPages: result.totalPages ?? 1 });
+      } else {
+        setOrders([]);
+        setPagination({ total: 0, totalPages: 1 });
+      }
     } catch (err: any) {
       // Fallback to local store data if backend is offline or unauthenticated
       if (storeRequests && storeRequests.length > 0) {
         const mappedOrders: TransportOrder[] = storeRequests.map((r, idx) => ({
           id: idx + 1,
+          requestCode: `REQ-${String(idx + 1).padStart(3, '0')}`,
+          customerRequestCode: `REQ-${String(idx + 1).padStart(3, '0')}`,
           customerId: 1,
           contactName: r.horse?.ownerName || 'Customer',
           contactEmail: 'customer@equitransit.com',
@@ -339,6 +387,18 @@ export default function RequestsPage() {
         let filtered = mappedOrders;
         if (filterStatus !== 'all') {
           filtered = filtered.filter((o) => o.status === filterStatus);
+        }
+        if (departureDateFrom) {
+          filtered = filtered.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr >= departureDateFrom;
+          });
+        }
+        if (departureDateTo) {
+          filtered = filtered.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr <= departureDateTo;
+          });
         }
         if (sortBy === 'totalCost') {
           filtered.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
@@ -392,6 +452,8 @@ export default function RequestsPage() {
     const q = search.toLowerCase();
     return (
       String(o.id).includes(q) ||
+      (o.requestCode || '').toLowerCase().includes(q) ||
+      (o.customerRequestCode || '').toLowerCase().includes(q) ||
       (o.contactName || '').toLowerCase().includes(q) ||
       o.originLocation.toLowerCase().includes(q) ||
       o.destinationLocation.toLowerCase().includes(q) ||
@@ -627,7 +689,7 @@ export default function RequestsPage() {
                     color: 'var(--text-muted)',
                   }}
                 >
-                  #ID
+                  REQ-ID
                 </th>
                 <th
                   style={{
@@ -763,7 +825,7 @@ export default function RequestsPage() {
                           href={`/customer/requests/${order.id}`}
                           style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '13px' }}
                         >
-                          #{order.id}
+                          {order.requestCode || order.customerRequestCode || `REQ-${String(order.id).padStart(3, '0')}`}
                         </Link>
                       </td>
 

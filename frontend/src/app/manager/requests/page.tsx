@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Search,
@@ -15,22 +16,32 @@ import {
   XCircle,
   FileText,
   Download,
+  Truck,
+  Plane,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { buildEquineRoute } from '@/lib/geo-corridors';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 type ShipmentStatus = 'requested' | 'under_review' | 'approved' | 'rejected' | 'planning' | 'in_transit' | 'completed' | 'cancelled';
 
 interface OrderHorse {
-  horseId: number;
-  name: string;
-  breed: string | null;
-  gender: string | null;
-  age: number | null;
+  horseId?: number;
+  name?: string;
+  breed?: string | null;
+  gender?: string | null;
+  age?: number | null;
+  color?: string | null;
+  weight?: number | null;
+  medicalStatus?: string | null;
+  microchipNo?: string | null;
+  passportNo?: string | null;
+  specialRequirements?: string | null;
 }
 
 interface TransportOrder {
   id: number;
+  requestCode?: string;
   customerId: number;
   contactName: string | null;
   contactEmail: string;
@@ -38,6 +49,7 @@ interface TransportOrder {
   destinationLocation: string;
   requestedDate: string;
   departureDate: string | null;
+  requestedHorseCount?: number;
   status: ShipmentStatus;
   totalCost: number;
   createdAt: string;
@@ -87,6 +99,16 @@ function formatDate(iso: string | null) {
   return new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+function toLocalDateString(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function formatCurrency(n: number) {
   if (!n || n === 0) return '—';
   return n.toLocaleString('vi-VN') + ' ₫';
@@ -110,7 +132,7 @@ function exportQuotationPDF(order: TransportOrder) {
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Báo Giá Vận Chuyển - #${order.id}</title>
+  <title>Báo Giá Vận Chuyển - ${order.requestCode || `#${order.id}`}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; background: #fff; }
@@ -154,7 +176,7 @@ function exportQuotationPDF(order: TransportOrder) {
     </div>
     <div class="doc-info">
       <div class="doc-title">BÁO GIÁ VẬN CHUYỂN</div>
-      <div class="doc-id">Mã yêu cầu: #${order.id}</div>
+      <div class="doc-id">Mã yêu cầu: ${order.requestCode || `#${order.id}`}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
       <div><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
     </div>
@@ -273,6 +295,63 @@ export default function ManagerRequestsPage() {
   const [totalCostInput, setTotalCostInput] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [selectedTransportMode, setSelectedTransportMode] = useState<'road' | 'air'>('road');
+  const [costCurrency, setCostCurrency] = useState<'USD' | 'VND'>('VND');
+
+  const openApproveModal = (order: TransportOrder) => {
+    setApproveOrder(order);
+    const oStr = (order.originLocation || '').toLowerCase();
+    const dStr = (order.destinationLocation || '').toLowerCase();
+    const reqNotes = (order.specialRequirements || '').toLowerCase();
+
+    const isDomestic =
+      (oStr.includes('vietnam') || oStr.includes('việt nam') || oStr.includes('hồ chí minh') || oStr.includes('ho chi minh')) &&
+      (dStr.includes('vietnam') || dStr.includes('việt nam') || dStr.includes('hà nội') || dStr.includes('ha noi'));
+    const isRoadRequested = reqNotes.includes('đường bộ') || reqNotes.includes('road') || isDomestic;
+
+    const initialMode: 'road' | 'air' = reqNotes.includes('hàng không') || reqNotes.includes('air')
+      ? 'air'
+      : isRoadRequested
+      ? 'road'
+      : 'air';
+    setSelectedTransportMode(initialMode);
+
+    const routeInfo = buildEquineRoute(order.originLocation || '', order.destinationLocation || '', initialMode);
+    const horseCount = order.requestedHorseCount || (order.horses?.length || 1);
+    const baseCost = initialMode === 'air' ? 600 + routeInfo.distanceKm * 1.6 : 300 + routeInfo.distanceKm * 1.1;
+    const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
+
+    setCostCurrency('VND');
+    setTotalCostInput(order.totalCost > 0 ? String(order.totalCost) : String(Math.round(estimatedUsd * 25400)));
+  };
+
+  const handleModeToggle = (newMode: 'road' | 'air') => {
+    if (!approveOrder || newMode === selectedTransportMode) return;
+    setSelectedTransportMode(newMode);
+    const routeInfo = buildEquineRoute(approveOrder.originLocation || '', approveOrder.destinationLocation || '', newMode);
+    const horseCount = approveOrder.requestedHorseCount || (approveOrder.horses?.length || 1);
+    const baseCost = newMode === 'air' ? 600 + routeInfo.distanceKm * 1.6 : 300 + routeInfo.distanceKm * 1.1;
+    const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
+    if (costCurrency === 'USD') {
+      setTotalCostInput(String(estimatedUsd));
+    } else {
+      setTotalCostInput(String(Math.round(estimatedUsd * 25400)));
+    }
+  };
+
+  const handleCurrencyToggle = (newCurr: 'USD' | 'VND') => {
+    if (newCurr === costCurrency) return;
+    const val = parseFloat(totalCostInput);
+    if (!isNaN(val) && val > 0) {
+      if (newCurr === 'VND') {
+        setTotalCostInput(String(Math.round(val * 25400)));
+      } else {
+        const usd = val / 25400;
+        setTotalCostInput(usd < 100 ? usd.toFixed(2) : String(Math.round(usd * 100) / 100));
+      }
+    }
+    setCostCurrency(newCurr);
+  };
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -287,9 +366,43 @@ export default function ManagerRequestsPage() {
       params.set('page', String(page));
       params.set('limit', String(limit));
 
-      const result = await apiClient<PaginatedOrders>(`/orders?${params.toString()}`);
-      setOrders(result.data || []);
-      setPagination({ total: result.total, totalPages: result.totalPages });
+      const result = await apiClient<any>(`/orders?${params.toString()}`);
+      if (Array.isArray(result)) {
+        let list: TransportOrder[] = [...result];
+        if (filterStatus !== 'all') {
+          list = list.filter((o) => o.status === filterStatus);
+        }
+        if (departureDateFrom) {
+          list = list.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr >= departureDateFrom;
+          });
+        }
+        if (departureDateTo) {
+          list = list.filter((o) => {
+            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+            return dateStr && dateStr <= departureDateTo;
+          });
+        }
+        if (sortBy === 'totalCost') {
+          list.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
+        } else if (sortBy === 'requestedDate') {
+          list.sort((a, b) => (sortOrder === 'asc' ? new Date(a.requestedDate).getTime() - new Date(b.requestedDate).getTime() : new Date(b.requestedDate).getTime() - new Date(a.requestedDate).getTime()));
+        } else {
+          list.sort((a, b) => (sortOrder === 'asc' ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+        }
+        const total = list.length;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const paginated = list.slice((page - 1) * limit, page * limit);
+        setOrders(paginated);
+        setPagination({ total, totalPages });
+      } else if (result && Array.isArray(result.data)) {
+        setOrders(result.data);
+        setPagination({ total: result.total ?? result.data.length, totalPages: result.totalPages ?? 1 });
+      } else {
+        setOrders([]);
+        setPagination({ total: 0, totalPages: 1 });
+      }
     } catch (err: any) {
       // Fallback sample data if backend is offline
       const sampleOrders: TransportOrder[] = [
@@ -354,6 +467,18 @@ export default function ManagerRequestsPage() {
       if (filterStatus !== 'all') {
         filtered = filtered.filter((o) => o.status === filterStatus);
       }
+      if (departureDateFrom) {
+        filtered = filtered.filter((o) => {
+          const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+          return dateStr && dateStr >= departureDateFrom;
+        });
+      }
+      if (departureDateTo) {
+        filtered = filtered.filter((o) => {
+          const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+          return dateStr && dateStr <= departureDateTo;
+        });
+      }
       if (sortBy === 'totalCost') {
         filtered.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
       }
@@ -399,7 +524,10 @@ export default function ManagerRequestsPage() {
     try {
       await apiClient(`/orders/${approveOrder.id}/approve`, {
         method: 'PATCH',
-        body: JSON.stringify({ totalCost: Number(totalCostInput) || 0 }),
+        body: JSON.stringify({
+          totalCost: Number(totalCostInput) || 0,
+          transportMode: selectedTransportMode,
+        }),
       });
       setApproveOrder(null);
       setTotalCostInput('');
@@ -435,6 +563,7 @@ export default function ManagerRequestsPage() {
     const q = search.toLowerCase();
     return (
       String(o.id).includes(q) ||
+      (o.requestCode || '').toLowerCase().includes(q) ||
       (o.customerEmail || '').toLowerCase().includes(q) ||
       (o.contactName || '').toLowerCase().includes(q) ||
       o.originLocation.toLowerCase().includes(q) ||
@@ -562,7 +691,7 @@ export default function ManagerRequestsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead style={{ backgroundColor: '#f8fafc' }}>
               <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>#ID</th>
+                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>REQ-ID</th>
                 <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>Customer</th>
                 <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>Route</th>
                 <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
@@ -596,7 +725,11 @@ export default function ManagerRequestsPage() {
                   const sc = STATUS_COLORS[order.status] || STATUS_COLORS.cancelled;
                   return (
                     <tr key={order.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '14px 16px', fontWeight: 700, color: '#1d4ed8', fontSize: '13px' }}>#{order.id}</td>
+                      <td style={{ padding: '14px 16px', fontWeight: 700, color: '#1d4ed8', fontSize: '13px' }}>
+                        <Link href={`/manager/requests/${order.id}`} style={{ color: '#1d4ed8', textDecoration: 'none' }}>
+                          {order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`}
+                        </Link>
+                      </td>
                       <td style={{ padding: '14px 16px' }}>
                         <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>{order.contactName || '—'}</div>
                         <div style={{ fontSize: '11px', color: '#94a3b8' }}>{order.customerEmail}</div>
@@ -628,7 +761,7 @@ export default function ManagerRequestsPage() {
                           {/* Approve - only for requested status */}
                           {order.status === 'requested' && (
                             <button
-                              onClick={() => { setApproveOrder(order); setTotalCostInput(''); }}
+                              onClick={() => openApproveModal(order)}
                               title="Approve"
                               style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #bbf7d0', background: '#dcfce7', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#15803d', fontWeight: 600 }}
                             >
@@ -704,35 +837,255 @@ export default function ManagerRequestsPage() {
       </div>
 
       {/* Approve Modal */}
-      {approveOrder && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', borderRadius: '16px', padding: '28px', width: '440px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', margin: '0 0 8px' }}>Approve Request #{approveOrder.id}</h3>
-            <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 20px' }}>
-              {approveOrder.originLocation} → {approveOrder.destinationLocation}<br />
-              Customer: {approveOrder.contactName || approveOrder.customerEmail}
-            </p>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a', display: 'block', marginBottom: '6px' }}>
-              Quoted Price (VND) <span style={{ color: '#94a3b8', fontWeight: 400 }}>optional</span>
-            </label>
-            <input
-              type="number"
-              min={0}
-              value={totalCostInput}
-              onChange={(e) => setTotalCostInput(e.target.value)}
-              placeholder="e.g. 15000000"
-              style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', marginBottom: '20px' }}
-            />
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setApproveOrder(null)} style={{ padding: '9px 20px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontSize: '13px', fontWeight: 600, color: '#64748b', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleApprove} disabled={actionLoading} style={{ padding: '9px 24px', borderRadius: '8px', border: 'none', background: '#15803d', color: '#fff', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: actionLoading ? 0.7 : 1 }}>
-                {actionLoading ? 'Approving...' : '✓ Approve Request'}
-              </button>
+      {approveOrder && (() => {
+        const routeInfo = buildEquineRoute(
+          approveOrder.originLocation || "",
+          approveOrder.destinationLocation || "",
+          selectedTransportMode
+        );
+        const horseCount = approveOrder.requestedHorseCount || (approveOrder.horses?.length || 1);
+        const orderCode = approveOrder.requestCode || `REQ-${String(approveOrder.id).padStart(3, "0")}`;
+
+        return (
+          <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+            <div style={{ background: "#fff", borderRadius: "16px", padding: "24px 28px", width: "100%", maxWidth: "560px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+              {/* Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <h3 style={{ fontSize: "18px", fontWeight: 800, color: "#0f172a", margin: 0 }}>
+                  Phê duyệt đơn vận chuyển {orderCode}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setApproveOrder(null)}
+                  style={{ background: "transparent", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "18px", padding: "4px" }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Route & Distance Card */}
+              <div style={{ padding: "14px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", marginBottom: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: 700, color: "#64748b" }}>
+                    Lộ trình & Khoảng cách:
+                  </span>
+                  <div style={{ display: "flex", gap: "4px", background: "#fff", padding: "3px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                    <button
+                      type="button"
+                      onClick={() => handleModeToggle("road")}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "4px 10px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        borderRadius: "6px",
+                        border: "none",
+                        cursor: "pointer",
+                        backgroundColor: selectedTransportMode === "road" ? "#eff6ff" : "transparent",
+                        color: selectedTransportMode === "road" ? "#2563eb" : "#64748b",
+                      }}
+                    >
+                      <Truck size={12} /> Đường bộ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleModeToggle("air")}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "4px 10px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        borderRadius: "6px",
+                        border: "none",
+                        cursor: "pointer",
+                        backgroundColor: selectedTransportMode === "air" ? "#eff6ff" : "transparent",
+                        color: selectedTransportMode === "air" ? "#2563eb" : "#64748b",
+                      }}
+                    >
+                      <Plane size={12} /> Hàng không
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", marginBottom: "10px" }}>
+                  {approveOrder.originLocation} → {approveOrder.destinationLocation}
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", fontSize: "11px" }}>
+                  <div>
+                    <span style={{ color: "#94a3b8", display: "block" }}>Khoảng cách:</span>
+                    <strong style={{ color: "#0284c7", fontSize: "12px" }}>{routeInfo.distanceKm.toLocaleString("vi-VN")} km</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#94a3b8", display: "block" }}>Thời gian ước tính:</span>
+                    <strong style={{ color: "#0f172a", fontSize: "12px" }}>~{routeInfo.durationHours} giờ</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#94a3b8", display: "block" }}>Số lượng ngựa:</span>
+                    <strong style={{ color: "#15803d", fontSize: "12px" }}>{horseCount} cá thể</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Horse Info Card */}
+              <div style={{ padding: "14px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", marginBottom: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: 700, color: "#991b1b" }}>
+                    🐎 Thông tin cá thể ngựa vận chuyển ({approveOrder.horses?.length || horseCount} con):
+                  </span>
+                  <span style={{ fontSize: "10px", color: "#94a3b8", background: "#fff", padding: "2px 6px", borderRadius: "4px", border: "1px solid #e2e8f0" }}>
+                    Mã định danh thú y
+                  </span>
+                </div>
+
+                {approveOrder.horses && approveOrder.horses.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "140px", overflowY: "auto" }}>
+                    {approveOrder.horses.map((horse, idx) => (
+                      <div
+                        key={horse.horseId || idx}
+                        style={{ padding: "10px", background: "#fff", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "12px" }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                          <strong style={{ color: "#0f172a" }}>#{idx + 1}. {horse.name || "Chiến mã"}</strong>
+                          <span style={{ fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "12px", background: "#eff6ff", color: "#2563eb" }}>
+                            {horse.breed || "Ngựa đua"}
+                          </span>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px", fontSize: "11px", color: "#64748b" }}>
+                          <div>Tuổi / Giới tính: <strong style={{ color: "#0f172a" }}>{horse.age ? `${horse.age} tuổi` : "N/A"} • {horse.gender === "male" ? "Đực" : horse.gender === "female" ? "Cái" : horse.gender || "N/A"}</strong></div>
+                          <div>Màu / Cân nặng: <strong style={{ color: "#0f172a" }}>{horse.color || "Chestnut"} {horse.weight ? `• ${horse.weight} kg` : ""}</strong></div>
+                          <div>Microchip/Passport: <strong style={{ color: "#0f172a", fontFamily: "monospace" }}>{horse.microchipNo || horse.passportNo || "981456789234123"}</strong></div>
+                        </div>
+                        {horse.medicalStatus && (
+                          <div style={{ marginTop: "4px", fontSize: "11px", color: "#b45309" }}>
+                            🩺 Sức khỏe: {horse.medicalStatus}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ padding: "8px 12px", background: "#fff", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "12px", color: "#64748b" }}>
+                    Khách hàng: <strong style={{ color: "#0f172a" }}>{approveOrder.contactName || approveOrder.customerEmail}</strong>
+                  </div>
+                )}
+              </div>
+
+              {/* Price & Currency */}
+              <div style={{ marginBottom: "16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <label style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                    Chi phí vận chuyển báo giá (Total Cost) <span style={{ color: "#dc2626" }}>*</span>
+                  </label>
+                  <div style={{ display: "flex", gap: "4px", background: "#f1f5f9", padding: "2px", borderRadius: "6px" }}>
+                    <button
+                      type="button"
+                      onClick={() => handleCurrencyToggle("USD")}
+                      style={{
+                        padding: "3px 8px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        borderRadius: "4px",
+                        border: "none",
+                        cursor: "pointer",
+                        background: costCurrency === "USD" ? "#fff" : "transparent",
+                        color: costCurrency === "USD" ? "#2563eb" : "#64748b",
+                        boxShadow: costCurrency === "USD" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                      }}
+                    >
+                      USD ($)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCurrencyToggle("VND")}
+                      style={{
+                        padding: "3px 8px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        borderRadius: "4px",
+                        border: "none",
+                        cursor: "pointer",
+                        background: costCurrency === "VND" ? "#fff" : "transparent",
+                        color: costCurrency === "VND" ? "#16a34a" : "#64748b",
+                        boxShadow: costCurrency === "VND" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                      }}
+                    >
+                      VND (₫)
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="number"
+                    min={0}
+                    value={totalCostInput}
+                    onChange={(e) => setTotalCostInput(e.target.value)}
+                    placeholder={costCurrency === "USD" ? "e.g. 2500" : "e.g. 60000000"}
+                    style={{
+                      width: "100%",
+                      padding: "10px 60px 10px 14px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "14px",
+                      fontWeight: 700,
+                      outline: "none",
+                    }}
+                  />
+                  <span style={{ position: "absolute", right: "12px", top: "12px", fontSize: "12px", fontWeight: 700, color: "#64748b" }}>
+                    {costCurrency === "USD" ? "USD ($)" : "VND (₫)"}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b", marginTop: "6px" }}>
+                  <span>Tỷ lệ quy đổi khi lưu báo giá (1 USD ≈ 25,400 VND):</span>
+                  <strong style={{ color: "#0f172a" }}>
+                    {costCurrency === "USD"
+                      ? `≈ ${(Math.round((parseFloat(totalCostInput) || 0) * 25400)).toLocaleString("vi-VN")} VND`
+                      : `≈ $${(Math.round((parseFloat(totalCostInput) || 0) / 25400)).toLocaleString("en-US")} USD`}
+                  </strong>
+                </div>
+                <p style={{ fontSize: "11px", color: "#94a3b8", margin: "4px 0 0 0" }}>
+                  Báo giá được lưu bằng VND. Sau khi duyệt, khách hàng mở chi tiết đơn để xem mục thanh toán SePay.
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", paddingTop: "10px", borderTop: "1px solid #f1f5f9" }}>
+                <button
+                  type="button"
+                  onClick={() => setApproveOrder(null)}
+                  style={{ padding: "9px 20px", borderRadius: "8px", border: "1px solid #e2e8f0", background: "#fff", fontSize: "13px", fontWeight: 600, color: "#64748b", cursor: "pointer" }}
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={actionLoading}
+                  style={{
+                    padding: "9px 24px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "#15803d",
+                    color: "#fff",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    cursor: actionLoading ? "not-allowed" : "pointer",
+                    opacity: actionLoading ? 0.7 : 1,
+                  }}
+                >
+                  {actionLoading ? "Đang xử lý..." : "Xác nhận phê duyệt"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
+        );
+      })()}
       {/* Reject Modal */}
       {rejectOrder && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
