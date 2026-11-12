@@ -14,7 +14,7 @@
     "migrate:payment-gate": "node ../database/apply-payment-gate-migration.cjs",
     "migrate:sepay": "node ../database/apply-sepay-migration.cjs",
     "migrate:road-trips": "node ../database/apply-road-trip-migration.cjs",
-    "test:controlled": "npm run build && node --test test/controlled-fixes.test.cjs test/road-trips-policy.test.cjs",
+    "test:controlled": "npm run build && node --test test/controlled-fixes.test.cjs test/road-trips-policy.test.cjs test/merge-resolution.test.cjs",
     "migrate:transport-mode": "node ../database/apply-transport-mode-migration.cjs"
   },
   "dependencies": {

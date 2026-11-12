@@ -235,6 +235,45 @@ export class DocumentsService {
     return location.trim() || 'Global Baseline';
   }
 
+  private computeTripTargetDate(order?: {
+    expected_arrival_date?: Date | string | null;
+    departure_date?: Date | string | null;
+    requested_date?: Date | string | null;
+  }): string | null {
+    const raw = order?.expected_arrival_date || order?.departure_date || order?.requested_date;
+    if (!raw) return null;
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return null;
+    return d.toISOString().split('T')[0];
+  }
+
+  private evaluateDocumentExpiry(
+    expiryDate: string | null,
+    tripTargetDate: string | null,
+  ): { isExpiredForTrip: boolean; isExpiringSoonForTrip: boolean; expiryNotice?: string } {
+    if (!expiryDate || !tripTargetDate) {
+      return { isExpiredForTrip: false, isExpiringSoonForTrip: false };
+    }
+    if (expiryDate < tripTargetDate) {
+      return {
+        isExpiredForTrip: true,
+        isExpiringSoonForTrip: false,
+        expiryNotice: `Hết hạn vào ${expiryDate}, trước ngày đến dự kiến (${tripTargetDate})`,
+      };
+    }
+    const diffDays = Math.floor(
+      (new Date(expiryDate).getTime() - new Date(tripTargetDate).getTime()) / (1000 * 60 * 60 * 24),
+    );
+    if (diffDays <= 3) {
+      return {
+        isExpiredForTrip: false,
+        isExpiringSoonForTrip: true,
+        expiryNotice: `Sắp hết hạn (${diffDays} ngày sau khi đến nơi)`,
+      };
+    }
+    return { isExpiredForTrip: false, isExpiringSoonForTrip: false };
+  }
+
   // --- Order Compliance Checklist ---
   async getOrderComplianceChecklist(
     user: AuthenticatedUser,
@@ -267,16 +306,30 @@ export class DocumentsService {
 
     // Lấy danh sách ngựa trong đơn
     const horsesInOrder = await this.documentsStore.findHorsesInOrder(orderId);
+    const tripTargetDate = this.computeTripTargetDate(order);
 
     const horseItems: HorseComplianceItem[] = [];
     let totalApprovedDocs = 0;
+    let hasExpiredDocuments = false;
 
     for (const h of horsesInOrder) {
-      const docs = await this.documentsStore.findDocumentsByHorseId(h.horse_id);
+      const rawDocs = await this.documentsStore.findDocumentsByHorseId(h.horse_id);
+      const docs = rawDocs.map((d) => {
+        const expiryEval = this.evaluateDocumentExpiry(d.expiryDate, tripTargetDate);
+        if (expiryEval.isExpiredForTrip) {
+          hasExpiredDocuments = true;
+        }
+        return {
+          ...d,
+          ...expiryEval,
+        };
+      });
 
-      // Tìm những quy định đã có tài liệu approved
+      // Tìm những quy định đã có tài liệu approved VÀ còn hạn đến ngày kết thúc chuyến đi
       const approvedRegIds = new Set(
-        docs.filter((d) => d.status === DocumentStatus.APPROVED).map((d) => d.regulationId),
+        docs
+          .filter((d) => d.status === DocumentStatus.APPROVED && !d.isExpiredForTrip)
+          .map((d) => d.regulationId),
       );
 
       // Tìm những quy định đã có bất kỳ tài liệu nào được nộp (approved, submitted hoặc rejected)
@@ -328,6 +381,8 @@ export class DocumentsService {
       isUsingGlobalBaseline,
       complianceNotice,
       requirementsSent,
+      tripTargetDate,
+      hasExpiredDocuments,
       horses: horseItems,
     };
   }
@@ -415,6 +470,19 @@ export class DocumentsService {
 
     if (dto.status === DocumentStatus.REJECTED && (!dto.notes || dto.notes.trim().length === 0)) {
       throw new BadRequestException('Khi từ chối tài liệu, bắt buộc phải có lý do cụ thể');
+    }
+
+    if (dto.status === DocumentStatus.APPROVED && dto.expiryDate) {
+      const activeShipmentIds = await this.documentsStore.findActiveShipmentIdsByHorseId(doc.horseId);
+      for (const sid of activeShipmentIds) {
+        const orderDetails = await this.documentsStore.findOrderDetails(sid);
+        const tripTargetDate = this.computeTripTargetDate(orderDetails);
+        if (tripTargetDate && dto.expiryDate < tripTargetDate) {
+          throw new BadRequestException(
+            `Tài liệu hết hạn vào ngày ${dto.expiryDate}, trước ngày dự kiến hoàn thành chuyến đi (${tripTargetDate}). Không thể phê duyệt; vui lòng từ chối để khách hàng bổ sung giấy tờ mới.`,
+          );
+        }
+      }
     }
 
     await this.documentsStore.updateDocumentReview(
