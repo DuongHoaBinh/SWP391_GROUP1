@@ -23,6 +23,10 @@ import { AddHorseModal } from '@/components/horses/AddHorseModal';
 import { apiClient } from '@/lib/api-client';
 import { getCurrentUser } from '@/lib/auth';
 import dynamic from 'next/dynamic';
+import useSWR from 'swr';
+import { InsuranceSelection } from '@/features/orders/components/InsuranceSelection';
+import { CostSummary } from '@/features/orders/components/InsuranceSummary';
+import { defaultInsurance, insuranceNames, previewInsurance, vnd, type InsuranceInput, type InsurancePolicy } from '@/features/orders/insurance-policy';
 
 const RoutePlanningMap = dynamic(
   () => import('@/components/maps/RoutePlanningMap'),
@@ -140,6 +144,9 @@ function CreateTransportRequestForm() {
 
   // Horse quantities mapping: horseId -> quantity
   const [horseQuantities, setHorseQuantities] = useState<Record<string, number>>({});
+  const [insuranceValues, setInsuranceValues] = useState<Record<string, InsuranceInput>>({});
+  const [insuranceError, setInsuranceError] = useState('');
+  const { data: policy, error: policyError, mutate: reloadPolicy } = useSWR<InsurancePolicy>('/orders/insurance-policy', url => apiClient<InsurancePolicy>(url), { shouldRetryOnError: false });
 
   useEffect(() => {
     refreshHorses();
@@ -175,6 +182,14 @@ function CreateTransportRequestForm() {
       quantity: horseQuantities[h.id] || 1,
     }));
 
+  const estimatedInsuranceFee = selectedHorses.reduce((sum, h) => sum + previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null).fee * h.quantity, 0);
+  const validateInsurance = () => {
+    const invalid = selectedHorses.map(h => ({ name: h.name, ...previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null) })).find(p => p.error);
+    const message = invalid ? `${invalid.name}: ${invalid.error}` : estimatedInsuranceFee > 9999999999999 ? 'Tổng phí bảo hiểm vượt giới hạn đơn hàng.' : '';
+    setInsuranceError(message);
+    return !message;
+  };
+
   const breedBreakdown = selectedHorses.reduce((acc, h) => {
     const breed = h.breed || 'Other Breed';
     acc[breed] = (acc[breed] || 0) + 1;
@@ -209,6 +224,7 @@ function CreateTransportRequestForm() {
       if (!isValid) return;
     }
     if (currentStep === 2) {
+      if (!validateInsurance()) return;
       if (totalSelectedHorses === 0) {
         alert('Vui lòng chọn ít nhất một con ngựa sẵn sàng vận chuyển.');
         return;
@@ -238,7 +254,7 @@ function CreateTransportRequestForm() {
   };
 
   const onSubmitForm = async (data: FormData) => {
-    if (isSubmitting) return;
+    if (isSubmitting || !validateInsurance()) return;
     setIsSubmitting(true);
     try {
       const selectedHorsesData: Array<{
@@ -247,7 +263,7 @@ function CreateTransportRequestForm() {
         breed?: string;
         gender?: 'male' | 'female' | 'gelding';
         age?: number;
-        quantity: number;
+        quantity: number; declaredValue: number; declaredCurrency: 'VND' | 'USD'; insurancePackage: 'basic' | 'standard' | 'premium';
       }> = [];
 
       for (const h of selectedHorses) {
@@ -260,6 +276,9 @@ function CreateTransportRequestForm() {
           gender: h.gender === 'Stallion' ? 'male' : h.gender === 'Mare' ? 'female' : 'gelding',
           age: h.age,
           quantity: qty,
+          declaredValue: Number((insuranceValues[h.id] ?? defaultInsurance).declaredValue || 0),
+          declaredCurrency: (insuranceValues[h.id] ?? defaultInsurance).declaredCurrency,
+          insurancePackage: (insuranceValues[h.id] ?? defaultInsurance).insurancePackage,
         });
       }
 
@@ -790,6 +809,9 @@ function CreateTransportRequestForm() {
                   })}
                 </tbody>
               </table>
+              {selectedHorses.length > 0 && <InsuranceSelection horses={selectedHorses} values={insuranceValues}
+                onChange={(id, value) => { setInsuranceValues(previous => ({ ...previous, [id]: value })); setInsuranceError(''); }}
+                policy={policy ?? null} error={policyError ? 'Chưa tải được chính sách bảo hiểm.' : insuranceError} onRetry={() => void reloadPolicy()} />}
             </div>
           </div>
         )}
@@ -938,6 +960,17 @@ function CreateTransportRequestForm() {
           </div>
         )}
       </div>
+
+      {currentStep === 3 && <section aria-label="Xác nhận bảo hiểm" className="mx-auto w-full max-w-[850px] space-y-4 rounded-xl border border-slate-200 bg-white p-5">
+        <h3 className="font-semibold">Bảo hiểm & chi phí dự kiến</h3>
+        <ul className="space-y-2 text-sm">{selectedHorses.map(h => {
+          const value = insuranceValues[h.id] ?? defaultInsurance;
+          return <li key={h.id}><strong>{h.name}</strong> · {Number(value.declaredValue || 0).toLocaleString('vi-VN')} {value.declaredCurrency}/ngựa · Gói {insuranceNames[value.insurancePackage]} · {vnd(previewInsurance(value, policy ?? null).fee * h.quantity)}</li>;
+        })}</ul>
+        <CostSummary transportCost={null} insuranceFee={estimatedInsuranceFee} />
+        <p className="text-xs text-slate-500">Phí bảo hiểm làm tròn đến VNĐ trên mỗi ngựa. Backend xác nhận lại phí khi lưu yêu cầu. Tổng tiền sẽ gồm cước cơ bản và phí bảo hiểm; chưa yêu cầu thanh toán ở bước này.</p>
+        {insuranceError && <p role="alert" className="text-sm text-red-700">{insuranceError}</p>}
+      </section>}
 
       {/* STICKY BOTTOM ACTION BAR */}
       <div

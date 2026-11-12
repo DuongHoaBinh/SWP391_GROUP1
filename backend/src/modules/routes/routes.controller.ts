@@ -138,7 +138,7 @@ export class RoutesController {
   // --- Step 4: Ready to Depart Gate ---
   @Get('plan/:shipmentId/readiness')
   @ApiOperation({
-    summary: 'Bước 4: Kiểm tra cổng hội tụ Ready to depart (Cả 2 điều kiện: Kế hoạch đã Confirmed + Kiểm dịch Flow 2 hoàn tất 100%)',
+    summary: 'Bước 4: Kiểm tra cổng hội tụ Ready to depart (Cả 3 điều kiện: Lộ trình Confirmed + Hồ sơ Flow 2 đạt 100% + SePay thanh toán thành công)',
   })
   getTripPlanReadiness(
     @CurrentUser() user: AuthenticatedUser,

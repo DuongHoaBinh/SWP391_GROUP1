@@ -67,6 +67,10 @@ CREATE TABLE horse (
   age INT,
   microchip_no VARCHAR(50) UNIQUE,
   passport_no VARCHAR(50) UNIQUE,
+  color VARCHAR(100),
+  weight VARCHAR(100),
+  medical_status VARCHAR(255),
+  special_requirements TEXT,
   status ENUM('active','in_transit','retired','deceased') NOT NULL DEFAULT 'active',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_horse_owner FOREIGN KEY (owner_id) REFERENCES `user`(user_id)
@@ -132,6 +136,8 @@ CREATE TABLE shipment (
   change_request_notes VARCHAR(500),
   status ENUM('requested','change_requested','approved','rejected','planning','in_transit','completed','cancelled') NOT NULL DEFAULT 'requested',
   total_cost DECIMAL(15,2) NOT NULL DEFAULT 0,
+  transport_cost DECIMAL(15,2) NULL DEFAULT NULL,
+  insurance_fee DECIMAL(15,2) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_shipment_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id),
@@ -146,6 +152,16 @@ CREATE TABLE shipment_horse (
   shipment_id INT NOT NULL,
   horse_id INT NOT NULL,
   stall_number VARCHAR(20),
+  declared_value DECIMAL(15,2) NOT NULL DEFAULT 0,
+  declared_currency CHAR(3) NOT NULL DEFAULT 'VND',
+  exchange_rate DECIMAL(18,6) NOT NULL DEFAULT 1,
+  declared_value_vnd DECIMAL(15,2) NOT NULL DEFAULT 0,
+  insurance_package VARCHAR(50) NOT NULL DEFAULT 'basic',
+  insurance_fee DECIMAL(15,2) NOT NULL DEFAULT 0,
+  max_compensation DECIMAL(15,2) NOT NULL DEFAULT 50000000,
+  emergency_vet_covered BOOLEAN NOT NULL DEFAULT FALSE,
+  insurance_policy_version VARCHAR(30) NOT NULL DEFAULT 'equine-v1',
+
   notes VARCHAR(255),
   UNIQUE KEY uq_shipment_horse (shipment_id, horse_id),
   CONSTRAINT fk_sh_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
@@ -319,3 +335,34 @@ INSERT INTO `role` (role_name, description) VALUES
 -- Do not insert plaintext passwords or CHANGE_ME_HASH into a shared environment.
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+
+-- Official invoices are issued only after Flow 3 confirmation. Historical payments are preserved.
+CREATE TABLE IF NOT EXISTS shipment_invoice (
+  invoice_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  route_id INT NOT NULL,
+  customer_id INT NOT NULL,
+  amount BIGINT NOT NULL,
+  currency CHAR(3) NOT NULL DEFAULT 'VND',
+  snapshot JSON NOT NULL,
+  issued_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uq_invoice_route (route_id),
+  INDEX idx_invoice_shipment (shipment_id, issued_at),
+  CONSTRAINT fk_invoice_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_invoice_route FOREIGN KEY (route_id) REFERENCES route(route_id),
+  CONSTRAINT fk_invoice_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id),
+  CHECK (amount > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shipment_insurance_revision (
+  revision_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  changed_by INT NOT NULL,
+  previous_snapshot JSON NOT NULL,
+  reason VARCHAR(100) NOT NULL DEFAULT 'customer_resubmission',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_insurance_revision_shipment (shipment_id, created_at),
+  CONSTRAINT fk_insurance_revision_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_insurance_revision_user FOREIGN KEY (changed_by) REFERENCES `user`(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

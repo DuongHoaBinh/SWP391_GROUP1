@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { createPool, Pool, PoolConnection } from 'mysql2/promise';
 import { randomUUID } from 'node:crypto';
 import { SandboxPayment, SandboxPaymentStatus } from './momo-payment.types';
+import { paymentGate } from './payment-gate';
 
 @Injectable()
 export class MomoPaymentStore implements OnModuleInit, OnModuleDestroy {
@@ -40,6 +41,8 @@ export class MomoPaymentStore implements OnModuleInit, OnModuleDestroy {
       if (!orders.length) throw new NotFoundException('Không tìm thấy đơn hàng');
       const order = orders[0];
       if (Number(order.customer_id) !== customerId) throw new ForbiddenException('Đơn hàng không thuộc tài khoản của bạn');
+      const gate = await paymentGate(db, shipmentId);
+      if (!gate.paymentUnlocked) throw new BadRequestException(gate.blockedReason!);
       if (!['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(order.status)) throw new BadRequestException('Đơn hàng cần được duyệt và có báo giá trước khi thanh toán thử');
       const rawCost = Number(order.total_cost);
       const amount = rawCost > 0 && rawCost < 100000 ? Math.round(rawCost * 25400) : Math.round(rawCost);

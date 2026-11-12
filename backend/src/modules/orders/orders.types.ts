@@ -23,6 +23,15 @@ export interface OrderHorse {
   gender: 'male' | 'female' | 'gelding' | null;
   age: number | null;
   quantity?: number;
+  declaredValue: number;
+  declaredCurrency: 'VND' | 'USD';
+  exchangeRate: number;
+  declaredValueVnd: number;
+  insurancePackage: 'basic' | 'standard' | 'premium';
+  insuranceFee: number;
+  maxCompensation: number;
+  emergencyVetCovered: boolean;
+  insurancePolicyVersion: string;
 }
 
 export interface TransportOrder {
@@ -49,6 +58,8 @@ export interface TransportOrder {
   changeRequestNotes: string | null;
   status: ShipmentStatus;
   totalCost: number;
+  transportCost: number | null;
+  insuranceFee: number;
   paymentStatus?: 'unpaid' | 'pending' | 'review' | 'succeeded';
   paymentCode?: string | null;
   paidAt?: string | null;
