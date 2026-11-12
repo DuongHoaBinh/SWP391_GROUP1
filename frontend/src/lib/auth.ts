@@ -4,8 +4,6 @@ import { UserProfile } from './types';
 const TOKEN_KEY = 'equitransit_token';
 const USER_KEY = 'equitransit_user';
 
-export const SESSION_EXPIRED_MESSAGE = 'Phiên đăng nhập đã hết hạn hoặc không còn hợp lệ. Vui lòng đăng nhập lại.';
-
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);

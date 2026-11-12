@@ -17,8 +17,6 @@ export interface SepayPayment extends RowDataPacket {
   shipment_status?: string;
   current_amount?: number | string;
   shipment_customer_id?: number;
-  payment_unlocked?: boolean;
-  gate_blocked_reason?: string | null;
 }
 
 export interface SepayTransaction {
@@ -43,4 +41,4 @@ export interface SepayConfig {
   secret: string;
 }
 
-export const PAYABLE_SHIPMENT_STATUSES = ['planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'];
+export const PAYABLE_SHIPMENT_STATUSES = ['confirmed', 'ready_to_depart', 'in_transit', 'completed'];

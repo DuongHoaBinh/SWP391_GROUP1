@@ -107,7 +107,6 @@ export class MomoPaymentService {
     shipmentId: number,
     dto?: ConfirmAtmSandboxDto,
   ) {
-    this.config();
     const customerId = this.customer(user);
     const payment = await this.store.latest(shipmentId, customerId);
     if (!payment) throw new BadRequestException('Chưa khởi tạo giao dịch thanh toán cho đơn này');
