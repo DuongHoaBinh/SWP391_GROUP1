@@ -4,10 +4,11 @@ import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { SepayPaymentStore } from './sepay-payment.store';
 import { PAYABLE_SHIPMENT_STATUSES, SepayConfig, SepayPayment, SepayTransaction } from './sepay-payment.types';
+import { ShipmentLifecycle } from '../../common/shipment-lifecycle';
 
 @Injectable()
 export class SepayPaymentService {
-  constructor(private readonly store: SepayPaymentStore) {}
+  constructor(private readonly store: SepayPaymentStore, private readonly lifecycle: ShipmentLifecycle) {}
 
   config(): SepayConfig {
     const secret = process.env.SEPAY_WEBHOOK_SECRET ?? '';
@@ -31,6 +32,7 @@ export class SepayPaymentService {
 
   private blockedReason(payment: SepayPayment, config: SepayConfig | null): string | null {
     if (payment.status !== 'pending') return null;
+    if (payment.payment_unlocked === false) return payment.gate_blocked_reason ?? 'Lộ trình chưa được xác nhận.';
     if (!config) return 'Thanh toán đang tạm ngưng. Vui lòng liên hệ bộ phận vận chuyển trước khi chuyển tiền.';
     if ((payment.shipment_status !== undefined && !PAYABLE_SHIPMENT_STATUSES.includes(payment.shipment_status)) ||
         (payment.shipment_customer_id !== undefined && Number(payment.shipment_customer_id) !== Number(payment.customer_id))) {
@@ -64,7 +66,8 @@ export class SepayPaymentService {
     const payment = await this.store.latest(shipmentId, staff ? null : this.customer(user));
     let config: SepayConfig | null = null;
     try { config = this.config(); } catch {}
-    return { enabled: config !== null, provider: 'sepay', payment: this.view(payment, config) };
+    const billing = await this.store.billing(shipmentId);
+    return { enabled: config !== null, provider: 'sepay', ...billing, payment: this.view(payment ? { ...payment, payment_unlocked: billing.paymentUnlocked, gate_blocked_reason: billing.blockedReason } : null, config) };
   }
 
   async create(user: AuthenticatedUser, shipmentId: number) {
@@ -96,7 +99,8 @@ export class SepayPaymentService {
     const codes = [...payload.content.matchAll(pattern)].map(match => match[1].toUpperCase());
     const unique = [...new Set(codes)];
     const code = unique.length === 1 && (!payload.code || payload.code.toUpperCase() === unique[0]) ? unique[0] : null;
-    await this.store.receive(payload, code, config);
+    const shipmentId = await this.store.receive(payload, code, config);
+    if (shipmentId) await this.lifecycle.changed(shipmentId);
     return { success: true };
   }
 }

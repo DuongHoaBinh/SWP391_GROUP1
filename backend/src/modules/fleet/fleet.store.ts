@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import {
   AvailableStaff,
@@ -235,15 +235,31 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async assignVehicles(shipmentId: number, vehicleIds: number[]): Promise<void> {
-    // Xóa các liên kết cũ nếu có
-    await this.pool.execute('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [shipmentId]);
-
-    for (const vId of vehicleIds) {
-      await this.pool.execute(
+    const db = await this.pool.getConnection();
+    try {
+    await db.beginTransaction();
+    const [orders] = await db.execute<RowDataPacket[]>('SELECT status, requested_horse_count FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+    if (!orders[0] || !['approved', 'planning'].includes(orders[0].status)) throw new BadRequestException('Chỉ phân công xe trước khi kế hoạch được xác nhận');
+    const ids = [...new Set(vehicleIds)].sort((a, b) => a - b);
+    if (ids.length) {
+      const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT * FROM vehicle WHERE vehicle_id IN (${ids.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, ids);
+      if (vehicles.length !== ids.length || vehicles.some(v => v.status === 'maintenance') || vehicles.reduce((sum, v) => sum + Number(v.capacity), 0) < Number(orders[0].requested_horse_count)) throw new BadRequestException('Phương tiện không hoạt động hoặc không đủ sức chứa');
+      const [conflicts] = await db.execute<RowDataPacket[]>(`SELECT sv.shipment_id FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id
+        WHERE sv.vehicle_id IN (${ids.map(() => '?').join(',')}) AND sv.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','rejected')`, [...ids, shipmentId]);
+      if (conflicts.length) throw new BadRequestException('Xe đã có phân công. Hãy chọn chuyến đường bộ trong màn hình lập tuyến để ghép chỗ và kiểm tra lịch');
+    }
+    const [planned] = await db.execute<RowDataPacket[]>('SELECT l.leg_id FROM route_leg l JOIN route r ON r.route_id = l.route_id WHERE r.shipment_id = ? AND l.vehicle_id IS NOT NULL', [shipmentId]);
+    if (planned.length) throw new BadRequestException('Xe đã có trong kế hoạch. Hãy điều chỉnh tại màn hình lập tuyến');
+    await db.execute('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [shipmentId]);
+    for (const vId of ids) {
+      await db.execute(
         'INSERT INTO shipment_vehicle (shipment_id, vehicle_id, assigned_date) VALUES (?, ?, NOW())',
         [shipmentId, vId],
       );
     }
+    await db.commit();
+    } catch (error) { await db.rollback(); throw error; }
+    finally { db.release(); }
   }
 
   async findAssignedStaff(shipmentId: number): Promise<ShipmentStaffAssignment[]> {
