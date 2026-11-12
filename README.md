@@ -72,6 +72,8 @@ Login requires the backend and its configured MySQL instance to be running. The 
 
 Run `npm run test:auth` from `frontend/` for login failure, session and redirect regressions.
 
+An expired or invalid session (HTTP 401) clears the old session and returns to login with an expiry notice and the original page as the return destination. Multiple failed requests redirect once; a delayed response from an old session cannot clear a newer login. Permission errors (403), server errors and connection failures do not sign the user out.
+
 ## Suggested ownership
 
 The first implementation slice is `auth`, `orders`, and `documents`, plus the `manager` and `customer` application routes. Other modules can be developed independently against the documented contracts.
