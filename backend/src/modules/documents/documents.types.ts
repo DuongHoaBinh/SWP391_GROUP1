@@ -53,6 +53,9 @@ export interface TransportDocument {
   reviewerNotes: string | null;
   createdAt: string;
   approvals?: DocumentApproval[];
+  isExpiredForTrip?: boolean;
+  isExpiringSoonForTrip?: boolean;
+  expiryNotice?: string;
 }
 
 export interface HorseComplianceItem {
@@ -77,6 +80,8 @@ export interface OrderComplianceChecklist {
   isUsingGlobalBaseline?: boolean;
   complianceNotice?: string;
   requirementsSent?: boolean;
+  tripTargetDate?: string | null;
+  hasExpiredDocuments?: boolean;
   horses: HorseComplianceItem[];
 }
 
