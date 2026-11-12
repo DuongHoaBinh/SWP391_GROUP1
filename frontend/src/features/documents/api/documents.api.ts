@@ -40,6 +40,9 @@ export interface ApiTransportDocument {
   reviewerNotes: string | null;
   createdAt: string;
   approvals?: AuthorityApprovalRecord[];
+  isExpiredForTrip?: boolean;
+  isExpiringSoonForTrip?: boolean;
+  expiryNotice?: string;
 }
 
 export interface HorseComplianceItem {
@@ -78,6 +81,8 @@ export interface OrderComplianceChecklist {
   requirementsSent?: boolean;
   isUsingGlobalBaseline?: boolean;
   complianceNotice?: string;
+  tripTargetDate?: string | null;
+  hasExpiredDocuments?: boolean;
   horses: HorseComplianceItem[];
 }
 

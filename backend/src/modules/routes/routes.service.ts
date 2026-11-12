@@ -330,8 +330,8 @@ export class RoutesService {
 
       await this.notificationsService.createNotification(
         order.customerId,
-        `Lịch trình vận chuyển đơn ${code} đã được xác nhận`,
-        `Đội ngũ điều phối và tài xế đã hoàn tất việc xác nhận lịch trình chuyến đi ${code}.`,
+        `Lịch trình đơn ${code} đã xác nhận — Cổng thanh toán đã mở`,
+        `Đội ngũ điều phối và tài xế đã hoàn tất việc xác nhận lịch trình chuyến đi ${code}. Cổng thanh toán cước vận chuyển đã được mở, quý khách vui lòng hoàn tất thanh toán để đoàn xe sẵn sàng xuất phát.`,
         'status_update',
         shipmentId,
       );
