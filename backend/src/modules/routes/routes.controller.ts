@@ -41,8 +41,8 @@ export class RoutesController {
 
   @Get('shipment/:shipmentId')
   @ApiOperation({ summary: 'Lấy thông tin lộ trình và danh sách điểm dừng của đơn vận chuyển' })
-  getRouteByShipmentId(@Param('shipmentId', ParseIntPipe) shipmentId: number) {
-    return this.routesService.getRouteByShipmentId(shipmentId);
+  getRouteByShipmentId(@CurrentUser() user: AuthenticatedUser, @Param('shipmentId', ParseIntPipe) shipmentId: number) {
+    return this.routesService.getRouteByShipmentId(shipmentId, user);
   }
 
   @Get('shipment/:shipmentId/plan')
@@ -50,8 +50,8 @@ export class RoutesController {
     summary:
       'Lấy toàn bộ kế hoạch chuyến đi (lộ trình, các chặng, xe, tài xế/hộ tống) và đánh giá tính hợp lệ để xuất bản (isReadyToPublish)',
   })
-  getFullTripPlan(@Param('shipmentId', ParseIntPipe) shipmentId: number) {
-    return this.routesService.getFullTripPlan(shipmentId);
+  getFullTripPlan(@CurrentUser() user: AuthenticatedUser, @Param('shipmentId', ParseIntPipe) shipmentId: number) {
+    return this.routesService.getFullTripPlan(shipmentId, user);
   }
 
   // --- Step 1a: Manager Sets Strategic Framework ---
@@ -138,7 +138,7 @@ export class RoutesController {
   // --- Step 4: Ready to Depart Gate ---
   @Get('plan/:shipmentId/readiness')
   @ApiOperation({
-    summary: 'Bước 4: Kiểm tra cổng hội tụ Ready to depart (Cả 2 điều kiện: Kế hoạch đã Confirmed + Kiểm dịch Flow 2 hoàn tất 100%)',
+    summary: 'Bước 4: Kiểm tra cổng hội tụ Ready to depart (Cả 3 điều kiện: Lộ trình Confirmed + Hồ sơ Flow 2 đạt 100% + SePay thanh toán thành công)',
   })
   getTripPlanReadiness(
     @CurrentUser() user: AuthenticatedUser,

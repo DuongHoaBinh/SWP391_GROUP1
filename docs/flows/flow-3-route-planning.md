@@ -11,6 +11,8 @@
   - **Cấp chiến lược (Strategic Framework):** Logistics Manager thiết lập định hướng tổng thể, chọn loại phương tiện, hãng bay, tuyến chính và chỉ định Coordinator.
   - **Cấp thực thi (Operational Details):** Fleet & Route Coordinator chọn xe cụ thể, dựng chi tiết các chặng (legs), điểm dừng, giờ giấc và thông tin booking chuyến bay.
 - **Tích hợp bên ngoài:** Không kết nối API đặt vé hãng bay thật; Coordinator đặt chỗ bên ngoài và nhập mã booking, số stall vào hệ thống.
+- **Hình thức đặt chỗ:** `order.bookingType` từ Flow 1 phân biệt `shared_stall` (chỉ mua số ô bằng số ngựa trên hành lang chung) và `dedicated_charter` (dịch vụ riêng cho đoàn, ưu tiên tuyến thẳng/giờ yêu cầu). Đây là lựa chọn dịch vụ độc lập với đường bộ/hàng không. Coordinator sắp xếp booking thực tế phù hợp lựa chọn; tính năng lựa chọn/báo giá không tự gom nhiều đơn vào một chuyến hay tự đặt vé hãng bay.
+- Khi phát hành invoice sau xác nhận, lưu `bookingType`, `stallUnitPrice` (nếu có), số ngựa, cước và bảo hiểm trong snapshot. Thanh toán vẫn đợi Flow 3 xác nhận, điều kiện xuất phát vẫn yêu cầu đủ tiền và đủ hồ sơ.
 
 ---
 
@@ -71,7 +73,7 @@
 - Chuyến đi tự động chuyển sang trạng thái **`Ready to depart`** khi và chỉ khi **CẢ BA** điều kiện được thỏa mãn:
   1. Kế hoạch lộ trình & phương tiện ở trạng thái **`Confirmed`** (Flow 3 xong - đã phân công và tài xế xác nhận).
   2. Toàn bộ hồ sơ kiểm dịch, hải quan của đàn ngựa đã được Chuyên viên & Cơ quan chức năng phê duyệt đạt chuẩn 100% (`isFullyCompliant === true`, Flow 2 xong).
-  3. Cước phí vận chuyển đã được khách hàng thanh toán thành công qua MoMo/Thẻ ngân hàng (`isPaymentSucceeded === true`).
+  3. Cước phí vận chuyển đã được ngân hàng xác nhận qua SePay, đúng số tiền hóa đơn (`shipment_sepay_payment.status = succeeded`; MoMo sandbox không được tính là tiền thật) (`isPaymentSucceeded === true`).
 - Nếu thiếu một trong ba điều kiện:
   - Hệ thống **chặn xuất phát** và hiển thị rõ lý do đang chờ: *"Đang chờ phê duyệt đủ hồ sơ kiểm dịch"*, *"Đang chờ xác nhận từ đội ngũ tài xế"* hoặc *"Đang chờ khách hàng hoàn tất thanh toán cước vận chuyển"*.
 - **Đầu ra:** Khi đạt `Ready to depart`, chuyến đi sẵn sàng cho Flow 4 (Tài xế bấm bắt đầu xuất phát và cập nhật nhật ký hành trình).
@@ -113,3 +115,30 @@ Ready to depart ──► [Chuyển giao sang Flow 4: Theo dõi hành trình]
 3. Chặng đường bộ xuyên biên giới hoặc chặng bay quốc tế bắt buộc phải có điểm dừng làm thủ tục hải quan / kiểm dịch.
 4. Chuyến đi tuyệt đối **không được xuất phát** (`Ready to depart`) nếu hồ sơ pháp lý kiểm dịch ở Flow 2 chưa hoàn tất 100%.
 5. Nếu phát sinh thay đổi lịch kiểm dịch ở Flow 2 làm ảnh hưởng ngày bay, Coordinator được phép mở lại kế hoạch về `Draft` để điều chỉnh ngày giờ các chặng và gửi Manager duyệt lại.
+
+
+## 6. Cổng thanh toán sau xác nhận (11/11/2026)
+
+- Duyệt Flow 1 chỉ có báo giá dự kiến. Hoàn tất Flow 2 cũng không tự mở QR.
+- Manager phải duyệt kế hoạch chi tiết; Driver/Escort chỉ xác nhận phân công của mình. Tất cả Driver/Escort phải xác nhận, các chặng phải có xe/chuyến bay và giờ đi/đến hợp lệ.
+- Lần xác nhận cuối ghi `confirmed`, tạo `shipment_invoice` và thông báo thanh toán trong cùng transaction. Một route có một hóa đơn; gửi lại không sinh trùng. Hóa đơn chụp lại giá VND, thông tin khách và các chặng tại thời điểm phát hành.
+- Customer đọc hóa đơn và in/lưu PDF trong chi tiết đơn hoặc trang thanh toán. Đây là hóa đơn cước vận chuyển của ứng dụng, không tích hợp hóa đơn thuế điện tử.
+- API SePay kiểm tra route mới nhất, xác nhận nhân sự, hóa đơn và giá hiện hành ở cả tạo QR, đọc QR và nhận tiền. Không suy ra đủ điều kiện từ `activeStepIndex` hay chỉ từ trạng thái đơn `planning`.
+- Thanh toán hợp lệ và thay đổi hồ sơ kích hoạt đánh giá lại cổng xuất phát. Thiếu một trong ba điều kiện thì chưa được `ready_to_depart`. Báo giá 0 không được xem là đã thanh toán. API xuất bản và mốc xuất phát Flow 4 cũng phải kiểm tra cổng này.
+- Giữ giá trị trạng thái thanh toán đang dùng là `succeeded` (ý nghĩa đã trả tiền), không thêm giá trị `paid` song song.
+- Migration `016_route_payment_gate.sql` không sửa lịch sử thanh toán. Với kế hoạch cũ chưa có hóa đơn, Driver/Escort hoặc Admin xác nhận lại phân công để phát hành hóa đơn; không backfill bằng cách giả định kế hoạch lịch sử đã hợp lệ.
+- Cấu hình khung, dựng lại chi tiết và duyệt lại không được sửa ngầm kế hoạch đã xác nhận/phát hành hóa đơn. Điều chỉnh điểm dừng trong chuyến đi vẫn theo API lịch trình và lý do hiện có; hóa đơn giữ snapshot lúc phát hành.
+
+## 7. Shared/Dedicated đường bộ — phạm vi được duyệt ngày 12/11/2026
+
+- Coordinator tạo chuyến đường bộ từ chặng mới khi lưu kế hoạch, hoặc chọn `roadTripId` để ghép thủ công các đơn phù hợp. Coordinator chịu trách nhiệm đánh giá tuyến và lịch; không đặt ngưỡng lệch giờ/khoảng cách tự động.
+- Một chuyến lưu xe, loại booking, điểm đi/đến và khoảng giờ bất biến. Chọn chuyến có sẵn lấy thông tin chặng từ chuyến, không tin xe/giờ/slot do client gửi kèm. Một đơn có một phân bổ trên mỗi chuyến; mỗi ngựa chiếm một Stall.
+- Shared cho nhiều Customer cùng chuyến; Dedicated chỉ cho một đơn sử dụng xe trong khoảng giờ đã đặt. Các chuyến khác trên cùng xe không được trùng khoảng giờ. Hai khoảng có giờ kết thúc/bắt đầu bằng nhau không giao nhau.
+- Lưu kế hoạch khóa shipment/route và khóa các xe theo ID tăng dần trong cùng transaction, rồi kiểm tra tổng slot, ghi các chặng và liên kết xe. Không xác nhận phần phân bổ khi bất kỳ chặng nào thất bại. Xác nhận nhận chuyến kiểm tra lại capacity và reservation, gồm kế hoạch cũ chưa có roadTripId.
+- Phân bổ cũ chưa có giờ/chuyến phải được điều phối lại trước khi dùng xe cho đơn khác. Các API phân công xe không có lịch không được thay thế phân bổ đã nằm trong kế hoạch; dùng màn hình lập tuyến để sửa/ghép.
+- Khoảng đặt chỗ đã ghi vẫn được đối chiếu khi kiểm tra trùng thời gian; không tự xóa lịch sử đặt chỗ khi hoàn tất đơn. Hóa đơn giữ snapshot riêng, bao gồm booking và chặng đường bộ.
+- Danh sách chuyến ghép chỉ dành cho Coordinator/Manager/Admin, không trả danh sách khách/ngựa của các đơn khác. Customer chỉ đọc route/plan của đơn thuộc mình.
+- MoMo sandbox không cập nhật trạng thái vận hành hoặc trạng thái đã thanh toán chính thức của đơn. Mọi mutation sandbox kiểm tra cờ bật và môi trường; số tiền lấy nguyên giá trị VND đã chốt. Readiness vẫn dựa vào SePay và hồ sơ pháp lý.
+- Chưa được duyệt mô hình vận hành ghép/thuê riêng hàng không. Giữ nguyên các trường hãng bay, flight booking reference và stalls hiện có; không thêm quy tắc thuê cả chuyến bay/khoang riêng.
+- Migration 019 thêm road_trip và route_leg.road_trip_id; không backfill hoặc sửa giá/booking lịch sử. Chạy sau các migration hiện có trên môi trường được phép.
+- Migration 020 lưu riêng shipment.transport_mode (road/air), không thay Domestic/International. Chọn mode tại bước duyệt giá và giữ trong response/snapshot; dữ liệu cũ không bị suy đoán hoặc sửa tự động.

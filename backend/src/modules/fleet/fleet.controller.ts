@@ -69,8 +69,8 @@ export class FleetController {
 
   @Get('shipments/:id/assignments')
   @ApiOperation({ summary: 'Lấy danh sách xe và nhân sự đã phân công cho đơn vận chuyển' })
-  getShipmentAssignments(@Param('id', ParseIntPipe) id: number) {
-    return this.fleetService.getShipmentAssignments(id);
+  getShipmentAssignments(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseIntPipe) id: number) {
+    return this.fleetService.getShipmentAssignments(id, user);
   }
 
   @Post('shipments/:id/assign-vehicles')

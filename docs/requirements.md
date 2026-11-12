@@ -68,3 +68,22 @@ The system must preserve an auditable history of approvals, documents, route cha
 ## Working rule
 
 Each flow owns its business rules and API contract. Cross-flow changes must be recorded in the relevant flow document and database design before implementation.
+
+
+## Equine value and transport insurance
+
+- Each selected shipment horse records its declared value and a package: `basic` (default), `standard` or `premium`. A row's value and premium are **per horse**; the selected quantity multiplies the row premium.
+- Basic has zero added premium and a transport compensation cap of 50,000,000 VND per horse. Standard costs 1.5% of declared value and has an 80% compensation limit for loss/permanent injury. Premium costs 3% and covers 100% of declared value plus actual emergency veterinary expenses during transport.
+- VND is always supported. USD declarations require a configured `INSURANCE_USD_TO_VND`; the server snapshots this rate and the resulting VND valuation at declaration time. No browser-provided rate or fee is trusted.
+- The Manager quotes **base transport freight**, separately from insurance. Once quoted, `totalCost = transportCost + insuranceFee`. Before a quote exists, base freight is pending and the API keeps `totalCost = 0`, returning the known insurance premium separately.
+- Insurance values, premiums, compensation limits and the policy version belong to the shipment horse, not the reusable My Horses profile. Changing a later request never modifies a prior trip's policy.
+
+## Shared stall and dedicated charter booking
+
+- Customer chooses `shared_stall` (default) or `dedicated_charter`, independently of domestic/international scope and road/air mode. Recommend shared for 1–2 horses and dedicated for 3+ or special-care horses, but neither threshold restricts the choice.
+- Shared purchases one slot per horse on a fixed corridor; freight equals the Manager's unit stall price multiplied by the total selected horse quantity. Dedicated purchases a private vehicle/charter service with one flat freight price for the entire group, flexible requested departure and priority for direct routing.
+- The Manager sees the customer's choice before quoting. The backend computes freight, then adds the saved aggregate insurance once. Quotes, invoices and bank amounts use the same combined total.
+- Customer can change the choice only in `change_requested`; preserve the old choice in an append-only booking revision and clear the old quote for Manager review. Approval validates the quoted booking/count against the locked order.
+- Coordinator uses the selected service when arranging shared capacity on compatible corridors or a private trip. Actual flight/stall booking remains operational work as in Flow 3; this requirement does not introduce airline reservation integration or automatic cross-customer trip matching.
+- Approved road scope: manual shared-trip selection, one stall per horse, aggregate capacity checked under vehicle locks, dedicated vehicle exclusivity during the booked interval, and customer data isolation. Coordinator assesses compatibility; no automatic route/time tolerance is imposed. Operational air sharing/chartering remains an open decision.
+- New Manager approvals require explicit positive base freight. Omitted amendment fields preserve existing policy and quantity. MoMo sandbox never supplies real payment status or operational readiness.
