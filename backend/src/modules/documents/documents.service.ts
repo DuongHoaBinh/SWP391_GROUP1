@@ -23,17 +23,18 @@ import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { REGULATION_PRESET_TEMPLATES } from './constants/regulation-presets.constant';
+import { ShipmentLifecycle } from '../../common/shipment-lifecycle';
 
 @Injectable()
 export class DocumentsService {
   constructor(
     private readonly documentsStore: DocumentsStore,
     private readonly notificationsService: NotificationsService,
+    private readonly lifecycle: ShipmentLifecycle,
   ) {}
 
   /**
-   * ĐIỀU KIỆN KÍCH HOẠT THANH TOÁN DUY NHẤT (Single Source of Truth):
-   * Mọi chứng từ bắt buộc của đơn hàng đã được Specialist duyệt thành công (Flow 2 hoàn tất / Dossier Complete).
+   * Compliance is a departure prerequisite. Payment unlocks separately after Flow 3 confirmation.
    */
   async isFlow2CompletedForPayment(orderId: number): Promise<boolean> {
     try {
@@ -53,6 +54,7 @@ export class DocumentsService {
     try {
       const shipmentIds = await this.documentsStore.findActiveShipmentIdsByHorseId(horseId);
       for (const orderId of shipmentIds) {
+        await this.lifecycle.changed(orderId);
         const isComplete = await this.isFlow2CompletedForPayment(orderId);
         if (!isComplete) continue;
 
@@ -62,8 +64,8 @@ export class DocumentsService {
         const code = `REQ-${String(orderId).padStart(3, '0')}`;
         await this.notificationsService.notifyRole(
           'Logistics Manager',
-          `Đơn ${code} đã đủ hồ sơ, có thể gửi yêu cầu thanh toán`,
-          `Toàn bộ chứng từ pháp lý và kiểm dịch (Flow 2) của đơn ${code} đã được Chuyên viên thẩm định phê duyệt 100% (Documents approved). Quý quản lý đã có thể gửi yêu cầu thanh toán QR cho khách hàng.`,
+          `Đơn ${code} đã đủ hồ sơ kiểm dịch`,
+          `Hồ sơ pháp lý và kiểm dịch của đơn ${code} đã được phê duyệt 100%. Thanh toán chỉ mở khi lộ trình Flow 3 được xác nhận; chuyến đi chỉ được xuất phát khi cả ba điều kiện hoàn tất.`,
           'status_update',
           orderId,
         );
@@ -447,9 +449,7 @@ export class DocumentsService {
       'status_update',
     );
 
-    if (dto.status === DocumentStatus.APPROVED) {
-      await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
-    }
+    await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
 
     const updated = await this.documentsStore.findDocumentById(documentId);
     return updated!;
@@ -587,6 +587,7 @@ export class DocumentsService {
       dto?.docNumber,
       dto?.notes ? `[Cập nhật lại]: ${dto.notes}` : null,
     );
+    await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
 
     const updated = await this.documentsStore.findDocumentById(documentId);
     return updated!;
@@ -598,6 +599,7 @@ export class DocumentsService {
   ): Promise<{ success: boolean; message: string }> {
     const isAdminOrSpecialist =
       user.role === UserRole.ADMIN || user.role === UserRole.TRANSPORT_SPECIALIST;
+    const doc = await this.documentsStore.findDocumentById(documentId);
     const deleted = await this.documentsStore.deleteDocument(
       documentId,
       Number(user.id),
@@ -606,6 +608,7 @@ export class DocumentsService {
     if (!deleted) {
       throw new NotFoundException(`Tài liệu #${documentId} không tồn tại hoặc bạn không có quyền xóa`);
     }
+    if (doc) await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
     return { success: true, message: `Tài liệu #${documentId} đã được xóa thành công` };
   }
 }

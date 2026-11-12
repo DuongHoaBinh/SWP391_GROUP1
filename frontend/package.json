@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "next lint",
+    "test:insurance": "node --test test/insurance.test.cjs",
     "test:sepay": "node --test test/sepay-payment.test.cjs"
   },
   "dependencies": {

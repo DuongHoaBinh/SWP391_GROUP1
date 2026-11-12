@@ -1,11 +1,19 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Min, Max } from 'class-validator';
 
 export class ApproveOrderDto {
-  @ApiPropertyOptional({ example: 15000000, description: 'Estimated initial transport cost in VND' })
+  @ApiPropertyOptional({ example: 15000000, description: 'Cước vận chuyển cơ bản VNĐ, chưa cộng bảo hiểm; ưu tiên hơn trường totalCost cũ' })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   @Min(0)
+  @Max(9999999999999)
+  transportCost?: number;
+
+  @ApiPropertyOptional({ example: 15000000, description: 'Cước cơ bản VNĐ (tên trường cũ); server cộng phí bảo hiểm một lần' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(9999999999999)
   totalCost?: number;
 
   @ApiPropertyOptional({ example: 'Đơn hàng đủ điều kiện, chuyển sang bộ phận lập kế hoạch tuyến đường.', description: 'Approval note' })
