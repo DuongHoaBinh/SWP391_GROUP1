@@ -71,6 +71,9 @@ interface OrderDestinationRow extends RowDataPacket {
   destination_location: string;
   origin_location: string;
   status: string;
+  requested_date: Date | null;
+  departure_date: Date | null;
+  expected_arrival_date: Date | null;
   request_code?: string;
 }
 
@@ -463,6 +466,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
   async findOrderDetails(orderId: number): Promise<OrderDestinationRow | undefined> {
     const [rows] = await this.pool.execute<OrderDestinationRow[]>(
       `SELECT s.shipment_id, s.customer_id, s.destination_location, s.origin_location, s.status,
+              s.requested_date, s.departure_date, s.expected_arrival_date,
               CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
        FROM shipment s WHERE s.shipment_id = ? LIMIT 1`,
       [orderId],
