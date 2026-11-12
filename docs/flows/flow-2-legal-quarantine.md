@@ -27,3 +27,7 @@ Document checklist, authority approval status, missing-document notifications, a
 **Owner:** `backend/src/modules/documents`  
 **Supporting module:** `backend/src/modules/auth`  
 **Primary UI:** `frontend/src/app/specialist`, `frontend/src/app/customer`, `frontend/src/app/manager`
+
+## Payment and departure
+
+Document completion is a departure requirement, not the payment trigger. A confirmed Flow 3 plan opens payment independently of Flow 2 completion. Reviewing or replacing documents refreshes departure readiness; approved documents must remain valid. Missing/invalid compliance prevents departure even after payment.

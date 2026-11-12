@@ -18,6 +18,7 @@ function render(state, props = {}, loadError) {
       swrOptions = options;
       return { data: state, error: loadError, mutate() {}, isLoading: false, isValidating: false };
     };
+    if (name === './InvoiceSummary') return { InvoiceSummary: () => null };
     if (name === 'next/link') return ({ href, children, ...rest }) => React.createElement('a', { href, ...rest }, children);
     if (name === 'lucide-react') return Object.fromEntries(['CheckCircle2', 'Copy', 'QrCode', 'RefreshCw', 'ShieldCheck'].map(icon => [icon, () => null]));
     if (name === '@/lib/auth') return { getCurrentUser: () => ({ id: 99 }) };
@@ -38,7 +39,7 @@ const payment = {
   bankCode: 'MBBank', accountNumber: '0123456789', accountName: 'TEST ACCOUNT',
   qrUrl: 'https://vietqr.app/img?amount=15000', blockedReason: null, transactionId: null, paidAt: null,
 };
-const state = value => ({ enabled: true, provider: 'sepay', payment: value });
+const state = value => ({ enabled: true, provider: 'sepay', payment: value, paymentUnlocked: true, blockedReason: null, invoice: null });
 
 test('unpaid order opens its own checkout; checkout presents QR creation without declaring success', () => {
   const detail = render(state(null)).html;
@@ -91,6 +92,22 @@ test('review, changed quote, blocked order, network failure and disabled gateway
 
 test('unapproved or unquoted order cannot create a payment', () => {
   const html = render(state(null), { checkout: true, eligible: false, amount: 0 }).html;
-  assert.match(html, /Đơn cần được duyệt/);
+  assert.match(html, /Đơn cần có lộ trình đã xác nhận/);
   assert.doesNotMatch(html, /Tạo mã QR thanh toán|<img/);
+});
+
+test('server gate hides every transfer action before route confirmation, even for an eligible client', () => {
+  for (const checkout of [true, false]) {
+    const locked = { ...state(payment), paymentUnlocked: false, blockedReason: 'Lộ trình và chuyến xe đang được bộ phận điều phối thiết lập chi tiết. Cổng thanh toán sẽ tự động mở sau khi lịch trình được xác nhận.' };
+    const html = render(locked, { checkout, eligible: true }).html;
+    assert.match(html, /lịch trình được xác nhận/);
+    assert.doesNotMatch(html, /<img|Tạo mã QR thanh toán|Thanh toán bằng SePay|Tiếp tục thanh toán/);
+  }
+});
+
+test('missing server eligibility fails closed and unpaid confirmed plans keep polling', () => {
+  const { paymentUnlocked, ...legacyState } = state(null);
+  const html = render(legacyState, { checkout: true }).html;
+  assert.doesNotMatch(html, /Tạo mã QR thanh toán|Thanh toán bằng SePay/);
+  assert.equal(render(state(null)).options.refreshInterval(state(null)), 10000);
 });
