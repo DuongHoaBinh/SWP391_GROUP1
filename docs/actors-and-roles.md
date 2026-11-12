@@ -19,3 +19,11 @@
 - Customers cannot edit an approved request or operational status; they can submit requested corrections/documents.
 
 All authorization checks belong to `backend/src/modules/auth` and must be enforced server-side. The frontend route grouping is a usability boundary, not a security boundary.
+
+
+### Payment and confirmation permissions
+
+- Financial and route-confirmation APIs require verified JWTs; development `mock-jwt-token-*` strings are rejected.
+- Customer can read their own invoice/payment and initiate payment only after route confirmation. Manager/Admin can inspect payment state; they cannot create a bank transfer on the customer's behalf.
+- Driver/Escort can confirm only their own existing transport assignment after Manager approval. Admin may explicitly identify the assigned person.
+- Customer/Admin can cancel an unapproved request (`requested` / `change_requested`). Approved/invoiced/paid requests require operational handling rather than the self-service cancellation endpoint. Approval and cancellation use conditional writes to prevent a cancelled request from becoming payable.

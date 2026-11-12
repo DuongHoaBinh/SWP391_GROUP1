@@ -41,6 +41,8 @@ import { buildEquineRoute, geocodeAddress, resolveLocation, GeocodedLocation } f
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 import { SepayPayment } from '@/features/orders/components/SepayPayment';
+import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
+import { InsuranceAmendmentForm } from '@/features/orders/components/InsuranceAmendmentForm';
 
 const fetcher = async (url: string) => {
   const data = await apiClient<any>(url);
@@ -247,6 +249,7 @@ const fetcher = async (url: string) => {
 
   return {
     ...data,
+    insuranceHorses: rawHorses,
     isDomestic,
     transportationType,
     originCountryCode,
@@ -318,9 +321,6 @@ export default function RequestDetailPage() {
   
   // Resubmit Modal States
   const [isResubmitOpen, setIsResubmitOpen] = useState(false);
-  const [resubmitNotes, setResubmitNotes] = useState('');
-  const [isResubmitting, setIsResubmitting] = useState(false);
-  const [resubmitError, setResubmitError] = useState('');
 
   // Cancel Request Modal States
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
@@ -342,7 +342,7 @@ export default function RequestDetailPage() {
   }
 
   const statusLower = String(request?.status || '').toLowerCase();
-  const isPendingReview = statusLower === 'requested' || statusLower === 'under_review';
+  const isPendingReview = ['requested', 'under_review', 'change_requested'].includes(statusLower);
   const isRejected = statusLower === 'rejected' || statusLower === 'cancelled';
   const isApproved = ['approved', 'planning', 'confirmed', 'ready_to_depart', 'ready', 'in_transit', 'completed'].includes(statusLower);
   const requirementsSent = Boolean(checklist?.requirementsSent);
@@ -502,28 +502,6 @@ export default function RequestDetailPage() {
       });
     } finally {
       setIsCancelling(false);
-    }
-  };
-
-  const submitResubmit = async () => {
-    if (!resubmitNotes.trim()) {
-      setResubmitError('Please describe the changes you made.');
-      return;
-    }
-    setIsResubmitting(true);
-    setResubmitError('');
-    try {
-      await apiClient(`/orders/${request.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ specialRequirements: `[Updated] ${resubmitNotes}` }) // For now, updating specialReqs as a placeholder edit
-      });
-      await mutate();
-      setIsResubmitOpen(false);
-      toast.success('Request resubmitted successfully!');
-    } catch (err) {
-      setResubmitError('Failed to resubmit request. Please try again.');
-    } finally {
-      setIsResubmitting(false);
     }
   };
 
@@ -696,7 +674,7 @@ export default function RequestDetailPage() {
             </p>
           </div>
           <button
-            onClick={() => { setResubmitNotes(''); setResubmitError(''); setIsResubmitOpen(true); }}
+            onClick={() => setIsResubmitOpen(true)}
             style={{
               padding: '8px 16px',
               backgroundColor: '#ef4444',
@@ -904,19 +882,16 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          {/* 2.1 SEPAY VIETQR PAYMENT - Chỉ hiển thị sau khi Flow 2 hoàn tất VÀ Manager đã gửi yêu cầu thanh toán */}
-          {Boolean(checklist?.isFullyCompliant) &&
-            Number(request.totalCost) > 0 &&
-            ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(
-              String(request.status).toLowerCase()
-            ) && (
-              <SepayPayment
-                shipmentId={Number(request.id || request.shipmentId || requestId)}
-                requestCode={request.requestCode}
-                amount={Number(request.totalCost)}
-                eligible={true}
-              />
-            )}
+          <InsuranceSummary horses={request.insuranceHorses ?? []}
+            transportCost={request.transportCost ?? null} insuranceFee={Number(request.insuranceFee ?? 0)}
+            totalCost={Number(request.totalCost ?? 0)} />
+
+          {/* Payment eligibility and invoice come from the server's confirmed route. */}
+          {isApproved && <SepayPayment
+            shipmentId={Number(request.id || request.shipmentId || requestId)}
+            requestCode={request.requestCode}
+            amount={Number(request.totalCost)}
+          />}
 
           {/* 3. TRANSPORT ROUTE */}
           <div
@@ -1966,83 +1941,14 @@ export default function RequestDetailPage() {
       />
 
       {/* Resubmit Modal */}
-      <Modal
-        isOpen={isResubmitOpen}
-        onClose={() => setIsResubmitOpen(false)}
-        title="Edit & Resubmit Request"
-        subtitle={`Request ID: ${request.requestCode}`}
-        maxWidth="500px"
-      >
-        <div style={{ padding: '24px' }}>
-          {resubmitError && (
-            <div style={{ marginBottom: '16px', padding: '12px', borderRadius: '8px', backgroundColor: '#fef2f2', color: '#b91c1c', fontSize: '13px', border: '1px solid #fecaca' }}>
-              <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px' }} />
-              {resubmitError}
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>What changes have you made?</label>
-            <textarea
-              value={resubmitNotes}
-              onChange={(e) => setResubmitNotes(e.target.value)}
-              placeholder="e.g. I have updated the pickup date and attached new health certificates..."
-              style={{
-                padding: '12px',
-                borderRadius: '8px',
-                border: '1px solid #d1d5db',
-                fontSize: '14px',
-                minHeight: '100px',
-                resize: 'vertical',
-                outline: 'none',
-                boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
-                width: '100%',
-                boxSizing: 'border-box'
-              }}
-              autoFocus
-            />
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
-              The manager will review these notes along with your updated request.
-            </p>
-          </div>
-          
-          <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
-            <button
-              onClick={() => setIsResubmitOpen(false)}
-              disabled={isResubmitting}
-              style={{
-                padding: '10px 16px',
-                borderRadius: '8px',
-                border: '1px solid #d1d5db',
-                backgroundColor: '#ffffff',
-                color: '#374151',
-                fontWeight: 600,
-                fontSize: '13px',
-                cursor: isResubmitting ? 'not-allowed' : 'pointer',
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={submitResubmit}
-              disabled={isResubmitting}
-              style={{
-                padding: '10px 20px',
-                borderRadius: '8px',
-                border: 'none',
-                backgroundColor: '#2563eb',
-                color: '#ffffff',
-                fontWeight: 600,
-                fontSize: '13px',
-                cursor: isResubmitting ? 'not-allowed' : 'pointer',
-                opacity: isResubmitting ? 0.7 : 1,
-              }}
-            >
-              {isResubmitting ? 'Resubmitting...' : 'Submit Now'}
-            </button>
-          </div>
-        </div>
+      <Modal isOpen={isResubmitOpen} onClose={() => setIsResubmitOpen(false)} title="Chỉnh sửa & gửi lại yêu cầu"
+        subtitle={`Mã yêu cầu: ${request.requestCode}`} maxWidth="700px">
+        <InsuranceAmendmentForm key={`${request.id}-${request.updatedAt}`} orderId={Number(request.id)}
+          horses={request.insuranceHorses ?? []} specialRequirements={request.specialRequirements}
+          onCancel={() => setIsResubmitOpen(false)} onSaved={() => {
+            setIsResubmitOpen(false); void mutate(); toast.success('Đã gửi lại yêu cầu để Manager xét duyệt.');
+          }} />
       </Modal>
-
       {/* Professional Cancel Request Confirmation Modal */}
       <Modal
         isOpen={isCancelModalOpen}

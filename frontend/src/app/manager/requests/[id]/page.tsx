@@ -31,6 +31,7 @@ import {
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 import { apiClient } from '@/lib/api-client';
+import { CostSummary, InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { buildEquineRoute } from '@/lib/geo-corridors';
@@ -147,7 +148,7 @@ export default function ManagerRequestDetailPage() {
     if (type === 'APPROVE') {
       const mode = isDomestic && !specialReqLower.includes('hàng không') ? 'road' : 'air';
       setSelectedTransportMode(mode);
-      const initialCost = order?.totalCost > 0 ? order.totalCost : Math.round(routeMetrics.distanceKm * 15000);
+      const initialCost = order?.transportCost != null ? order.transportCost : Math.round(routeMetrics.distanceKm * 15000);
       setCostCurrency('VND');
       setInputValue(String(initialCost));
     } else {
@@ -170,15 +171,15 @@ export default function ManagerRequestDetailPage() {
         }
         const costInVnd = costCurrency === 'USD' ? Math.round(costNum * 25400) : Math.round(costNum);
 
-        await apiClient(`/orders/${order.id}/approve`, {
+        const approved = await apiClient<{ totalCost: number }>(`/orders/${order.id}/approve`, {
           method: 'PATCH',
           body: JSON.stringify({
-            totalCost: costInVnd,
+            transportCost: costInVnd,
             transportMode: selectedTransportMode,
           }),
         });
 
-        toast.success(`Đã phê duyệt đơn vận chuyển #${order.id} với báo giá ${costInVnd.toLocaleString('vi-VN')} ₫`);
+        toast.success(`Đã phê duyệt đơn vận chuyển #${order.id} với tổng báo giá ${approved.totalCost.toLocaleString('vi-VN')} ₫ (gồm bảo hiểm)`);
       } else if (activeModal === 'REJECT') {
         if (!inputValue.trim()) {
           toast.error('Vui lòng nhập lý do từ chối');
@@ -475,6 +476,7 @@ export default function ManagerRequestDetailPage() {
             </div>
 
             <div className="p-6">
+              <div className="mb-5"><InsuranceSummary horses={order.horses ?? []} transportCost={order.transportCost ?? null} insuranceFee={Number(order.insuranceFee ?? 0)} totalCost={Number(order.totalCost ?? 0)} /></div>
               {Array.isArray(order.horses) && order.horses.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {order.horses.map((horse: any, idx: number) => (
@@ -703,7 +705,7 @@ export default function ManagerRequestDetailPage() {
             {activeModal === 'APPROVE' ? (
               <>
                 <p className="text-xs text-slate-500">
-                  Xác nhận báo giá chính thức cho khách hàng. Sau khi duyệt, khách hàng sẽ nhận được thông báo kèm mã QR SePay để thanh toán.
+                  Xác nhận báo giá dự kiến gồm cước cơ bản và bảo hiểm. Hóa đơn và mã QR SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.
                 </p>
 
                 {/* Transport Mode Toggle */}
@@ -741,10 +743,11 @@ export default function ManagerRequestDetailPage() {
                   </div>
                 </div>
 
+                <CostSummary transportCost={costCurrency === 'USD' ? Math.round((Number(inputValue) || 0) * 25400) : Number(inputValue) || 0} insuranceFee={Number(order.insuranceFee ?? 0)} />
                 {/* Currency and Cost Input */}
                 <div>
                   <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1.5">
-                    <span>Chi phí vận chuyển báo giá: <span className="text-red-500">*</span></span>
+                    <span>Cước vận chuyển cơ bản (chưa bảo hiểm): <span className="text-red-500">*</span></span>
                     <div className="flex items-center gap-1">
                       <button
                         type="button"

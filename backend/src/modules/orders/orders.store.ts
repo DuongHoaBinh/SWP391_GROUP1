@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
+import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, HorseInfoDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { calculateInsurance, totalInsuranceFee } from './insurance-policy';
 
 interface ShipmentRow extends RowDataPacket {
   shipment_id: number;
@@ -26,6 +27,8 @@ interface ShipmentRow extends RowDataPacket {
   change_request_notes: string | null;
   status: ShipmentStatus;
   total_cost: number | string;
+  transport_cost: number | string | null;
+  insurance_fee: number | string;
   payment_status?: 'pending' | 'review' | 'succeeded';
   payment_code?: string | null;
   paid_at?: Date | null;
@@ -79,133 +82,75 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async transaction<T>(action: (db: PoolConnection) => Promise<T>): Promise<T> {
+    const db = await this.pool.getConnection();
+    try { await db.beginTransaction(); const result = await action(db); await db.commit(); return result; }
+    catch (error) { await db.rollback(); throw error; }
+    finally { db.release(); }
+  }
+
+  private horseInputs(dto: CreateOrderDto | UpdateOrderDto): HorseInfoDto[] {
+    if (dto.horses?.length) return dto.horses;
+    return dto.horseName ? [{ name: dto.horseName, breed: dto.horseBreed, gender: dto.horseGender, age: dto.horseAge, quantity: dto.requestedHorseCount ?? 1 }] : [];
+  }
+
+  private async insuredHorses(db: PoolConnection, customerId: number, input: HorseInfoDto[], previous: RowDataPacket[] = []) {
+    if (!input.length) throw new BadRequestException('Vui lòng chọn ít nhất một con ngựa cho đơn vận chuyển.');
+    const seen = new Set<number>();
+    const result: Array<ReturnType<typeof calculateInsurance> & { horseId: number; quantity: number }> = [];
+    for (const h of [...input].sort((a, b) => (a.horseId ?? 0) - (b.horseId ?? 0) || a.name.localeCompare(b.name))) {
+      const [rows] = await db.execute<RowDataPacket[]>(`SELECT horse_id, name, status, quantity FROM horse
+        WHERE owner_id = ? AND ${h.horseId ? 'horse_id = ?' : 'name = ?'} ORDER BY horse_id DESC LIMIT 1 FOR UPDATE`, [customerId, h.horseId ?? h.name]);
+      const horse = rows[0];
+      if (!horse) throw new BadRequestException(`Ngựa "${h.name}" không thuộc My Horses của bạn.`);
+      const horseId = Number(horse.horse_id), old = previous.find(p => Number(p.horse_id) === horseId);
+      if (seen.has(horseId)) throw new BadRequestException('Một hồ sơ ngựa chỉ được xuất hiện một lần trong đơn');
+      seen.add(horseId);
+      if (horse.status !== 'active' && !(old && horse.status === 'in_transit')) throw new BadRequestException(`Ngựa "${horse.name}" hiện không sẵn sàng vận chuyển.`);
+      const quantity = h.quantity ?? 1;
+      if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > Number(horse.quantity ?? 1)) throw new BadRequestException(`Số lượng ngựa "${horse.name}" không hợp lệ hoặc vượt số lượng trong hồ sơ.`);
+      const unchanged = old && (h.declaredValue === undefined || h.declaredValue === Number(old.declared_value)) &&
+        (h.declaredCurrency === undefined || h.declaredCurrency === old.declared_currency) &&
+        (h.insurancePackage === undefined || h.insurancePackage === old.insurance_package);
+      const policy = unchanged ? {
+        declaredValue: Number(old.declared_value), declaredCurrency: old.declared_currency,
+        exchangeRate: Number(old.exchange_rate), declaredValueVnd: Number(old.declared_value_vnd),
+        insurancePackage: old.insurance_package, insuranceFee: Number(old.insurance_fee), maxCompensation: Number(old.max_compensation),
+        emergencyVetCovered: Boolean(old.emergency_vet_covered), insurancePolicyVersion: old.insurance_policy_version,
+      } : calculateInsurance(h);
+      result.push({ ...policy, horseId, quantity });
+    }
+    totalInsuranceFee(result);
+    return result;
+  }
+
+  private async insertInsuredHorses(db: PoolConnection, shipmentId: number, horses: Awaited<ReturnType<OrdersStore['insuredHorses']>>) {
+    for (const h of horses) {
+      await db.execute(`INSERT INTO shipment_horse (shipment_id, horse_id, quantity, declared_value, declared_currency,
+        exchange_rate, declared_value_vnd, insurance_package, insurance_fee, max_compensation, emergency_vet_covered, insurance_policy_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [shipmentId, h.horseId, h.quantity, h.declaredValue, h.declaredCurrency,
+        h.exchangeRate, h.declaredValueVnd, h.insurancePackage, h.insuranceFee, h.maxCompensation, h.emergencyVetCovered, h.insurancePolicyVersion]);
+      await db.execute("UPDATE horse SET status = 'in_transit' WHERE horse_id = ?", [h.horseId]);
+    }
+  }
+
   async createShipment(customerId: number, dto: CreateOrderDto): Promise<number> {
-    const requestedDate = dto.requestedDate ? new Date(dto.requestedDate) : new Date();
-
-    // 1. Tạo đơn vận chuyển trong bảng shipment
-    const [result] = await this.pool.execute(
-      `INSERT INTO shipment (
-        customer_id, requested_by, contact_name, contact_address, contact_phone, contact_email,
-        requested_horse_count, origin_location, destination_location, requested_date,
-        transportation_type, special_requirements, status, total_cost
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0)`,
-      [
-        customerId,
-        customerId,
-        dto.contactName ?? null,
-        dto.contactAddress ?? null,
-        dto.contactPhone,
-        dto.contactEmail,
-        dto.requestedHorseCount ?? 1,
-        dto.originLocation,
-        dto.destinationLocation,
-        requestedDate,
-        dto.transportationType ?? null,
-        dto.specialRequirements ?? null,
-      ],
-    );
-
-    const shipmentId = (result as { insertId: number }).insertId;
-
-    // 2. Lưu file tài liệu y tế nếu có
-    if (dto.medicalDocumentUrl) {
-      await this.createAttachment(shipmentId, dto.medicalDocumentUrl, customerId);
-    }
-
-    // 3. Xử lý các con ngựa trong đơn vận chuyển: bắt buộc chọn từ My Horses và chuyển trạng thái sang in_transit
-    const horsesToProcess: Array<{
-      horseId?: number;
-      name: string;
-      breed: string | null;
-      gender: 'male' | 'female' | 'gelding' | null;
-      age: number | null;
-      quantity: number;
-    }> = [];
-
-    if (dto.horses && dto.horses.length > 0) {
-      for (const h of dto.horses) {
-        horsesToProcess.push({
-          horseId: h.horseId,
-          name: h.name,
-          breed: h.breed ?? null,
-          gender: h.gender ?? null,
-          age: h.age ?? null,
-          quantity: h.quantity && h.quantity > 0 ? h.quantity : 1,
-        });
-      }
-    } else if (dto.horseName) {
-      horsesToProcess.push({
-        name: dto.horseName,
-        breed: dto.horseBreed ?? null,
-        gender: dto.horseGender ?? null,
-        age: dto.horseAge ?? null,
-        quantity: dto.requestedHorseCount || 1,
-      });
-    }
-
-    if (horsesToProcess.length === 0) {
-      throw new BadRequestException('Vui lòng chọn ít nhất một con ngựa cho đơn vận chuyển.');
-    }
-
-    for (const h of horsesToProcess) {
-      let targetHorseId = h.horseId;
-
-      if (!targetHorseId) {
-        const [existing] = await this.pool.execute<RowDataPacket[]>(
-          'SELECT horse_id, name, status FROM horse WHERE owner_id = ? AND name = ? AND (status IS NULL OR status != "deleted") ORDER BY horse_id DESC LIMIT 1',
-          [customerId, h.name],
-        );
-        if (existing.length > 0) {
-          targetHorseId = existing[0].horse_id;
-        }
-      }
-
-      if (!targetHorseId) {
-        throw new BadRequestException(
-          `Ngựa "${h.name}" không tồn tại trong danh sách "My Horses" của bạn. Vui lòng tạo hồ sơ ngựa trước khi gửi yêu cầu vận chuyển.`,
-        );
-      }
-
-      const [horseRows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT horse_id, name, status FROM horse WHERE horse_id = ? AND owner_id = ?',
-        [targetHorseId, customerId],
-      );
-
-      if (horseRows.length === 0) {
-        throw new BadRequestException(`Không tìm thấy hồ sơ hợp lệ của ngựa "${h.name}" thuộc tài khoản của bạn.`);
-      }
-
-      const horse = horseRows[0];
-      if (horse.status === 'in_transit') {
-        throw new BadRequestException(
-          `Ngựa "${horse.name}" hiện đang trong chuyến vận chuyển khác. Không thể chọn vận chuyển nhiều đơn cùng lúc.`,
-        );
-      }
-      if (horse.status === 'delivered') {
-        throw new BadRequestException(
-          `Ngựa "${horse.name}" đã hoàn tất chuyến vận chuyển trước đó (đã bàn giao).`,
-        );
-      }
-      if (horse.status !== 'active') {
-        throw new BadRequestException(
-          `Ngựa "${horse.name}" hiện không sẵn sàng để vận chuyển (trạng thái: ${horse.status}).`,
-        );
-      }
-
-      // Liên kết vào shipment
-      await this.pool.execute(
-        'INSERT INTO shipment_horse (shipment_id, horse_id, quantity) VALUES (?, ?, ?)',
-        [shipmentId, targetHorseId, h.quantity],
-      );
-
-      // Cập nhật trạng thái con ngựa sang in_transit để khóa con ngựa không thể đi đơn khác
-      await this.pool.execute(
-        'UPDATE horse SET status = "in_transit" WHERE horse_id = ?',
-        [targetHorseId],
-      );
-    }
-
-    return shipmentId;
+    return this.transaction(async db => {
+      const horses = await this.insuredHorses(db, customerId, this.horseInputs(dto));
+      const count = horses.reduce((sum, h) => sum + h.quantity, 0);
+      if (count !== dto.requestedHorseCount) throw new BadRequestException('Số lượng ngựa khai báo phải khớp danh sách được chọn');
+      const [result] = await db.execute(`INSERT INTO shipment (customer_id, requested_by, contact_name, contact_address, contact_phone,
+        contact_email, requested_horse_count, origin_location, destination_location, requested_date, transportation_type,
+        special_requirements, status, total_cost, transport_cost, insurance_fee)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0, NULL, ?)`,
+        [customerId, customerId, dto.contactName ?? null, dto.contactAddress ?? null, dto.contactPhone, dto.contactEmail,
+        count, dto.originLocation, dto.destinationLocation, dto.requestedDate ? new Date(dto.requestedDate) : new Date(),
+        dto.transportationType ?? null, dto.specialRequirements ?? null, totalInsuranceFee(horses)]);
+      const shipmentId = (result as { insertId: number }).insertId;
+      await this.insertInsuredHorses(db, shipmentId, horses);
+      if (dto.medicalDocumentUrl) await db.execute("INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'document', ?)", [shipmentId, dto.medicalDocumentUrl, customerId]);
+      return shipmentId;
+    });
   }
 
   async createAttachment(
@@ -327,6 +272,12 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     totalCost: number = 0,
     transportMode?: "road" | "air",
   ): Promise<boolean> {
+    return this.transaction(async db => {
+    const [orders] = await db.execute<RowDataPacket[]>('SELECT insurance_fee, transport_cost, total_cost FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+    if (!orders.length) throw new BadRequestException('Không tìm thấy đơn hàng');
+    const insuranceFee = Number(orders[0].insurance_fee);
+    const combined = totalCost + insuranceFee;
+    if (!Number.isSafeInteger(totalCost) || totalCost < 0 || !Number.isSafeInteger(combined) || combined > 9999999999999) throw new BadRequestException('Tổng cước và bảo hiểm vượt giới hạn VNĐ hợp lệ');
     let modeType: string | null = null;
     let modeNote: string | null = null;
     if (status === ShipmentStatus.APPROVED && transportMode) {
@@ -340,8 +291,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     }
 
     let query = `UPDATE shipment
-       SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = CASE WHEN ? > 0 THEN ? ELSE total_cost END`;
-    const params: any[] = [status, approvedBy, rejectionReason, totalCost, totalCost];
+       SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = ?, transport_cost = ?`;
+    const params: any[] = [status, approvedBy, rejectionReason, status === ShipmentStatus.APPROVED ? combined : orders[0].total_cost, status === ShipmentStatus.APPROVED ? totalCost : orders[0].transport_cost];
 
     if (modeType) {
       query += `, transportation_type = ?`;
@@ -356,12 +307,13 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       const matchKeyword = transportMode === "air" ? "%Hàng không%" : "%Đường bộ%";
       params.push(modeNote, matchKeyword, modeNote);
     }
-    query += ` WHERE shipment_id = ?`;
+    query += ` WHERE shipment_id = ? AND status = 'requested'`;
     params.push(shipmentId);
 
-    const [result] = await this.pool.execute(query, params);
+    const [result] = await db.execute(query, params);
+    if (!(result as { affectedRows: number }).affectedRows) throw new BadRequestException('Đơn hàng đã thay đổi, vui lòng tải lại trước khi duyệt.');
     if (status === ShipmentStatus.REJECTED) {
-      await this.pool.execute(
+      await db.execute(
         `UPDATE horse
          SET status = 'active'
          WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)`,
@@ -370,6 +322,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     }
 
     return (result as { affectedRows: number }).affectedRows > 0;
+    });
   }
 
   async completeShipment(shipmentId: number): Promise<boolean> {
@@ -397,10 +350,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     const [result] = await this.pool.execute(
       `UPDATE shipment
        SET status = ?, change_request_notes = ?
-       WHERE shipment_id = ?`,
+       WHERE shipment_id = ? AND status = 'requested'`,
       [ShipmentStatus.CHANGE_REQUESTED, notes, shipmentId],
     );
-
+    if (!(result as { affectedRows: number }).affectedRows) throw new BadRequestException('Đơn hàng đã thay đổi, vui lòng tải lại trước khi yêu cầu chỉnh sửa.');
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
@@ -440,110 +393,49 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async cancelShipment(shipmentId: number): Promise<boolean> {
-    // 1. Revert horse statuses back to active
-    await this.pool.execute(
-      `UPDATE horse h
-       JOIN shipment_horse sh ON sh.horse_id = h.horse_id
-       SET h.status = 'active'
-       WHERE sh.shipment_id = ?`,
-      [shipmentId],
-    );
-
-    // 2. Set shipment status to cancelled
-    const [result] = await this.pool.execute(
-      'UPDATE shipment SET status = ? WHERE shipment_id = ?',
-      [ShipmentStatus.CANCELLED, shipmentId],
-    );
-
-    return (result as { affectedRows: number }).affectedRows > 0;
+    const db = await this.pool.getConnection();
+    try {
+      await db.beginTransaction();
+      const [rows] = await db.execute<RowDataPacket[]>('SELECT status FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+      if (rows[0]?.status === 'cancelled') { await db.commit(); return false; }
+      if (!rows[0] || !['requested', 'change_requested'].includes(rows[0].status)) throw new BadRequestException('Chỉ được hủy yêu cầu trước khi phê duyệt.');
+      await db.execute("UPDATE shipment SET status = 'cancelled' WHERE shipment_id = ?", [shipmentId]);
+      await db.execute("UPDATE horse h JOIN shipment_horse sh ON sh.horse_id = h.horse_id SET h.status = 'active' WHERE sh.shipment_id = ?", [shipmentId]);
+      await db.commit();
+      return true;
+    } catch (error) { await db.rollback(); throw error; }
+    finally { db.release(); }
   }
 
-  async updateAndResubmitShipment(
-    customerId: number,
-    shipmentId: number,
-    dto: UpdateOrderDto,
-  ): Promise<boolean> {
-    const requestedDate = dto.requestedDate ? new Date(dto.requestedDate) : null;
-
-    // 1. Cập nhật các thông tin của đơn vận chuyển và chuyển status về requested
-    const [result] = await this.pool.execute(
-      `UPDATE shipment
-       SET
-         contact_name = COALESCE(?, contact_name),
-         contact_address = COALESCE(?, contact_address),
-         contact_phone = COALESCE(?, contact_phone),
-         contact_email = COALESCE(?, contact_email),
-         requested_horse_count = COALESCE(?, requested_horse_count),
-         origin_location = COALESCE(?, origin_location),
-         destination_location = COALESCE(?, destination_location),
-         requested_date = COALESCE(?, requested_date),
-         special_requirements = COALESCE(?, special_requirements),
-         change_request_notes = NULL,
-         status = ?
-       WHERE shipment_id = ?`,
-      [
-        dto.contactName ?? null,
-        dto.contactAddress ?? null,
-        dto.contactPhone ?? null,
-        dto.contactEmail ?? null,
-        dto.requestedHorseCount ?? null,
-        dto.originLocation ?? null,
-        dto.destinationLocation ?? null,
-        requestedDate,
-        dto.specialRequirements ?? null,
-        ShipmentStatus.REQUESTED,
-        shipmentId,
-      ],
-    );
-
-    // 2. Lưu file tài liệu y tế mới nếu có
-    if (dto.medicalDocumentUrl) {
-      await this.createAttachment(shipmentId, dto.medicalDocumentUrl, customerId);
-    }
-
-    // 3. Cập nhật thông tin ngựa nếu có gửi mới
-    const horsesToInsert: Array<{
-      name: string;
-      breed: string | null;
-      gender: 'male' | 'female' | 'gelding' | null;
-      age: number | null;
-    }> = [];
-
-    if (dto.horses && dto.horses.length > 0) {
-      for (const h of dto.horses) {
-        horsesToInsert.push({
-          name: h.name,
-          breed: h.breed ?? null,
-          gender: h.gender ?? null,
-          age: h.age ?? null,
-        });
+  async updateAndResubmitShipment(customerId: number, shipmentId: number, dto: UpdateOrderDto): Promise<boolean> {
+    return this.transaction(async db => {
+      const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? AND customer_id = ? FOR UPDATE', [shipmentId, customerId]);
+      if (!orders[0] || orders[0].status !== 'change_requested') throw new BadRequestException('Chỉ được gửi lại yêu cầu đang cần chỉnh sửa');
+      const [previous] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment_horse WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+      const input = this.horseInputs(dto);
+      const horses = input.length ? await this.insuredHorses(db, customerId, input, previous) : null;
+      const count = horses ? horses.reduce((sum, h) => sum + h.quantity, 0) : previous.reduce((sum, h) => sum + Number(h.quantity), 0);
+      if (dto.requestedHorseCount !== undefined && dto.requestedHorseCount !== count) throw new BadRequestException('Số lượng ngựa phải khớp danh sách được chọn');
+      const fee = horses ? totalInsuranceFee(horses) : Number(orders[0].insurance_fee);
+      if (horses) {
+        await db.execute('INSERT INTO shipment_insurance_revision (shipment_id, changed_by, previous_snapshot) VALUES (?, ?, ?)', [shipmentId, customerId, JSON.stringify(previous)]);
+        await db.execute('DELETE FROM shipment_horse WHERE shipment_id = ?', [shipmentId]);
+        for (const old of previous) if (!horses.some(h => h.horseId === Number(old.horse_id))) {
+          await db.execute("UPDATE horse SET status = 'active' WHERE horse_id = ? AND status = 'in_transit'", [old.horse_id]);
+        }
+        await this.insertInsuredHorses(db, shipmentId, horses);
       }
-    } else if (dto.horseName) {
-      horsesToInsert.push({
-        name: dto.horseName,
-        breed: dto.horseBreed ?? null,
-        gender: dto.horseGender ?? null,
-        age: dto.horseAge ?? null,
-      });
-    }
-
-    if (horsesToInsert.length > 0) {
-      await this.pool.execute('DELETE FROM shipment_horse WHERE shipment_id = ?', [shipmentId]);
-
-      for (const h of horsesToInsert) {
-        const [hResult] = await this.pool.execute(
-          'INSERT INTO horse (owner_id, name, breed, gender, age, status) VALUES (?, ?, ?, ?, ?, ?)',
-          [customerId, h.name, h.breed, h.gender, h.age, 'active'],
-        );
-        const horseId = (hResult as { insertId: number }).insertId;
-        await this.pool.execute(
-          'INSERT INTO shipment_horse (shipment_id, horse_id) VALUES (?, ?)',
-          [shipmentId, horseId],
-        );
-      }
-    }
-
-    return (result as { affectedRows: number }).affectedRows > 0;
+      await db.execute(`UPDATE shipment SET contact_name = COALESCE(?, contact_name), contact_address = COALESCE(?, contact_address),
+        contact_phone = COALESCE(?, contact_phone), contact_email = COALESCE(?, contact_email), origin_location = COALESCE(?, origin_location),
+        destination_location = COALESCE(?, destination_location), requested_date = COALESCE(?, requested_date),
+        special_requirements = COALESCE(?, special_requirements), requested_horse_count = ?, insurance_fee = ?,
+        total_cost = 0, transport_cost = NULL, change_request_notes = NULL, status = 'requested' WHERE shipment_id = ?`,
+        [dto.contactName ?? null, dto.contactAddress ?? null, dto.contactPhone ?? null, dto.contactEmail ?? null,
+        dto.originLocation ?? null, dto.destinationLocation ?? null, dto.requestedDate ? new Date(dto.requestedDate) : null,
+        dto.specialRequirements ?? null, count, fee, shipmentId]);
+      if (dto.medicalDocumentUrl) await db.execute("INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'document', ?)", [shipmentId, dto.medicalDocumentUrl, customerId]);
+      return true;
+    });
   }
 
   private async mapShipmentWithAttachments(row: ShipmentRow): Promise<TransportOrder> {
@@ -554,7 +446,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
     const [horses] = await this.pool.execute<HorseRow[]>(
       `SELECT h.horse_id, h.name, h.breed, h.gender, h.age, h.color, h.weight,
-              h.medical_status, h.microchip_no, h.passport_no, h.special_requirements, sh.quantity
+              h.medical_status, h.microchip_no, h.passport_no, h.special_requirements, sh.quantity, sh.declared_value, sh.declared_currency, sh.exchange_rate, sh.declared_value_vnd, sh.insurance_package, sh.insurance_fee, sh.max_compensation, sh.emergency_vet_covered, sh.insurance_policy_version
        FROM shipment_horse sh
        JOIN horse h ON h.horse_id = sh.horse_id
        WHERE sh.shipment_id = ?`,
@@ -587,6 +479,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       changeRequestNotes: row.change_request_notes ?? null,
       status: row.status,
       totalCost: Number(row.total_cost ?? 0),
+      transportCost: row.transport_cost == null ? null : Number(row.transport_cost),
+      insuranceFee: Number(row.insurance_fee ?? 0),
       paymentStatus: row.payment_status ?? 'unpaid',
       paymentCode: row.payment_code ?? null,
       paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
@@ -608,6 +502,11 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         gender: h.gender,
         age: h.age !== null ? Number(h.age) : null,
         quantity: h.quantity !== null && h.quantity !== undefined ? Number(h.quantity) : 1,
+        declaredValue: Number(h.declared_value ?? 0), declaredCurrency: h.declared_currency ?? 'VND',
+        exchangeRate: Number(h.exchange_rate ?? 1), declaredValueVnd: Number(h.declared_value_vnd ?? 0),
+        insurancePackage: h.insurance_package ?? 'basic', insuranceFee: Number(h.insurance_fee ?? 0),
+        maxCompensation: Number(h.max_compensation ?? 50000000), emergencyVetCovered: Boolean(h.emergency_vet_covered),
+        insurancePolicyVersion: h.insurance_policy_version ?? 'equine-v1',
         color: h.color ?? null,
         weight: h.weight ?? null,
         medicalStatus: h.medical_status ?? null,

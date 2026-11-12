@@ -6,6 +6,10 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "test:sepay": "npm run build && node --test test/sepay.integration.cjs",
+    "test:payment-gate": "npm run build && node scripts/test-payment-gate.cjs",
+    "test:insurance": "npm run build && node scripts/test-payment-gate.cjs",
+    "migrate:insurance": "node ../database/apply-insurance-migration.cjs",
+    "migrate:payment-gate": "node ../database/apply-payment-gate-migration.cjs",
     "migrate:sepay": "node ../database/apply-sepay-migration.cjs"
   },
   "dependencies": {
