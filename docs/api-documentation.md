@@ -190,7 +190,7 @@ Requests modifications on a pending `requested` order with a mandatory explanati
 - **Body:** `{ "reason": "Vui lòng dời ngày xuất phát sang 16/10 và cập nhật địa chỉ đón chi tiết" }`
 
 ### `PUT /orders/:id` (Customer)
-Customer updates editable order details (dates, route locations, horse info, special requirements) and resubmits the request. Resets status back to `requested` for manager review.
+Customer updates editable order details (dates, route locations, horse info, special requirements) only while the owned order is `change_requested`, then resubmits it. Resets status back to `requested` for manager review. Other states return 400.
 - **Body:** Partial or full fields from `CreateOrderDto`.
 
 ## Documents endpoints (Flow 2: Legal, Quarantine, and Customs Documents)
@@ -443,3 +443,75 @@ Records actual progress at a milestone stop (`arrived`, `customs_cleared`, `depa
 - Emergency route or cost changes require manager approval before publication.
 
 Document request/response examples here as each module reaches an agreed contract.
+
+
+## Payment gating after Flow 3
+
+### `GET /orders/:id/payments/sepay`
+
+Authenticated owner Customer; Manager/Admin may inspect. Ownership is checked before returning invoice or payment information. Response now includes:
+
+```json
+{
+  "enabled": true,
+  "provider": "sepay",
+  "paymentUnlocked": false,
+  "blockedReason": "Lộ trình và chuyến xe đang được bộ phận điều phối thiết lập chi tiết. Cổng thanh toán sẽ tự động mở sau khi lịch trình được xác nhận.",
+  "invoice": null,
+  "payment": null
+}
+```
+
+After confirmation, `invoice` contains `id`, `code` (`INV-000001`), `shipmentId`, `routeId`, `amount`, `currency: VND`, `issuedAt` and an immutable `snapshot` of contact/route/legs. `paymentUnlocked` is computed from the latest route, staff confirmations and matching invoice/quote. Disabling SePay configuration does not delete an invoice. Existing paid receipts remain readable; pending QR URLs are suppressed whenever the gate closes.
+
+### `POST /orders/:id/payments/sepay`
+
+Customer only, owned shipment. `400` until Flow 3 confirmation and invoice issuance. Flow 1 approval or 100% compliance alone is insufficient. The server uses persisted integer VND amounts; client amounts are ignored. Repeated requests reuse the code. A stale QR received after the plan is invalidated is retained for reconciliation instead of being credited automatically. Historical sandbox payment initiation uses the same route gate, but sandbox success never satisfies real departure payment.
+
+### `POST /routes/plan/:shipmentId/driver-confirm`
+
+Driver/Escort confirms only their assigned role; Admin can name a `driverUserId`. The plan must already be approved. Last confirmation atomically issues the invoice, sets the plan/shipment to confirmed and notifies the customer. Repeated confirmation does not duplicate invoices or payment notifications. Missing vehicle/flight/schedule/quote is `400`.
+
+### `GET /routes/plan/:shipmentId/readiness`
+
+All three prerequisites: confirmed plan with invoice and staff, full legal compliance, verified real SePay payment for the current invoice amount. Customers may inspect only their own orders. Payment webhooks and legal reviews refresh readiness automatically. `POST /routes/shipment/:shipmentId/publish` and the first Flow 4 departure milestone enforce the same gate.
+
+### Local migration and tests
+
+From `backend`: `npm run migrate:payment-gate` (after existing migrations through 015). `npm run test:payment-gate` builds and starts a disposable MySQL 8 container and Nest test API, executes real HTTP/MySQL regression tests, then removes only the test container. It requires Docker and does not use the application's database. Frontend: `npm run test:sepay`.
+
+
+## Equine value and insurance API
+
+### `GET /orders/insurance-policy`
+
+Authenticated callers receive `{ version, currency: "VND", usdToVnd: number | null, packages }`. Package rates and compensation use basis points. USD is selectable only when `INSURANCE_USD_TO_VND` is configured; empty means VND only. Invalid configured rates return 503 instead of silently applying a fabricated conversion.
+
+### Create / resubmit
+
+`POST /orders` and pre-approval `PUT /orders/:id` accept these fields per `horses[]` item:
+
+```json
+{
+  "horseId": 1,
+  "name": "Xích Thố",
+  "quantity": 2,
+  "declaredValue": 100000000,
+  "declaredCurrency": "VND",
+  "insurancePackage": "standard"
+}
+```
+
+Defaults are `declaredValue: 0`, `declaredCurrency: VND`, `insurancePackage: basic`. Standard/Premium need value > 0. Negative, non-finite, more than two decimal places, unsupported currencies/packages, overflowing VND conversions/totals, duplicate or foreign/unavailable horses and inconsistent quantities return 400. Ownership is rechecked under the transaction. Client `insuranceFee`, `maxCompensation` or `exchangeRate` fields cannot override computed money/coverage.
+
+Resubmission without `horses` preserves all saved policies/quantities and adds no insurance revision. With `horses`, include the selected identities and quantities; unchanged policies retain their saved rate/premium, changed policies use the current server rate. The former policy rows are recorded before replacement. Approval and change-request state transitions use conditional writes so simultaneous actions cannot reopen an approved policy.
+
+Responses include per horse: the source value/currency, saved rate, `declaredValueVnd`, package, **unit** `insuranceFee`, **unit** `maxCompensation`, `emergencyVetCovered`, and `insurancePolicyVersion`. Order responses include `transportCost` (null until quoted), aggregate `insuranceFee`, and existing `totalCost` (0 until quoted). For the example above, insurance is 1,500,000 VND per horse, 3,000,000 VND for two; compensation limit is 80,000,000 VND per horse.
+
+### `PATCH /orders/:id/approve`
+
+Manager/Admin sends `{ "transportCost": 10000000 }` for base freight. The example above yields `transportCost: 10000000`, `insuranceFee: 3000000`, `totalCost: 13000000`. Legacy `totalCost` request field remains a base-freight alias. If both fields are sent with differing values, return 400; insurance is never added twice. Confirmation and SePay QR use the combined total. Customer insurance changes after approval are rejected.
+
+### Migration / testing
+
+From `backend`: `npm run migrate:insurance` applies rerunnable migration 017 to the configured database. Run existing migrations first. For this working branch, apply 016 as well if not yet present. `npm run test:insurance` builds and runs policy, real HTTP/MySQL and payment-regression tests in a disposable MySQL container. Frontend `npm run test:insurance` tests the selectable policies, previews, summary and persisted coverage rendering. No live insurance provider or claim-payout integration is introduced.

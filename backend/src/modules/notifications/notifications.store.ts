@@ -155,23 +155,10 @@ export class NotificationsStore implements OnModuleInit, OnModuleDestroy {
     const targetRoles = roleMapping[roleName] || [roleName];
     const placeholders = targetRoles.map(() => '?').join(', ');
 
-    try {
-      const [rows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT u.user_id FROM \`user\` u JOIN \`role\` r ON u.role_id = r.role_id WHERE r.role_name IN (${placeholders}) AND u.status = "active"`,
-        targetRoles,
-      );
-      if (rows.length > 0) {
-        return rows.map((r) => Number(r.user_id));
-      }
-    } catch {
-      // fallback below
-    }
-
-    // Default development fallback IDs
-    if (roleName.includes('Manager')) return [2];
-    if (roleName.includes('Specialist')) return [3];
-    if (roleName.includes('Coordinator')) return [4];
-    if (roleName.includes('Driver')) return [5];
-    return [1];
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT u.user_id FROM \`user\` u JOIN \`role\` r ON u.role_id = r.role_id WHERE r.role_name IN (${placeholders}) AND u.status = "active"`,
+      targetRoles,
+    );
+    return rows.map((row) => Number(row.user_id));
   }
 }

@@ -20,6 +20,7 @@ import {
   Plane,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { CostSummary } from '@/features/orders/components/InsuranceSummary';
 import { buildEquineRoute } from '@/lib/geo-corridors';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -52,6 +53,8 @@ interface TransportOrder {
   requestedHorseCount?: number;
   status: ShipmentStatus;
   totalCost: number;
+  transportCost?: number | null;
+  insuranceFee?: number;
   createdAt: string;
   customerEmail?: string;
   approverName?: string;
@@ -237,7 +240,8 @@ function exportQuotationPDF(order: TransportOrder) {
 
   <!-- Cost -->
   <div class="cost-section">
-    <div class="cost-label">Chi phí vận chuyển ước tính</div>
+    <div class="cost-label">Tổng cước vận chuyển và bảo hiểm</div>
+    <p>Cước cơ bản: ${order.transportCost == null ? 'Chờ báo giá' : order.transportCost.toLocaleString('vi-VN') + ' VNĐ'} · Phí bảo hiểm: ${(order.insuranceFee ?? 0).toLocaleString('vi-VN')} VNĐ</p>
     <div class="cost-value">${order.totalCost > 0 ? order.totalCost.toLocaleString('vi-VN') + ' ₫' : 'Chưa định giá'}</div>
     <div class="cost-sub">${order.totalCost > 0 ? 'Đã bao gồm: phí vận chuyển, kiểm dịch, hải quan cơ bản' : 'Vui lòng chờ Manager xác nhận báo giá'}</div>
   </div>
@@ -322,7 +326,7 @@ export default function ManagerRequestsPage() {
     const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
 
     setCostCurrency('VND');
-    setTotalCostInput(order.totalCost > 0 ? String(order.totalCost) : String(Math.round(estimatedUsd * 25400)));
+    setTotalCostInput(order.transportCost != null ? String(order.transportCost) : String(Math.round(estimatedUsd * 25400)));
   };
 
   const handleModeToggle = (newMode: 'road' | 'air') => {
@@ -525,7 +529,7 @@ export default function ManagerRequestsPage() {
       await apiClient(`/orders/${approveOrder.id}/approve`, {
         method: 'PATCH',
         body: JSON.stringify({
-          totalCost: Number(totalCostInput) || 0,
+          transportCost: costCurrency === 'USD' ? Math.round((Number(totalCostInput) || 0) * 25400) : Number(totalCostInput) || 0,
           transportMode: selectedTransportMode,
         }),
       });
@@ -942,6 +946,7 @@ export default function ManagerRequestsPage() {
                   </span>
                 </div>
 
+                <div className="my-4"><CostSummary transportCost={costCurrency === 'USD' ? Math.round((Number(totalCostInput) || 0) * 25400) : Number(totalCostInput) || 0} insuranceFee={Number(approveOrder.insuranceFee ?? 0)} /></div>
                 {approveOrder.horses && approveOrder.horses.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "140px", overflowY: "auto" }}>
                     {approveOrder.horses.map((horse, idx) => (
@@ -979,7 +984,7 @@ export default function ManagerRequestsPage() {
               <div style={{ marginBottom: "16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
                   <label style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
-                    Chi phí vận chuyển báo giá (Total Cost) <span style={{ color: "#dc2626" }}>*</span>
+                    Cước vận chuyển cơ bản (chưa bảo hiểm) (Total Cost) <span style={{ color: "#dc2626" }}>*</span>
                   </label>
                   <div style={{ display: "flex", gap: "4px", background: "#f1f5f9", padding: "2px", borderRadius: "6px" }}>
                     <button
@@ -1050,7 +1055,7 @@ export default function ManagerRequestsPage() {
                   </strong>
                 </div>
                 <p style={{ fontSize: "11px", color: "#94a3b8", margin: "4px 0 0 0" }}>
-                  Báo giá được lưu bằng VND. Sau khi duyệt, khách hàng mở chi tiết đơn để xem mục thanh toán SePay.
+                  Báo giá dự kiến được lưu bằng VND, gồm cước cơ bản và bảo hiểm. Hóa đơn và thanh toán SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.
                 </p>
               </div>
 

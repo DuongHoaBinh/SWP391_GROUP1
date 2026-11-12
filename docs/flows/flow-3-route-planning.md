@@ -71,7 +71,7 @@
 - Chuyến đi tự động chuyển sang trạng thái **`Ready to depart`** khi và chỉ khi **CẢ BA** điều kiện được thỏa mãn:
   1. Kế hoạch lộ trình & phương tiện ở trạng thái **`Confirmed`** (Flow 3 xong - đã phân công và tài xế xác nhận).
   2. Toàn bộ hồ sơ kiểm dịch, hải quan của đàn ngựa đã được Chuyên viên & Cơ quan chức năng phê duyệt đạt chuẩn 100% (`isFullyCompliant === true`, Flow 2 xong).
-  3. Cước phí vận chuyển đã được khách hàng thanh toán thành công qua MoMo/Thẻ ngân hàng (`isPaymentSucceeded === true`).
+  3. Cước phí vận chuyển đã được ngân hàng xác nhận qua SePay, đúng số tiền hóa đơn (`shipment_sepay_payment.status = succeeded`; MoMo sandbox không được tính là tiền thật) (`isPaymentSucceeded === true`).
 - Nếu thiếu một trong ba điều kiện:
   - Hệ thống **chặn xuất phát** và hiển thị rõ lý do đang chờ: *"Đang chờ phê duyệt đủ hồ sơ kiểm dịch"*, *"Đang chờ xác nhận từ đội ngũ tài xế"* hoặc *"Đang chờ khách hàng hoàn tất thanh toán cước vận chuyển"*.
 - **Đầu ra:** Khi đạt `Ready to depart`, chuyến đi sẵn sàng cho Flow 4 (Tài xế bấm bắt đầu xuất phát và cập nhật nhật ký hành trình).
@@ -113,3 +113,16 @@ Ready to depart ──► [Chuyển giao sang Flow 4: Theo dõi hành trình]
 3. Chặng đường bộ xuyên biên giới hoặc chặng bay quốc tế bắt buộc phải có điểm dừng làm thủ tục hải quan / kiểm dịch.
 4. Chuyến đi tuyệt đối **không được xuất phát** (`Ready to depart`) nếu hồ sơ pháp lý kiểm dịch ở Flow 2 chưa hoàn tất 100%.
 5. Nếu phát sinh thay đổi lịch kiểm dịch ở Flow 2 làm ảnh hưởng ngày bay, Coordinator được phép mở lại kế hoạch về `Draft` để điều chỉnh ngày giờ các chặng và gửi Manager duyệt lại.
+
+
+## 6. Cổng thanh toán sau xác nhận (11/11/2026)
+
+- Duyệt Flow 1 chỉ có báo giá dự kiến. Hoàn tất Flow 2 cũng không tự mở QR.
+- Manager phải duyệt kế hoạch chi tiết; Driver/Escort chỉ xác nhận phân công của mình. Tất cả Driver/Escort phải xác nhận, các chặng phải có xe/chuyến bay và giờ đi/đến hợp lệ.
+- Lần xác nhận cuối ghi `confirmed`, tạo `shipment_invoice` và thông báo thanh toán trong cùng transaction. Một route có một hóa đơn; gửi lại không sinh trùng. Hóa đơn chụp lại giá VND, thông tin khách và các chặng tại thời điểm phát hành.
+- Customer đọc hóa đơn và in/lưu PDF trong chi tiết đơn hoặc trang thanh toán. Đây là hóa đơn cước vận chuyển của ứng dụng, không tích hợp hóa đơn thuế điện tử.
+- API SePay kiểm tra route mới nhất, xác nhận nhân sự, hóa đơn và giá hiện hành ở cả tạo QR, đọc QR và nhận tiền. Không suy ra đủ điều kiện từ `activeStepIndex` hay chỉ từ trạng thái đơn `planning`.
+- Thanh toán hợp lệ và thay đổi hồ sơ kích hoạt đánh giá lại cổng xuất phát. Thiếu một trong ba điều kiện thì chưa được `ready_to_depart`. Báo giá 0 không được xem là đã thanh toán. API xuất bản và mốc xuất phát Flow 4 cũng phải kiểm tra cổng này.
+- Giữ giá trị trạng thái thanh toán đang dùng là `succeeded` (ý nghĩa đã trả tiền), không thêm giá trị `paid` song song.
+- Migration `016_route_payment_gate.sql` không sửa lịch sử thanh toán. Với kế hoạch cũ chưa có hóa đơn, Driver/Escort hoặc Admin xác nhận lại phân công để phát hành hóa đơn; không backfill bằng cách giả định kế hoạch lịch sử đã hợp lệ.
+- Cấu hình khung, dựng lại chi tiết và duyệt lại không được sửa ngầm kế hoạch đã xác nhận/phát hành hóa đơn. Điều chỉnh điểm dừng trong chuyến đi vẫn theo API lịch trình và lý do hiện có; hóa đơn giữ snapshot lúc phát hành.

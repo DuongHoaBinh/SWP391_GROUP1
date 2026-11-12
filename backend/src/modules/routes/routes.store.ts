@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import {
   AirlineEntity,
@@ -19,6 +19,7 @@ import { RouteStopItemDto } from './dto/create-route.dto';
 import { RecordStopProgressDto } from './dto/record-stop-progress.dto';
 import { SetStrategicFrameworkDto } from './dto/set-strategic-framework.dto';
 import { BuildDetailedPlanDto, RouteLegDto } from './dto/build-detailed-plan.dto';
+import { paymentGate } from '../orders/payment-gate';
 
 interface RouteRow extends RowDataPacket {
   route_id: number;
@@ -437,6 +438,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           existing.id,
         ],
       );
+      await this.pool.execute("UPDATE shipment_assignment SET is_confirmed = FALSE, confirmed_at = NULL WHERE shipment_id = ? AND role_in_shipment IN ('driver', 'escort')", [shipmentId]);
       return existing.id;
     }
 
@@ -639,6 +641,90 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
   }
 
   // --- Step 3: Driver / Staff Confirmation ---
+  async confirmAndInvoice(shipmentId: number, userId: number, notes?: string): Promise<boolean> {
+    const db = await this.pool.getConnection();
+    try {
+      await db.beginTransaction();
+      // The same shipment -> route lock order is used by payment and readiness commands.
+      const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+      const order = orders[0];
+      if (!order) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
+      if (!['approved', 'planning', 'confirmed', 'ready_to_depart'].includes(order.status)) throw new BadRequestException('Đơn hàng không còn ở giai đoạn xác nhận lịch trình');
+      const [routes] = await db.execute<RowDataPacket[]>('SELECT * FROM route WHERE shipment_id = ? ORDER BY route_id DESC LIMIT 1 FOR UPDATE', [shipmentId]);
+      const route = routes[0];
+      if (!route || !['approved', 'confirmed', 'ready_to_depart'].includes(route.plan_status)) throw new BadRequestException('Kế hoạch chi tiết phải được Manager phê duyệt trước khi nhận chuyến');
+      const [assignments] = await db.execute<RowDataPacket[]>("SELECT * FROM shipment_assignment WHERE shipment_id = ? AND role_in_shipment IN ('driver', 'escort') FOR UPDATE", [shipmentId]);
+      if (!assignments.some(a => Number(a.user_id) === userId)) throw new BadRequestException('Bạn không được phân công tài xế hoặc áp tải cho chuyến này');
+      const amount = Number(order.total_cost);
+      if (!Number.isSafeInteger(amount) || amount <= 0) throw new BadRequestException('Cần báo giá VND hợp lệ trước khi xác nhận lịch trình và phát hành hóa đơn');
+      const [legs] = await db.execute<RowDataPacket[]>('SELECT * FROM route_leg WHERE route_id = ? ORDER BY sequence_no FOR UPDATE', [route.route_id]);
+      if (!legs.length || legs.some(l => !l.planned_departure || !l.planned_arrival || new Date(l.planned_arrival) <= new Date(l.planned_departure) ||
+        (l.leg_type === 'road' && !l.vehicle_id) || (l.leg_type === 'flight' && (!l.flight_number || !l.booking_reference || !l.airline_id || !l.departure_airport_id || !l.arrival_airport_id || Number(l.stalls_booked) < Number(order.requested_horse_count))))) {
+        throw new BadRequestException('Cần hoàn thiện xe, chuyến bay và giờ đi/đến của từng chặng trước khi xác nhận');
+      }
+      await db.execute(`UPDATE shipment_assignment SET is_confirmed = TRUE, confirmed_at = COALESCE(confirmed_at, NOW()),
+        confirmation_notes = COALESCE(?, confirmation_notes) WHERE shipment_id = ? AND user_id = ? AND role_in_shipment IN ('driver', 'escort')`, [notes ?? null, shipmentId, userId]);
+      const fullyConfirmed = assignments.every(a => Boolean(a.is_confirmed) || Number(a.user_id) === userId);
+      if (fullyConfirmed) {
+        const [invoices] = await db.execute<RowDataPacket[]>('SELECT invoice_id, amount FROM shipment_invoice WHERE route_id = ?', [route.route_id]);
+        if (invoices.length && Number(invoices[0].amount) !== amount) throw new BadRequestException('Báo giá khác hóa đơn đã phát hành. Cần đối soát trước khi xác nhận lại');
+        if (!invoices.length) {
+          const [insuredHorses] = await db.execute<RowDataPacket[]>('SELECT sh.*, h.name FROM shipment_horse sh JOIN horse h ON h.horse_id = sh.horse_id WHERE sh.shipment_id = ?', [shipmentId]);
+          const snapshot = { requestCode: `REQ-${String(shipmentId).padStart(3, '0')}`, contactName: order.contact_name,
+            contactEmail: order.contact_email, origin: order.origin_location, destination: order.destination_location,
+            horseCount: order.requested_horse_count, routeName: route.route_name, legs,
+            transportCost: Number(order.transport_cost ?? order.total_cost), insuranceFee: Number(order.insurance_fee ?? 0),
+            horses: insuredHorses.map(h => ({ horseId: h.horse_id, name: h.name, quantity: Number(h.quantity),
+              declaredValue: Number(h.declared_value), declaredCurrency: h.declared_currency, exchangeRate: Number(h.exchange_rate),
+              declaredValueVnd: Number(h.declared_value_vnd), insurancePackage: h.insurance_package, insuranceFee: Number(h.insurance_fee),
+              maxCompensation: Number(h.max_compensation), emergencyVetCovered: Boolean(h.emergency_vet_covered) })) };
+          await db.execute('INSERT INTO shipment_invoice (shipment_id, route_id, customer_id, amount, snapshot) VALUES (?, ?, ?, ?, ?)',
+            [shipmentId, route.route_id, order.customer_id, amount, JSON.stringify(snapshot)]);
+          await db.execute(`INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
+            VALUES (?, ?, 'Kế hoạch vận chuyển đã hoàn tất', ?, 'status_update', FALSE)`, [order.customer_id, shipmentId,
+            `Kế hoạch vận chuyển mã ${snapshot.requestCode} đã hoàn tất. Quý khách vui lòng tiến hành thanh toán để đoàn xe sẵn sàng khởi hành.`]);
+        }
+        await db.execute("UPDATE route SET plan_status = 'confirmed' WHERE route_id = ? AND plan_status = 'approved'", [route.route_id]);
+        await db.execute("UPDATE shipment SET status = 'confirmed' WHERE shipment_id = ? AND status IN ('approved', 'planning')", [shipmentId]);
+      }
+      await db.commit();
+      return fullyConfirmed;
+    } catch (error) { await db.rollback(); throw error; }
+    finally { db.release(); }
+  }
+
+  async applyDepartureReadiness(shipmentId: number, isLegalCompliant: boolean) {
+    const db = await this.pool.getConnection();
+    try {
+      await db.beginTransaction();
+      const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+      const order = orders[0];
+      if (!order) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
+      const [routes] = await db.execute<RowDataPacket[]>('SELECT * FROM route WHERE shipment_id = ? ORDER BY route_id DESC LIMIT 1 FOR UPDATE', [shipmentId]);
+      const route = routes[0];
+      const gate = await paymentGate(db, shipmentId);
+      const [payments] = await db.execute<RowDataPacket[]>('SELECT status, amount FROM shipment_sepay_payment WHERE shipment_id = ?', [shipmentId]);
+      const isPaymentSucceeded = payments[0]?.status === 'succeeded' && Number(payments[0].amount) === Number(order.total_cost) && Number(order.total_cost) > 0;
+      const isPlanConfirmed = gate.paymentUnlocked;
+      const isReadyToDepart = isPlanConfirmed && isPaymentSucceeded && isLegalCompliant && ['confirmed', 'ready_to_depart'].includes(order.status);
+      if (isReadyToDepart && route.plan_status === 'confirmed') {
+        await db.execute("UPDATE route SET plan_status = 'ready_to_depart' WHERE route_id = ?", [route.route_id]);
+        await db.execute("UPDATE shipment SET status = 'ready_to_depart' WHERE shipment_id = ?", [shipmentId]);
+        await db.execute(`INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
+          VALUES (?, ?, 'Chuyến đi đã đủ điều kiện xuất phát', 'Lộ trình, thanh toán và hồ sơ kiểm dịch đã hoàn tất. Đoàn xe sẵn sàng khởi hành.', 'status_update', FALSE)`, [order.customer_id, shipmentId]);
+        order.status = 'ready_to_depart'; route.plan_status = 'ready_to_depart';
+      } else if (!isReadyToDepart && order.status === 'ready_to_depart') {
+        await db.execute("UPDATE shipment SET status = 'confirmed' WHERE shipment_id = ?", [shipmentId]);
+        if (route?.plan_status === 'ready_to_depart') await db.execute("UPDATE route SET plan_status = 'confirmed' WHERE route_id = ?", [route.route_id]);
+        order.status = 'confirmed';
+        if (route?.plan_status === 'ready_to_depart') route.plan_status = 'confirmed';
+      }
+      await db.commit();
+      return { isPlanConfirmed, isLegalCompliant, isPaymentSucceeded, isReadyToDepart, currentShipmentStatus: order.status, currentPlanStatus: route?.plan_status ?? 'draft' };
+    } catch (error) { await db.rollback(); throw error; }
+    finally { db.release(); }
+  }
+
   async confirmStaffAssignment(
     shipmentId: number,
     userId: number,

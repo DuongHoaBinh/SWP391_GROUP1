@@ -53,6 +53,8 @@ interface TransportOrder {
   departureDate: string | null;
   status: ShipmentStatus;
   totalCost: number;
+  transportCost?: number | null;
+  insuranceFee?: number;
   createdAt: string;
   customerEmail?: string;
   horses?: OrderHorse[];
@@ -154,7 +156,7 @@ function exportQuotationPDF(order: TransportOrder) {
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Báo Giá Vận Chuyển - ${order.requestCode || `#${order.id}`}</title>
+  <title>Báo Giá Dự Kiến - ${order.requestCode || `#${order.id}`}</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff}
@@ -194,7 +196,7 @@ function exportQuotationPDF(order: TransportOrder) {
       <div class="brand-sub" style="margin-top:8px">Hotline: +84 28 3456 7890 | info@racehorse-logistics.vn</div>
     </div>
     <div>
-      <div class="doc-title">BÁO GIÁ VẬN CHUYỂN</div>
+      <div class="doc-title">BÁO GIÁ DỰ KIẾN</div><p style="font-size:12px;margin-top:8px">Chưa yêu cầu thanh toán. Hóa đơn được phát hành sau khi lộ trình được xác nhận.</p>
       <div class="doc-id">Mã yêu cầu: ${order.requestCode || `#${order.id}`}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
       <div style="text-align:right"><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
@@ -247,7 +249,8 @@ function exportQuotationPDF(order: TransportOrder) {
   </div>
 
   <div class="cost-section">
-    <div class="cost-label">Chi phí vận chuyển ước tính</div>
+    <div class="cost-label">Tổng cước vận chuyển và bảo hiểm</div>
+    <p>Cước cơ bản: ${order.transportCost == null ? 'Chờ báo giá' : order.transportCost.toLocaleString('vi-VN') + ' VNĐ'} · Phí bảo hiểm: ${(order.insuranceFee ?? 0).toLocaleString('vi-VN')} VNĐ</p>
     <div class="cost-value">${order.totalCost > 0 ? order.totalCost.toLocaleString('vi-VN') + ' ₫' : 'Chưa định giá'}</div>
     <div class="cost-sub">${order.totalCost > 0 ? 'Đã bao gồm: phí vận chuyển, kiểm dịch và hải quan cơ bản' : 'Vui lòng chờ Logistics Manager xác nhận báo giá chính thức'}</div>
   </div>
