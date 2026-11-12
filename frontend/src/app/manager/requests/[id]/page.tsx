@@ -31,6 +31,9 @@ import {
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 import { apiClient } from '@/lib/api-client';
+import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
+import { BookingQuoteSummary, BookingSummary } from '@/features/orders/components/BookingSummary';
+import { bookingQuotePayload } from '@/features/orders/booking-policy';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { buildEquineRoute } from '@/lib/geo-corridors';
@@ -145,9 +148,11 @@ export default function ManagerRequestDetailPage() {
   const handleOpenModal = (type: 'APPROVE' | 'REJECT' | 'CHANGE') => {
     setActiveModal(type);
     if (type === 'APPROVE') {
-      const mode = isDomestic && !specialReqLower.includes('hàng không') ? 'road' : 'air';
+      const mode = order?.transportMode ?? (isDomestic && !specialReqLower.includes('hàng không') ? 'road' : 'air');
       setSelectedTransportMode(mode);
-      const initialCost = order?.totalCost > 0 ? order.totalCost : Math.round(routeMetrics.distanceKm * 15000);
+      const count = Number(order?.requestedHorseCount ?? 1);
+      const freight = order?.transportCost ?? Math.round(routeMetrics.distanceKm * 15000);
+      const initialCost = order?.bookingType === 'dedicated_charter' ? freight : order?.stallUnitPrice ?? Math.round(freight / count);
       setCostCurrency('VND');
       setInputValue(String(initialCost));
     } else {
@@ -156,6 +161,13 @@ export default function ManagerRequestDetailPage() {
   };
 
   // Submit action
+  const handleQuoteCurrency = (currency: 'VND' | 'USD') => {
+    if (currency === costCurrency) return;
+    const value = Number(inputValue);
+    if (Number.isFinite(value) && value > 0) setInputValue(String(currency === 'VND' ? Math.round(value * 25400) : Math.round(value / 25400 * 100) / 100));
+    setCostCurrency(currency);
+  };
+
   const handleConfirmAction = async () => {
     if (!order) return;
     setIsSubmitting(true);
@@ -168,17 +180,15 @@ export default function ManagerRequestDetailPage() {
           setIsSubmitting(false);
           return;
         }
-        const costInVnd = costCurrency === 'USD' ? Math.round(costNum * 25400) : Math.round(costNum);
-
-        await apiClient(`/orders/${order.id}/approve`, {
+        const approved = await apiClient<{ totalCost: number }>(`/orders/${order.id}/approve`, {
           method: 'PATCH',
           body: JSON.stringify({
-            totalCost: costInVnd,
+            ...bookingQuotePayload(inputValue, order.bookingType ?? 'shared_stall', Number(order.requestedHorseCount ?? 1), costCurrency),
             transportMode: selectedTransportMode,
           }),
         });
 
-        toast.success(`Đã phê duyệt đơn vận chuyển #${order.id} với báo giá ${costInVnd.toLocaleString('vi-VN')} ₫`);
+        toast.success(`Đã phê duyệt đơn vận chuyển #${order.id} với tổng báo giá ${approved.totalCost.toLocaleString('vi-VN')} ₫ (gồm bảo hiểm)`);
       } else if (activeModal === 'REJECT') {
         if (!inputValue.trim()) {
           toast.error('Vui lòng nhập lý do từ chối');
@@ -469,12 +479,13 @@ export default function ManagerRequestDetailPage() {
               <div className="flex items-center gap-2">
                 <ShieldCheck size={18} className="text-emerald-600" />
                 <h2 className="text-base font-extrabold text-slate-900">
-                  Danh Sách Cá Thể Ngựa Vận Chuyển ({order.horses?.length || order.requestedHorseCount || 1} cá thể)
+                  Hồ Sơ Ngựa Vận Chuyển ({order.horses?.length || 1} hồ sơ / {order.requestedHorseCount || 1} ngựa)
                 </h2>
               </div>
             </div>
 
             <div className="p-6">
+              <div className="mb-5 space-y-4"><BookingSummary bookingType={order.bookingType} horseCount={Number(order.requestedHorseCount ?? 1)} stallUnitPrice={order.stallUnitPrice} /><InsuranceSummary horses={order.horses ?? []} transportCost={order.transportCost ?? null} insuranceFee={Number(order.insuranceFee ?? 0)} totalCost={Number(order.totalCost ?? 0)} /></div>
               {Array.isArray(order.horses) && order.horses.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {order.horses.map((horse: any, idx: number) => (
@@ -703,7 +714,7 @@ export default function ManagerRequestDetailPage() {
             {activeModal === 'APPROVE' ? (
               <>
                 <p className="text-xs text-slate-500">
-                  Xác nhận báo giá chính thức cho khách hàng. Sau khi duyệt, khách hàng sẽ nhận được thông báo kèm mã QR SePay để thanh toán.
+                  Xác nhận báo giá dự kiến gồm cước cơ bản và bảo hiểm. Hóa đơn và mã QR SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.
                 </p>
 
                 {/* Transport Mode Toggle */}
@@ -741,14 +752,15 @@ export default function ManagerRequestDetailPage() {
                   </div>
                 </div>
 
+                <BookingQuoteSummary input={inputValue} bookingType={order.bookingType} horseCount={Number(order.requestedHorseCount ?? 1)} currency={costCurrency} insuranceFee={Number(order.insuranceFee ?? 0)} />
                 {/* Currency and Cost Input */}
                 <div>
                   <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1.5">
-                    <span>Chi phí vận chuyển báo giá: <span className="text-red-500">*</span></span>
+                    <span>{order.bookingType === 'dedicated_charter' ? 'Cước trọn gói toàn chuyến (chưa bảo hiểm)' : 'Đơn giá mỗi ô chuồng / ngựa (chưa bảo hiểm)'}: <span className="text-red-500">*</span></span>
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => setCostCurrency('VND')}
+                        onClick={() => handleQuoteCurrency('VND')}
                         className={`px-2 py-0.5 text-[11px] font-bold rounded ${
                           costCurrency === 'VND' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'
                         }`}
@@ -757,7 +769,7 @@ export default function ManagerRequestDetailPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setCostCurrency('USD')}
+                        onClick={() => handleQuoteCurrency('USD')}
                         className={`px-2 py-0.5 text-[11px] font-bold rounded ${
                           costCurrency === 'USD' ? 'bg-blue-100 text-blue-800' : 'text-slate-500'
                         }`}
@@ -772,6 +784,7 @@ export default function ManagerRequestDetailPage() {
                       type="number"
                       min={0}
                       value={inputValue}
+                      aria-label={order.bookingType === 'dedicated_charter' ? 'Cước trọn gói toàn chuyến' : 'Đơn giá mỗi ô chuồng'}
                       onChange={(e) => setInputValue(e.target.value)}
                       placeholder="Nhập giá tiền..."
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 pr-16"

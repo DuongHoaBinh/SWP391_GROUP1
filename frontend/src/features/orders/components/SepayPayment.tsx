@@ -6,6 +6,7 @@ import useSWR from 'swr';
 import { CheckCircle2, Copy, QrCode, RefreshCw, ShieldCheck } from 'lucide-react';
 import { getCurrentUser } from '@/lib/auth';
 import { apiClient } from '@/lib/api-client';
+import { InvoiceSummary, type Invoice } from './InvoiceSummary';
 
 interface Payment {
   id: number;
@@ -21,7 +22,7 @@ interface Payment {
   transactionId: string | null;
   paidAt: string | null;
 }
-interface PaymentState { enabled: boolean; provider: 'sepay'; payment: Payment | null }
+interface PaymentState { enabled: boolean; provider: 'sepay'; payment: Payment | null; paymentUnlocked: boolean; blockedReason: string | null; invoice: Invoice | null }
 const money = (amount: number) => `${amount.toLocaleString('vi-VN')} VND`;
 const buttonStyle = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -36,17 +37,19 @@ export function SepayPayment({ shipmentId, requestCode, amount, checkout = false
   const checkoutUrl = `/customer/requests/${shipmentId}/payment`;
   const { data, error: loadError, mutate, isLoading, isValidating } = useSWR<PaymentState>(
     ['sepay', getCurrentUser().id, shipmentId], () => apiClient<PaymentState>(endpoint, { cache: 'no-store' }),
-    { refreshInterval: state => state?.payment?.status === 'pending' ? 3000 : 0, refreshWhenHidden: false, shouldRetryOnError: false },
+    { refreshInterval: state => state?.payment?.status === 'succeeded' ? 0 : state?.payment?.status === 'pending' ? 3000 : 10000, refreshWhenHidden: false, shouldRetryOnError: false },
   );
   const payment = data?.payment;
+  const paymentUnlocked = data?.paymentUnlocked === true;
   const quoteChanged = !!payment && payment.status !== 'succeeded' && payment.amount !== amount;
-  const canPay = checkout && eligible && data?.enabled && !loadError && payment?.status === 'pending' && !!payment.qrUrl && !payment.blockedReason && !quoteChanged;
+  const canPay = checkout && eligible && paymentUnlocked && data?.enabled && !loadError && payment?.status === 'pending' && !!payment.qrUrl && !payment.blockedReason && !quoteChanged;
 
   async function create() {
+    if (!paymentUnlocked || !eligible || loadError) return;
     setBusy(true); setError('');
     try {
       const result = await apiClient<Payment>(endpoint, { method: 'POST' });
-      await mutate({ enabled: true, provider: 'sepay', payment: result }, false);
+      await mutate(current => current ? { ...current, payment: result } : current, false);
     } catch (err) { setError(err instanceof Error ? err.message : 'Không tạo được yêu cầu thanh toán. Vui lòng thử lại.'); }
     finally { setBusy(false); }
   }
@@ -66,6 +69,8 @@ export function SepayPayment({ shipmentId, requestCode, amount, checkout = false
       {(error || loadError) && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error || loadError.message}</div>}
       {loadError && <button type="button" className={`${buttonStyle} border border-slate-200 text-slate-700 hover:bg-slate-50`} onClick={() => { setError(''); void mutate(); }}>Tải lại thông tin</button>}
       {data && !data.enabled && <p className="text-sm text-amber-800">Thanh toán đang tạm ngưng. Vui lòng liên hệ bộ phận vận chuyển trước khi chuyển tiền.</p>}
+      {data?.invoice && <InvoiceSummary invoice={data.invoice} />}
+      {!paymentUnlocked && payment?.status !== 'succeeded' && data && <p role="status" className="rounded-lg bg-slate-50 p-4 text-sm leading-6 text-slate-600">{data.blockedReason || 'Lộ trình và chuyến xe đang được bộ phận điều phối thiết lập chi tiết. Cổng thanh toán sẽ tự động mở sau khi lịch trình được xác nhận.'}</p>}
       {payment?.status === 'succeeded' ? <div role="status" className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4 text-green-900">
         <CheckCircle2 className="mt-0.5 shrink-0" size={22} aria-hidden="true" />
         <div><p className="font-semibold">Đã nhận {money(payment.amount)}</p><p className="mt-1 text-sm">Mã thanh toán: <strong>{payment.paymentCode}</strong></p><p className="mt-1 break-all text-xs">Giao dịch SePay: {payment.transactionId}{payment.paidAt ? ` · ${new Date(payment.paidAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` : ''}</p></div>
@@ -73,8 +78,8 @@ export function SepayPayment({ shipmentId, requestCode, amount, checkout = false
         {payment?.blockedReason ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{payment.blockedReason}</p> : quoteChanged && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Báo giá đã thay đổi. Vui lòng liên hệ bộ phận vận chuyển để đối soát; chưa chuyển tiền theo thông tin cũ.</p>}
         {payment?.status === 'review' && <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p className="font-semibold">Giao dịch cần đối soát</p><p className="mt-1">Thông tin chuyển khoản chưa khớp hoàn toàn với đơn hàng. Vui lòng liên hệ bộ phận vận chuyển và cung cấp mã {payment.paymentCode}. Chưa chuyển thêm tiền cho đến khi được xác nhận.</p></div>}
         {payment?.status === 'pending' && !eligible && !payment.blockedReason && <p role="alert" className="text-sm text-amber-800">Đơn hàng không còn đủ điều kiện thanh toán. Vui lòng liên hệ bộ phận vận chuyển trước khi chuyển tiền.</p>}
-        {!payment && data?.enabled && <div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm text-slate-500">Số tiền theo báo giá</p><p className="mt-1 text-xl font-bold tabular-nums text-slate-900">{money(amount)}</p><p className="mt-2 max-w-lg text-sm text-slate-600">{eligible ? 'Quét QR bằng ứng dụng ngân hàng. Số tiền và nội dung chuyển khoản sẽ được điền sẵn.' : 'Đơn cần được duyệt và có báo giá hợp lệ trước khi thanh toán.'}</p></div>{eligible && (checkout ? <button type="button" disabled={busy || !Number.isSafeInteger(amount) || amount <= 0} className={`${buttonStyle} bg-blue-600 text-white hover:bg-blue-700`} onClick={create}><QrCode size={18} aria-hidden="true" />{busy ? 'Đang tạo mã…' : 'Tạo mã QR thanh toán'}</button> : <Link href={checkoutUrl} className={`${buttonStyle} bg-blue-600 text-white hover:bg-blue-700`}><QrCode size={18} aria-hidden="true" />Thanh toán bằng SePay</Link>)}</div>}
-        {!checkout && eligible && payment?.status === 'pending' && !payment.blockedReason && !quoteChanged && data?.enabled && <div className="flex flex-wrap items-center justify-between gap-4"><p className="text-sm text-slate-600">Chưa nhận xác nhận thanh toán. Nếu đã chuyển tiền, bạn có thể chờ tại đây; trang sẽ tự cập nhật.</p><Link href={checkoutUrl} className={`${buttonStyle} bg-blue-600 text-white hover:bg-blue-700`}>Tiếp tục thanh toán</Link></div>}
+        {!payment && paymentUnlocked && !loadError && data?.enabled && <div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm text-slate-500">Số tiền theo hóa đơn</p><p className="mt-1 text-xl font-bold tabular-nums text-slate-900">{money(amount)}</p><p className="mt-2 max-w-lg text-sm text-slate-600">{eligible ? 'Quét QR bằng ứng dụng ngân hàng. Số tiền và nội dung chuyển khoản sẽ được điền sẵn.' : 'Đơn cần có lộ trình đã xác nhận và hóa đơn hợp lệ trước khi thanh toán.'}</p></div>{eligible && (checkout ? <button type="button" disabled={busy || !Number.isSafeInteger(amount) || amount <= 0} className={`${buttonStyle} bg-blue-600 text-white hover:bg-blue-700`} onClick={create}><QrCode size={18} aria-hidden="true" />{busy ? 'Đang tạo mã…' : 'Tạo mã QR thanh toán'}</button> : <Link href={checkoutUrl} className={`${buttonStyle} bg-blue-600 text-white hover:bg-blue-700`}><QrCode size={18} aria-hidden="true" />Thanh toán bằng SePay</Link>)}</div>}
+        {!checkout && eligible && paymentUnlocked && !loadError && payment?.status === 'pending' && !payment.blockedReason && !quoteChanged && data?.enabled && <div className="flex flex-wrap items-center justify-between gap-4"><p className="text-sm text-slate-600">Chưa nhận xác nhận thanh toán. Nếu đã chuyển tiền, bạn có thể chờ tại đây; trang sẽ tự cập nhật.</p><Link href={checkoutUrl} className={`${buttonStyle} bg-blue-600 text-white hover:bg-blue-700`}>Tiếp tục thanh toán</Link></div>}
         {canPay && <div className="grid min-w-0 gap-6 md:grid-cols-[240px_minmax(0,1fr)]">
           <div className="flex flex-col items-center gap-3">
             <div className="flex min-h-60 w-60 max-w-full items-center justify-center rounded-xl border border-slate-200 p-3">
