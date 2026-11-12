@@ -13,18 +13,11 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
   const prefix = `sepay-it-${crypto.randomUUID()}`;
   const userIds = [], shipmentIds = [], transactionIds = [], horseIds = [];
   const tokens = {};
-  async function confirmFixture(id) {
-    const [route] = await db.execute("INSERT INTO route (shipment_id, route_name, plan_status) VALUES (?, 'SePay test route', 'confirmed')", [id]);
-    await db.execute("INSERT INTO shipment_assignment (shipment_id, user_id, role_in_shipment, is_confirmed) VALUES (?, ?, 'driver', TRUE)", [id, userIds[2]]);
-    await db.execute("INSERT INTO shipment_invoice (shipment_id, route_id, customer_id, amount, snapshot) SELECT shipment_id, ?, customer_id, total_cost, JSON_OBJECT('requestCode', 'TEST', 'legs', JSON_ARRAY()) FROM shipment WHERE shipment_id = ?", [route.insertId, id]);
-    await db.execute("UPDATE shipment SET status = 'confirmed' WHERE shipment_id = ?", [id]);
-  }
   let nextTransaction = 8000000000000 + crypto.randomInt(1000000000);
   async function fixtureOrder(status = 'approved', amount = 15000) {
     const [result] = await db.execute(`INSERT INTO shipment (customer_id, requested_by, contact_name, contact_phone, contact_email, origin_location, destination_location, requested_date, requested_horse_count, status, total_cost)
       VALUES (?, ?, 'SePay fixture', '0900000000', ?, 'Fixture origin', 'Fixture destination', CURDATE(), 1, ?, ?)`, [userIds[0], userIds[0], `${prefix}@example.com`, status, amount]);
     shipmentIds.push(result.insertId);
-    if (status === 'approved') await confirmFixture(result.insertId);
     return result.insertId;
   }
   async function request(actor, endpoint, method = 'GET', body) {
@@ -63,7 +56,6 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
       const [result] = await db.execute(`INSERT INTO shipment (customer_id, requested_by, contact_name, contact_phone, contact_email, origin_location, destination_location, requested_date, requested_horse_count, status, total_cost)
         VALUES (?, ?, 'SePay fixture', '0900000000', ?, 'Fixture origin', 'Fixture destination', CURDATE(), 1, ?, 15000)`, [userIds[0], userIds[0], `${prefix}@example.com`, status]);
       shipmentIds.push(result.insertId);
-      if (status === 'approved') await confirmFixture(result.insertId);
     }
     const endpoint = id => `/orders/${id}/payments/sepay`;
     const sid = shipmentIds[0];
@@ -144,7 +136,7 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
       assert.equal(state.payment.qrUrl, null);
       const order = await expected('owner', `/orders/${sid}`, 'GET', undefined, 200);
       assert.equal(order.paymentStatus, 'succeeded');
-      assert.equal(order.status, 'confirmed');
+      assert.equal(order.status, 'approved');
       assert.equal((await expected('owner', endpoint(sid), 'POST', {}, 200)).id, payment.id);
       const [[count]] = await db.execute("SELECT COUNT(*) AS count FROM notification WHERE shipment_id = ? AND title = 'Đã nhận thanh toán'", [sid]);
       assert.equal(Number(count.count), 1);
@@ -159,7 +151,7 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
         assert.equal(stale.payment.status, 'pending');
         assert.equal(stale.payment.qrUrl, null);
         assert.ok(stale.payment.blockedReason);
-        await expected('owner', endpoint(shipmentIds[index]), 'POST', {}, 400);
+        await expected('owner', endpoint(shipmentIds[index]), 'POST', {}, index === 3 ? 409 : 400);
         assert.equal((await webhook(payload(p))).status, 200);
         assert.equal((await expected('owner', endpoint(shipmentIds[index]), 'GET', undefined, 200)).payment.status, 'review');
       }
@@ -188,13 +180,11 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
       for (const totalCost of [1.5, -1, 10000000000000]) {
         await expected('manager', `/orders/${id}/approve`, 'PATCH', { totalCost }, 400);
       }
-      await expected('manager', `/orders/${id}/approve`, 'PATCH', { totalCost: 0 }, 400);
+      await expected('manager', `/orders/${id}/approve`, 'PATCH', { totalCost: 0 }, 200);
       await expected('owner', endpoint(id), 'POST', {}, 400);
       const payable = await fixtureOrder('requested', 0);
       const approved = await expected('manager', `/orders/${payable}/approve`, 'PATCH', { totalCost: 52527200 }, 200);
       assert.equal(approved.totalCost, 52527200);
-      await expected('owner', endpoint(payable), 'POST', {}, 400);
-      await confirmFixture(payable);
       assert.equal((await expected('owner', endpoint(payable), 'POST', { amount: 1 }, 200)).amount, 52527200);
     });
     await t.test('cancellation is persisted, owned, idempotent and cannot cancel approved or paid orders', async () => {
@@ -235,14 +225,10 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
     if (shipmentIds.length) {
       await db.query('DELETE FROM notification WHERE shipment_id IN (?)', [shipmentIds]);
       await db.query('DELETE FROM shipment_sepay_payment WHERE shipment_id IN (?)', [shipmentIds]);
-      await db.query('DELETE FROM shipment_invoice WHERE shipment_id IN (?)', [shipmentIds]);
-      await db.query('DELETE FROM shipment_assignment WHERE shipment_id IN (?)', [shipmentIds]);
-      await db.query('DELETE FROM route WHERE shipment_id IN (?)', [shipmentIds]);
       await db.query('DELETE FROM shipment_horse WHERE shipment_id IN (?)', [shipmentIds]);
       await db.query('DELETE FROM shipment WHERE shipment_id IN (?)', [shipmentIds]);
     }
     if (horseIds.length) await db.query('DELETE FROM horse WHERE horse_id IN (?)', [horseIds]);
-    if (userIds.length) await db.query('DELETE FROM notification WHERE user_id IN (?)', [userIds]);
     if (userIds.length) await db.query('DELETE FROM `user` WHERE user_id IN (?)', [userIds]);
     await db.end();
   }

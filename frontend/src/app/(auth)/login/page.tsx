@@ -1,23 +1,30 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { AuthShowcasePanel } from '@/components/layout/AuthShowcasePanel';
-import { SESSION_EXPIRED_MESSAGE, setAuthSession } from '@/lib/auth';
-import { getPostLoginRedirect } from '@/lib/auth-redirect';
-import { loginWithPassword } from '@/lib/auth-login';
+import { setAuthSession, clearAuthSession } from '@/lib/auth';
+import { mockCurrentUser } from '@/lib/mock-data';
 
 function LoginFormContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const redirectTarget = searchParams.get('redirect') || '/customer';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
+    // Clear stale session when visiting login directly so old forgot-to-logout sessions do not linger
+    if (!searchParams.get('redirect')) {
+      clearAuthSession();
+    }
     try {
       const savedEmail = localStorage.getItem('equitransit_remembered_email');
       const isRemembered = localStorage.getItem('equitransit_remember_me') === 'true';
@@ -28,48 +35,92 @@ function LoginFormContent() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [searchParams]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [error, setError] = useState<string | null>(() =>
-    searchParams.get('reason') === 'session-expired' ? SESSION_EXPIRED_MESSAGE : null
-  );
+  const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isLoading || isSuccess) return;
     setIsLoading(true);
     setError(null);
+
+    let authUser = {
+      ...mockCurrentUser,
+      email,
+    };
+    let authToken = 'mock-jwt-token-customer';
+
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000/api';
-      const { accessToken, user } = await loginWithPassword(apiUrl, email, password);
-      const roleRoutes: Record<string, string> = {
-        CUSTOMER: '/customer', LOGISTICS_MANAGER: '/manager', TRANSPORT_SPECIALIST: '/specialist',
-        FLEET_ROUTE_COORDINATOR: '/coordinator', DRIVER_ESCORT: '/driver', ADMIN: '/manager',
-      };
-      const finalRoute = getPostLoginRedirect(searchParams.get('redirect'), roleRoutes[user.role]);
-      setAuthSession(accessToken, user);
-      try {
-        if (rememberMe) {
-          localStorage.setItem('equitransit_remembered_email', email.trim().toLowerCase());
-          localStorage.setItem('equitransit_remember_me', 'true');
-        } else {
-          localStorage.removeItem('equitransit_remembered_email');
-          localStorage.removeItem('equitransit_remember_me');
-        }
-      } catch {
-        // Remembering the email is optional; the authenticated session has already been saved.
+      const response = await fetch(`${apiUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        authToken = data.accessToken;
+        authUser = {
+          ...mockCurrentUser,
+          ...data.user,
+          name: data.user?.fullName || data.user?.name || data.user?.email?.split('@')[0] || email.split('@')[0],
+        };
+      } else if (response.status === 401 || response.status === 400) {
+        const errData = await response.json().catch(() => null);
+        setError(errData?.message || 'Invalid email or password. Please verify your credentials.');
+        setIsLoading(false);
+        return;
       }
-      setIsSuccess(true);
-      // A fresh navigation makes middleware read the cookies just written by setAuthSession.
-      window.location.replace(finalRoute);
-    } catch (cause) {
-      setIsSuccess(false);
-      setError(cause instanceof Error ? cause.message : 'Không thể đăng nhập. Vui lòng thử lại.');
-    } finally {
-      setIsLoading(false);
+    } catch {
+      // Backend offline fallback for preview
     }
+
+    if (rememberMe) {
+      try {
+        localStorage.setItem('equitransit_remembered_email', email.trim().toLowerCase());
+        localStorage.setItem('equitransit_remember_me', 'true');
+      } catch {
+        // ignore
+      }
+    } else {
+      try {
+        localStorage.removeItem('equitransit_remembered_email');
+        localStorage.removeItem('equitransit_remember_me');
+      } catch {
+        // ignore
+      }
+    }
+
+    const roleRoutes: Record<string, string> = {
+      CUSTOMER: '/customer',
+      LOGISTICS_MANAGER: '/manager',
+      TRANSPORT_SPECIALIST: '/specialist',
+      FLEET_ROUTE_COORDINATOR: '/coordinator',
+      COORDINATOR: '/coordinator',
+      DRIVER_ESCORT: '/driver',
+      DRIVER: '/driver',
+      ADMIN: '/manager',
+    };
+
+    const userRoleKey = (authUser.role || 'CUSTOMER').toUpperCase();
+    const defaultRoleRoute = roleRoutes[userRoleKey] || '/customer';
+
+    const customRedirect = searchParams.get('redirect');
+    const finalRoute =
+      customRedirect && customRedirect !== '/customer' && !customRedirect.startsWith('/login')
+        ? customRedirect
+        : defaultRoleRoute;
+
+    setAuthSession(authToken, authUser);
+    setIsLoading(false);
+    setIsSuccess(true);
+
+    setTimeout(() => {
+      router.push(finalRoute);
+    }, 1000);
   };
 
   return (

@@ -24,7 +24,6 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
-import { insurancePolicy } from './insurance-policy';
 
 @ApiTags('Orders')
 @ApiBearerAuth()
@@ -32,10 +31,6 @@ import { insurancePolicy } from './insurance-policy';
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
-
-  @Get('insurance-policy')
-  @ApiOperation({ summary: 'Chính sách bảo hiểm và tỷ giá khai báo do server cấu hình' })
-  getInsurancePolicy() { return insurancePolicy(); }
 
   @Post()
   @Roles(UserRole.CUSTOMER)

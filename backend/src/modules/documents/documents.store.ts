@@ -489,7 +489,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
   async hasDocumentsApprovedManagerNotifSent(orderId: number): Promise<boolean> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT COUNT(*) as cnt FROM notification
-       WHERE shipment_id = ? AND (title LIKE '%đã đủ hồ sơ, có thể gửi yêu cầu thanh toán%' OR title LIKE '%đã đủ hồ sơ kiểm dịch%')`,
+       WHERE shipment_id = ? AND title LIKE '%đã đủ hồ sơ, có thể gửi yêu cầu thanh toán%'`,
       [orderId],
     );
     return Number(rows[0]?.cnt ?? 0) > 0;
@@ -525,7 +525,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
               (SELECT COUNT(*) FROM notification n WHERE n.shipment_id = s.shipment_id AND n.user_id = s.customer_id AND (n.notif_type = 'document_missing' OR n.title LIKE '%hồ sơ kiểm dịch%')) as req_sent_count
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
-       WHERE s.status IN ('approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed')
+       WHERE s.status IN ('approved', 'planning', 'ready_to_depart', 'in_transit', 'completed')
        ORDER BY s.shipment_id DESC`,
     );
 

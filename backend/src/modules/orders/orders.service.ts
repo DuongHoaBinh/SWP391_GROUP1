@@ -99,17 +99,13 @@ export class OrdersService {
     }
 
     const managerId = Number(manager.id);
-    if (dto.transportCost !== undefined && dto.totalCost !== undefined && dto.transportCost !== dto.totalCost) {
-      throw new BadRequestException('Chỉ gửi một giá trị cước vận chuyển cơ bản nhất quán');
-    }
     await this.ordersStore.updateShipmentApproval(
       orderId,
       managerId,
       ShipmentStatus.APPROVED,
       null,
-      dto.transportCost ?? dto.totalCost ?? 0,
+      dto.totalCost ?? 0,
       dto.transportMode,
-      dto,
     );
 
     // 1. Gửi thông báo đến customer (dùng mã đơn của riêng khách hàng)
@@ -117,7 +113,7 @@ export class OrdersService {
     await this.notificationsService.createNotification(
       order.customerId,
       `Đơn vận chuyển ${customerCode} đã được phê duyệt`,
-      `Yêu cầu vận chuyển ${customerCode} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được duyệt sơ bộ. Báo giá hiện tại là dự kiến. Quý khách chưa cần thanh toán; hóa đơn và cổng thanh toán sẽ mở sau khi lộ trình chi tiết được xác nhận. Chuyên viên kiểm dịch sẽ gửi danh mục hồ sơ cần nộp.`,
+      `Yêu cầu vận chuyển ${customerCode} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được Logistics Manager phê duyệt. Chuyên viên kiểm dịch đang rà soát quy chế nước đến và sẽ gửi danh mục hồ sơ cần nộp cho quý khách.`,
       'status_update',
       orderId,
     );
@@ -221,9 +217,12 @@ export class OrdersService {
       throw new ForbiddenException('Bạn chỉ có thể chỉnh sửa đơn vận chuyển của chính mình');
     }
 
-    if (order.status !== ShipmentStatus.CHANGE_REQUESTED) {
+    if (
+      order.status !== ShipmentStatus.CHANGE_REQUESTED &&
+      order.status !== ShipmentStatus.REQUESTED
+    ) {
       throw new BadRequestException(
-        `Chỉ đơn hàng ở trạng thái "${ShipmentStatus.CHANGE_REQUESTED}" mới có thể chỉnh sửa. Trạng thái hiện tại: "${order.status}"`,
+        `Chỉ đơn hàng ở trạng thái "${ShipmentStatus.CHANGE_REQUESTED}" hoặc "${ShipmentStatus.REQUESTED}" mới có thể chỉnh sửa. Trạng thái hiện tại: "${order.status}"`,
       );
     }
 
@@ -249,14 +248,7 @@ export class OrdersService {
       throw new NotFoundException(`Transport order #${orderId} not found`);
     }
 
-    if (![UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.DRIVER_ESCORT].includes(user.role)) {
-      throw new ForbiddenException('Bạn không có quyền hoàn tất chuyến');
-    }
-    if (![ShipmentStatus.IN_TRANSIT, ShipmentStatus.COMPLETED].includes(order.status)) {
-      throw new BadRequestException('Chỉ được hoàn tất chuyến đã xuất phát');
-    }
-    const changed = await this.ordersStore.completeShipment(orderId, Number(user.id), user.role === UserRole.DRIVER_ESCORT);
-    if (!changed) return order;
+    await this.ordersStore.completeShipment(orderId);
 
     const code = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
@@ -281,14 +273,24 @@ export class OrdersService {
       throw new ForbiddenException('Bạn chỉ có thể hủy đơn vận chuyển của chính mình');
     }
 
-    if (![UserRole.CUSTOMER, UserRole.ADMIN].includes(user.role)) throw new ForbiddenException('Chỉ khách hàng sở hữu đơn hoặc Admin được hủy yêu cầu.');
-    const changed = await this.ordersStore.cancelShipment(orderId);
-    if (!changed) return order;
+    if (order.status === ShipmentStatus.COMPLETED) {
+      throw new BadRequestException('Không thể hủy đơn vận chuyển đã hoàn tất');
+    }
+
+    if (order.status === ShipmentStatus.IN_TRANSIT) {
+      throw new BadRequestException('Không thể hủy đơn vận chuyển đang trong hành trình di chuyển');
+    }
+
+    if (order.status === ShipmentStatus.CANCELLED) {
+      throw new BadRequestException('Đơn vận chuyển này đã được hủy trước đó');
+    }
+
+    await this.ordersStore.cancelShipment(orderId);
 
     const code = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
-      'Đã hủy yêu cầu vận chuyển',
+      'Đơn vận chuyển đã được hủy',
       `Đơn vận chuyển mã ${code} đã được hủy theo yêu cầu của bạn. Trạng thái các chú ngựa trong đơn đã được mở lại.`,
       'status_update',
       orderId,

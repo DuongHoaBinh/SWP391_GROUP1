@@ -1,38 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { BookingType } from '../booking-policy';
 import {
   IsArray,
   IsEmail,
   IsIn,
   IsInt,
-  IsNumber,
   IsNotEmpty,
   IsOptional,
   IsString,
   Min,
-  Max,
   ValidateNested,
 } from 'class-validator';
 
 export class HorseInfoDto {
-  @ApiPropertyOptional({ example: 100000000, minimum: 0, description: 'Giá trị mỗi ngựa theo declaredCurrency, tối đa hai chữ số thập phân' })
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(9999999999999.99)
-  declaredValue?: number;
-
-  @ApiPropertyOptional({ enum: ['VND', 'USD'], default: 'VND' })
-  @IsOptional()
-  @IsIn(['VND', 'USD'])
-  declaredCurrency?: 'VND' | 'USD';
-
-  @ApiPropertyOptional({ enum: ['basic', 'standard', 'premium'], default: 'basic' })
-  @IsOptional()
-  @IsIn(['basic', 'standard', 'premium'])
-  insurancePackage?: 'basic' | 'standard' | 'premium';
-
   @ApiProperty({ example: 'Xích Thố', description: 'Tên con ngựa' })
   @IsNotEmpty({ message: 'Tên con ngựa là bắt buộc' })
   @IsString()
@@ -76,11 +56,6 @@ export class HorseInfoDto {
 }
 
 export class CreateOrderDto {
-  @ApiPropertyOptional({ enum: ['shared_stall', 'dedicated_charter'], default: 'shared_stall', description: 'Ghép ô chuồng hoặc bao nguyên chuyến; độc lập với nội địa/quốc tế' })
-  @IsOptional()
-  @IsIn(['shared_stall', 'dedicated_charter'])
-  bookingType?: BookingType;
-
   @ApiPropertyOptional({ example: 'Nguyễn Văn A', description: 'Contact person name' })
   @IsOptional()
   @IsString()

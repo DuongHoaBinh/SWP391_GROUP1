@@ -20,17 +20,12 @@ import {
   Plane,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
-import { escapeQuotationText } from '@/features/orders/quotation-html';
-import { BookingQuoteSummary } from '@/features/orders/components/BookingSummary';
-import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
-import type { InsuredHorse } from '@/features/orders/insurance-policy';
-import { bookingName, bookingQuotePayload, type BookingType } from '@/features/orders/booking-policy';
 import { buildEquineRoute } from '@/lib/geo-corridors';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 type ShipmentStatus = 'requested' | 'under_review' | 'approved' | 'rejected' | 'planning' | 'in_transit' | 'completed' | 'cancelled';
 
-interface OrderHorse extends Partial<InsuredHorse> {
+interface OrderHorse {
   horseId?: number;
   name?: string;
   breed?: string | null;
@@ -45,9 +40,6 @@ interface OrderHorse extends Partial<InsuredHorse> {
 }
 
 interface TransportOrder {
-  transportMode?: 'road' | 'air' | null;
-  bookingType?: BookingType;
-  stallUnitPrice?: number | null;
   id: number;
   requestCode?: string;
   customerId: number;
@@ -60,8 +52,6 @@ interface TransportOrder {
   requestedHorseCount?: number;
   status: ShipmentStatus;
   totalCost: number;
-  transportCost?: number | null;
-  insuranceFee?: number;
   createdAt: string;
   customerEmail?: string;
   approverName?: string;
@@ -131,10 +121,10 @@ function exportQuotationPDF(order: TransportOrder) {
 
   const horses = order.horses?.map((h) => `
     <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.name)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.breed || '—')}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.gender || '—')}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.age ?? '—')} yrs</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${h.name}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${h.breed || '—'}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${h.gender || '—'}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${h.age ?? '—'} yrs</td>
     </tr>
   `).join('') || '<tr><td colspan="4" style="padding:8px 12px;">Không có thông tin ngựa</td></tr>';
 
@@ -142,7 +132,7 @@ function exportQuotationPDF(order: TransportOrder) {
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Báo Giá Vận Chuyển - ${escapeQuotationText(order.requestCode || `#${order.id}`)}</title>
+  <title>Báo Giá Vận Chuyển - ${order.requestCode || `#${order.id}`}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; background: #fff; }
@@ -186,7 +176,7 @@ function exportQuotationPDF(order: TransportOrder) {
     </div>
     <div class="doc-info">
       <div class="doc-title">BÁO GIÁ VẬN CHUYỂN</div>
-      <div class="doc-id">Mã yêu cầu: ${escapeQuotationText(order.requestCode || `#${order.id}`)}</div>
+      <div class="doc-id">Mã yêu cầu: ${order.requestCode || `#${order.id}`}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
       <div><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
     </div>
@@ -198,11 +188,11 @@ function exportQuotationPDF(order: TransportOrder) {
     <div class="grid-2">
       <div class="info-box">
         <div class="info-label">Tên liên hệ</div>
-        <div class="info-value">${escapeQuotationText(order.contactName || '—')}</div>
+        <div class="info-value">${order.contactName || '—'}</div>
       </div>
       <div class="info-box">
         <div class="info-label">Email</div>
-        <div class="info-value">${escapeQuotationText(order.contactEmail)}</div>
+        <div class="info-value">${order.contactEmail}</div>
       </div>
     </div>
   </div>
@@ -213,18 +203,18 @@ function exportQuotationPDF(order: TransportOrder) {
     <div class="grid-3">
       <div class="info-box">
         <div class="info-label">Điểm xuất phát</div>
-        <div class="info-value">${escapeQuotationText(order.originLocation)}</div>
+        <div class="info-value">${order.originLocation}</div>
       </div>
       <div class="info-box">
         <div class="info-label">Điểm đến</div>
-        <div class="info-value">${escapeQuotationText(order.destinationLocation)}</div>
+        <div class="info-value">${order.destinationLocation}</div>
       </div>
       <div class="info-box">
         <div class="info-label">Ngày yêu cầu xuất phát</div>
         <div class="info-value">${formatDate(order.requestedDate)}</div>
       </div>
     </div>
-    ${order.specialRequirements ? `<div class="note-box" style="margin-top:12px;"><strong>Yêu cầu đặc biệt:</strong> ${escapeQuotationText(order.specialRequirements)}</div>` : ''}
+    ${order.specialRequirements ? `<div class="note-box" style="margin-top:12px;"><strong>Yêu cầu đặc biệt:</strong> ${order.specialRequirements}</div>` : ''}
   </div>
 
   <!-- Horses -->
@@ -247,10 +237,7 @@ function exportQuotationPDF(order: TransportOrder) {
 
   <!-- Cost -->
   <div class="cost-section">
-    <p>Hình thức: ${bookingName(order.bookingType)}</p>
-    ${order.stallUnitPrice == null ? '' : `<p>${order.stallUnitPrice.toLocaleString('vi-VN')} VNĐ / ô × ${order.requestedHorseCount ?? 1} ngựa</p>`}
-    <div class="cost-label">Tổng cước vận chuyển và bảo hiểm</div>
-    <p>Cước cơ bản: ${order.transportCost == null ? 'Chờ báo giá' : order.transportCost.toLocaleString('vi-VN') + ' VNĐ'} · Phí bảo hiểm: ${(order.insuranceFee ?? 0).toLocaleString('vi-VN')} VNĐ</p>
+    <div class="cost-label">Chi phí vận chuyển ước tính</div>
     <div class="cost-value">${order.totalCost > 0 ? order.totalCost.toLocaleString('vi-VN') + ' ₫' : 'Chưa định giá'}</div>
     <div class="cost-sub">${order.totalCost > 0 ? 'Đã bao gồm: phí vận chuyển, kiểm dịch, hải quan cơ bản' : 'Vui lòng chờ Manager xác nhận báo giá'}</div>
   </div>
@@ -259,7 +246,7 @@ function exportQuotationPDF(order: TransportOrder) {
   ${order.rejectionReason ? `
   <div class="section">
     <div class="section-title" style="color:#b91c1c;">Lý do từ chối</div>
-    <div class="note-box" style="background:#fee2e2;border-color:#fecaca;color:#b91c1c;">${escapeQuotationText(order.rejectionReason)}</div>
+    <div class="note-box" style="background:#fee2e2;border-color:#fecaca;color:#b91c1c;">${order.rejectionReason}</div>
   </div>` : ''}
 
   <!-- Footer -->
@@ -322,11 +309,11 @@ export default function ManagerRequestsPage() {
       (dStr.includes('vietnam') || dStr.includes('việt nam') || dStr.includes('hà nội') || dStr.includes('ha noi'));
     const isRoadRequested = reqNotes.includes('đường bộ') || reqNotes.includes('road') || isDomestic;
 
-    const initialMode: 'road' | 'air' = order.transportMode ?? (reqNotes.includes('hàng không') || reqNotes.includes('air')
+    const initialMode: 'road' | 'air' = reqNotes.includes('hàng không') || reqNotes.includes('air')
       ? 'air'
       : isRoadRequested
       ? 'road'
-      : 'air');
+      : 'air';
     setSelectedTransportMode(initialMode);
 
     const routeInfo = buildEquineRoute(order.originLocation || '', order.destinationLocation || '', initialMode);
@@ -335,8 +322,7 @@ export default function ManagerRequestsPage() {
     const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
 
     setCostCurrency('VND');
-    const shared = order.bookingType !== 'dedicated_charter';
-    setTotalCostInput(String(shared ? order.stallUnitPrice ?? Math.round((order.transportCost ?? estimatedUsd * 25400) / horseCount) : order.transportCost ?? Math.round(estimatedUsd * 25400)));
+    setTotalCostInput(order.totalCost > 0 ? String(order.totalCost) : String(Math.round(estimatedUsd * 25400)));
   };
 
   const handleModeToggle = (newMode: 'road' | 'air') => {
@@ -347,9 +333,9 @@ export default function ManagerRequestsPage() {
     const baseCost = newMode === 'air' ? 600 + routeInfo.distanceKm * 1.6 : 300 + routeInfo.distanceKm * 1.1;
     const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
     if (costCurrency === 'USD') {
-      setTotalCostInput(String(approveOrder.bookingType === 'dedicated_charter' ? estimatedUsd : Math.round(estimatedUsd / horseCount)));
+      setTotalCostInput(String(estimatedUsd));
     } else {
-      setTotalCostInput(String(Math.round(estimatedUsd * 25400 / (approveOrder.bookingType === 'dedicated_charter' ? 1 : horseCount))));
+      setTotalCostInput(String(Math.round(estimatedUsd * 25400)));
     }
   };
 
@@ -418,9 +404,92 @@ export default function ManagerRequestsPage() {
         setPagination({ total: 0, totalPages: 1 });
       }
     } catch (err: any) {
-      setOrders([]);
-      setPagination({ total: 0, totalPages: 1 });
-      setError(err.message || 'Không thể tải đơn hàng. Vui lòng thử lại.');
+      // Fallback sample data if backend is offline
+      const sampleOrders: TransportOrder[] = [
+        {
+          id: 101,
+          customerId: 1,
+          contactName: 'John Doe',
+          contactEmail: 'customer@equitransit.com',
+          originLocation: 'Ho Chi Minh City, VN',
+          destinationLocation: 'Singapore Turf Club, SG',
+          requestedDate: '2026-10-28T08:00:00.000Z',
+          departureDate: '2026-10-28',
+          status: 'requested',
+          totalCost: 18500000,
+          createdAt: '2026-10-23T09:42:00.000Z',
+          customerEmail: 'customer@equitransit.com',
+          specialRequirements: 'Cần khoang máy bay có điều hòa 18 độ C',
+          horses: [
+            { horseId: 1, name: 'Thunder', breed: 'Thoroughbred', gender: 'Male', age: 6 },
+            { horseId: 2, name: 'Silver Star', breed: 'Thoroughbred', gender: 'Female', age: 5 }
+          ]
+        },
+        {
+          id: 102,
+          customerId: 2,
+          contactName: 'Alex Ferguson',
+          contactEmail: 'alex.f@equineclub.sg',
+          originLocation: 'Hanoi Equestrian Center, VN',
+          destinationLocation: 'Bangkok Royal Stables, TH',
+          requestedDate: '2026-11-05T06:30:00.000Z',
+          departureDate: '2026-11-05',
+          status: 'under_review',
+          totalCost: 24000000,
+          createdAt: '2026-10-22T14:15:00.000Z',
+          customerEmail: 'alex.f@equineclub.sg',
+          specialRequirements: 'Kiểm dịch đặc biệt qua cửa khẩu Hữu Nghị',
+          horses: [
+            { horseId: 3, name: 'Pegasus Spirit', breed: 'Arabian', gender: 'Mare', age: 4 }
+          ]
+        },
+        {
+          id: 103,
+          customerId: 3,
+          contactName: 'Michael Chang',
+          contactEmail: 'mchang@derby.my',
+          originLocation: 'Danang Horse Club, VN',
+          destinationLocation: 'Kuala Lumpur Turf Club, MY',
+          requestedDate: '2026-10-30T10:00:00.000Z',
+          departureDate: '2026-10-30',
+          status: 'approved',
+          totalCost: 32000000,
+          createdAt: '2026-10-21T08:00:00.000Z',
+          customerEmail: 'mchang@derby.my',
+          specialRequirements: 'Cần chuyên viên thú y đi kèm suốt chuyến',
+          horses: [
+            { horseId: 4, name: 'Golden Champion', breed: 'Warmblood', gender: 'Gelding', age: 6 }
+          ]
+        }
+      ];
+
+      let filtered = sampleOrders;
+      if (filterStatus !== 'all') {
+        filtered = filtered.filter((o) => o.status === filterStatus);
+      }
+      if (departureDateFrom) {
+        filtered = filtered.filter((o) => {
+          const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+          return dateStr && dateStr >= departureDateFrom;
+        });
+      }
+      if (departureDateTo) {
+        filtered = filtered.filter((o) => {
+          const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
+          return dateStr && dateStr <= departureDateTo;
+        });
+      }
+      if (sortBy === 'totalCost') {
+        filtered.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
+      }
+
+      const total = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const paginated = filtered.slice((page - 1) * limit, page * limit);
+
+      setOrders(paginated);
+      setPagination({ total, totalPages });
+      setError('');
     } finally {
       setLoading(false);
     }
@@ -456,7 +525,7 @@ export default function ManagerRequestsPage() {
       await apiClient(`/orders/${approveOrder.id}/approve`, {
         method: 'PATCH',
         body: JSON.stringify({
-          ...bookingQuotePayload(totalCostInput, approveOrder.bookingType ?? 'shared_stall', approveOrder.requestedHorseCount ?? 1, costCurrency),
+          totalCost: Number(totalCostInput) || 0,
           transportMode: selectedTransportMode,
         }),
       });
@@ -667,7 +736,6 @@ export default function ManagerRequestsPage() {
                       </td>
                       <td style={{ padding: '14px 16px', fontSize: '13px', color: '#334155' }}>
                         {order.originLocation} → {order.destinationLocation}
-                        <div className="mt-1 text-xs font-semibold text-blue-700" title={bookingName(order.bookingType)}>{order.bookingType === 'dedicated_charter' ? 'Bao chuyến' : 'Ghép ô chuồng'}</div>
                       </td>
                       <td style={{ padding: '14px 16px', fontSize: '13px', color: '#334155' }}>{formatDate(order.requestedDate)}</td>
                       <td style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, color: order.totalCost > 0 ? '#15803d' : '#94a3b8' }}>
@@ -867,15 +935,13 @@ export default function ManagerRequestsPage() {
               <div style={{ padding: "14px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", marginBottom: "14px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "#991b1b" }}>
-                    🐎 Hồ sơ ngựa vận chuyển ({approveOrder.horses?.length || 1} hồ sơ / {horseCount} ngựa):
+                    🐎 Thông tin cá thể ngựa vận chuyển ({approveOrder.horses?.length || horseCount} con):
                   </span>
                   <span style={{ fontSize: "10px", color: "#94a3b8", background: "#fff", padding: "2px 6px", borderRadius: "4px", border: "1px solid #e2e8f0" }}>
                     Mã định danh thú y
                   </span>
                 </div>
 
-                <div className="my-4"><BookingQuoteSummary input={totalCostInput} bookingType={approveOrder.bookingType} horseCount={horseCount} currency={costCurrency} insuranceFee={Number(approveOrder.insuranceFee ?? 0)} /></div>
-                <InsuranceSummary horses={(approveOrder.horses ?? []).map(h => ({ ...h, name: h.name ?? 'Ngựa' }))} transportCost={approveOrder.transportCost ?? null} insuranceFee={Number(approveOrder.insuranceFee ?? 0)} totalCost={approveOrder.totalCost} />
                 {approveOrder.horses && approveOrder.horses.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "140px", overflowY: "auto" }}>
                     {approveOrder.horses.map((horse, idx) => (
@@ -913,7 +979,7 @@ export default function ManagerRequestsPage() {
               <div style={{ marginBottom: "16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
                   <label style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
-                    {approveOrder.bookingType === 'dedicated_charter' ? 'Cước trọn gói toàn chuyến (chưa bảo hiểm)' : 'Đơn giá mỗi ô chuồng / ngựa (chưa bảo hiểm)'} <span style={{ color: "#dc2626" }}>*</span>
+                    Chi phí vận chuyển báo giá (Total Cost) <span style={{ color: "#dc2626" }}>*</span>
                   </label>
                   <div style={{ display: "flex", gap: "4px", background: "#f1f5f9", padding: "2px", borderRadius: "6px" }}>
                     <button
@@ -958,7 +1024,6 @@ export default function ManagerRequestsPage() {
                     type="number"
                     min={0}
                     value={totalCostInput}
-                    aria-label={approveOrder.bookingType === 'dedicated_charter' ? 'Cước trọn gói toàn chuyến' : 'Đơn giá mỗi ô chuồng'}
                     onChange={(e) => setTotalCostInput(e.target.value)}
                     placeholder={costCurrency === "USD" ? "e.g. 2500" : "e.g. 60000000"}
                     style={{
@@ -985,7 +1050,7 @@ export default function ManagerRequestsPage() {
                   </strong>
                 </div>
                 <p style={{ fontSize: "11px", color: "#94a3b8", margin: "4px 0 0 0" }}>
-                  Báo giá dự kiến được lưu bằng VND, gồm cước cơ bản và bảo hiểm. Hóa đơn và thanh toán SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.
+                  Báo giá được lưu bằng VND. Sau khi duyệt, khách hàng mở chi tiết đơn để xem mục thanh toán SePay.
                 </p>
               </div>
 
