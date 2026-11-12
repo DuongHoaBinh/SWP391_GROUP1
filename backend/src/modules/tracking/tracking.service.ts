@@ -5,6 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { TrackingStore } from './tracking.store';
+import { RoutesService } from '../routes/routes.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import {
@@ -22,6 +23,7 @@ export class TrackingService {
   constructor(
     private readonly trackingStore: TrackingStore,
     private readonly notificationsService: NotificationsService,
+    private readonly routesService: RoutesService,
   ) {}
 
   async getMyTrips(user: AuthenticatedUser): Promise<any[]> {
@@ -554,6 +556,11 @@ export class TrackingService {
 
     // Role check: driver for road, escort for flight, coordinator/manager can override
     this.assertStaffCanUpdateLeg(user, targetLeg);
+
+    if (targetLeg.sequence_no === 1 && shipment.status === 'ready_to_depart') {
+      const readiness = await this.routesService.getTripPlanReadiness(user, shipmentId);
+      if (!readiness.isReadyToDepart) throw new BadRequestException(readiness.pendingConditions.join('; '));
+    }
 
     // Sequence check: previous leg must be completed
     if (targetLeg.sequence_no > 1) {
