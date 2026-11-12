@@ -1,6 +1,7 @@
-import { getAuthToken } from './auth';
+import { clearAuthSession, getAuthToken, SESSION_EXPIRED_MESSAGE } from './auth';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000/api';
+let redirectingToLogin = false;
 
 export async function apiClient<T>(
   endpoint: string,
@@ -26,6 +27,19 @@ export async function apiClient<T>(
     ...options,
     headers,
   });
+
+  if (response.status === 401) {
+    if (typeof window !== 'undefined' && !redirectingToLogin && getAuthToken() === token &&
+        headers.get('Authorization') === (token ? `Bearer ${token}` : null) &&
+        !/^\/(login|register|forgot-password)(\/|$)/.test(window.location.pathname)) {
+      const returnPath = window.location.pathname + window.location.search + window.location.hash;
+      clearAuthSession();
+      redirectingToLogin = true;
+      const query = new URLSearchParams({ reason: 'session-expired', redirect: returnPath });
+      window.location.replace(`/login?${query.toString()}`);
+    }
+    throw new Error(SESSION_EXPIRED_MESSAGE);
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

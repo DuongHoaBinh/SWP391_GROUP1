@@ -104,6 +104,7 @@ export interface RouteStopUpdateEntity {
 }
 
 export interface RouteLegEntity {
+  roadTripId?: number | null;
   id: number;
   routeId: number;
   sequenceNo: number;
