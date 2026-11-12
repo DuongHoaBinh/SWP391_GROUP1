@@ -904,18 +904,44 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          {/* 2.1 SEPAY VIETQR PAYMENT - Chỉ hiển thị sau khi Flow 2 hoàn tất VÀ Manager đã gửi yêu cầu thanh toán */}
-          {Boolean(checklist?.isFullyCompliant) &&
-            Number(request.totalCost) > 0 &&
-            ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(
+          {/* 2.1 SEPAY VIETQR PAYMENT - Chỉ mở cổng thanh toán sau khi lộ trình (Flow 3) đã được lập và xác nhận (Confirmed) */}
+          {Number(request.totalCost) > 0 &&
+            (['confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(
               String(request.status).toLowerCase()
-            ) && (
+            ) ||
+              request.paymentStatus === 'succeeded') && (
               <SepayPayment
                 shipmentId={Number(request.id || request.shipmentId || requestId)}
                 requestCode={request.requestCode}
                 amount={Number(request.totalCost)}
                 eligible={true}
               />
+            )}
+
+          {Number(request.totalCost) > 0 &&
+            ['approved', 'planning'].includes(String(request.status).toLowerCase()) &&
+            request.paymentStatus !== 'succeeded' && (
+              <div
+                style={{
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '14px',
+                  padding: '16px 20px',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                }}
+              >
+                <Clock size={20} color="#475569" style={{ marginTop: '2px', flexShrink: 0 }} />
+                <div>
+                  <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b', margin: '0 0 4px 0' }}>
+                    Cổng thanh toán đang tạm khóa — Chờ lập & xác nhận lộ trình (Flow 3)
+                  </h4>
+                  <p style={{ fontSize: '13px', color: '#475569', margin: 0, lineHeight: 1.5 }}>
+                    Bộ phận điều phối đang thiết lập lộ trình xe/chuyến bay chi tiết và phân công tài xế phụ trách. Cổng thanh toán chuyển khoản VietQR (SePay) sẽ tự động mở ngay khi lịch trình chuyến đi được xác nhận hoàn tất.
+                  </p>
+                </div>
+              </div>
             )}
 
           {/* 3. TRANSPORT ROUTE */}
@@ -1514,8 +1540,9 @@ export default function RequestDetailPage() {
 
                         {/* Uploaded items for this horse */}
                         {horseItem.documents.map((doc) => {
-                          const isDocApproved = doc.status === 'approved';
-                          const isDocSubmitted = doc.status === 'submitted';
+                          const isDocExpiredForTrip = Boolean(doc.isExpiredForTrip) || doc.status === 'expired';
+                          const isDocApproved = doc.status === 'approved' && !isDocExpiredForTrip;
+                          const isDocSubmitted = doc.status === 'submitted' && !isDocExpiredForTrip;
                           const isDocRejected = doc.status === 'rejected';
 
                           return (
@@ -1527,6 +1554,7 @@ export default function RequestDetailPage() {
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
                                 borderBottom: '1px solid #f8fafc',
+                                backgroundColor: isDocExpiredForTrip ? '#fff5f5' : undefined,
                               }}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0, paddingRight: '16px' }}>
@@ -1535,8 +1563,8 @@ export default function RequestDetailPage() {
                                     width: '36px',
                                     height: '36px',
                                     borderRadius: '8px',
-                                    backgroundColor: isDocApproved ? '#dcfce7' : isDocRejected ? '#fee2e2' : '#f1f5f9',
-                                    color: isDocApproved ? '#15803d' : isDocRejected ? '#dc2626' : '#64748b',
+                                    backgroundColor: isDocApproved ? '#dcfce7' : (isDocRejected || isDocExpiredForTrip) ? '#fee2e2' : '#f1f5f9',
+                                    color: isDocApproved ? '#15803d' : (isDocRejected || isDocExpiredForTrip) ? '#dc2626' : '#64748b',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
@@ -1552,12 +1580,22 @@ export default function RequestDetailPage() {
                                   <p style={{ fontSize: '11.5px', color: '#64748b', margin: '2px 0 0 0' }}>
                                     {doc.docNumber ? `Số: ${doc.docNumber} • ` : ''}Tải lên:{' '}
                                     {new Date(doc.createdAt).toLocaleDateString('vi-VN')}
+                                    {doc.expiryDate && (
+                                      <span style={{ marginLeft: '6px', color: isDocExpiredForTrip ? '#dc2626' : '#475569', fontWeight: isDocExpiredForTrip ? 700 : 500 }}>
+                                        • Hạn: {new Date(doc.expiryDate).toLocaleDateString('vi-VN')}
+                                      </span>
+                                    )}
                                     {doc.reviewerNotes && (
                                       <span style={{ color: isDocRejected ? '#dc2626' : '#2563eb', marginLeft: '6px' }}>
                                         (Ghi chú: {doc.reviewerNotes})
                                       </span>
                                     )}
                                   </p>
+                                  {(doc.isExpiredForTrip || doc.isExpiringSoonForTrip) && doc.expiryNotice && (
+                                    <p style={{ fontSize: '11.5px', color: doc.isExpiredForTrip ? '#dc2626' : '#b45309', margin: '3px 0 0 0', fontWeight: 600 }}>
+                                      ⚠️ {doc.expiryNotice}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
 
@@ -1573,14 +1611,14 @@ export default function RequestDetailPage() {
                                       ? '#dcfce7'
                                       : isDocSubmitted
                                       ? '#fef3c7'
-                                      : isDocRejected
+                                      : (isDocRejected || isDocExpiredForTrip)
                                       ? '#fee2e2'
                                       : '#f1f5f9',
                                     color: isDocApproved
                                       ? '#15803d'
                                       : isDocSubmitted
                                       ? '#b45309'
-                                      : isDocRejected
+                                      : (isDocRejected || isDocExpiredForTrip)
                                       ? '#b91c1c'
                                       : '#64748b',
                                     display: 'inline-flex',
@@ -1592,11 +1630,13 @@ export default function RequestDetailPage() {
                                 >
                                   {isDocApproved && <CheckCircle size={12} />}
                                   {isDocSubmitted && <Clock size={12} />}
-                                  {isDocRejected && <XCircle size={12} />}
+                                  {(isDocRejected || isDocExpiredForTrip) && <XCircle size={12} />}
                                   {isDocApproved
                                     ? 'Đã duyệt'
                                     : isDocSubmitted
                                     ? 'Chờ duyệt'
+                                    : isDocExpiredForTrip
+                                    ? 'Hết hạn'
                                     : isDocRejected
                                     ? 'Từ chối'
                                     : doc.status}
@@ -1628,15 +1668,15 @@ export default function RequestDetailPage() {
                                   </a>
                                 )}
 
-                                {(isDocRejected || isDocSubmitted) && (
+                                {(isDocRejected || isDocSubmitted || isDocExpiredForTrip) && (
                                   <button
                                     onClick={() => handleOpenReupload(doc, horseItem.horseId)}
                                     style={{
                                       padding: '5px 10px',
                                       borderRadius: '6px',
-                                      backgroundColor: isDocRejected ? '#dc2626' : '#eff6ff',
-                                      color: isDocRejected ? '#ffffff' : '#2563eb',
-                                      border: isDocRejected ? 'none' : '1px solid #bfdbfe',
+                                      backgroundColor: (isDocRejected || isDocExpiredForTrip) ? '#dc2626' : '#eff6ff',
+                                      color: (isDocRejected || isDocExpiredForTrip) ? '#ffffff' : '#2563eb',
+                                      border: (isDocRejected || isDocExpiredForTrip) ? 'none' : '1px solid #bfdbfe',
                                       fontSize: '12px',
                                       fontWeight: 600,
                                       cursor: 'pointer',

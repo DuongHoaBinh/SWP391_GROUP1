@@ -56,6 +56,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   onSuccess,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
   const { reviewDocument } = useDocumentStore();
 
   const getDefaultReviewValues = React.useCallback((): ReviewFormData => ({
@@ -79,11 +80,13 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
 
   React.useEffect(() => {
     if (isOpen) {
+      setApiError(null);
       reset(getDefaultReviewValues());
     }
   }, [isOpen, documentId, reset, getDefaultReviewValues]);
 
   const handleClose = () => {
+    setApiError(null);
     reset(getDefaultReviewValues());
     onClose();
   };
@@ -92,9 +95,17 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
 
   const onSubmit = async (data: ReviewFormData) => {
     setIsSubmitting(true);
+    setApiError(null);
     try {
       const numericId = parseInt(documentId.replace(/\D/g, ''), 10);
       if (!isNaN(numericId) && numericId > 0) {
+        await documentsApi.reviewDocument(numericId, {
+          status: data.status === 'APPROVED' ? 'approved' : 'rejected',
+          expiryDate: data.status === 'APPROVED' ? data.expiryDate : undefined,
+          notes: data.status === 'REJECTED' ? data.rejectionReason : undefined,
+          docNumber: data.status === 'APPROVED' ? data.referenceNumber?.trim() : undefined,
+        });
+
         if (data.status === 'APPROVED') {
           try {
             await documentsApi.recordAuthorityApproval(numericId, {
@@ -106,16 +117,6 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
           } catch (apprErr: any) {
             console.warn('Backend authority approval notice:', apprErr);
           }
-        }
-        try {
-          await documentsApi.reviewDocument(numericId, {
-            status: data.status === 'APPROVED' ? 'approved' : 'rejected',
-            expiryDate: data.status === 'APPROVED' ? data.expiryDate : undefined,
-            notes: data.status === 'REJECTED' ? data.rejectionReason : undefined,
-            docNumber: data.status === 'APPROVED' ? data.referenceNumber?.trim() : undefined,
-          });
-        } catch (revErr: any) {
-          console.warn('Backend API review notice:', revErr);
         }
       }
 
@@ -130,7 +131,9 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
       handleClose();
     } catch (e: any) {
       setIsSubmitting(false);
-      toast.error(e.message || 'Error processing review');
+      const msg = e?.message || 'Error processing review';
+      setApiError(msg);
+      toast.error(msg);
     }
   };
 
@@ -319,6 +322,13 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
                     <AlertCircle size={12} /> {errors.rejectionReason.message as string}
                   </span>
                 )}
+              </div>
+            )}
+
+            {apiError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+                <AlertCircle size={15} className="shrink-0 mt-0.5 text-red-600" />
+                <span>{apiError}</span>
               </div>
             )}
 

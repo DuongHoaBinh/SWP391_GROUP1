@@ -38,7 +38,7 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
       if (Number(order.customer_id) !== customerId) throw new ForbiddenException('Đơn hàng không thuộc tài khoản của bạn');
       const [existing] = await db.execute<SepayPayment[]>('SELECT * FROM shipment_sepay_payment WHERE shipment_id = ?', [shipmentId]);
       if (existing[0]?.status === 'succeeded') return existing[0];
-      if (!PAYABLE_SHIPMENT_STATUSES.includes(order.status)) throw new BadRequestException('Đơn hàng phải được duyệt trước khi thanh toán');
+      if (!PAYABLE_SHIPMENT_STATUSES.includes(order.status)) throw new BadRequestException('Lộ trình vận chuyển cần được lập và xác nhận hoàn tất (Flow 3) trước khi mở cổng thanh toán');
       const amount = Number(order.total_cost);
       if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 9999999999999) throw new BadRequestException('Báo giá phải là số nguyên VND lớn hơn 0');
       if (existing.length) {
