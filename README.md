@@ -66,6 +66,12 @@ With this configuration, `POST /api/auth/register` stores the pending OTP and pa
 
 For local development, start the backend on port `5000` and the Next.js frontend on port `3001` (for example, `next dev -p 3001`).
 
+### Login troubleshooting
+
+Login requires the backend and its configured MySQL instance to be running. The frontend displays an error for connection failures, failed API responses or invalid sessions; it never substitutes a demo JWT. Successful login saves the returned session before navigating to the role dashboard. Visiting the login page does not clear an existing session; use Logout to sign out. A redirect to `/` or an authentication page falls back to the role dashboard to avoid returning immediately to login.
+
+Run `npm run test:auth` from `frontend/` for login failure, session and redirect regressions.
+
 ## Suggested ownership
 
 The first implementation slice is `auth`, `orders`, and `documents`, plus the `manager` and `customer` application routes. Other modules can be developed independently against the documented contracts.
