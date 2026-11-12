@@ -1,3 +1,5 @@
+import { BookingType } from './booking-policy';
+
 export enum ShipmentStatus {
   REQUESTED = 'requested',
   CHANGE_REQUESTED = 'change_requested',
@@ -35,6 +37,9 @@ export interface OrderHorse {
 }
 
 export interface TransportOrder {
+  transportMode?: 'road' | 'air' | null;
+  bookingType: BookingType;
+  stallUnitPrice: number | null;
   id: number;
   requestCode?: string;
   customerRequestCode?: string;

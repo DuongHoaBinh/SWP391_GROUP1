@@ -16,6 +16,7 @@
 - Only the Transport Specialist can mark legal/document requirements as reviewed or incomplete.
 - Only the Fleet & Route Coordinator can publish route legs, capacity assignments, and planned schedules.
 - Drivers/escorts can update execution events and health logs only for assigned trips.
+- Road-trip catalog and creation are restricted to Coordinator/Manager/Admin. Customer cannot inspect other owners' routes/full plans or shared-trip membership. Completion checks Driver/Escort assignment server-side, including on retries.
 - Customers cannot edit an approved request or operational status; they can submit requested corrections/documents.
 
 All authorization checks belong to `backend/src/modules/auth` and must be enforced server-side. The frontend route grouping is a usability boundary, not a security boundary.

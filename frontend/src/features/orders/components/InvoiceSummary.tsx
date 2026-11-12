@@ -1,5 +1,6 @@
 'use client';
 import { insuranceNames, vnd, type InsuredHorse } from '../insurance-policy';
+import { bookingName, type BookingType } from '../booking-policy';
 
 export interface Invoice {
   id: number;
@@ -10,6 +11,7 @@ export interface Invoice {
   currency: 'VND';
   issuedAt: string;
   snapshot: {
+    bookingType?: BookingType; stallUnitPrice?: number | null;
     transportCost?: number; insuranceFee?: number; horses?: InsuredHorse[];
     requestCode: string; contactName: string | null; contactEmail: string;
     origin: string; destination: string; horseCount: number; routeName: string | null;
@@ -32,6 +34,10 @@ function printInvoice(invoice: Invoice) {
   add('p', `Khách hàng: ${invoice.snapshot.contactName || invoice.snapshot.contactEmail}`);
   add('p', `${invoice.snapshot.origin} → ${invoice.snapshot.destination} · ${invoice.snapshot.horseCount} ngựa`);
   add('p', `Lộ trình đã xác nhận: ${invoice.snapshot.routeName || invoice.routeId}`);
+  add('p', `Hình thức: ${bookingName(invoice.snapshot.bookingType)}`);
+  if (invoice.snapshot.bookingType === 'shared_stall' && invoice.snapshot.stallUnitPrice != null) {
+    add('p', `Cước cơ bản: ${vnd(invoice.snapshot.stallUnitPrice)} / ô × ${invoice.snapshot.horseCount} ngựa = ${vnd(invoice.snapshot.stallUnitPrice * invoice.snapshot.horseCount)}`);
+  }
   const table = doc.createElement('table');
   [
     ['Chặng', 'Lộ trình', 'Giờ đi', 'Giờ đến'],

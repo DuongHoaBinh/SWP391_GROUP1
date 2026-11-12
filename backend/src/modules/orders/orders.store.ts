@@ -1,11 +1,15 @@
-import { BadRequestException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
 import { CreateOrderDto, HorseInfoDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { calculateInsurance, totalInsuranceFee } from './insurance-policy';
+import { BookingQuote, BookingType, calculateBookingQuote, normalizeBookingType } from './booking-policy';
 
 interface ShipmentRow extends RowDataPacket {
+  transport_mode: 'road' | 'air' | null;
+  booking_type: BookingType;
+  stall_unit_price: number | string | null;
   shipment_id: number;
   customer_id: number;
   requested_by: number;
@@ -107,17 +111,21 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       if (seen.has(horseId)) throw new BadRequestException('Một hồ sơ ngựa chỉ được xuất hiện một lần trong đơn');
       seen.add(horseId);
       if (horse.status !== 'active' && !(old && horse.status === 'in_transit')) throw new BadRequestException(`Ngựa "${horse.name}" hiện không sẵn sàng vận chuyển.`);
-      const quantity = h.quantity ?? 1;
+      const quantity = h.quantity ?? Number(old?.quantity ?? 1);
       if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > Number(horse.quantity ?? 1)) throw new BadRequestException(`Số lượng ngựa "${horse.name}" không hợp lệ hoặc vượt số lượng trong hồ sơ.`);
-      const unchanged = old && (h.declaredValue === undefined || h.declaredValue === Number(old.declared_value)) &&
-        (h.declaredCurrency === undefined || h.declaredCurrency === old.declared_currency) &&
-        (h.insurancePackage === undefined || h.insurancePackage === old.insurance_package);
+      const declaration = {
+        declaredValue: h.declaredValue ?? (old ? Number(old.declared_value) : 0),
+        declaredCurrency: h.declaredCurrency ?? old?.declared_currency ?? 'VND',
+        insurancePackage: h.insurancePackage ?? old?.insurance_package ?? 'basic',
+      };
+      const unchanged = old && declaration.declaredValue === Number(old.declared_value) &&
+        declaration.declaredCurrency === old.declared_currency && declaration.insurancePackage === old.insurance_package;
       const policy = unchanged ? {
         declaredValue: Number(old.declared_value), declaredCurrency: old.declared_currency,
         exchangeRate: Number(old.exchange_rate), declaredValueVnd: Number(old.declared_value_vnd),
         insurancePackage: old.insurance_package, insuranceFee: Number(old.insurance_fee), maxCompensation: Number(old.max_compensation),
         emergencyVetCovered: Boolean(old.emergency_vet_covered), insurancePolicyVersion: old.insurance_policy_version,
-      } : calculateInsurance(h);
+      } : calculateInsurance(declaration);
       result.push({ ...policy, horseId, quantity });
     }
     totalInsuranceFee(result);
@@ -141,11 +149,11 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       if (count !== dto.requestedHorseCount) throw new BadRequestException('Số lượng ngựa khai báo phải khớp danh sách được chọn');
       const [result] = await db.execute(`INSERT INTO shipment (customer_id, requested_by, contact_name, contact_address, contact_phone,
         contact_email, requested_horse_count, origin_location, destination_location, requested_date, transportation_type,
-        special_requirements, status, total_cost, transport_cost, insurance_fee)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0, NULL, ?)`,
+        special_requirements, status, total_cost, transport_cost, insurance_fee, booking_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0, NULL, ?, ?)`,
         [customerId, customerId, dto.contactName ?? null, dto.contactAddress ?? null, dto.contactPhone, dto.contactEmail,
         count, dto.originLocation, dto.destinationLocation, dto.requestedDate ? new Date(dto.requestedDate) : new Date(),
-        dto.transportationType ?? null, dto.specialRequirements ?? null, totalInsuranceFee(horses)]);
+        dto.transportationType ?? null, dto.specialRequirements ?? null, totalInsuranceFee(horses), normalizeBookingType(dto.bookingType)]);
       const shipmentId = (result as { insertId: number }).insertId;
       await this.insertInsuredHorses(db, shipmentId, horses);
       if (dto.medicalDocumentUrl) await db.execute("INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'document', ?)", [shipmentId, dto.medicalDocumentUrl, customerId]);
@@ -171,20 +179,13 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       `SELECT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
               CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as request_code,
               CONCAT('REQ-', LPAD(ROW_NUMBER() OVER (ORDER BY s.shipment_id ASC), 3, '0')) as customer_request_code,
-              COALESCE(sp.status, mb.status) as payment_status,
-              COALESCE(sp.payment_code, mb.order_id) as payment_code,
-              COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
+              sp.status as payment_status,
+              sp.payment_code as payment_code,
+              sp.paid_at as paid_at
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
        LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
-       LEFT JOIN (
-         SELECT shipment_id, status, order_id, last_checked_at
-         FROM shipment_sandbox_payment
-         WHERE (shipment_id, payment_id) IN (
-           SELECT shipment_id, MAX(payment_id) FROM shipment_sandbox_payment GROUP BY shipment_id
-         )
-       ) mb ON mb.shipment_id = s.shipment_id
        WHERE s.customer_id = ?
        ORDER BY s.created_at DESC`,
       [customerId],
@@ -201,20 +202,13 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
                3, '0'
              )) as customer_request_code,
              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
-             COALESCE(sp.status, mb.status) as payment_status,
-             COALESCE(sp.payment_code, mb.order_id) as payment_code,
-             COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
+             sp.status as payment_status,
+             sp.payment_code as payment_code,
+             sp.paid_at as paid_at
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
       LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
-      LEFT JOIN (
-        SELECT shipment_id, status, order_id, last_checked_at
-        FROM shipment_sandbox_payment
-        WHERE (shipment_id, payment_id) IN (
-          SELECT shipment_id, MAX(payment_id) FROM shipment_sandbox_payment GROUP BY shipment_id
-        )
-      ) mb ON mb.shipment_id = s.shipment_id
     `;
     const params: (string | number)[] = [];
 
@@ -237,20 +231,13 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
                 3, '0'
               )) as customer_request_code,
               CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
-              COALESCE(sp.status, mb.status) as payment_status,
-              COALESCE(sp.payment_code, mb.order_id) as payment_code,
-              COALESCE(sp.paid_at, mb.last_checked_at) as paid_at
+              sp.status as payment_status,
+              sp.payment_code as payment_code,
+              sp.paid_at as paid_at
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
        LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
-       LEFT JOIN (
-         SELECT shipment_id, status, order_id, last_checked_at
-         FROM shipment_sandbox_payment
-         WHERE (shipment_id, payment_id) IN (
-           SELECT shipment_id, MAX(payment_id) FROM shipment_sandbox_payment GROUP BY shipment_id
-         )
-       ) mb ON mb.shipment_id = s.shipment_id
        WHERE s.shipment_id = ?
        LIMIT 1`,
       [shipmentId],
@@ -271,33 +258,36 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     rejectionReason: string | null = null,
     totalCost: number = 0,
     transportMode?: "road" | "air",
+    quote?: BookingQuote,
   ): Promise<boolean> {
     return this.transaction(async db => {
-    const [orders] = await db.execute<RowDataPacket[]>('SELECT insurance_fee, transport_cost, total_cost FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+    const [orders] = await db.execute<RowDataPacket[]>('SELECT insurance_fee, transport_cost, total_cost, booking_type, requested_horse_count, stall_unit_price FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
     if (!orders.length) throw new BadRequestException('Không tìm thấy đơn hàng');
+    const pricing = status === ShipmentStatus.APPROVED
+      ? calculateBookingQuote(orders[0].booking_type, Number(orders[0].requested_horse_count), quote ?? { transportCost: totalCost })
+      : { transportCost: totalCost, stallUnitPrice: orders[0].stall_unit_price };
+    totalCost = pricing.transportCost;
     const insuranceFee = Number(orders[0].insurance_fee);
     const combined = totalCost + insuranceFee;
     if (!Number.isSafeInteger(totalCost) || totalCost < 0 || !Number.isSafeInteger(combined) || combined > 9999999999999) throw new BadRequestException('Tổng cước và bảo hiểm vượt giới hạn VNĐ hợp lệ');
-    let modeType: string | null = null;
     let modeNote: string | null = null;
     if (status === ShipmentStatus.APPROVED && transportMode) {
       if (transportMode === "air") {
-        modeType = "Domestic (Air)";
         modeNote = "[Phương thức: Đường Hàng Không]";
       } else {
-        modeType = "Domestic";
         modeNote = "[Phương thức: Đường Bộ Liên Vận]";
       }
     }
 
     let query = `UPDATE shipment
-       SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = ?, transport_cost = ?`;
-    const params: any[] = [status, approvedBy, rejectionReason, status === ShipmentStatus.APPROVED ? combined : orders[0].total_cost, status === ShipmentStatus.APPROVED ? totalCost : orders[0].transport_cost];
+       SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = ?, transport_cost = ?, stall_unit_price = ?`;
+    const params: any[] = [status, approvedBy, rejectionReason, status === ShipmentStatus.APPROVED ? combined : orders[0].total_cost, status === ShipmentStatus.APPROVED ? totalCost : orders[0].transport_cost, pricing.stallUnitPrice];
 
-    if (modeType) {
-      query += `, transportation_type = ?`;
-      params.push(modeType);
+    if (status === ShipmentStatus.APPROVED && transportMode) {
+      query += ', transport_mode = ?';
+      params.push(transportMode);
     }
+
     if (modeNote) {
       query += `, special_requirements = CASE
         WHEN special_requirements IS NULL OR special_requirements = '' THEN ?
@@ -325,22 +315,40 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async completeShipment(shipmentId: number): Promise<boolean> {
-    const [result] = await this.pool.execute(
+  async completeShipment(shipmentId: number, actorId: number, requireAssignment: boolean): Promise<boolean> {
+    return this.transaction(async db => {
+    const [orders] = await db.execute<RowDataPacket[]>('SELECT status FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+    if (!orders[0]) throw new BadRequestException('Không tìm thấy đơn vận chuyển');
+    if (requireAssignment) {
+      const [assignments] = await db.execute<RowDataPacket[]>(
+        "SELECT assignment_id FROM shipment_assignment WHERE shipment_id = ? AND user_id = ? AND role_in_shipment IN ('driver', 'escort') FOR UPDATE", [shipmentId, actorId]);
+      if (!assignments.length) throw new ForbiddenException('Bạn không được phân công cho chuyến này');
+    }
+    if (orders[0].status === 'completed') return false;
+    if (orders[0].status !== 'in_transit') throw new BadRequestException('Chỉ được hoàn tất chuyến đã xuất phát');
+    const [assignedVehicles] = await db.execute<RowDataPacket[]>('SELECT vehicle_id FROM shipment_vehicle WHERE shipment_id = ? ORDER BY vehicle_id', [shipmentId]);
+    const vehicleIds = [...new Set(assignedVehicles.map(v => Number(v.vehicle_id)))];
+    if (vehicleIds.length) await db.execute(`SELECT vehicle_id FROM vehicle WHERE vehicle_id IN (${vehicleIds.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, vehicleIds);
+    const [result] = await db.execute(
       `UPDATE shipment
        SET status = 'completed', actual_arrival_date = NOW()
-       WHERE shipment_id = ?`,
+        WHERE shipment_id = ? AND status = 'in_transit'`,
       [shipmentId],
     );
 
-    await this.pool.execute(
+    await db.execute(
       `UPDATE horse
        SET status = 'delivered'
        WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)`,
       [shipmentId],
     );
 
+    await db.execute("UPDATE route SET status = 'completed', plan_status = 'completed' WHERE shipment_id = ? AND plan_status = 'in_transit'", [shipmentId]);
+    for (const id of vehicleIds) await db.execute(`UPDATE vehicle v SET status = 'available' WHERE v.vehicle_id = ? AND v.status = 'in_use'
+      AND NOT EXISTS (SELECT 1 FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id WHERE sv.vehicle_id = v.vehicle_id AND s.status NOT IN ('completed','cancelled','rejected'))`, [id]);
+
     return (result as { affectedRows: number }).affectedRows > 0;
+    });
   }
 
   async updateShipmentChangeRequest(
@@ -411,6 +419,11 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return this.transaction(async db => {
       const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? AND customer_id = ? FOR UPDATE', [shipmentId, customerId]);
       if (!orders[0] || orders[0].status !== 'change_requested') throw new BadRequestException('Chỉ được gửi lại yêu cầu đang cần chỉnh sửa');
+      const bookingType = normalizeBookingType(dto.bookingType ?? orders[0].booking_type);
+      if (bookingType !== orders[0].booking_type) {
+        await db.execute('INSERT INTO shipment_booking_revision (shipment_id, changed_by, previous_booking_type, booking_type) VALUES (?, ?, ?, ?)',
+          [shipmentId, customerId, orders[0].booking_type, bookingType]);
+      }
       const [previous] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment_horse WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
       const input = this.horseInputs(dto);
       const horses = input.length ? await this.insuredHorses(db, customerId, input, previous) : null;
@@ -429,10 +442,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         contact_phone = COALESCE(?, contact_phone), contact_email = COALESCE(?, contact_email), origin_location = COALESCE(?, origin_location),
         destination_location = COALESCE(?, destination_location), requested_date = COALESCE(?, requested_date),
         special_requirements = COALESCE(?, special_requirements), requested_horse_count = ?, insurance_fee = ?,
-        total_cost = 0, transport_cost = NULL, change_request_notes = NULL, status = 'requested' WHERE shipment_id = ?`,
+        total_cost = 0, transport_cost = NULL, stall_unit_price = NULL, booking_type = ?, change_request_notes = NULL, status = 'requested' WHERE shipment_id = ?`,
         [dto.contactName ?? null, dto.contactAddress ?? null, dto.contactPhone ?? null, dto.contactEmail ?? null,
         dto.originLocation ?? null, dto.destinationLocation ?? null, dto.requestedDate ? new Date(dto.requestedDate) : null,
-        dto.specialRequirements ?? null, count, fee, shipmentId]);
+        dto.specialRequirements ?? null, count, fee, bookingType, shipmentId]);
       if (dto.medicalDocumentUrl) await db.execute("INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'document', ?)", [shipmentId, dto.medicalDocumentUrl, customerId]);
       return true;
     });
@@ -457,6 +470,9 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
     return {
       id: row.shipment_id,
+      transportMode: row.transport_mode ?? null,
+      bookingType: row.booking_type ?? 'shared_stall',
+      stallUnitPrice: row.stall_unit_price == null ? null : Number(row.stall_unit_price),
       requestCode,
       customerRequestCode: row.customer_request_code,
       customerId: row.customer_id,

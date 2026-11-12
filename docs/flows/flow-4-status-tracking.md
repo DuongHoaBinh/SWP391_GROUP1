@@ -19,6 +19,7 @@ Vehicle Driver / Escort, Fleet & Route Coordinator, Logistics Manager, Customer
 - A milestone cannot move backward without an explicitly recorded correction or incident.
 - Health logs are associated with an individual horse, trip, author, time, and optional attachment.
 - Customer tracking exposes operational status and approved location information, not private staff notes.
+- The order completion endpoint permits only Manager/Admin or an assigned Driver/Escort. It accepts only an in-transit order (retries on completed orders are idempotent), locks the shipment and updates shipment/horse/route together. Optional Flow 6 evidence is not a mandatory prerequisite for Flow 4 completion.
 
 ## Outputs
 
