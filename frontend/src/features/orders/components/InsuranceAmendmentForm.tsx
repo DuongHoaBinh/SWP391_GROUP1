@@ -5,16 +5,20 @@ import useSWR from 'swr';
 import { apiClient } from '@/lib/api-client';
 import { InsuranceSelection } from './InsuranceSelection';
 import { CostSummary } from './InsuranceSummary';
+import { BookingChoice } from './BookingChoice';
+import { type BookingType } from '../booking-policy';
 import { previewInsurance, unchangedInsurance, type InsuredHorse, type InsuranceInput, type InsurancePolicy } from '../insurance-policy';
 
-export function InsuranceAmendmentForm({ orderId, horses, specialRequirements, onSaved, onCancel }: {
+export function InsuranceAmendmentForm({ orderId, horses, specialRequirements, bookingType = 'shared_stall', onSaved, onCancel }: {
   orderId: number; horses: InsuredHorse[]; specialRequirements?: string | null;
+  bookingType?: BookingType;
   onSaved: () => void; onCancel: () => void;
 }) {
   const [values, setValues] = useState<Record<string, InsuranceInput>>(() => Object.fromEntries(horses.map(h => [String(h.horseId), {
     declaredValue: String(h.declaredValue ?? 0), declaredCurrency: h.declaredCurrency ?? 'VND', insurancePackage: h.insurancePackage ?? 'basic',
   }])));
   const [notes, setNotes] = useState('');
+  const [booking, setBooking] = useState<BookingType>(bookingType);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { data: policy, error: policyError, mutate } = useSWR<InsurancePolicy>('/orders/insurance-policy', (url: string) => apiClient<InsurancePolicy>(url));
@@ -33,6 +37,7 @@ export function InsuranceAmendmentForm({ orderId, horses, specialRequirements, o
     try {
       const changed = horses.some(h => !unchangedInsurance(values[String(h.horseId)], h));
       await apiClient(`/orders/${orderId}`, { method: 'PUT', body: JSON.stringify({
+        bookingType: booking,
         specialRequirements: [specialRequirements, `[Updated] ${notes.trim()}`].filter(Boolean).join(' | '),
         ...(changed ? { horses: horses.map(h => {
           const value = values[String(h.horseId)];
@@ -50,6 +55,7 @@ export function InsuranceAmendmentForm({ orderId, horses, specialRequirements, o
   return <form onSubmit={submit} className="space-y-5">
     <fieldset disabled={submitting} className="space-y-5 disabled:opacity-60">
       <p className="text-sm text-slate-600">Điều chỉnh giá trị hoặc gói bảo hiểm theo yêu cầu của Manager. Cước cơ bản sẽ được báo giá lại sau khi gửi.</p>
+      <BookingChoice value={booking} onChange={setBooking} horseCount={horses.reduce((sum, h) => sum + (h.quantity ?? 1), 0)} />
       <InsuranceSelection horses={horses.map(h => ({ id: String(h.horseId), name: h.name, quantity: h.quantity }))}
         values={values} savedPolicies={savedPolicies} onChange={(id, value) => { setValues(previous => ({ ...previous, [id]: value })); setError(''); }}
         policy={policy ?? null} error={policyError ? 'Chưa tải được chính sách mới. Khai báo không thay đổi vẫn giữ quyền lợi đã lưu.' : undefined}

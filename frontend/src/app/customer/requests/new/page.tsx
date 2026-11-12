@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -26,6 +26,9 @@ import dynamic from 'next/dynamic';
 import useSWR from 'swr';
 import { InsuranceSelection } from '@/features/orders/components/InsuranceSelection';
 import { CostSummary } from '@/features/orders/components/InsuranceSummary';
+import { BookingChoice } from '@/features/orders/components/BookingChoice';
+import { BookingSummary } from '@/features/orders/components/BookingSummary';
+import { type BookingType } from '@/features/orders/booking-policy';
 import { defaultInsurance, insuranceNames, previewInsurance, vnd, type InsuranceInput, type InsurancePolicy } from '@/features/orders/insurance-policy';
 
 const RoutePlanningMap = dynamic(
@@ -144,19 +147,27 @@ function CreateTransportRequestForm() {
 
   // Horse quantities mapping: horseId -> quantity
   const [horseQuantities, setHorseQuantities] = useState<Record<string, number>>({});
+  const [bookingType, setBookingType] = useState<BookingType>('shared_stall');
   const [insuranceValues, setInsuranceValues] = useState<Record<string, InsuranceInput>>({});
   const [insuranceError, setInsuranceError] = useState('');
   const { data: policy, error: policyError, mutate: reloadPolicy } = useSWR<InsurancePolicy>('/orders/insurance-policy', url => apiClient<InsurancePolicy>(url), { shouldRetryOnError: false });
 
+  const refreshedStep = useRef<number | null>(null);
+  const initializedSelection = useRef<string | null>(null);
   useEffect(() => {
-    refreshHorses();
+    if (refreshedStep.current === currentStep) return;
+    refreshedStep.current = currentStep;
+    void refreshHorses();
   }, [currentStep, refreshHorses]);
 
   useEffect(() => {
+    const selectionKey = preselectedHorseId ?? 'default';
+    if (initializedSelection.current === selectionKey) return;
     if (preselectedHorseId) {
       const target = horses.find((item) => item.id === preselectedHorseId);
       if (target && (target.status === 'active' || target.availabilityStatus === 'Available')) {
         setHorseQuantities({ [preselectedHorseId]: 1 });
+        initializedSelection.current = selectionKey;
       }
     } else if (horses.length > 0 && Object.keys(horseQuantities).length === 0) {
       const firstAvailable = horses.find(
@@ -164,6 +175,7 @@ function CreateTransportRequestForm() {
       );
       if (firstAvailable) {
         setHorseQuantities({ [firstAvailable.id]: 1 });
+        initializedSelection.current = selectionKey;
       }
     }
   }, [preselectedHorseId, horses]);
@@ -192,7 +204,7 @@ function CreateTransportRequestForm() {
 
   const breedBreakdown = selectedHorses.reduce((acc, h) => {
     const breed = h.breed || 'Other Breed';
-    acc[breed] = (acc[breed] || 0) + 1;
+    acc[breed] = (acc[breed] || 0) + h.quantity;
     return acc;
   }, {} as Record<string, number>);
 
@@ -291,6 +303,7 @@ function CreateTransportRequestForm() {
       const combinedReqs = [titleNote, typeNote, data.specialReqs, routeNote].filter(Boolean).join(' | ');
 
       const payload = {
+        bookingType,
         contactName: currentUser.fullName || currentUser.name || 'Current Customer',
         contactPhone: currentUser.phone || '0901234567',
         contactEmail: currentUser.email || 'customer@example.com',
@@ -769,6 +782,18 @@ function CreateTransportRequestForm() {
                             </div>
                             <div>
                               <div>{h.name}</div>
+                              {isSelected && Number(h.quantity ?? 1) > 1 && <label className="mt-2 flex items-center gap-2 text-xs font-medium">
+                                Số ngựa
+                                <input type="number" min={1} max={h.quantity} step={1} value={horseQuantities[h.id]}
+                                  aria-label={`Số ngựa từ hồ sơ ${h.name}`}
+                                  onChange={e => {
+                                    const quantity = Number(e.target.value);
+                                    if (Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= Number(h.quantity)) {
+                                      setHorseQuantities(previous => ({ ...previous, [h.id]: quantity }));
+                                    }
+                                  }} className="w-20 rounded border border-slate-300 p-2" />
+                                / {h.quantity}
+                              </label>}
                               {isInTransit ? (
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#e0e7ff', color: '#4338ca', fontSize: '11px', fontWeight: 700 }}>
                                   <Truck size={12} /> Đang vận chuyển
@@ -809,6 +834,7 @@ function CreateTransportRequestForm() {
                   })}
                 </tbody>
               </table>
+              <BookingChoice value={bookingType} onChange={setBookingType} horseCount={totalSelectedHorses} />
               {selectedHorses.length > 0 && <InsuranceSelection horses={selectedHorses} values={insuranceValues}
                 onChange={(id, value) => { setInsuranceValues(previous => ({ ...previous, [id]: value })); setInsuranceError(''); }}
                 policy={policy ?? null} error={policyError ? 'Chưa tải được chính sách bảo hiểm.' : insuranceError} onRetry={() => void reloadPolicy()} />}
@@ -967,6 +993,7 @@ function CreateTransportRequestForm() {
           const value = insuranceValues[h.id] ?? defaultInsurance;
           return <li key={h.id}><strong>{h.name}</strong> · {Number(value.declaredValue || 0).toLocaleString('vi-VN')} {value.declaredCurrency}/ngựa · Gói {insuranceNames[value.insurancePackage]} · {vnd(previewInsurance(value, policy ?? null).fee * h.quantity)}</li>;
         })}</ul>
+        <BookingSummary bookingType={bookingType} horseCount={totalSelectedHorses} />
         <CostSummary transportCost={null} insuranceFee={estimatedInsuranceFee} />
         <p className="text-xs text-slate-500">Phí bảo hiểm làm tròn đến VNĐ trên mỗi ngựa. Backend xác nhận lại phí khi lưu yêu cầu. Tổng tiền sẽ gồm cước cơ bản và phí bảo hiểm; chưa yêu cầu thanh toán ở bước này.</p>
         {insuranceError && <p role="alert" className="text-sm text-red-700">{insuranceError}</p>}

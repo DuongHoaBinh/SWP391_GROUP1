@@ -33,6 +33,7 @@ import { ReviewPlanDto } from './dto/review-plan.dto';
 import { ConfirmAssignmentDto } from './dto/confirm-assignment.dto';
 import { ShipmentStatus } from '../orders/orders.types';
 import { ShipmentLifecycle } from '../../common/shipment-lifecycle';
+import { assertRoadCapacity } from '../fleet/capacity-policy';
 
 @Injectable()
 export class RoutesService implements OnModuleInit {
@@ -63,7 +64,12 @@ export class RoutesService implements OnModuleInit {
     return { airlines, airports, masterStops };
   }
 
-  async getRouteByShipmentId(shipmentId: number): Promise<RouteEntity> {
+  async getRouteByShipmentId(shipmentId: number, user?: AuthenticatedUser): Promise<RouteEntity> {
+    if (user?.role === UserRole.CUSTOMER) {
+      const order = await this.ordersStore.findById(shipmentId);
+      if (!order) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
+      if (order.customerId !== Number(user.id)) throw new ForbiddenException('Bạn chỉ được xem lộ trình đơn của mình');
+    }
     const route = await this.routesStore.findRouteByShipmentId(shipmentId);
     if (!route) {
       throw new NotFoundException(`Chưa có lộ trình nào được lập cho đơn vận chuyển #${shipmentId}`);
@@ -71,11 +77,13 @@ export class RoutesService implements OnModuleInit {
     return route;
   }
 
-  async getFullTripPlan(shipmentId: number): Promise<FullTripPlan> {
+  async getFullTripPlan(shipmentId: number, user?: AuthenticatedUser): Promise<FullTripPlan> {
     const order = await this.ordersStore.findById(shipmentId);
     if (!order) {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
+
+    if (user?.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) throw new ForbiddenException('Bạn chỉ được xem kế hoạch đơn của mình');
 
     const route = await this.routesStore.findRouteByShipmentId(shipmentId);
     const assignedVehicles = await this.fleetStore.findAssignedVehicles(shipmentId);
@@ -172,6 +180,16 @@ export class RoutesService implements OnModuleInit {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
 
+    if (dto.legs.some(l => l.legType === 'road' && !l.vehicleId && l.vehiclePlate && !l.roadTripId)) {
+      const vehicles = await this.fleetStore.findAllVehicles();
+      dto = { ...dto, legs: dto.legs.map(leg => {
+        if (leg.legType !== 'road' || leg.vehicleId || leg.roadTripId || !leg.vehiclePlate) return leg;
+        const vehicle = vehicles.find(v => v.plateOrCode.toLowerCase() === leg.vehiclePlate!.trim().toLowerCase());
+        return vehicle ? { ...leg, vehicleId: vehicle.id } : leg;
+      }) };
+    }
+    const roadVehicles = [...new Set(dto.legs.filter(l => l.legType === 'road' && l.vehicleId && !l.roadTripId).map(l => l.vehicleId!))];
+    if (roadVehicles.length) assertRoadCapacity(order.requestedHorseCount, roadVehicles, await this.fleetStore.findVehiclesByIds(roadVehicles));
     let route = await this.routesStore.findRouteByShipmentId(shipmentId);
     let routeId: number;
     if (!route) {
@@ -186,16 +204,7 @@ export class RoutesService implements OnModuleInit {
 
     const emergencyReroute = route?.planStatus === PlanStatus.IN_TRANSIT && Boolean(route.activeIncident);
     if (route && !['draft', 'pending_approval'].includes(route.planStatus) && !emergencyReroute) throw new BadRequestException('Chỉ sửa kế hoạch khi còn ở giai đoạn lập/duyệt hoặc đang xử lý sự cố trên đường.');
-    await this.routesStore.saveDetailedPlan(routeId, dto);
-
-    // Gán phương tiện từ các chặng đường bộ vào shipment_vehicle nếu có
-    const vehicleIds = dto.legs
-      .filter((l) => l.legType === 'road' && l.vehicleId)
-      .map((l) => l.vehicleId as number);
-    if (vehicleIds.length > 0) {
-      const uniqueVehicles = Array.from(new Set(vehicleIds));
-      await this.fleetStore.assignVehicles(shipmentId, uniqueVehicles);
-    }
+    await this.routesStore.saveDetailedPlan(routeId, dto, Number(user.id));
 
     return (await this.routesStore.findRouteById(routeId))!;
   }

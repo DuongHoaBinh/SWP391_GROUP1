@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { BookingType } from '../booking-policy';
 import {
   IsArray,
   IsEmail,
@@ -75,6 +76,11 @@ export class HorseInfoDto {
 }
 
 export class CreateOrderDto {
+  @ApiPropertyOptional({ enum: ['shared_stall', 'dedicated_charter'], default: 'shared_stall', description: 'Ghép ô chuồng hoặc bao nguyên chuyến; độc lập với nội địa/quốc tế' })
+  @IsOptional()
+  @IsIn(['shared_stall', 'dedicated_charter'])
+  bookingType?: BookingType;
+
   @ApiPropertyOptional({ example: 'Nguyễn Văn A', description: 'Contact person name' })
   @IsOptional()
   @IsString()

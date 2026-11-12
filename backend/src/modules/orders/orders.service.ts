@@ -109,6 +109,7 @@ export class OrdersService {
       null,
       dto.transportCost ?? dto.totalCost ?? 0,
       dto.transportMode,
+      dto,
     );
 
     // 1. Gửi thông báo đến customer (dùng mã đơn của riêng khách hàng)
@@ -248,7 +249,14 @@ export class OrdersService {
       throw new NotFoundException(`Transport order #${orderId} not found`);
     }
 
-    await this.ordersStore.completeShipment(orderId);
+    if (![UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.DRIVER_ESCORT].includes(user.role)) {
+      throw new ForbiddenException('Bạn không có quyền hoàn tất chuyến');
+    }
+    if (![ShipmentStatus.IN_TRANSIT, ShipmentStatus.COMPLETED].includes(order.status)) {
+      throw new BadRequestException('Chỉ được hoàn tất chuyến đã xuất phát');
+    }
+    const changed = await this.ordersStore.completeShipment(orderId, Number(user.id), user.role === UserRole.DRIVER_ESCORT);
+    if (!changed) return order;
 
     const code = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
