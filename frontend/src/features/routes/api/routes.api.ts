@@ -48,7 +48,6 @@ export interface MasterStopItem {
 }
 
 export interface RouteLegItem {
-  roadTripId?: number | null;
   id?: number;
   sequenceNo: number;
   legType: 'road' | 'flight';

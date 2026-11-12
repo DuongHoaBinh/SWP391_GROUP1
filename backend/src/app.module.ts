@@ -9,11 +9,9 @@ import { FleetModule } from './modules/fleet/fleet.module';
 import { RoutesModule } from './modules/routes/routes.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { ReportsModule } from './modules/reports/reports.module';
-import { ShipmentLifecycleModule } from './common/shipment-lifecycle';
 
 @Module({
   imports: [
-    ShipmentLifecycleModule,
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET ?? 'development-only-secret',

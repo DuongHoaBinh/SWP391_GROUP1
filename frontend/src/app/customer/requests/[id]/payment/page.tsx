@@ -9,7 +9,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { SepayPayment } from '@/features/orders/components/SepayPayment';
 
 interface Order { id: number; requestCode: string; totalCost: number; status: string }
-const payableStatuses = ['planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'];
+const payableStatuses = ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'];
 
 export default function PaymentPage() {
   const params = useParams<{ id: string }>();

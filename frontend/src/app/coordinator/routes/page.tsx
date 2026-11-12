@@ -23,8 +23,6 @@ import {
   RouteDetail
 } from '@/features/routes/api/routes.api';
 import { buildEquineRoute, normalizeVietnamese } from '@/lib/geo-corridors';
-import { bookingName, type BookingType } from '@/features/orders/booking-policy';
-import { RoadTripPicker, LegScheduleFields } from '@/features/routes/components/RoadTripPicker';
 
 const RoutePlanningMap = dynamic(
   () => import('@/components/maps/RoutePlanningMap'),
@@ -39,8 +37,6 @@ const RoutePlanningMap = dynamic(
 );
 
 interface PlanningOrder {
-  transportMode?: 'road' | 'air' | null;
-  bookingType: BookingType;
   id: number;
   requestCode: string;
   customerName?: string;
@@ -258,8 +254,6 @@ export default function RoutePlanningPage() {
           }
 
           enriched.push({
-            transportMode: o.transportMode ?? null,
-            bookingType: o.bookingType ?? 'shared_stall',
             id: o.id,
             requestCode: o.requestCode || `REQ-${String(o.id).padStart(3, '0')}`,
             customerName: o.customer?.fullName || o.customerName || 'Khách hàng',
@@ -1662,7 +1656,6 @@ export default function RoutePlanningPage() {
             maxWidth="920px"
           >
             <div className="flex flex-col gap-6 max-h-[75vh] overflow-y-auto pr-1">
-              <p className="rounded-lg bg-blue-50 p-3 font-semibold text-blue-800">{bookingName(selectedPlanningOrder.bookingType)} · {selectedPlanningOrder.horseCount} ô chuồng{selectedPlanningOrder.transportMode ? ` · ${selectedPlanningOrder.transportMode === 'road' ? 'Đường bộ' : 'Hàng không'}` : ''}</p>
               {/* IN-TRANSIT & INCIDENT & APPROVAL & COMPLETED BANNERS */}
               {isCompleted ? (
                 <div className="p-4 bg-slate-100 border border-slate-300 rounded-xl flex items-start gap-3 text-slate-800 shadow-2xs">
@@ -1957,9 +1950,6 @@ export default function RoutePlanningPage() {
                       )}
                     </div>
 
-                    {leg.legType === 'road' && <RoadTripPicker leg={leg} bookingType={selectedPlanningOrder.bookingType} readOnly={isReadOnlyModal}
-                      onChange={next => setLegs(current => current.map((item, index) => index === idx ? next : item))} />}
-                    <fieldset disabled={isReadOnlyModal || Boolean(leg.roadTripId)}>
                     {/* Road Leg details */}
                     {leg.legType === 'road' && (
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
@@ -1979,9 +1969,20 @@ export default function RoutePlanningPage() {
                                   onChange={(e) => {
                                     const val = e.target.value;
                                     const updated = [...legs];
+                                    const plateToIdMap: Record<string, number> = {
+                                      '51C-888.99': 1,
+                                      '51D-777.22': 2,
+                                      '29B-999.11': 3,
+                                      '60C-555.33': 4,
+                                      'TRK-VN-089': 3,
+                                      'TRK-VN-102': 4,
+                                    };
                                     const matchedVehicle = vehicles.find((v) => v.code === val);
-                                    const parsed = matchedVehicle ? Number(String(matchedVehicle.id).replace(/\D/g, '')) : NaN;
-                                    const resolvedVehicleId = Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+                                    let resolvedVehicleId = plateToIdMap[val];
+                                    if (!resolvedVehicleId && matchedVehicle) {
+                                      const parsed = Number(String(matchedVehicle.id).replace(/\D/g, ''));
+                                      if (!isNaN(parsed) && parsed > 0) resolvedVehicleId = parsed;
+                                    }
                                     updated[idx].vehiclePlate = val;
                                     updated[idx].vehicleId = resolvedVehicleId || null;
                                     setLegs(updated);
@@ -2114,8 +2115,6 @@ export default function RoutePlanningPage() {
                       </div>
                     )}
 
-                    </fieldset>
-                    <LegScheduleFields leg={leg} readOnly={isReadOnlyModal} onChange={next => setLegs(current => current.map((item, index) => index === idx ? next : item))} />
                     {/* Flight Leg details */}
                     {leg.legType === 'flight' && (
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
