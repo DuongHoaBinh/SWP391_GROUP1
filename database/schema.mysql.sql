@@ -139,12 +139,27 @@ CREATE TABLE shipment (
   transport_cost DECIMAL(15,2) NULL DEFAULT NULL,
   insurance_fee DECIMAL(15,2) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  booking_type ENUM('shared_stall','dedicated_charter') NOT NULL DEFAULT 'shared_stall',
+  stall_unit_price DECIMAL(15,2) NULL DEFAULT NULL,
+  transport_mode ENUM('road','air') NULL DEFAULT NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_shipment_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id),
   CONSTRAINT fk_shipment_requester FOREIGN KEY (requested_by) REFERENCES `user`(user_id),
   CONSTRAINT fk_shipment_approver FOREIGN KEY (approved_by) REFERENCES `user`(user_id),
   INDEX idx_shipment_status (status),
   INDEX idx_shipment_customer (customer_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE shipment_booking_revision (
+  revision_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  changed_by INT NOT NULL,
+  previous_booking_type ENUM('shared_stall','dedicated_charter') NOT NULL,
+  booking_type ENUM('shared_stall','dedicated_charter') NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_booking_revision_shipment (shipment_id, created_at),
+  CONSTRAINT fk_booking_revision_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_booking_revision_user FOREIGN KEY (changed_by) REFERENCES `user`(user_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE shipment_horse (
@@ -366,3 +381,22 @@ CREATE TABLE IF NOT EXISTS shipment_insurance_revision (
   CONSTRAINT fk_insurance_revision_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
   CONSTRAINT fk_insurance_revision_user FOREIGN KEY (changed_by) REFERENCES `user`(user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- No historical shipment, quote or route leg is rewritten.
+CREATE TABLE IF NOT EXISTS road_trip (
+  road_trip_id INT AUTO_INCREMENT PRIMARY KEY,
+  vehicle_id INT NOT NULL,
+  booking_type ENUM('shared_stall','dedicated_charter') NOT NULL,
+  origin_location VARCHAR(255) NOT NULL,
+  destination_location VARCHAR(255) NOT NULL,
+  planned_departure DATETIME NOT NULL,
+  planned_arrival DATETIME NOT NULL,
+  created_by INT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_road_trip_vehicle_time (vehicle_id, planned_departure, planned_arrival),
+  CONSTRAINT fk_road_trip_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicle(vehicle_id),
+  CONSTRAINT fk_road_trip_actor FOREIGN KEY (created_by) REFERENCES `user`(user_id),
+  CONSTRAINT chk_road_trip_interval CHECK (planned_arrival > planned_departure)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- route_leg is introduced by migration 010; migration 019 adds its road_trip_id reference.

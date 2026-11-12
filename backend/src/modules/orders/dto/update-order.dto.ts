@@ -11,8 +11,14 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { HorseInfoDto } from './create-order.dto';
+import { BookingType } from '../booking-policy';
 
 export class UpdateOrderDto {
+  @ApiPropertyOptional({ enum: ['shared_stall', 'dedicated_charter'], description: 'Chỉ thay đổi khi Manager yêu cầu chỉnh sửa' })
+  @IsOptional()
+  @IsIn(['shared_stall', 'dedicated_charter'])
+  bookingType?: BookingType;
+
   @ApiPropertyOptional({ example: 'Nguyễn Văn A', description: 'Contact person name' })
   @IsOptional()
   @IsString()

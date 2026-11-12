@@ -1,5 +1,7 @@
 # Giá trị ngựa và bảo hiểm vận chuyển
 
+> Cập nhật Phase 2 ngày 12/11/2026: đã sửa bảo toàn policy/quantity khi cập nhật một phần, phân quyền hoàn tất, quotation HTML, giá duyệt dương và tách sandbox khỏi paid/readiness chính thức. Xem [báo cáo kiểm chứng hiện tại](controlled-fixes-audit.md). Các số liệu test cũ bên dưới là lịch sử; không thay thế kết quả HTTP/MySQL/browser của Phase 2 đang BLOCKED bởi Docker.
+
 ## Phạm vi triển khai
 
 - Customer khai báo giá trị và chọn Basic/Standard/Premium độc lập cho từng hồ sơ ngựa tại bước chọn ngựa khi tạo yêu cầu.

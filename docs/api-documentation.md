@@ -515,3 +515,44 @@ Manager/Admin sends `{ "transportCost": 10000000 }` for base freight. The exampl
 ### Migration / testing
 
 From `backend`: `npm run migrate:insurance` applies rerunnable migration 017 to the configured database. Run existing migrations first. For this working branch, apply 016 as well if not yet present. `npm run test:insurance` builds and runs policy, real HTTP/MySQL and payment-regression tests in a disposable MySQL container. Frontend `npm run test:insurance` tests the selectable policies, previews, summary and persisted coverage rendering. No live insurance provider or claim-payout integration is introduced.
+
+## Shared stall / dedicated charter API
+
+- `POST /orders`: optional `bookingType`, enum `shared_stall` / `dedicated_charter`, default shared. Unknown values return 400; no horse-count threshold is enforced. Values are accepted with either domestic/international or road/air scope. Prices supplied by Customer cannot quote the order.
+- `PUT /orders/:id`: owned `change_requested` orders may set `bookingType`. Omitted type keeps the saved selection. A changed type appends a booking revision transactionally; the former freight, unit price and total are cleared for reapproval. Insurance is preserved unless changed explicitly. Other states return 400; other owners receive 403.
+- Responses from order list/detail/create/update include `bookingType`, nullable `stallUnitPrice`, existing total `transportCost`, aggregate `insuranceFee`, combined `totalCost` and `requestedHorseCount`. Full trip plan's `order` includes these fields for Coordinator use.
+
+### Approval examples
+
+Shared, two horses (unit freight 2,000,000 VND, saved insurance 3,000,000 VND):
+
+```json
+{ "bookingType": "shared_stall", "quotedHorseCount": 2, "stallUnitPrice": 2000000 }
+```
+
+Backend stores `stallUnitPrice=2000000`, `transportCost=4000000`, `totalCost=7000000`. Unit and count must be integers; count/type must match the locked order. Missing count/type for a unit quote, stale count/type, charter with unit rate, mixed unit/total fields, negative/fractional amounts and DECIMAL overflow return 400. Authorization remains Manager/Admin only.
+
+Dedicated, three horses:
+
+```json
+{ "bookingType": "dedicated_charter", "quotedHorseCount": 3, "transportCost": 9000000 }
+```
+
+Freight stays 9,000,000 VND, without multiplying by three. Add saved insurance once. Existing clients may still send `transportCost` or the legacy `totalCost` field as **total freight**, including shared orders; these requests do not store/invent a unit price or multiply their total. If both total aliases are present they must agree.
+
+After Flow 3, invoice snapshot includes `bookingType`, nullable `stallUnitPrice`, horse count, total freight and insurance. SePay uses the unchanged combined invoice amount.
+
+Apply migration 018 with `npm run migrate:booking` in `backend`, after existing migrations. `npm run test:booking` runs isolated HTTP/MySQL plus insurance/payment regressions; the frontend command of the same name tests cards, previews and quote payloads. No new environment variable is required.
+
+## Controlled corrections and road-trip API (12/11/2026)
+
+- Approval prices must be explicitly provided and positive whole VND. Omitted/null/empty/zero/negative/invalid prices return 400. This does not rewrite historical quotes. `totalCost = transportCost + insuranceFee` remains the response contract; the legacy approval input `totalCost` means base freight.
+- On owned `change_requested` orders, omitted horse policy fields and quantity preserve saved values. Actual declaration changes recalculate the policy; unchanged declarations preserve saved FX rates. Approval mode never overwrites Domestic/International scope.
+- `GET /fleet/road-trips`: Coordinator/Manager/Admin only. Returns id, vehicleId, vehiclePlate, bookingType, originLocation, destinationLocation, plannedDeparture, plannedArrival, capacity and bookedStalls. No other customers' identity or horses are included.
+- `POST /fleet/road-trips`: same staff roles, body `{vehicleId, bookingType, originLocation, destinationLocation, plannedDeparture, plannedArrival}`; returns 201 `{id}`. Creates trip metadata; capacity is committed when a plan allocates a shipment.
+- `POST /routes/plan/:shipmentId/build-detail`: each road leg may send `roadTripId`. The backend uses that trip's vehicle/route/times, validates booking type, and sets `stallsBooked` from the shipment. Without an id, a timed road leg creates its own trip when saved. All leg/stop/vehicle changes and capacity checks are transactional. Insufficient slots or an overlapping exclusive/other trip return 400; the plan is not partially saved. No automatic compatibility tolerance is imposed.
+- Flight legs cannot set roadTripId; existing air fields retain their meaning. Air operational shared/dedicated rules await approval.
+- Customer route/full-plan reads enforce order ownership. `PATCH /orders/:id/complete` requires an in-transit order and Manager/Admin or an assigned Driver/Escort; completed retries do not duplicate notifications.
+- MoMo confirm-atm requires sandbox enabled and non-production. Sandbox uses the exact stored VND amount and never updates official payment status or readiness. No live bank transaction is used in the regression suite.
+- Apply 019 after existing migrations with `npm run migrate:road-trips`. `npm run test:controlled` runs focused regressions; the isolated backend runner includes real HTTP/MySQL road tests and upgrade/repeat checks. No new environment variable is added.
+- Apply 020 with `npm run migrate:transport-mode` after 019. Order responses add nullable `transportMode` (`road`/`air`), set by Manager approval. Domestic/International and existing quotes are preserved. Customer, Manager and Coordinator prefer the typed mode; legacy note inference remains a UI fallback.

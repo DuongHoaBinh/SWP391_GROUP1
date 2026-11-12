@@ -3,12 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:booking": "node --test test/booking.test.cjs",
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "next lint",
     "test:insurance": "node --test test/insurance.test.cjs",
-    "test:sepay": "node --test test/sepay-payment.test.cjs"
+    "test:sepay": "node --test test/sepay-payment.test.cjs",
+    "test:controlled": "node --test test/controlled-fixes.test.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
