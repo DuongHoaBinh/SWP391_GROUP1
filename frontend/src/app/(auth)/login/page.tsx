@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { AuthShowcasePanel } from '@/components/layout/AuthShowcasePanel';
-import { setAuthSession } from '@/lib/auth';
+import { SESSION_EXPIRED_MESSAGE, setAuthSession } from '@/lib/auth';
 import { getPostLoginRedirect } from '@/lib/auth-redirect';
 import { loginWithPassword } from '@/lib/auth-login';
 
@@ -32,7 +32,9 @@ function LoginFormContent() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    searchParams.get('reason') === 'session-expired' ? SESSION_EXPIRED_MESSAGE : null
+  );
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

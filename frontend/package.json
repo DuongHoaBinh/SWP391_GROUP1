@@ -11,7 +11,7 @@
     "test:insurance": "node --test test/insurance.test.cjs",
     "test:sepay": "node --test test/sepay-payment.test.cjs",
     "test:controlled": "node --test test/controlled-fixes.test.cjs",
-    "test:auth": "node --test test/auth-login.test.cjs"
+    "test:auth": "node --test test/auth-login.test.cjs test/api-client-auth.test.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
