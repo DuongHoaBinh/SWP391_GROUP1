@@ -1,3 +1,5 @@
+import { BookingType } from './booking-policy';
+
 export enum ShipmentStatus {
   REQUESTED = 'requested',
   CHANGE_REQUESTED = 'change_requested',
@@ -23,9 +25,21 @@ export interface OrderHorse {
   gender: 'male' | 'female' | 'gelding' | null;
   age: number | null;
   quantity?: number;
+  declaredValue: number;
+  declaredCurrency: 'VND' | 'USD';
+  exchangeRate: number;
+  declaredValueVnd: number;
+  insurancePackage: 'basic' | 'standard' | 'premium';
+  insuranceFee: number;
+  maxCompensation: number;
+  emergencyVetCovered: boolean;
+  insurancePolicyVersion: string;
 }
 
 export interface TransportOrder {
+  transportMode?: 'road' | 'air' | null;
+  bookingType: BookingType;
+  stallUnitPrice: number | null;
   id: number;
   requestCode?: string;
   customerRequestCode?: string;
@@ -49,6 +63,8 @@ export interface TransportOrder {
   changeRequestNotes: string | null;
   status: ShipmentStatus;
   totalCost: number;
+  transportCost: number | null;
+  insuranceFee: number;
   paymentStatus?: 'unpaid' | 'pending' | 'review' | 'succeeded';
   paymentCode?: string | null;
   paidAt?: string | null;

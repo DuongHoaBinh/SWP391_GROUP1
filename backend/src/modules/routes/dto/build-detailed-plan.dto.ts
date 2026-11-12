@@ -13,6 +13,9 @@ import {
 import { LegType, RouteStopType } from '../routes.types';
 
 export class RouteLegDto {
+  @ApiPropertyOptional({ description: 'Chuyến đường bộ do Coordinator chọn để ghép chỗ hoặc bao xe' })
+  @IsOptional() @IsInt() @Min(1)
+  roadTripId?: number;
   @ApiProperty({ description: 'Thứ tự chặng (1, 2, 3...)' })
   @IsInt()
   @Min(1)

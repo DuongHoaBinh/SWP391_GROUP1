@@ -19,6 +19,8 @@ import {
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { apiClient } from '@/lib/api-client';
+import { escapeQuotationText } from '@/features/orders/quotation-html';
+import { bookingName, type BookingType } from '@/features/orders/booking-policy';
 import { useCustomerStore } from '@/lib/customer-store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -41,6 +43,9 @@ interface OrderHorse {
 }
 
 interface TransportOrder {
+  bookingType?: BookingType;
+  stallUnitPrice?: number | null;
+  requestedHorseCount?: number;
   id: number;
   requestCode?: string;
   customerRequestCode?: string;
@@ -53,6 +58,8 @@ interface TransportOrder {
   departureDate: string | null;
   status: ShipmentStatus;
   totalCost: number;
+  transportCost?: number | null;
+  insuranceFee?: number;
   createdAt: string;
   customerEmail?: string;
   horses?: OrderHorse[];
@@ -141,10 +148,10 @@ function exportQuotationPDF(order: TransportOrder) {
       ?.map(
         (h) => `
     <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${h.name}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${h.breed || '—'}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${h.gender || '—'}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${h.age ?? '—'} yrs</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.name)}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.breed || '—')}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.gender || '—')}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.age ?? '—')} yrs</td>
     </tr>`,
       )
       .join('') ||
@@ -154,7 +161,7 @@ function exportQuotationPDF(order: TransportOrder) {
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Báo Giá Vận Chuyển - ${order.requestCode || `#${order.id}`}</title>
+  <title>Báo Giá Dự Kiến - ${escapeQuotationText(order.requestCode || `#${order.id}`)}</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff}
@@ -194,8 +201,8 @@ function exportQuotationPDF(order: TransportOrder) {
       <div class="brand-sub" style="margin-top:8px">Hotline: +84 28 3456 7890 | info@racehorse-logistics.vn</div>
     </div>
     <div>
-      <div class="doc-title">BÁO GIÁ VẬN CHUYỂN</div>
-      <div class="doc-id">Mã yêu cầu: ${order.requestCode || `#${order.id}`}</div>
+      <div class="doc-title">BÁO GIÁ DỰ KIẾN</div><p style="font-size:12px;margin-top:8px">Chưa yêu cầu thanh toán. Hóa đơn được phát hành sau khi lộ trình được xác nhận.</p>
+      <div class="doc-id">Mã yêu cầu: ${escapeQuotationText(order.requestCode || `#${order.id}`)}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
       <div style="text-align:right"><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
     </div>
@@ -206,11 +213,11 @@ function exportQuotationPDF(order: TransportOrder) {
     <div class="grid-2">
       <div class="info-box">
         <div class="info-label">Tên liên hệ</div>
-        <div class="info-value">${order.contactName || '—'}</div>
+        <div class="info-value">${escapeQuotationText(order.contactName || '—')}</div>
       </div>
       <div class="info-box">
         <div class="info-label">Email</div>
-        <div class="info-value">${order.contactEmail}</div>
+        <div class="info-value">${escapeQuotationText(order.contactEmail)}</div>
       </div>
     </div>
   </div>
@@ -220,18 +227,18 @@ function exportQuotationPDF(order: TransportOrder) {
     <div class="grid-3">
       <div class="info-box">
         <div class="info-label">Điểm xuất phát</div>
-        <div class="info-value">${order.originLocation}</div>
+        <div class="info-value">${escapeQuotationText(order.originLocation)}</div>
       </div>
       <div class="info-box">
         <div class="info-label">Điểm đến</div>
-        <div class="info-value">${order.destinationLocation}</div>
+        <div class="info-value">${escapeQuotationText(order.destinationLocation)}</div>
       </div>
       <div class="info-box">
         <div class="info-label">Ngày yêu cầu xuất phát</div>
         <div class="info-value">${formatDate(order.requestedDate)}</div>
       </div>
     </div>
-    ${order.specialRequirements ? `<div class="note-box" style="margin-top:12px"><strong>Yêu cầu đặc biệt:</strong> ${order.specialRequirements}</div>` : ''}
+    ${order.specialRequirements ? `<div class="note-box" style="margin-top:12px"><strong>Yêu cầu đặc biệt:</strong> ${escapeQuotationText(order.specialRequirements)}</div>` : ''}
   </div>
 
   <div class="section">
@@ -247,7 +254,10 @@ function exportQuotationPDF(order: TransportOrder) {
   </div>
 
   <div class="cost-section">
-    <div class="cost-label">Chi phí vận chuyển ước tính</div>
+    <p>Hình thức: ${bookingName(order.bookingType)}</p>
+    ${order.stallUnitPrice == null ? '' : `<p>${order.stallUnitPrice.toLocaleString('vi-VN')} VNĐ / ô × ${order.requestedHorseCount ?? 1} ngựa</p>`}
+    <div class="cost-label">Tổng cước vận chuyển và bảo hiểm</div>
+    <p>Cước cơ bản: ${order.transportCost == null ? 'Chờ báo giá' : order.transportCost.toLocaleString('vi-VN') + ' VNĐ'} · Phí bảo hiểm: ${(order.insuranceFee ?? 0).toLocaleString('vi-VN')} VNĐ</p>
     <div class="cost-value">${order.totalCost > 0 ? order.totalCost.toLocaleString('vi-VN') + ' ₫' : 'Chưa định giá'}</div>
     <div class="cost-sub">${order.totalCost > 0 ? 'Đã bao gồm: phí vận chuyển, kiểm dịch và hải quan cơ bản' : 'Vui lòng chờ Logistics Manager xác nhận báo giá chính thức'}</div>
   </div>
@@ -255,7 +265,7 @@ function exportQuotationPDF(order: TransportOrder) {
   ${order.rejectionReason ? `
   <div class="section">
     <div class="section-title" style="color:#b91c1c">Lý do từ chối</div>
-    <div class="note-box" style="background:#fee2e2;border-color:#fecaca;color:#b91c1c">${order.rejectionReason}</div>
+    <div class="note-box" style="background:#fee2e2;border-color:#fecaca;color:#b91c1c">${escapeQuotationText(order.rejectionReason)}</div>
   </div>` : ''}
 
   <div class="footer">
@@ -349,71 +359,9 @@ export default function RequestsPage() {
         setPagination({ total: 0, totalPages: 1 });
       }
     } catch (err: any) {
-      // Fallback to local store data if backend is offline or unauthenticated
-      if (storeRequests && storeRequests.length > 0) {
-        const mappedOrders: TransportOrder[] = storeRequests.map((r, idx) => ({
-          id: idx + 1,
-          requestCode: `REQ-${String(idx + 1).padStart(3, '0')}`,
-          customerRequestCode: `REQ-${String(idx + 1).padStart(3, '0')}`,
-          customerId: 1,
-          contactName: r.horse?.ownerName || 'Customer',
-          contactEmail: 'customer@equitransit.com',
-          originLocation: r.origin,
-          destinationLocation: r.destination,
-          requestedDate: new Date().toISOString(),
-          departureDate: r.departureDate,
-          status: (r.status.toLowerCase() === 'submitted' ? 'requested' : r.status.toLowerCase() === 'in_review' ? 'under_review' : r.status.toLowerCase()) as ShipmentStatus,
-          totalCost: 15000000,
-          createdAt: new Date().toISOString(),
-          customerEmail: 'customer@equitransit.com',
-          horses: r.horses?.map((h: any, hIdx: number) => ({
-            horseId: hIdx + 1,
-            name: h.horse?.name || h.name || 'Horse',
-            breed: h.horse?.breed || h.breed || null,
-            gender: h.horse?.gender || h.gender || null,
-            age: h.horse?.age ?? h.age ?? null,
-          })) || [
-            {
-              horseId: 1,
-              name: r.horse?.name || 'Thunder',
-              breed: r.horse?.breed || 'Thoroughbred',
-              gender: r.horse?.gender || 'Male',
-              age: r.horse?.age || 6,
-            },
-          ],
-          specialRequirements: r.notes,
-        }));
-
-        let filtered = mappedOrders;
-        if (filterStatus !== 'all') {
-          filtered = filtered.filter((o) => o.status === filterStatus);
-        }
-        if (departureDateFrom) {
-          filtered = filtered.filter((o) => {
-            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
-            return dateStr && dateStr >= departureDateFrom;
-          });
-        }
-        if (departureDateTo) {
-          filtered = filtered.filter((o) => {
-            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
-            return dateStr && dateStr <= departureDateTo;
-          });
-        }
-        if (sortBy === 'totalCost') {
-          filtered.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
-        }
-
-        const total = filtered.length;
-        const totalPages = Math.max(1, Math.ceil(total / limit));
-        const paginated = filtered.slice((page - 1) * limit, page * limit);
-
-        setOrders(paginated);
-        setPagination({ total, totalPages });
-        setError('');
-      } else {
-        setError(err.message || 'Không thể kết nối đến máy chủ Backend.');
-      }
+      setOrders([]);
+      setPagination({ total: 0, totalPages: 1 });
+      setError(err.message || 'Không thể tải đơn hàng. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
