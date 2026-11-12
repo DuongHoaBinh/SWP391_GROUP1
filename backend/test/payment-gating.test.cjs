@@ -15,6 +15,8 @@ test('Flow 1 -> Flow 3 invoice -> SePay -> legal readiness, against isolated MyS
     const data = await res.json(); assert.equal(res.status, status, JSON.stringify(data)); return data;
   }
   async function fixture({ status = 'planning', plan = 'approved', cost = 15000, approvedDocs = false, staff = true, legs = true } = {}) {
+    const [assignedVehicle] = await db.execute("INSERT INTO vehicle (vehicle_type, plate_or_code, capacity) VALUES ('truck', ?, 10)", [`${prefix}-${crypto.randomUUID()}`]);
+    const fixtureVehicle = assignedVehicle.insertId;
     const [order] = await db.execute(`INSERT INTO shipment (customer_id, requested_by, contact_phone, contact_email, origin_location, destination_location, status, total_cost)
       VALUES (?, ?, '0900000000', 'test@example.com', 'Test origin', 'Gate Testland', ?, ?)`, [ids.customer, ids.customer, status, cost]);
     const id = order.insertId;
@@ -24,9 +26,9 @@ test('Flow 1 -> Flow 3 invoice -> SePay -> legal readiness, against isolated MyS
       VALUES (?, ?, ?, 'health_certificate', '/test.pdf', ?, '2099-12-31')`, [horse.insertId, reg, ids.customer, approvedDocs ? 'approved' : 'submitted']);
     const [route] = await db.execute("INSERT INTO route (shipment_id, route_name, plan_status) VALUES (?, 'Confirmed test itinerary', ?)", [id, plan]);
     if (legs) await db.execute(`INSERT INTO route_leg (route_id, sequence_no, leg_type, origin_location, destination_location, planned_departure, planned_arrival, vehicle_id)
-      VALUES (?, 1, 'road', 'Test origin', 'Gate Testland', '2099-01-01 08:00:00', '2099-01-01 12:00:00', ?)`, [route.insertId, vehicle]);
+      VALUES (?, 1, 'road', 'Test origin', 'Gate Testland', '2099-01-01 08:00:00', '2099-01-01 12:00:00', ?)`, [route.insertId, fixtureVehicle]);
     if (staff) for (const [actor, role] of [['driver', 'driver'], ['escort', 'escort']]) await db.execute('INSERT INTO shipment_assignment (shipment_id, user_id, role_in_shipment) VALUES (?, ?, ?)', [id, ids[actor], role]);
-    await db.execute('INSERT INTO shipment_vehicle (shipment_id, vehicle_id) VALUES (?, ?)', [id, vehicle]);
+    await db.execute('INSERT INTO shipment_vehicle (shipment_id, vehicle_id) VALUES (?, ?)', [id, fixtureVehicle]);
     return { id, routeId: route.insertId, documentId: document.insertId };
   }
   const payPath = f => `/orders/${f.id}/payments/sepay`;

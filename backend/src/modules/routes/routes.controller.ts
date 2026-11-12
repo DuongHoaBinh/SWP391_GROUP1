@@ -41,8 +41,8 @@ export class RoutesController {
 
   @Get('shipment/:shipmentId')
   @ApiOperation({ summary: 'Lấy thông tin lộ trình và danh sách điểm dừng của đơn vận chuyển' })
-  getRouteByShipmentId(@Param('shipmentId', ParseIntPipe) shipmentId: number) {
-    return this.routesService.getRouteByShipmentId(shipmentId);
+  getRouteByShipmentId(@CurrentUser() user: AuthenticatedUser, @Param('shipmentId', ParseIntPipe) shipmentId: number) {
+    return this.routesService.getRouteByShipmentId(shipmentId, user);
   }
 
   @Get('shipment/:shipmentId/plan')
@@ -50,8 +50,8 @@ export class RoutesController {
     summary:
       'Lấy toàn bộ kế hoạch chuyến đi (lộ trình, các chặng, xe, tài xế/hộ tống) và đánh giá tính hợp lệ để xuất bản (isReadyToPublish)',
   })
-  getFullTripPlan(@Param('shipmentId', ParseIntPipe) shipmentId: number) {
-    return this.routesService.getFullTripPlan(shipmentId);
+  getFullTripPlan(@CurrentUser() user: AuthenticatedUser, @Param('shipmentId', ParseIntPipe) shipmentId: number) {
+    return this.routesService.getFullTripPlan(shipmentId, user);
   }
 
   // --- Step 1a: Manager Sets Strategic Framework ---

@@ -42,6 +42,7 @@ import useSWR from 'swr';
 import toast from 'react-hot-toast';
 import { SepayPayment } from '@/features/orders/components/SepayPayment';
 import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
+import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { InsuranceAmendmentForm } from '@/features/orders/components/InsuranceAmendmentForm';
 
 const fetcher = async (url: string) => {
@@ -227,7 +228,7 @@ const fetcher = async (url: string) => {
   }
 
   // 6. Build route calculation
-  const preferredMode = (savedMode || (isDomestic ? 'road' : 'air')) as 'air' | 'road';
+  const preferredMode = (data.transportMode || savedMode || (isDomestic ? 'road' : 'air')) as 'air' | 'road';
   const routeCalc = buildEquineRoute(
     originStr,
     destStr,
@@ -326,6 +327,12 @@ export default function RequestDetailPage() {
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
 
+  if (error) {
+    return <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-800">
+      <p>Không thể tải đơn hàng. Đơn có thể không tồn tại hoặc bạn không có quyền truy cập.</p>
+      <button type="button" onClick={() => void mutate()} className="mt-3 min-h-11 rounded-lg border border-red-300 px-4">Thử lại</button>
+    </div>;
+  }
   if (loading || !request) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -882,6 +889,7 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
+          <BookingSummary bookingType={request.bookingType} horseCount={Number(request.requestedHorseCount ?? request.horses?.length ?? 1)} stallUnitPrice={request.stallUnitPrice} />
           <InsuranceSummary horses={request.insuranceHorses ?? []}
             transportCost={request.transportCost ?? null} insuranceFee={Number(request.insuranceFee ?? 0)}
             totalCost={Number(request.totalCost ?? 0)} />
@@ -970,7 +978,7 @@ export default function RequestDetailPage() {
           >
             <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
               <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                Horses ({request.horses?.length || request.requestedHorseCount || 1})
+                Hồ sơ ngựa ({request.horses?.length || 1} hồ sơ / {request.requestedHorseCount || 1} ngựa)
               </h4>
             </div>
 
@@ -1944,7 +1952,7 @@ export default function RequestDetailPage() {
       <Modal isOpen={isResubmitOpen} onClose={() => setIsResubmitOpen(false)} title="Chỉnh sửa & gửi lại yêu cầu"
         subtitle={`Mã yêu cầu: ${request.requestCode}`} maxWidth="700px">
         <InsuranceAmendmentForm key={`${request.id}-${request.updatedAt}`} orderId={Number(request.id)}
-          horses={request.insuranceHorses ?? []} specialRequirements={request.specialRequirements}
+          horses={request.insuranceHorses ?? []} specialRequirements={request.specialRequirements} bookingType={request.bookingType}
           onCancel={() => setIsResubmitOpen(false)} onSaved={() => {
             setIsResubmitOpen(false); void mutate(); toast.success('Đã gửi lại yêu cầu để Manager xét duyệt.');
           }} />

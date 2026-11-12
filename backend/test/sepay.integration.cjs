@@ -188,7 +188,7 @@ test('SePay: real HTTP, MySQL, ownership, QR amounts, HMAC, durable settlement a
       for (const totalCost of [1.5, -1, 10000000000000]) {
         await expected('manager', `/orders/${id}/approve`, 'PATCH', { totalCost }, 400);
       }
-      await expected('manager', `/orders/${id}/approve`, 'PATCH', { totalCost: 0 }, 200);
+      await expected('manager', `/orders/${id}/approve`, 'PATCH', { totalCost: 0 }, 400);
       await expected('owner', endpoint(id), 'POST', {}, 400);
       const payable = await fixtureOrder('requested', 0);
       const approved = await expected('manager', `/orders/${payable}/approve`, 'PATCH', { totalCost: 52527200 }, 200);

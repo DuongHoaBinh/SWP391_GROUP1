@@ -11,6 +11,8 @@
   - **Cấp chiến lược (Strategic Framework):** Logistics Manager thiết lập định hướng tổng thể, chọn loại phương tiện, hãng bay, tuyến chính và chỉ định Coordinator.
   - **Cấp thực thi (Operational Details):** Fleet & Route Coordinator chọn xe cụ thể, dựng chi tiết các chặng (legs), điểm dừng, giờ giấc và thông tin booking chuyến bay.
 - **Tích hợp bên ngoài:** Không kết nối API đặt vé hãng bay thật; Coordinator đặt chỗ bên ngoài và nhập mã booking, số stall vào hệ thống.
+- **Hình thức đặt chỗ:** `order.bookingType` từ Flow 1 phân biệt `shared_stall` (chỉ mua số ô bằng số ngựa trên hành lang chung) và `dedicated_charter` (dịch vụ riêng cho đoàn, ưu tiên tuyến thẳng/giờ yêu cầu). Đây là lựa chọn dịch vụ độc lập với đường bộ/hàng không. Coordinator sắp xếp booking thực tế phù hợp lựa chọn; tính năng lựa chọn/báo giá không tự gom nhiều đơn vào một chuyến hay tự đặt vé hãng bay.
+- Khi phát hành invoice sau xác nhận, lưu `bookingType`, `stallUnitPrice` (nếu có), số ngựa, cước và bảo hiểm trong snapshot. Thanh toán vẫn đợi Flow 3 xác nhận, điều kiện xuất phát vẫn yêu cầu đủ tiền và đủ hồ sơ.
 
 ---
 
@@ -126,3 +128,17 @@ Ready to depart ──► [Chuyển giao sang Flow 4: Theo dõi hành trình]
 - Giữ giá trị trạng thái thanh toán đang dùng là `succeeded` (ý nghĩa đã trả tiền), không thêm giá trị `paid` song song.
 - Migration `016_route_payment_gate.sql` không sửa lịch sử thanh toán. Với kế hoạch cũ chưa có hóa đơn, Driver/Escort hoặc Admin xác nhận lại phân công để phát hành hóa đơn; không backfill bằng cách giả định kế hoạch lịch sử đã hợp lệ.
 - Cấu hình khung, dựng lại chi tiết và duyệt lại không được sửa ngầm kế hoạch đã xác nhận/phát hành hóa đơn. Điều chỉnh điểm dừng trong chuyến đi vẫn theo API lịch trình và lý do hiện có; hóa đơn giữ snapshot lúc phát hành.
+
+## 7. Shared/Dedicated đường bộ — phạm vi được duyệt ngày 12/11/2026
+
+- Coordinator tạo chuyến đường bộ từ chặng mới khi lưu kế hoạch, hoặc chọn `roadTripId` để ghép thủ công các đơn phù hợp. Coordinator chịu trách nhiệm đánh giá tuyến và lịch; không đặt ngưỡng lệch giờ/khoảng cách tự động.
+- Một chuyến lưu xe, loại booking, điểm đi/đến và khoảng giờ bất biến. Chọn chuyến có sẵn lấy thông tin chặng từ chuyến, không tin xe/giờ/slot do client gửi kèm. Một đơn có một phân bổ trên mỗi chuyến; mỗi ngựa chiếm một Stall.
+- Shared cho nhiều Customer cùng chuyến; Dedicated chỉ cho một đơn sử dụng xe trong khoảng giờ đã đặt. Các chuyến khác trên cùng xe không được trùng khoảng giờ. Hai khoảng có giờ kết thúc/bắt đầu bằng nhau không giao nhau.
+- Lưu kế hoạch khóa shipment/route và khóa các xe theo ID tăng dần trong cùng transaction, rồi kiểm tra tổng slot, ghi các chặng và liên kết xe. Không xác nhận phần phân bổ khi bất kỳ chặng nào thất bại. Xác nhận nhận chuyến kiểm tra lại capacity và reservation, gồm kế hoạch cũ chưa có roadTripId.
+- Phân bổ cũ chưa có giờ/chuyến phải được điều phối lại trước khi dùng xe cho đơn khác. Các API phân công xe không có lịch không được thay thế phân bổ đã nằm trong kế hoạch; dùng màn hình lập tuyến để sửa/ghép.
+- Khoảng đặt chỗ đã ghi vẫn được đối chiếu khi kiểm tra trùng thời gian; không tự xóa lịch sử đặt chỗ khi hoàn tất đơn. Hóa đơn giữ snapshot riêng, bao gồm booking và chặng đường bộ.
+- Danh sách chuyến ghép chỉ dành cho Coordinator/Manager/Admin, không trả danh sách khách/ngựa của các đơn khác. Customer chỉ đọc route/plan của đơn thuộc mình.
+- MoMo sandbox không cập nhật trạng thái vận hành hoặc trạng thái đã thanh toán chính thức của đơn. Mọi mutation sandbox kiểm tra cờ bật và môi trường; số tiền lấy nguyên giá trị VND đã chốt. Readiness vẫn dựa vào SePay và hồ sơ pháp lý.
+- Chưa được duyệt mô hình vận hành ghép/thuê riêng hàng không. Giữ nguyên các trường hãng bay, flight booking reference và stalls hiện có; không thêm quy tắc thuê cả chuyến bay/khoang riêng.
+- Migration 019 thêm road_trip và route_leg.road_trip_id; không backfill hoặc sửa giá/booking lịch sử. Chạy sau các migration hiện có trên môi trường được phép.
+- Migration 020 lưu riêng shipment.transport_mode (road/air), không thay Domestic/International. Chọn mode tại bước duyệt giá và giữ trong response/snapshot; dữ liệu cũ không bị suy đoán hoặc sửa tự động.

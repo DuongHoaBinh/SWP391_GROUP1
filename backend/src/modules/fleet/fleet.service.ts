@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -22,6 +23,7 @@ import { AssignVehiclesDto } from './dto/assign-vehicles.dto';
 import { AssignStaffDto } from './dto/assign-staff.dto';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { ShipmentStatus } from '../orders/orders.types';
+import { UserRole } from '../auth/auth.types';
 
 @Injectable()
 export class FleetService {
@@ -79,7 +81,7 @@ export class FleetService {
     });
   }
 
-  async getShipmentAssignments(shipmentId: number): Promise<{
+  async getShipmentAssignments(shipmentId: number, user?: AuthenticatedUser): Promise<{
     vehicles: ShipmentVehicleAssignment[];
     staff: ShipmentStaffAssignment[];
   }> {
@@ -87,6 +89,8 @@ export class FleetService {
     if (!order) {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
+
+    if (user?.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) throw new ForbiddenException('Bạn chỉ được xem phân công đơn của mình');
 
     const [vehicles, staff] = await Promise.all([
       this.fleetStore.findAssignedVehicles(shipmentId),
@@ -119,6 +123,11 @@ export class FleetService {
     const vehicles = await this.fleetStore.findVehiclesByIds(dto.vehicleIds);
     if (vehicles.length !== dto.vehicleIds.length) {
       throw new BadRequestException('Một hoặc nhiều phương tiện được chọn không tồn tại trong hệ thống');
+    }
+    const ownVehicleIds = vehicles.some(v => v.status === VehicleStatus.IN_USE)
+      ? new Set((await this.fleetStore.findAssignedVehicles(shipmentId)).map(a => a.vehicleId)) : new Set<number>();
+    if (vehicles.some(v => v.status === VehicleStatus.MAINTENANCE || (v.status === VehicleStatus.IN_USE && !ownVehicleIds.has(v.id)))) {
+      throw new BadRequestException('Xe đang được sử dụng hoặc bảo trì. Ghép chuyến phải chọn chuyến đường bộ trong kế hoạch để kiểm tra chỗ');
     }
 
     // Key rule Flow 3: A vehicle/capacity assignment cannot exceed availability or horse capacity.
