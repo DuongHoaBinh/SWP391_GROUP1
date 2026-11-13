@@ -16,6 +16,7 @@ import {
   Loader2,
   Truck,
   Navigation,
+  Clock,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
@@ -607,6 +608,20 @@ function CreateTransportRequestForm() {
                       {errors.departureDate.message}
                     </span>
                   )}
+                  {formValues.departureDate && (() => {
+                    const diffDays = Math.ceil((new Date(formValues.departureDate).getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
+                    if (diffDays >= 0 && diffDays < 7) {
+                      return (
+                        <span style={{ fontSize: '12px', color: '#92400e', backgroundColor: '#fef3c7', padding: '6px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', border: '1px solid #fde68a' }}>
+                          <Clock size={13} style={{ flexShrink: 0, color: '#b45309' }} />
+                          <span>
+                            Lịch đi cách {diffDays} ngày. Nếu chọn <strong>Ghép chuồng</strong>, khuyến nghị đặt trước ≥ 7 ngày để kịp gom đơn và xin giấy kiểm dịch thú y.
+                          </span>
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
 
                 <div>

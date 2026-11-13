@@ -677,4 +677,61 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       };
     });
   }
+
+  async isHorseOwnedByUser(horseId: number, userId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<any[]>(
+      'SELECT 1 FROM horse WHERE horse_id = ? AND owner_id = ? LIMIT 1',
+      [horseId, userId],
+    );
+    return rows.length > 0;
+  }
+
+  async findHorseHealthLogsByHorseId(horseId: number): Promise<any[]> {
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT hhl.*, u.full_name as recorded_by_name, r.role_name as recorded_by_role,
+              s.origin_location, s.destination_location
+       FROM horse_health_log hhl
+       JOIN \`user\` u ON hhl.recorded_by = u.user_id
+       JOIN \`role\` r ON u.role_id = r.role_id
+       LEFT JOIN shipment s ON s.shipment_id = hhl.shipment_id
+       WHERE hhl.horse_id = ?
+       ORDER BY hhl.recorded_at DESC`,
+      [horseId],
+    );
+
+    const conditionMapVi: Record<string, string> = {
+      stable: 'Khỏe mạnh / Ổn định',
+      not_eating: 'Bỏ ăn',
+      stressed: 'Căng thẳng',
+      climate_change: 'Khí hậu thay đổi',
+      other: 'Khác',
+    };
+
+    return rows.map((r) => {
+      let attachments: string[] = [];
+      try {
+        if (r.attachments_json) attachments = JSON.parse(r.attachments_json);
+      } catch {}
+
+      return {
+        id: r.log_id,
+        shipmentId: r.shipment_id,
+        horseId: r.horse_id,
+        horseName: r.horse_name,
+        legName: r.leg_name || 'Chặng vận chuyển thực địa',
+        recordedBy: r.recorded_by,
+        recordedByName: r.recorded_by_name,
+        recordedByRole: r.recorded_by_role,
+        conditionStatus: r.condition_status,
+        conditionStatusVi: conditionMapVi[r.condition_status] || r.condition_status,
+        temperatureC: r.temperature_c !== null ? Number(r.temperature_c) : null,
+        heartRateBpm: r.heart_rate_bpm !== null ? Number(r.heart_rate_bpm) : null,
+        notes: r.notes,
+        attachments,
+        recordedAt: new Date(r.recorded_at).toISOString(),
+        originLocation: r.origin_location,
+        destinationLocation: r.destination_location,
+      };
+    });
+  }
 }

@@ -1063,4 +1063,17 @@ export class TrackingService {
       }
     }
   }
+
+  async getHealthLogsByHorseId(
+    user: AuthenticatedUser,
+    horseId: number,
+  ): Promise<any[]> {
+    if (String(user.role).toUpperCase() === 'CUSTOMER') {
+      const isOwner = await this.trackingStore.isHorseOwnedByUser(horseId, Number(user.id));
+      if (!isOwner) {
+        throw new ForbiddenException('Bạn chỉ có thể xem lịch sử y tế của ngựa thuộc tài khoản của mình');
+      }
+    }
+    return this.trackingStore.findHorseHealthLogsByHorseId(horseId);
+  }
 }
