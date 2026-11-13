@@ -54,4 +54,11 @@ Requested corrections merge omitted policy fields and quantities with the existi
 5. For compatibility, existing `transportCost`/`totalCost` approval fields still mean total freight. Never reinterpret a legacy total as a unit rate or multiply an old quote again. These historical/legacy quotes have `stallUnitPrice = null`; no invented unit price appears in the saved summary.
 6. Requested corrections can change booking type through the Customer detail modal. Save old/new choices and actor in `shipment_booking_revision`, preserve the horse insurance unless explicitly changed, clear freight/unit price, and return to Manager review. Changes after approval are rejected.
 
+7. **Quy chuẩn thời gian ghép chuồng (Consolidation SLA & Lead Time):**
+   - **Mốc 1 (Đặt yêu cầu):** Khách hàng tạo đơn đặt chỗ ghép chuồng trước ngày khởi hành dự kiến tối thiểu **7 ngày** ($\ge D - 7$) để hệ thống có thời gian gom đơn cùng hành lang.
+   - **Mốc 2 (Hạn nộp hồ sơ thú y):** Khách hàng hoàn tất nộp giấy tờ tiêm phòng và xét nghiệm máu trước ngày khởi hành tối thiểu **5 ngày** ($\ge D - 5$). Chuyên viên Logistics (Specialist) thẩm định và làm thủ tục xin Giấy kiểm dịch động vật liên tỉnh với Chi cục Thú y (thời gian xử lý 24–48h). Nếu nộp trễ hạn, đơn không đủ điều kiện ghép vào chuyến.
+   - **Mốc 3 (Chốt sổ ghép tuyến - Cut-off):** Đúng **72 giờ trước giờ chạy** ($D - 3$), hệ thống đóng nhận đơn mới cho chuyến. Điều phối viên (Coordinator) chốt lộ trình multi-stop (thứ tự đón/trả, vị trí ô chuồng trên xe), gán tài xế, nhân viên y tế/chăm sóc và hệ thống phát hành hóa đơn (Invoice).
+   - **Mốc 4 (Thanh toán giữ chỗ):** Khách hàng thanh toán qua cổng SePay trong vòng 24 giờ sau khi hóa đơn được phát hành để khóa ô chuồng chắc chắn.
+   - **Chính sách không đủ số lượng ghép:** Nếu đến mốc Cut-off ($D - 3$) chưa đủ người ghép trên cùng tuyến, hệ thống thông báo cho khách hàng với 2 phương án: (1) **Lùi ngày khởi hành** sang chuyến ghép tiếp theo (hoàn toàn miễn phí); hoặc (2) **Nâng cấp Bao trọn chuyến (Charter)** bù thêm chi phí chênh lệch để xe xuất phát riêng đúng ngày.
+
 Role notifications use existing active accounts with the requested role. If no account matches, no recipient is invented; approval still succeeds. This prevents false approval errors and notifications sent to unrelated users on databases without all staff accounts.

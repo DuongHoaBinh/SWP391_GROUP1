@@ -29,6 +29,27 @@ import { apiClient } from '@/lib/api-client';
 import { getFullPhotoUrl } from '@/lib/customer-store';
 import { formatHorseColor, formatHorseMedicalStatus } from '@/lib/horse-constants';
 
+const formatDocTypeName = (type: string) => {
+  const map: Record<string, string> = {
+    horse_passport: 'Hộ chiếu ngựa (FEI / Horse Passport)',
+    health_certificate: 'Chứng nhận kiểm dịch thú y (Health Certificate)',
+    vaccination_certificate: 'Chứng nhận tiêm chủng (Vaccination Certificate)',
+    import_permit: 'Giấy phép nhập khẩu (Import Permit)',
+    export_permit: 'Giấy phép xuất khẩu (Export Permit)',
+    customs_declaration: 'Tờ khai hải quan (Customs Declaration)',
+    cites_permit: 'Giấy phép CITES (CITES Permit)',
+  };
+  return map[type] || type;
+};
+
+const formatDocStatus = (status: string) => {
+  if (status === 'approved') return 'Approved';
+  if (status === 'submitted' || status === 'draft') return 'Under Review';
+  if (status === 'rejected') return 'Rejected';
+  if (status === 'expired') return 'Expired';
+  return status;
+};
+
 export default function HorseDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -38,6 +59,73 @@ export default function HorseDetailPage() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [apiHorse, setApiHorse] = useState<any>(null);
+  const [horseDocs, setHorseDocs] = useState<any[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
+  const [medicalLogs, setMedicalLogs] = useState<any[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  const fetchHorseDocs = () => {
+    if (!horseId) return;
+    setIsLoadingDocs(true);
+    apiClient<any[]>(`/documents/horse/${horseId}`)
+      .then((data) => {
+        if (Array.isArray(data)) {
+          const mapped = data.map((d) => {
+            const docTypeDisplay = formatDocTypeName(d.docType);
+            const statusDisplay = formatDocStatus(d.status);
+            return {
+              id: d.id,
+              title: d.regulationTitle || docTypeDisplay,
+              type: docTypeDisplay,
+              docType: d.docType,
+              docNumber: d.docNumber || '—',
+              uploadedDate: d.createdAt ? new Date(d.createdAt).toISOString().split('T')[0] : '—',
+              expiryDate: d.expiryDate ? new Date(d.expiryDate).toISOString().split('T')[0] : null,
+              status: statusDisplay,
+              rawStatus: d.status,
+              fileUrl: d.fileUrl,
+              reviewerNotes: d.reviewerNotes,
+              regulationCountry: d.regulationCountry,
+            };
+          });
+          setHorseDocs(mapped);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingDocs(false));
+  };
+
+  const fetchHealthLogs = () => {
+    if (!horseId) return;
+    setIsLoadingLogs(true);
+    apiClient<any[]>(`/tracking/horses/${horseId}/health-logs`)
+      .then((data) => {
+        if (Array.isArray(data)) {
+          const mapped = data.map((log) => ({
+            id: log.id,
+            date: new Date(log.recordedAt).toLocaleString('vi-VN', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+            title: log.legName || 'Kiểm tra sức khỏe trạm vận chuyển',
+            examiner: `${log.recordedByName || 'Nhân viên thú y / áp tải'}${log.recordedByRole ? ` (${log.recordedByRole})` : ''} • Thân nhiệt: ${log.temperatureC !== null && log.temperatureC !== undefined ? `${log.temperatureC}°C` : 'Bình thường'} • Nhịp tim: ${log.heartRateBpm ? `${log.heartRateBpm} bpm` : 'Bình thường'}${log.notes ? ` • Ghi chú: ${log.notes}` : ''}`,
+            status: log.conditionStatusVi || 'Khỏe mạnh / Ổn định',
+            rawStatus: log.conditionStatus,
+          }));
+          setMedicalLogs(mapped);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingLogs(false));
+  };
+
+  useEffect(() => {
+    fetchHorseDocs();
+    fetchHealthLogs();
+  }, [horseId]);
 
   useEffect(() => {
     if (horseId) {
@@ -115,7 +203,9 @@ export default function HorseDetailPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
 
-  const hasMissingDoc = horse.documents?.some((d: any) => d.status === 'Missing');
+  const displayDocs = horseDocs.length > 0 ? horseDocs : (horse.documents || []);
+  const displayMedicalHistory = medicalLogs.length > 0 ? medicalLogs : (horse.medicalHistory || []);
+  const hasMissingDoc = displayDocs.some((d: any) => d.status === 'Missing');
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -137,6 +227,7 @@ export default function HorseDetailPage() {
     uploadDocumentForHorse(horse.id, uploadedDoc.title);
     uploadDocumentForRequest('TR-2026-001', uploadedDoc.title);
     setIsUploadOpen(false);
+    fetchHorseDocs();
   };
 
   return (
@@ -760,88 +851,102 @@ export default function HorseDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {horse.documents?.map((doc: any) => (
-                <tr
-                  key={doc.id}
-                  style={{
-                    borderBottom: '1px solid var(--border-light)',
-                    backgroundColor: doc.status === 'Missing' ? '#fff5f5' : 'transparent',
-                  }}
-                >
-                  <td style={{ padding: '16px 20px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <FileText size={18} color={doc.status === 'Missing' ? '#dc2626' : '#64748b'} />
-                      <span style={{ fontWeight: 600, color: doc.status === 'Missing' ? '#dc2626' : 'var(--text-heading)' }}>
-                        {doc.title}
-                      </span>
-                    </div>
+              {isLoadingDocs ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: '32px 20px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                    Đang tải danh sách tài liệu kiểm dịch...
                   </td>
-                  <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>{doc.type}</td>
-                  <td style={{ padding: '16px 20px', color: doc.uploadedDate ? 'var(--text-body)' : '#94a3b8' }}>
-                    {doc.uploadedDate || '—'}
+                </tr>
+              ) : displayDocs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: '32px 20px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                    Chưa có tài liệu kiểm dịch nào được tải lên cho con ngựa này.
                   </td>
-                  <td style={{ padding: '16px 20px', color: doc.expiryDate ? 'var(--text-body)' : '#94a3b8' }}>
-                    {doc.expiryDate || '—'}
-                  </td>
-                  <td style={{ padding: '16px 20px' }}>
-                    <span
-                      style={{
-                        padding: '3px 8px',
-                        borderRadius: '6px',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        backgroundColor:
-                          doc.status === 'Approved'
-                            ? '#dcfce7'
-                            : doc.status === 'Under Review'
-                            ? '#eff6ff'
-                            : '#fee2e2',
-                        color:
-                          doc.status === 'Approved'
-                            ? '#15803d'
-                            : doc.status === 'Under Review'
-                            ? '#1d4ed8'
-                            : '#b91c1c',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
-                    >
-                      {doc.status === 'Approved' && <Check size={12} strokeWidth={3} />}
-                      {doc.status === 'Under Review' && <Clock size={12} />}
-                      {doc.status}
-                    </span>
-                  </td>
-                  <td style={{ padding: '16px 20px', textAlign: 'right' }}>
-                    {doc.status === 'Missing' ? (
-                      <button
-                        onClick={() => setIsUploadOpen(true)}
+                </tr>
+              ) : (
+                displayDocs.map((doc: any) => (
+                  <tr
+                    key={doc.id}
+                    style={{
+                      borderBottom: '1px solid var(--border-light)',
+                      backgroundColor: doc.status === 'Missing' ? '#fff5f5' : 'transparent',
+                    }}
+                  >
+                    <td style={{ padding: '16px 20px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <FileText size={18} color={doc.status === 'Missing' ? '#dc2626' : '#64748b'} />
+                        <span style={{ fontWeight: 600, color: doc.status === 'Missing' ? '#dc2626' : 'var(--text-heading)' }}>
+                          {doc.title}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>{doc.type}</td>
+                    <td style={{ padding: '16px 20px', color: doc.uploadedDate ? 'var(--text-body)' : '#94a3b8' }}>
+                      {doc.uploadedDate || '—'}
+                    </td>
+                    <td style={{ padding: '16px 20px', color: doc.expiryDate ? 'var(--text-body)' : '#94a3b8' }}>
+                      {doc.expiryDate || '—'}
+                    </td>
+                    <td style={{ padding: '16px 20px' }}>
+                      <span
                         style={{
-                          color: '#dc2626',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
                           fontWeight: 700,
-                          fontSize: '13px',
+                          backgroundColor:
+                            doc.status === 'Approved'
+                              ? '#dcfce7'
+                              : doc.status === 'Under Review'
+                              ? '#eff6ff'
+                              : '#fee2e2',
+                          color:
+                            doc.status === 'Approved'
+                              ? '#15803d'
+                              : doc.status === 'Under Review'
+                              ? '#1d4ed8'
+                              : '#b91c1c',
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '4px',
                         }}
                       >
-                        <Upload size={13} /> Upload
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setPreviewDoc(doc)}
-                        style={{
-                          color: 'var(--primary)',
-                          fontWeight: 600,
-                          fontSize: '13px',
-                        }}
-                      >
-                        View
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                        {doc.status === 'Approved' && <Check size={12} strokeWidth={3} />}
+                        {doc.status === 'Under Review' && <Clock size={12} />}
+                        {doc.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: '16px 20px', textAlign: 'right' }}>
+                      {doc.status === 'Missing' ? (
+                        <button
+                          onClick={() => setIsUploadOpen(true)}
+                          style={{
+                            color: '#dc2626',
+                            fontWeight: 700,
+                            fontSize: '13px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          <Upload size={13} /> Upload
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setPreviewDoc(doc)}
+                          style={{
+                            color: 'var(--primary)',
+                            fontWeight: 600,
+                            fontSize: '13px',
+                          }}
+                        >
+                          View
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -862,58 +967,66 @@ export default function HorseDetailPage() {
           Medical History
         </h4>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', position: 'relative', paddingLeft: '24px' }}>
-          {/* Vertical Track Line */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '8px',
-              bottom: '8px',
-              left: '7px',
-              width: '2px',
-              backgroundColor: '#e2e8f0',
-            }}
-          />
+        {isLoadingLogs ? (
+          <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Đang tải lịch sử kiểm tra sức khỏe...</p>
+        ) : displayMedicalHistory.length === 0 ? (
+          <p style={{ fontSize: '13px', color: '#64748b', margin: 0, fontStyle: 'italic' }}>
+            Chưa có nhật ký kiểm tra sức khỏe nào được ghi nhận cho con ngựa này. Nhật ký sẽ tự động xuất hiện khi ngựa di chuyển qua các trạm trong chuyến đi (Flow 4).
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', position: 'relative', paddingLeft: '24px' }}>
+            {/* Vertical Track Line */}
+            <div
+              style={{
+                position: 'absolute',
+                top: '8px',
+                bottom: '8px',
+                left: '7px',
+                width: '2px',
+                backgroundColor: '#e2e8f0',
+              }}
+            />
 
-          {horse.medicalHistory?.map((item: any, idx: number) => (
-            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '-21px',
-                  width: '10px',
-                  height: '10px',
-                  borderRadius: '50%',
-                  backgroundColor: idx === 0 ? '#16a34a' : '#94a3b8',
-                  boxShadow: '0 0 0 3px #ffffff',
-                }}
-              />
-              <div>
-                <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>{item.date}</span>
-                <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '2px' }}>
-                  {item.title}
+            {displayMedicalHistory.map((item: any, idx: number) => (
+              <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '-21px',
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    backgroundColor: idx === 0 ? '#16a34a' : '#94a3b8',
+                    boxShadow: '0 0 0 3px #ffffff',
+                  }}
+                />
+                <div>
+                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>{item.date}</span>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '2px' }}>
+                    {item.title}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                    <UserCheck size={13} style={{ display: 'inline', marginRight: '4px' }} />
+                    {item.examiner}
+                  </div>
                 </div>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                  <UserCheck size={13} style={{ display: 'inline', marginRight: '4px' }} />
-                  {item.examiner}
-                </div>
+
+                <span
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    backgroundColor: idx === 0 ? '#dcfce7' : '#f1f5f9',
+                    color: idx === 0 ? '#15803d' : '#475569',
+                  }}
+                >
+                  {item.status}
+                </span>
               </div>
-
-              <span
-                style={{
-                  padding: '3px 8px',
-                  borderRadius: '6px',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  backgroundColor: idx === 0 ? '#dcfce7' : '#f1f5f9',
-                  color: idx === 0 ? '#15803d' : '#475569',
-                }}
-              >
-                {item.status}
-              </span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* DOCUMENT PREVIEW MODAL */}
@@ -1007,35 +1120,60 @@ export default function HorseDetailPage() {
             {/* Large Preview Area */}
             <div
               style={{
-                padding: '40px',
+                padding: '24px',
                 backgroundColor: '#f1f5f9',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
                 minHeight: '360px',
+                overflowY: 'auto',
               }}
             >
-              <div
-                style={{
-                  width: '260px',
-                  height: '320px',
-                  backgroundColor: '#ffffff',
-                  borderRadius: '10px',
-                  border: '1px solid #cbd5e1',
-                  boxShadow: 'var(--shadow-md)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '12px',
-                  color: '#94a3b8',
-                }}
-              >
-                <FileText size={48} color="#2563eb" />
-                <span style={{ fontWeight: 600, color: 'var(--text-heading)' }}>PDF Document Preview</span>
-                <span style={{ fontSize: '11px', color: '#64748b' }}>Official FEI Government Seal Verified</span>
-              </div>
+              {previewDoc.fileUrl && (previewDoc.fileUrl.endsWith('.png') || previewDoc.fileUrl.endsWith('.jpg') || previewDoc.fileUrl.endsWith('.jpeg')) ? (
+                <div style={{ textAlign: 'center' }}>
+                  <img
+                    src={getFullPhotoUrl(previewDoc.fileUrl)}
+                    alt={previewDoc.title}
+                    style={{ maxWidth: '100%', maxHeight: '420px', objectFit: 'contain', borderRadius: '10px', boxShadow: 'var(--shadow-md)' }}
+                  />
+                  <p style={{ marginTop: '12px', fontSize: '12px', color: '#64748b' }}>
+                    {previewDoc.title} • Hạn dùng: {previewDoc.expiryDate || 'Vô thời hạn'}
+                  </p>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    width: '280px',
+                    padding: '24px',
+                    backgroundColor: '#ffffff',
+                    borderRadius: '12px',
+                    border: '1px solid #cbd5e1',
+                    boxShadow: 'var(--shadow-md)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '12px',
+                    color: '#94a3b8',
+                    textAlign: 'center',
+                  }}
+                >
+                  <FileText size={48} color="#2563eb" />
+                  <span style={{ fontWeight: 600, color: 'var(--text-heading)' }}>{previewDoc.title}</span>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Hạn dùng: {previewDoc.expiryDate || '—'}</span>
+                  {previewDoc.fileUrl && (
+                    <a
+                      href={getFullPhotoUrl(previewDoc.fileUrl)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'underline', marginTop: '4px' }}
+                    >
+                      Mở tài liệu gốc ↗
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Modal Actions */}
@@ -1057,27 +1195,33 @@ export default function HorseDetailPage() {
                   backgroundColor: '#ffffff',
                   fontSize: '13px',
                   fontWeight: 600,
+                  cursor: 'pointer',
                 }}
               >
-                Close
+                Đóng
               </button>
-              <button
-                onClick={() => alert(`Downloading ${previewDoc.title}`)}
-                style={{
-                  padding: '9px 20px',
-                  borderRadius: '8px',
-                  backgroundColor: 'var(--primary)',
-                  color: '#ffffff',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  border: 'none',
-                }}
-              >
-                <Download size={14} /> Download
-              </button>
+              {previewDoc.fileUrl ? (
+                <a
+                  href={getFullPhotoUrl(previewDoc.fileUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download
+                  style={{
+                    padding: '9px 20px',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    textDecoration: 'none',
+                  }}
+                >
+                  <Download size={14} /> Tải xuống tệp
+                </a>
+              ) : null}
             </div>
           </div>
         </div>

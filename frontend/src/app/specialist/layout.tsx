@@ -250,14 +250,6 @@ export default function SpecialistLayout({
 
         {/* Bottom Area */}
         <div className="p-4 border-t border-white/5 flex flex-col gap-2.5">
-          <Link
-            href="/specialist/support"
-            className="flex items-center gap-3 px-3 py-2 text-[13px] text-slate-400 hover:text-white transition-colors rounded-lg"
-          >
-            <HelpCircle size={17} className="text-slate-500" />
-            <span>Help & Support</span>
-          </Link>
-
           <div className="bg-white/5 rounded-xl px-3 py-2.5 flex items-center justify-between border border-white/10">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-[34px] h-[34px] rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white shrink-0">

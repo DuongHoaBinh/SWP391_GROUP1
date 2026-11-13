@@ -977,11 +977,11 @@ export default function ManagerRequestsPage() {
                 </div>
 
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b", marginTop: "6px" }}>
-                  <span>Tỷ lệ quy đổi khi lưu báo giá (1 USD ≈ 25,400 VND):</span>
+                  <span>Tỷ lệ quy đổi khi lưu báo giá (1 USD ≈ 25.400 VND):</span>
                   <strong style={{ color: "#0f172a" }}>
                     {costCurrency === "USD"
                       ? `≈ ${(Math.round((parseFloat(totalCostInput) || 0) * 25400)).toLocaleString("vi-VN")} VND`
-                      : `≈ $${(Math.round((parseFloat(totalCostInput) || 0) / 25400)).toLocaleString("en-US")} USD`}
+                      : `≈ $${(Math.round(((parseFloat(totalCostInput) || 0) / 25400) * 100) / 100).toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`}
                   </strong>
                 </div>
                 <p style={{ fontSize: "11px", color: "#94a3b8", margin: "4px 0 0 0" }}>
