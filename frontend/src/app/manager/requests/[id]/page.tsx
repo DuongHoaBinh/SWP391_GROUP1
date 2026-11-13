@@ -61,7 +61,7 @@ function formatCurrencyVND(amount: number) {
 function formatUSD(amount: number) {
   if (!amount || amount === 0) return '$0 USD';
   const usd = Math.round((amount / 25400) * 100) / 100;
-  return `$${usd.toLocaleString('en-US')} USD`;
+  return `$${usd.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
 }
 
 function formatDate(iso: string | null) {
