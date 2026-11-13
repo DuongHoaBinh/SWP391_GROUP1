@@ -11,7 +11,10 @@
   - **Cấp chiến lược (Strategic Framework):** Logistics Manager thiết lập định hướng tổng thể, chọn loại phương tiện, hãng bay, tuyến chính và chỉ định Coordinator.
   - **Cấp thực thi (Operational Details):** Fleet & Route Coordinator chọn xe cụ thể, dựng chi tiết các chặng (legs), điểm dừng, giờ giấc và thông tin booking chuyến bay.
 - **Tích hợp bên ngoài:** Không kết nối API đặt vé hãng bay thật; Coordinator đặt chỗ bên ngoài và nhập mã booking, số stall vào hệ thống.
-- **Hình thức đặt chỗ:** `order.bookingType` từ Flow 1 phân biệt `shared_stall` (chỉ mua số ô bằng số ngựa trên hành lang chung) và `dedicated_charter` (dịch vụ riêng cho đoàn, ưu tiên tuyến thẳng/giờ yêu cầu). Đây là lựa chọn dịch vụ độc lập với đường bộ/hàng không. Coordinator sắp xếp booking thực tế phù hợp lựa chọn; tính năng lựa chọn/báo giá không tự gom nhiều đơn vào một chuyến hay tự đặt vé hãng bay.
+- **Hình thức đặt chỗ & Gom chuyến (Consolidation):** `order.bookingType` phân biệt `shared_stall` (ghép ô chuồng trên hành lang chung) và `dedicated_charter` (xe riêng cho đoàn, ưu tiên tuyến thẳng/giờ yêu cầu).
+  - *Đường bộ ghép chuồng:* Tuyến Multi-stop (nhiều điểm đón, nhiều điểm trả dọc trục Bắc – Nam). Coordinator sắp xếp thứ tự ô chuồng trên xe logic (ngựa xuống trước ở khoang ngoài gần cửa dỡ, ngựa đi xa nhất ở trong cùng).
+  - *Hàng không ghép chuồng:* Mô hình Hub-to-Hub cố định giữa các sân bay cargo lớn (Tân Sơn Nhất SGN, Nội Bài HAN, Changi, v.v.) kết hợp xe tải trung chuyển chặng đầu và chặng cuối. Thùng Airstall/ULD ghép tối đa 3 ngựa.
+  - *Khung thời hạn (SLA):* Đặt chỗ $\ge 7$ ngày; nộp hồ sơ thú y $\ge 5$ ngày; Coordinator chốt sổ lộ trình và vị trí chuồng trước giờ chạy 72 giờ (3 ngày - Cut-off time).
 - Khi phát hành invoice sau xác nhận, lưu `bookingType`, `stallUnitPrice` (nếu có), số ngựa, cước và bảo hiểm trong snapshot. Thanh toán vẫn đợi Flow 3 xác nhận, điều kiện xuất phát vẫn yêu cầu đủ tiền và đủ hồ sơ.
 
 ---

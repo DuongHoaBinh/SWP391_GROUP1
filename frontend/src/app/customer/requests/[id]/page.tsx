@@ -46,7 +46,23 @@ import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { InsuranceAmendmentForm } from '@/features/orders/components/InsuranceAmendmentForm';
 
 const fetcher = async (url: string) => {
-  const data = await apiClient<any>(url);
+  let targetUrl = url;
+  const segments = url.split('/');
+  const rawId = segments[segments.length - 1];
+  if (rawId && isNaN(Number(rawId))) {
+    try {
+      const myOrders = await apiClient<any[]>('/orders/my-orders');
+      const matched = myOrders.find((o) =>
+        String(o.requestCode || '').toLowerCase() === rawId.toLowerCase() ||
+        `req-${o.id}`.toLowerCase() === rawId.toLowerCase() ||
+        String(o.id) === rawId
+      );
+      if (matched) {
+        targetUrl = `/orders/${matched.id}`;
+      }
+    } catch {}
+  }
+  const data = await apiClient<any>(targetUrl);
 
   // Normalize horses array to support both backend schema and frontend template schema
   const rawHorses = Array.isArray(data.horses) && data.horses.length > 0
@@ -882,14 +898,20 @@ export default function RequestDetailPage() {
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Chi phí vận chuyển (Total Cost)</span>
                 <p style={{ fontSize: '14px', fontWeight: 700, color: '#16a34a', margin: '2px 0 0 0' }}>
                   {Number(request.totalCost) > 0
-                    ? `${Number(request.totalCost).toLocaleString('vi-VN')} ₫ (~$${(Math.round((Number(request.totalCost) / 25400) * 100) / 100).toLocaleString('en-US')} USD)`
+                    ? `${Number(request.totalCost).toLocaleString('vi-VN')} ₫ (~$${(Math.round((Number(request.totalCost) / 25400) * 100) / 100).toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD)`
                     : 'Đang chờ báo giá'}
                 </p>
               </div>
             </div>
           </div>
 
-          <BookingSummary bookingType={request.bookingType} horseCount={Number(request.requestedHorseCount ?? request.horses?.length ?? 1)} stallUnitPrice={request.stallUnitPrice} />
+          <BookingSummary
+            bookingType={request.bookingType}
+            horseCount={Number(request.requestedHorseCount ?? request.horses?.length ?? 1)}
+            stallUnitPrice={request.stallUnitPrice}
+            status={request.status}
+            departureDate={request.departureDate}
+          />
           <InsuranceSummary horses={request.insuranceHorses ?? []}
             transportCost={request.transportCost ?? null} insuranceFee={Number(request.insuranceFee ?? 0)}
             totalCost={Number(request.totalCost ?? 0)} />
