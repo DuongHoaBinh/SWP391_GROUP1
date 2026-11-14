@@ -22,6 +22,11 @@ import { BuildDetailedPlanDto, RouteLegDto } from './dto/build-detailed-plan.dto
 import { paymentGate } from '../orders/payment-gate';
 import { assertRoadCapacity } from '../fleet/capacity-policy';
 import { RoadTripsStore } from '../fleet/road-trips.store';
+import {
+  areSameLocations,
+  buildConsolidatedRoadItinerary,
+  CorridorStopInput,
+} from '../../common/road-trip-sequencing';
 
 interface RouteRow extends RowDataPacket {
   route_id: number;
@@ -470,12 +475,29 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       const [routes] = await db.execute<RowDataPacket[]>('SELECT plan_status FROM route WHERE route_id = ? FOR UPDATE', [routeId]);
       if (!orders[0] || !['approved', 'planning', 'in_transit'].includes(orders[0].status) ||
         !['draft', 'pending_approval', 'in_transit'].includes(routes[0]?.plan_status)) throw new BadRequestException('Kế hoạch đã chốt hoặc đơn không còn được lập tuyến');
-      const [oldLegs] = await db.execute<RowDataPacket[]>('SELECT vehicle_id FROM route_leg WHERE route_id = ? FOR UPDATE', [routeId]);
+      const [oldLegs] = await db.execute<RowDataPacket[]>('SELECT vehicle_id, road_trip_id FROM route_leg WHERE route_id = ? FOR UPDATE', [routeId]);
       const legs = await this.roadTrips.prepareLegs(db, orders[0], dto.legs, actorId, oldLegs.filter(l => l.vehicle_id).map(l => Number(l.vehicle_id)));
+      let stopsToSave = dto.stops;
+      if (stopsToSave.length === 0) {
+        const sharedRoadTripId = legs.find(l => l.roadTripId)?.roadTripId;
+        if (sharedRoadTripId) {
+          stopsToSave = await this.findStopsTemplateByRoadTripId(sharedRoadTripId, routeId, db);
+        }
+      }
       await db.execute('UPDATE route SET route_name = ?, total_distance_km = ? WHERE route_id = ?', [dto.routeName, dto.totalDistanceKm ?? null, routeId]);
       await this.replaceRouteStops(routeId, [], db);
       await this.replaceRouteLegs(routeId, legs, db);
-      await this.replaceRouteStops(routeId, dto.stops, db);
+      await this.replaceRouteStops(routeId, stopsToSave, db);
+      const affectedRoadTripIds = new Set<number>();
+      for (const l of oldLegs) {
+        if (l.road_trip_id) affectedRoadTripIds.add(Number(l.road_trip_id));
+      }
+      for (const l of legs) {
+        if (l.roadTripId) affectedRoadTripIds.add(Number(l.roadTripId));
+      }
+      for (const roadTripId of affectedRoadTripIds) {
+        await this.consolidateSharedRoadTripWaypoints(roadTripId, db, routeId);
+      }
       await db.execute('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [shipmentId]);
       for (const id of new Set(legs.filter(l => l.legType === 'road' && l.vehicleId).map(l => l.vehicleId!))) {
         await db.execute('INSERT INTO shipment_vehicle (shipment_id, vehicle_id, assigned_date) VALUES (?, ?, NOW())', [shipmentId, id]);
@@ -549,6 +571,203 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     );
     const r = rows[0];
     return r ? this.mapRouteStopRow(r) : undefined;
+  }
+
+  private async findStopsTemplateByRoadTripId(
+    roadTripId: number,
+    excludeRouteId: number,
+    db: PoolConnection,
+  ): Promise<RouteStopItemDto[]> {
+    const [sourceRoutes] = await db.execute<RowDataPacket[]>(
+      `SELECT rl.route_id
+       FROM route_leg rl
+       JOIN route r ON r.route_id = rl.route_id
+       WHERE rl.road_trip_id = ? AND rl.route_id <> ?
+         AND EXISTS (SELECT 1 FROM route_stop rs WHERE rs.route_id = rl.route_id AND rs.stop_type <> 'transfer_hub')
+       ORDER BY rl.leg_id ASC
+       LIMIT 1`,
+      [roadTripId, excludeRouteId],
+    );
+    if (!sourceRoutes.length) return [];
+    const [rows] = await db.execute<RouteStopRow[]>(
+      "SELECT sequence_no, stop_type, location_name, country, planned_arrival, planned_departure FROM route_stop WHERE route_id = ? AND stop_type <> 'transfer_hub' ORDER BY sequence_no ASC",
+      [sourceRoutes[0].route_id],
+    );
+    return rows.map((r) => ({
+      sequenceNo: r.sequence_no,
+      stopType: r.stop_type,
+      locationName: r.location_name,
+      country: r.country ?? undefined,
+      plannedArrival: r.planned_arrival ? new Date(r.planned_arrival).toISOString() : undefined,
+      plannedDeparture: r.planned_departure ? new Date(r.planned_departure).toISOString() : undefined,
+    }));
+  }
+
+  /**
+   * Tính toán lại thứ tự điểm đón (xa -> gần) -> trạm dọc tuyến -> điểm trả (gần -> xa)
+   * cho tất cả đơn hàng đang gộp chung một chuyến đường bộ (road_trip_id).
+   */
+  async consolidateSharedRoadTripWaypoints(
+    roadTripId: number,
+    db: PoolConnection,
+    preferredRouteId?: number,
+  ): Promise<void> {
+    const [legRows] = await db.execute<RowDataPacket[]>(
+      `SELECT s.shipment_id, s.origin_location, s.destination_location,
+              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) AS request_code,
+              r.route_id, rl.leg_id, rl.origin_location AS leg_origin, rl.destination_location AS leg_dest
+       FROM route_leg rl
+       JOIN route r ON r.route_id = rl.route_id
+       JOIN shipment s ON s.shipment_id = r.shipment_id
+       WHERE rl.road_trip_id = ?
+         AND s.status NOT IN ('cancelled', 'rejected')
+       ORDER BY rl.leg_id ASC`,
+      [roadTripId],
+    );
+    if (legRows.length === 0) return;
+
+    const routeIds = [...new Set(legRows.map((l) => Number(l.route_id)))];
+    const placeholders = routeIds.map(() => '?').join(',');
+    const [existingStopRows] = await db.execute<RowDataPacket[]>(
+      `SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country,
+              planned_arrival, planned_departure, status, actual_arrival, actual_departure, updated_by, notes
+       FROM route_stop
+       WHERE route_id IN (${placeholders})
+       ORDER BY sequence_no ASC, route_stop_id ASC`,
+      routeIds,
+    );
+
+    const hasExistingTransferHub = existingStopRows.some((s) => s.stop_type === 'transfer_hub');
+
+    const preferredCorridorRows = preferredRouteId
+      ? existingStopRows.filter((s) => Number(s.route_id) === Number(preferredRouteId) && s.stop_type !== 'transfer_hub')
+      : [];
+    const fallbackCorridorRows = existingStopRows.filter((s) => s.stop_type !== 'transfer_hub');
+    const corridorSourceRows = preferredCorridorRows.length > 0 ? preferredCorridorRows : fallbackCorridorRows;
+
+    const corridorStops: CorridorStopInput[] = corridorSourceRows.map((s) => ({
+      routeStopId: Number(s.route_stop_id),
+      sequenceNo: Number(s.sequence_no),
+      stopType: s.stop_type,
+      locationName: s.location_name,
+      country: s.country,
+      plannedArrival: s.planned_arrival,
+      plannedDeparture: s.planned_departure,
+      notes: s.notes,
+    }));
+
+    const itinerary = buildConsolidatedRoadItinerary({
+      shipments: legRows.map((l) => ({
+        shipmentId: Number(l.shipment_id),
+        requestCode: l.request_code,
+        originLocation: l.origin_location,
+        destinationLocation: l.destination_location,
+      })),
+      corridorStops,
+    });
+
+    if (!itinerary.isConsolidatedMultiPoint && !hasExistingTransferHub && legRows.length <= 1) {
+      return;
+    }
+
+    const [tripRows] = await db.execute<RowDataPacket[]>(
+      'SELECT origin_location, destination_location FROM road_trip WHERE road_trip_id = ? LIMIT 1',
+      [roadTripId],
+    );
+    if (
+      tripRows[0] &&
+      (tripRows[0].origin_location !== itinerary.canonicalOrigin ||
+        tripRows[0].destination_location !== itinerary.canonicalDestination)
+    ) {
+      await db.execute(
+        'UPDATE road_trip SET origin_location = ?, destination_location = ? WHERE road_trip_id = ?',
+        [itinerary.canonicalOrigin, itinerary.canonicalDestination, roadTripId],
+      );
+    }
+
+    for (const row of legRows) {
+      const legId = Number(row.leg_id);
+      const rId = Number(row.route_id);
+      if (row.leg_origin !== itinerary.canonicalOrigin || row.leg_dest !== itinerary.canonicalDestination) {
+        await db.execute(
+          'UPDATE route_leg SET origin_location = ?, destination_location = ? WHERE leg_id = ?',
+          [itinerary.canonicalOrigin, itinerary.canonicalDestination, legId],
+        );
+      }
+
+      if (!itinerary.isConsolidatedMultiPoint && !hasExistingTransferHub) {
+        continue;
+      }
+
+      const routeExisting = existingStopRows.filter((s) => Number(s.route_id) === rId);
+      await db.execute('UPDATE route_stop SET sequence_no = sequence_no + 1000 WHERE route_id = ?', [rId]);
+
+      const usedIds = new Set<number>();
+      for (const stop of itinerary.stops) {
+        const match = routeExisting.find(
+          (e) =>
+            !usedIds.has(Number(e.route_stop_id)) &&
+            areSameLocations(e.location_name, stop.locationName),
+        );
+
+        if (match) {
+          usedIds.add(Number(match.route_stop_id));
+          await db.execute(
+            `UPDATE route_stop
+             SET sequence_no = ?, stop_type = ?, leg_id = ?, country = COALESCE(country, ?),
+                 notes = COALESCE(notes, ?)
+             WHERE route_stop_id = ?`,
+            [
+              stop.sequenceNo,
+              stop.stopType,
+              legId,
+              stop.country ?? null,
+              stop.notes ?? null,
+              Number(match.route_stop_id),
+            ],
+          );
+        } else {
+          // Inherit completed status only for shared corridor transit stops already progressed on sibling routes
+          const siblingMatch = stop.stopRole === 'transit'
+            ? existingStopRows.find(
+                (e) =>
+                  areSameLocations(e.location_name, stop.locationName) &&
+                  e.status !== 'pending',
+              )
+            : undefined;
+
+          await db.execute(
+            `INSERT INTO route_stop (
+               route_id, leg_id, sequence_no, stop_type, location_name, country,
+               planned_arrival, planned_departure, status, actual_arrival, actual_departure, updated_by, notes
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              rId,
+              legId,
+              stop.sequenceNo,
+              stop.stopType,
+              stop.locationName,
+              stop.country ?? null,
+              stop.plannedArrival ? new Date(stop.plannedArrival) : null,
+              stop.plannedDeparture ? new Date(stop.plannedDeparture) : null,
+              siblingMatch ? siblingMatch.status : RouteStopStatus.PENDING,
+              siblingMatch?.actual_arrival ? new Date(siblingMatch.actual_arrival) : null,
+              siblingMatch?.actual_departure ? new Date(siblingMatch.actual_departure) : null,
+              siblingMatch?.updated_by ?? null,
+              stop.notes ?? null,
+            ],
+          );
+        }
+      }
+
+      const staleIds = routeExisting
+        .filter((e) => !usedIds.has(Number(e.route_stop_id)))
+        .map((e) => Number(e.route_stop_id));
+      for (const staleId of staleIds) {
+        await db.execute('DELETE FROM route_stop_update WHERE route_stop_id = ?', [staleId]);
+        await db.execute('DELETE FROM route_stop WHERE route_stop_id = ?', [staleId]);
+      }
+    }
   }
 
   async replaceRouteStops(routeId: number, stops: RouteStopItemDto[], db: Pool | PoolConnection = this.pool): Promise<void> {

@@ -2386,6 +2386,7 @@ export default function RoutePlanningPage() {
                             <option value="quarantine">Kiểm dịch (Quarantine)</option>
                             <option value="border_check">Cửa khẩu (Border)</option>
                             <option value="refuel">Nhiên liệu (Refuel)</option>
+                            <option value="transfer_hub">Điểm đón/trả ghép (Transfer Hub)</option>
                           </select>
                         </td>
                         <td className="p-2.5">

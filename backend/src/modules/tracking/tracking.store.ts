@@ -482,7 +482,72 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async updateVehicleStatus(vehicleId: number, status: string): Promise<void> {
+    if (status === 'available') {
+      await this.pool.execute(
+        `UPDATE vehicle v
+         SET v.status = 'available'
+         WHERE v.vehicle_id = ?
+           AND v.status = 'in_use'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM route_leg rl
+             JOIN route r ON r.route_id = rl.route_id
+             JOIN shipment s ON s.shipment_id = r.shipment_id
+             WHERE rl.vehicle_id = v.vehicle_id
+               AND rl.status <> 'completed'
+               AND s.status NOT IN ('completed', 'cancelled', 'rejected')
+           )`,
+        [vehicleId],
+      );
+      return;
+    }
     await this.pool.execute('UPDATE vehicle SET status = ? WHERE vehicle_id = ?', [status, vehicleId]);
+  }
+
+  async findSiblingLegsByRoadTrip(roadTripId: number, excludeLegId: number): Promise<any[]> {
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT rl.*, r.shipment_id, r.assigned_coordinator_id,
+              s.status AS shipment_status, s.customer_id,
+              s.origin_location AS shipment_origin_location,
+              s.destination_location AS shipment_destination_location,
+              CASE
+                WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
+                ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
+              END AS request_code
+       FROM route_leg rl
+       JOIN route r ON r.route_id = rl.route_id
+       JOIN shipment s ON s.shipment_id = r.shipment_id
+       WHERE rl.road_trip_id = ?
+         AND rl.leg_id <> ?
+         AND s.status IN ('ready_to_depart', 'in_transit')
+       ORDER BY rl.leg_id ASC`,
+      [roadTripId, excludeLegId],
+    );
+    return rows;
+  }
+
+  async findShipmentsByRoadTripId(roadTripId: number): Promise<any[]> {
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT s.shipment_id, s.customer_id, s.origin_location, s.destination_location,
+              s.status AS shipment_status,
+              CASE
+                WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
+                ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
+              END AS request_code,
+              r.route_id, r.assigned_coordinator_id,
+              rl.leg_id, rl.sequence_no AS leg_sequence_no,
+              rl.status AS leg_status, rl.actual_arrival AS leg_actual_arrival,
+              rl.origin_location AS leg_origin_location, rl.destination_location AS leg_destination_location,
+              (SELECT COUNT(*) FROM route_leg rl_all WHERE rl_all.route_id = r.route_id) AS total_legs
+       FROM route_leg rl
+       JOIN route r ON r.route_id = rl.route_id
+       JOIN shipment s ON s.shipment_id = r.shipment_id
+       WHERE rl.road_trip_id = ?
+         AND s.status NOT IN ('cancelled', 'rejected')
+       ORDER BY rl.leg_id ASC`,
+      [roadTripId],
+    );
+    return rows;
   }
 
   async updateStopStatus(
@@ -493,12 +558,17 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     isDeparture: boolean,
     notes?: string,
   ): Promise<void> {
-    const timeCol = isDeparture ? 'actual_departure' : 'actual_arrival';
+    const timeCol = isDeparture
+      ? 'actual_departure = ?, actual_arrival = COALESCE(actual_arrival, ?)'
+      : 'actual_arrival = ?';
+    const params = isDeparture
+      ? [status, actualTime, actualTime, updatedBy, notes || null, stopId]
+      : [status, actualTime, updatedBy, notes || null, stopId];
     await this.pool.execute(
       `UPDATE route_stop
-       SET status = ?, ${timeCol} = ?, updated_by = ?, notes = COALESCE(?, notes)
+       SET status = ?, ${timeCol}, updated_by = ?, notes = COALESCE(?, notes)
        WHERE route_stop_id = ?`,
-      [status, actualTime, updatedBy, notes || null, stopId],
+      params,
     );
   }
 
@@ -516,15 +586,25 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         [shipmentId],
       );
       await this.pool.execute(
-        `UPDATE vehicle
-         SET status = 'available'
-         WHERE vehicle_id IN (
+        `UPDATE vehicle v
+         SET v.status = 'available'
+         WHERE v.vehicle_id IN (
            SELECT rl.vehicle_id
            FROM route_leg rl
            JOIN route r ON rl.route_id = r.route_id
            WHERE r.shipment_id = ? AND rl.vehicle_id IS NOT NULL
-         )`,
-        [shipmentId],
+         )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM route_leg rl2
+             JOIN route r2 ON r2.route_id = rl2.route_id
+             JOIN shipment s2 ON s2.shipment_id = r2.shipment_id
+             WHERE rl2.vehicle_id = v.vehicle_id
+               AND s2.shipment_id <> ?
+               AND rl2.status <> 'completed'
+               AND s2.status NOT IN ('completed', 'cancelled', 'rejected')
+           )`,
+        [shipmentId, shipmentId],
       );
       return;
     }
