@@ -9,6 +9,11 @@ import { RoutesService } from '../routes/routes.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import {
+  areSameLocations,
+  buildConsolidatedRoadItinerary,
+  ConsolidatedRoadItinerary,
+} from '../../common/road-trip-sequencing';
+import {
   CheckInLegDto,
   CheckInStopDto,
   CoordinatorOverrideDto,
@@ -57,10 +62,60 @@ export class TrackingService {
     const assignedStaff = await this.trackingStore.findAssignedStaff(shipmentId);
     const assignedHorses = await this.trackingStore.findAssignedHorses(shipmentId);
     const healthLogs = await this.trackingStore.findHorseHealthLogs(shipmentId);
-    const statusLogs = await this.trackingStore.findTripStatusLogs(shipmentId);
+    const rawStatusLogs = await this.trackingStore.findTripStatusLogs(shipmentId);
+
+    const isCustomer = String(user.role).toUpperCase() === 'CUSTOMER';
+    const hasConsolidatedRoadTrip = legs.some((l) => Boolean(l.road_trip_id));
+
+    let effectiveLegs = legs;
+    let effectiveStops = stops;
+    let statusLogs = rawStatusLogs;
+    let consolidationContext: { itinerary: ConsolidatedRoadItinerary; shipments: any[] } | undefined;
+    let consolidatedRouteSummary: string | null = null;
+
+    if (isCustomer) {
+      const transferStopIds = new Set(
+        stops.filter((s) => s.stop_type === 'transfer_hub').map((s) => Number(s.route_stop_id)),
+      );
+      effectiveStops = stops
+        .filter((s) => s.stop_type !== 'transfer_hub')
+        .map((s, idx) => ({ ...s, sequence_no: idx + 1 }));
+      effectiveLegs = legs.map((l, idx) => {
+        if (!l.road_trip_id) return l;
+        return {
+          ...l,
+          road_trip_id: null,
+          origin_location: idx === 0 ? shipment.origin_location : l.origin_location,
+          destination_location: idx === legs.length - 1 ? shipment.destination_location : l.destination_location,
+        };
+      });
+      if (hasConsolidatedRoadTrip) {
+        statusLogs = rawStatusLogs
+          .filter((log) => !log.routeStopId || !transferStopIds.has(Number(log.routeStopId)))
+          .map((log) => ({
+            ...log,
+            milestoneName:
+              log.milestoneType === 'leg_departure'
+                ? `Xuất phát: ${shipment.origin_location}`
+                : log.milestoneType === 'leg_arrival'
+                ? `Đến đích: ${shipment.destination_location}`
+                : log.milestoneName,
+            notes:
+              typeof log.notes === 'string' && log.notes.toLowerCase().includes('chuyến ghép')
+                ? 'Cập nhật tiến độ vận chuyển'
+                : log.notes,
+          }));
+      }
+    } else if (hasConsolidatedRoadTrip) {
+      const context = await this.loadConsolidationContext(legs, stops);
+      if (context) {
+        consolidationContext = context;
+        consolidatedRouteSummary = this.formatConsolidatedSummary(context.roadTripId, context.itinerary);
+      }
+    }
 
     // Build timeline milestones dynamically from route_leg and route_stop, enriched with notes from statusLogs
-    const milestones = this.buildMilestonesTimeline(legs, stops, statusLogs);
+    const milestones = this.buildMilestonesTimeline(effectiveLegs, effectiveStops, statusLogs, consolidationContext);
 
     // Current active milestone
     const currentMilestoneItem =
@@ -74,9 +129,8 @@ export class TrackingService {
 
     const driverStaff = assignedStaff.find((s) => s.role_in_shipment === 'driver');
     const escortStaff = assignedStaff.find((s) => s.role_in_shipment === 'escort');
-    const assignedVehicle = legs.find((l) => l.vehicle_plate)?.vehicle_plate || 'Xe thùng chuyên dụng';
+    const assignedVehicle = effectiveLegs.find((l) => l.vehicle_plate)?.vehicle_plate || 'Xe thùng chuyên dụng';
 
-    const isCustomer = String(user.role).toUpperCase() === 'CUSTOMER';
     const finalRequestCode = isCustomer && shipment.customer_request_code
       ? shipment.customer_request_code
       : (shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`);
@@ -92,7 +146,8 @@ export class TrackingService {
       shipmentStatus: shipment.status,
       routePlanStatus: route?.plan_status || shipment.status,
       currentMilestone: currentMilestoneText,
-      eta: legs[legs.length - 1]?.planned_arrival ? new Date(legs[legs.length - 1].planned_arrival).toLocaleString('vi-VN') : null,
+      consolidatedRouteSummary,
+      eta: effectiveLegs[effectiveLegs.length - 1]?.planned_arrival ? new Date(effectiveLegs[effectiveLegs.length - 1].planned_arrival).toLocaleString('vi-VN') : null,
       totalDistanceKm: route?.total_distance_km ? Number(route.total_distance_km) : null,
       assignedVehicle,
       assignedDriver: driverStaff ? `${driverStaff.full_name} (${driverStaff.phone || '0912 345 678'})` : null,
@@ -110,14 +165,60 @@ export class TrackingService {
     };
   }
 
-  private buildMilestonesTimeline(legs: any[], stops: any[], statusLogs?: any[]): TrackingMilestoneItem[] {
+  private async loadConsolidationContext(
+    legs: any[],
+    stops: any[],
+  ): Promise<{ roadTripId: number; itinerary: ConsolidatedRoadItinerary; shipments: any[] } | null> {
+    const roadLeg = legs.find((l) => Boolean(l.road_trip_id));
+    if (!roadLeg?.road_trip_id) return null;
+    if (typeof this.trackingStore.findShipmentsByRoadTripId !== 'function') return null;
+
+    const roadTripId = Number(roadLeg.road_trip_id);
+    const shipments = await this.trackingStore.findShipmentsByRoadTripId(roadTripId);
+    if (!shipments || shipments.length <= 1) return null;
+
+    const itinerary = buildConsolidatedRoadItinerary({
+      shipments: shipments.map((s) => ({
+        shipmentId: Number(s.shipment_id),
+        requestCode: s.request_code || `REQ-${String(s.shipment_id).padStart(3, '0')}`,
+        originLocation: s.origin_location,
+        destinationLocation: s.destination_location,
+      })),
+      corridorStops: stops.map((s) => ({
+        routeStopId: s.route_stop_id,
+        sequenceNo: s.sequence_no,
+        stopType: s.stop_type,
+        locationName: s.location_name,
+        country: s.country,
+      })),
+    });
+
+    return { roadTripId, itinerary, shipments };
+  }
+
+  private formatConsolidatedSummary(roadTripId: number, itinerary: ConsolidatedRoadItinerary): string {
+    const pickLabel = itinerary.orderedOrigins
+      .map((o) => `${o.location.split(',')[0].trim()} (Đón ${o.requestCodes.map((c) => `#${c}`).join(', ')})`)
+      .join(' → ');
+    const dropLabel = itinerary.orderedDestinations
+      .map((d) => `${d.location.split(',')[0].trim()} (Trả ${d.requestCodes.map((c) => `#${c}`).join(', ')})`)
+      .join(' → ');
+    return `Chuyến ghép #${roadTripId}: ${pickLabel} → ${dropLabel}`;
+  }
+
+  private buildMilestonesTimeline(
+    legs: any[],
+    stops: any[],
+    statusLogs?: any[],
+    consolidationContext?: { itinerary: ConsolidatedRoadItinerary; shipments: any[] },
+  ): TrackingMilestoneItem[] {
     const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
 
     let items: TrackingMilestoneItem[] = [];
     if (isMultiModalFlight) {
       items = this.buildSimplifiedMultiModalMilestones(legs, stops);
     } else {
-      items = this.buildStandardTimeline(legs, stops);
+      items = this.buildStandardTimeline(legs, stops, consolidationContext);
     }
 
     // Gắn ghi chú thực địa (notes) và người xác nhận (updatedBy) từ lịch sử cập nhật statusLogs
@@ -400,7 +501,11 @@ export class TrackingService {
   }
 
   // Luồng tiêu chuẩn cho các tuyến đường bộ nội địa
-  private buildStandardTimeline(legs: any[], stops: any[]): TrackingMilestoneItem[] {
+  private buildStandardTimeline(
+    legs: any[],
+    stops: any[],
+    consolidationContext?: { itinerary: ConsolidatedRoadItinerary; shipments: any[] },
+  ): TrackingMilestoneItem[] {
     const items: TrackingMilestoneItem[] = [];
     let milestoneSeq = 1;
     let foundFirstIncomplete = false;
@@ -413,6 +518,12 @@ export class TrackingService {
         return s.sequence_no === 1 ? leg.sequence_no === 1 : leg.sequence_no === legs.length;
       });
       legStops.sort((a, b) => (a.sequence_no || 0) - (b.sequence_no || 0));
+
+      const isConsolidatedLeg = Boolean(leg.road_trip_id && consolidationContext?.itinerary);
+      const itinerary = isConsolidatedLeg ? consolidationContext!.itinerary : undefined;
+      const startCodes = itinerary?.orderedOrigins[0]?.requestCodes.map((c) => `#${c}`).join(', ');
+      const endGroup = itinerary?.orderedDestinations[itinerary.orderedDestinations.length - 1];
+      const endCodes = endGroup?.requestCodes.map((c) => `#${c}`).join(', ');
 
       const isLegDeparted = leg.actual_departure !== null || leg.status === 'departed' || leg.status === 'in_transit' || leg.status === 'completed';
       let legStartStatus: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
@@ -428,7 +539,9 @@ export class TrackingService {
         itemType: 'leg_start',
         legId: leg.leg_id,
         seq: milestoneSeq++,
-        title: `Xuất phát chặng ${leg.sequence_no}: ${leg.origin_location}`,
+        title: startCodes
+          ? `Xuất phát chặng ${leg.sequence_no} (Đón ${startCodes}): ${leg.origin_location}`
+          : `Xuất phát chặng ${leg.sequence_no}: ${leg.origin_location}`,
         location: leg.origin_location,
         status: legStartStatus,
         plannedTime: leg.planned_departure ? new Date(leg.planned_departure).toISOString() : null,
@@ -474,7 +587,7 @@ export class TrackingService {
           legId: leg.leg_id,
           stopId: stop.route_stop_id,
           seq: milestoneSeq++,
-          title: `${stop.location_name} (${this.getStopTypeVi(stop.stop_type)})`,
+          title: this.formatStopMilestoneTitle(stop, itinerary),
           location: `${stop.location_name}, ${stop.country || 'Vietnam'}`,
           status: stopStatus,
           plannedTime: stop.planned_arrival ? new Date(stop.planned_arrival).toISOString() : null,
@@ -488,7 +601,18 @@ export class TrackingService {
         });
       }
 
-      const isLegArrived = leg.actual_arrival !== null || leg.status === 'completed';
+      const finalDestShipmentIds = new Set(endGroup?.shipmentIds || []);
+      const hasPendingFinalDestSibling =
+        isConsolidatedLeg &&
+        finalDestShipmentIds.size > 0 &&
+        consolidationContext!.shipments.some(
+          (s) =>
+            finalDestShipmentIds.has(Number(s.shipment_id)) &&
+            s.leg_status !== 'completed' &&
+            !s.leg_actual_arrival,
+        );
+      const isLegArrived =
+        (leg.actual_arrival !== null || leg.status === 'completed') && !hasPendingFinalDestSibling;
       let legEndStatus: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
       if (isLegArrived) {
         legEndStatus = 'COMPLETED';
@@ -502,7 +626,9 @@ export class TrackingService {
         itemType: 'leg_end',
         legId: leg.leg_id,
         seq: milestoneSeq++,
-        title: `Đến đích chặng ${leg.sequence_no}: ${leg.destination_location}`,
+        title: endCodes
+          ? `Đến đích chặng ${leg.sequence_no} (Trả ${endCodes}): ${leg.destination_location}`
+          : `Đến đích chặng ${leg.sequence_no}: ${leg.destination_location}`,
         location: leg.destination_location,
         status: legEndStatus,
         plannedTime: leg.planned_arrival ? new Date(leg.planned_arrival).toISOString() : null,
@@ -519,12 +645,28 @@ export class TrackingService {
     return items;
   }
 
+  private formatStopMilestoneTitle(stop: any, itinerary?: ConsolidatedRoadItinerary): string {
+    if (stop.stop_type === 'transfer_hub' && itinerary) {
+      const matched = itinerary.stops.find(
+        (s) => s.stopType === 'transfer_hub' && areSameLocations(s.locationName, stop.location_name),
+      );
+      if (matched) {
+        const codes = matched.requestCodes.map((c) => `#${c}`).join(', ');
+        return matched.stopRole === 'pickup'
+          ? `Điểm đón hàng ghép (${codes}): ${stop.location_name}`
+          : `Điểm trả hàng ghép (${codes}): ${stop.location_name}`;
+      }
+    }
+    return `${stop.location_name} (${this.getStopTypeVi(stop.stop_type)})`;
+  }
+
   private getStopTypeVi(type: string): string {
     const map: Record<string, string> = {
       rest: 'Nghỉ dưỡng ngựa',
       quarantine: 'Kiểm dịch thú y',
       refuel: 'Tiếp nhiên liệu',
       border_check: 'Cửa khẩu / Hải quan',
+      transfer_hub: 'Điểm đón / trả ghép chuyến',
     };
     return map[type] || 'Trạm dừng';
   }
@@ -583,10 +725,12 @@ export class TrackingService {
       await this.trackingStore.updateRoutePlanStatus(route.route_id, 'in_transit');
 
       // Send auto notification to Customer
+      const custOrigin = targetLeg.road_trip_id ? (shipment.origin_location || targetLeg.origin_location) : targetLeg.origin_location;
+      const custDest = targetLeg.road_trip_id ? (shipment.destination_location || targetLeg.destination_location) : targetLeg.destination_location;
       await this.notificationsService.createNotification(
         shipment.customer_id,
         'Chuyến vận chuyển ngựa đã xuất phát!',
-        `Đơn vận chuyển #${shipment.request_code} đã bắt đầu khởi hành chặng 1 (${targetLeg.origin_location} → ${targetLeg.destination_location}).`,
+        `Đơn vận chuyển #${shipment.request_code} đã bắt đầu khởi hành chặng 1 (${custOrigin} → ${custDest}).`,
         'status_update',
         shipmentId,
       );
@@ -627,6 +771,8 @@ export class TrackingService {
       updatedBy: Number(user.id),
       updatedByRole: user.role,
     });
+
+    await this.syncSiblingLegStart(user, targetLeg, now, dto.notes);
 
     return this.getTrackingDetails(user, shipmentId);
   }
@@ -691,8 +837,10 @@ export class TrackingService {
       dto.notes,
     );
 
-    // Tuyến đa phương thức: Khi xe tới sân bay hoặc hoàn thành kiểm dịch xuất cảnh tại sân bay (Mốc 2), tự động hoàn tất chặng đường bộ 1 và đưa xe về available
-    if (parentLeg && parentLeg.sequence_no === 1 && (dto.action === 'customs_cleared' || dto.action === 'departed' || dto.action === 'arrived')) {
+    // Tuyến đa phương thức: Chỉ khi có chặng bay, việc xe tải tới sân bay / hoàn tất kiểm dịch sân bay mới tự động hoàn tất chặng đường bộ 1
+    const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
+    if (isMultiModalFlight && parentLeg && parentLeg.sequence_no === 1 && parentLeg.leg_type === 'road' &&
+        (dto.action === 'customs_cleared' || dto.action === 'departed' || dto.action === 'arrived')) {
       await this.trackingStore.updateLegStatus(parentLeg.leg_id, 'completed', undefined, now);
       if (parentLeg.vehicle_id) {
         await this.trackingStore.updateVehicleStatus(parentLeg.vehicle_id, 'available');
@@ -724,6 +872,12 @@ export class TrackingService {
       updatedBy: Number(user.id),
       updatedByRole: user.role,
     });
+
+    await this.syncSiblingStopCheckIn(user, targetStop, parentLeg, dto, now, isDeparture);
+
+    if (isDeparture && targetStop.stop_type === 'transfer_hub' && parentLeg?.road_trip_id) {
+      await this.completeConsolidatedDropoffShipments(user, targetStop, stops, parentLeg, now, dto.notes);
+    }
 
     return this.getTrackingDetails(user, shipmentId);
   }
@@ -787,16 +941,17 @@ export class TrackingService {
 
     // Check if this is the final leg of the entire trip
     const isFinalLeg = targetLeg.sequence_no === legs.length;
-    if (isFinalLeg) {
+    if (isFinalLeg && shipment.status !== 'completed') {
       // Step 7: Chuyển sang 'completed' (hoặc 'arrived' / chờ bàn giao)
       await this.trackingStore.updateShipmentStatus(shipmentId, 'completed');
       await this.trackingStore.updateRoutePlanStatus(route.route_id, 'completed');
 
       // Send auto notification to Customer
+      const customerDest = shipment.destination_location || targetLeg.destination_location;
       await this.notificationsService.createNotification(
         shipment.customer_id,
         'Ngựa đã tới địa điểm bàn giao an toàn!',
-        `Chuyến vận chuyển #${shipment.request_code} đã hoàn thành toàn bộ lộ trình và cập bến tại ${targetLeg.destination_location}. Sẵn sàng bàn giao ngựa.`,
+        `Chuyến vận chuyển #${shipment.request_code} đã hoàn thành toàn bộ lộ trình và cập bến tại ${customerDest}. Sẵn sàng bàn giao ngựa.`,
         'handover_complete',
         shipmentId,
       );
@@ -804,7 +959,7 @@ export class TrackingService {
       // Send auto notification to Coordinator
       const actor = await this.resolveStaffActor(shipmentId, user);
       const coordEndTitle = `Chuyến đi #${shipment.request_code} đã hoàn thành bàn giao`;
-      const coordEndMessage = `${actor.displayName} đã xác nhận cập bến an toàn tại điểm đích (${targetLeg.destination_location}) và bàn giao ngựa thành công.`;
+      const coordEndMessage = `${actor.displayName} đã xác nhận cập bến an toàn tại điểm đích (${customerDest}) và bàn giao ngựa thành công.`;
       if (route.assigned_coordinator_id) {
         await this.notificationsService.createNotification(
           route.assigned_coordinator_id,
@@ -837,6 +992,8 @@ export class TrackingService {
       updatedBy: Number(user.id),
       updatedByRole: user.role,
     });
+
+    await this.syncSiblingLegArrival(user, targetLeg, now, dto.notes);
 
     return this.getTrackingDetails(user, shipmentId);
   }
@@ -1075,5 +1232,291 @@ export class TrackingService {
       }
     }
     return this.trackingStore.findHorseHealthLogsByHorseId(horseId);
+  }
+
+  private async notifyCoordinator(
+    coordinatorId: number | null | undefined,
+    title: string,
+    message: string,
+    notifType: 'status_update' | 'handover_complete',
+    shipmentId: number,
+  ): Promise<void> {
+    if (coordinatorId) {
+      await this.notificationsService.createNotification(coordinatorId, title, message, notifType, shipmentId);
+    } else {
+      await this.notificationsService.notifyRole('FLEET_ROUTE_COORDINATOR', title, message, notifType, shipmentId);
+    }
+  }
+
+  /** Đồng bộ xuất phát cho các đơn cùng chuyến đường bộ (road_trip_id). */
+  private async syncSiblingLegStart(
+    user: AuthenticatedUser,
+    targetLeg: any,
+    now: Date,
+    notes?: string,
+  ): Promise<void> {
+    if (!targetLeg?.road_trip_id) return;
+    try {
+      const siblings = await this.trackingStore.findSiblingLegsByRoadTrip(
+        Number(targetLeg.road_trip_id),
+        Number(targetLeg.leg_id),
+      );
+      for (const sib of siblings) {
+        if (sib.actual_departure || sib.status !== 'pending') continue;
+        if (sib.sequence_no === 1 && sib.shipment_status === 'ready_to_depart') {
+          const readiness = await this.routesService.getTripPlanReadiness(user, Number(sib.shipment_id));
+          if (!readiness.isReadyToDepart) continue;
+          await this.trackingStore.updateLegStatus(Number(sib.leg_id), 'active', now, null);
+          await this.trackingStore.updateShipmentStatus(Number(sib.shipment_id), 'in_transit');
+          await this.trackingStore.updateRoutePlanStatus(Number(sib.route_id), 'in_transit');
+          const sibOrigin = sib.shipment_origin_location || sib.origin_location;
+          const sibDest = sib.shipment_destination_location || sib.destination_location;
+          await this.notificationsService.createNotification(
+            Number(sib.customer_id),
+            'Chuyến vận chuyển ngựa đã xuất phát!',
+            `Đơn vận chuyển #${sib.request_code} đã bắt đầu khởi hành chặng ${sib.sequence_no} (${sibOrigin} → ${sibDest}).`,
+            'status_update',
+            Number(sib.shipment_id),
+          );
+          const actor = await this.resolveStaffActor(Number(sib.shipment_id), user);
+          await this.notifyCoordinator(
+            sib.assigned_coordinator_id,
+            `Chuyến đi #${sib.request_code} đã xuất phát thực tế`,
+            `${actor.displayName} đã xác nhận xuất phát chuyến ghép #${targetLeg.road_trip_id} (${sib.origin_location}).`,
+            'status_update',
+            Number(sib.shipment_id),
+          );
+        } else if (sib.shipment_status === 'in_transit') {
+          await this.trackingStore.updateLegStatus(Number(sib.leg_id), 'active', now, null);
+        } else {
+          continue;
+        }
+        await this.trackingStore.recordTripStatusLog({
+          shipmentId: Number(sib.shipment_id),
+          routeId: Number(sib.route_id),
+          legId: Number(sib.leg_id),
+          previousStatus: sib.status,
+          newStatus: 'in_transit',
+          milestoneType: 'leg_departure',
+          milestoneName: `Xuất phát chặng ${sib.sequence_no}: ${sib.origin_location}`,
+          notes: notes || `Đồng bộ xuất phát chuyến ghép #${targetLeg.road_trip_id}`,
+          updatedBy: Number(user.id),
+          updatedByRole: user.role,
+        });
+      }
+    } catch (err) {
+      console.error('Lỗi đồng bộ xuất phát chuyến ghép:', err);
+    }
+  }
+
+  /** Đồng bộ check-in trạm dừng cho các đơn cùng chuyến đường bộ (road_trip_id). */
+  private async syncSiblingStopCheckIn(
+    user: AuthenticatedUser,
+    targetStop: any,
+    parentLeg: any,
+    dto: CheckInStopDto,
+    now: Date,
+    isDeparture: boolean,
+  ): Promise<void> {
+    if (!parentLeg?.road_trip_id) return;
+    const rank: Record<string, number> = { pending: 0, arrived: 1, customs_cleared: 2, departed: 3 };
+    const targetRank = rank[dto.action] ?? 0;
+    const targetName = String(targetStop.location_name || '').trim().toLowerCase();
+    try {
+      const siblings = await this.trackingStore.findSiblingLegsByRoadTrip(
+        Number(parentLeg.road_trip_id),
+        Number(parentLeg.leg_id),
+      );
+      for (const sib of siblings) {
+        if (sib.shipment_status !== 'in_transit') continue;
+        const sibStops = await this.trackingStore.findStopsByRouteId(Number(sib.route_id));
+        const sibStop = sibStops.find(
+          (s) =>
+            (!s.leg_id || Number(s.leg_id) === Number(sib.leg_id)) &&
+            String(s.location_name || '').trim().toLowerCase() === targetName,
+        );
+        if (!sibStop || (rank[sibStop.status] ?? 0) >= targetRank) continue;
+        await this.trackingStore.updateStopStatus(
+          Number(sibStop.route_stop_id),
+          dto.action,
+          Number(user.id),
+          now,
+          isDeparture,
+          dto.notes,
+        );
+        if (dto.action === 'customs_cleared') {
+          await this.notificationsService.createNotification(
+            Number(sib.customer_id),
+            'Ngựa đã hoàn tất thông quan & kiểm dịch!',
+            `Đoàn xe đơn #${sib.request_code} đã hoàn tất kiểm tra thú y & hải quan tại "${sibStop.location_name}".`,
+            'status_update',
+            Number(sib.shipment_id),
+          );
+        }
+        await this.trackingStore.recordTripStatusLog({
+          shipmentId: Number(sib.shipment_id),
+          routeId: Number(sib.route_id),
+          legId: sibStop.leg_id || Number(sib.leg_id),
+          routeStopId: Number(sibStop.route_stop_id),
+          previousStatus: sibStop.status,
+          newStatus: dto.action,
+          milestoneType:
+            dto.action === 'customs_cleared'
+              ? 'stop_customs_cleared'
+              : isDeparture
+              ? 'stop_departure'
+              : 'stop_arrival',
+          milestoneName: `${sibStop.location_name} - ${dto.action.toUpperCase()}`,
+          notes: dto.notes || `Đồng bộ trạm dừng chuyến ghép #${parentLeg.road_trip_id}`,
+          updatedBy: Number(user.id),
+          updatedByRole: user.role,
+        });
+      }
+    } catch (err) {
+      console.error('Lỗi đồng bộ trạm dừng chuyến ghép:', err);
+    }
+  }
+
+  /** Hoàn tất riêng các đơn hàng có điểm đến là trạm trả hàng ghép vừa rời trạm, giữ các đơn đi tiếp vẫn active. */
+  private async completeConsolidatedDropoffShipments(
+    user: AuthenticatedUser,
+    targetStop: any,
+    stops: any[],
+    parentLeg: any,
+    now: Date,
+    notes?: string,
+  ): Promise<void> {
+    if (typeof this.trackingStore.findShipmentsByRoadTripId !== 'function') return;
+    try {
+      const roadTripId = Number(parentLeg.road_trip_id);
+      const shipments = await this.trackingStore.findShipmentsByRoadTripId(roadTripId);
+      if (shipments.length <= 1) return;
+
+      const itinerary = buildConsolidatedRoadItinerary({
+        shipments: shipments.map((s) => ({
+          shipmentId: Number(s.shipment_id),
+          requestCode: s.request_code || `REQ-${String(s.shipment_id).padStart(3, '0')}`,
+          originLocation: s.origin_location,
+          destinationLocation: s.destination_location,
+        })),
+        corridorStops: stops.map((s) => ({
+          routeStopId: s.route_stop_id,
+          sequenceNo: s.sequence_no,
+          stopType: s.stop_type,
+          locationName: s.location_name,
+          country: s.country,
+        })),
+      });
+
+      const dropoffItem = itinerary.stops.find(
+        (st) => st.stopRole === 'dropoff' && areSameLocations(st.locationName, targetStop.location_name),
+      );
+      if (!dropoffItem || dropoffItem.shipmentIds.length === 0) return;
+
+      const targetIds = new Set(dropoffItem.shipmentIds);
+      for (const s of shipments) {
+        const sId = Number(s.shipment_id);
+        if (!targetIds.has(sId) || s.shipment_status !== 'in_transit' || s.leg_status === 'completed') continue;
+        const isFinalLeg = Number(s.leg_sequence_no || 1) >= Number(s.total_legs || 1);
+        await this.trackingStore.updateLegStatus(Number(s.leg_id), 'completed', undefined, now);
+        if (isFinalLeg) {
+          await this.trackingStore.updateShipmentStatus(sId, 'completed');
+          await this.trackingStore.updateRoutePlanStatus(Number(s.route_id), 'completed');
+          await this.notificationsService.createNotification(
+            Number(s.customer_id),
+            'Ngựa đã tới địa điểm bàn giao an toàn!',
+            `Chuyến vận chuyển #${s.request_code} đã hoàn thành toàn bộ lộ trình và cập bến tại ${s.destination_location}. Sẵn sàng bàn giao ngựa.`,
+            'handover_complete',
+            sId,
+          );
+          const actor = await this.resolveStaffActor(sId, user);
+          await this.notifyCoordinator(
+            s.assigned_coordinator_id,
+            `Chuyến đi #${s.request_code} đã hoàn thành bàn giao`,
+            `${actor.displayName} đã xác nhận bàn giao ngựa tại điểm trả (${s.destination_location}) thuộc chuyến ghép #${roadTripId}.`,
+            'handover_complete',
+            sId,
+          );
+        }
+        await this.trackingStore.recordTripStatusLog({
+          shipmentId: sId,
+          routeId: Number(s.route_id),
+          legId: Number(s.leg_id),
+          routeStopId: Number(targetStop.route_stop_id),
+          previousStatus: s.leg_status || 'active',
+          newStatus: 'completed',
+          milestoneType: 'leg_arrival',
+          milestoneName: `Hoàn tất bàn giao tại điểm trả: ${s.destination_location}`,
+          notes: notes || `Hoàn tất trả hàng tại ${targetStop.location_name}`,
+          updatedBy: Number(user.id),
+          updatedByRole: user.role,
+        });
+      }
+    } catch (err) {
+      console.error('Lỗi hoàn tất đơn tại điểm trả ghép chuyến:', err);
+    }
+  }
+
+  /** Đồng bộ hoàn tất chặng/đến đích cho các đơn cùng chuyến đường bộ (road_trip_id). */
+  private async syncSiblingLegArrival(
+    user: AuthenticatedUser,
+    targetLeg: any,
+    now: Date,
+    notes?: string,
+  ): Promise<void> {
+    if (!targetLeg?.road_trip_id) return;
+    try {
+      const siblings = await this.trackingStore.findSiblingLegsByRoadTrip(
+        Number(targetLeg.road_trip_id),
+        Number(targetLeg.leg_id),
+      );
+      for (const sib of siblings) {
+        if (sib.shipment_status !== 'in_transit' || sib.status === 'completed') continue;
+        const sibLegs = await this.trackingStore.findLegsByRouteId(Number(sib.route_id));
+        const sibStops = await this.trackingStore.findStopsByRouteId(Number(sib.route_id));
+        const sibLegStops = sibStops.filter((s) =>
+          s.leg_id ? Number(s.leg_id) === Number(sib.leg_id) : sibLegs.length === 1,
+        );
+        if (sibLegStops.some((s) => s.status !== 'departed' && s.status !== 'customs_cleared')) {
+          continue;
+        }
+        await this.trackingStore.updateLegStatus(Number(sib.leg_id), 'completed', undefined, now);
+        const sibDest = sib.shipment_destination_location || sib.destination_location;
+        const isSibFinalLeg = Number(sib.sequence_no) === sibLegs.length;
+        if (isSibFinalLeg) {
+          await this.trackingStore.updateShipmentStatus(Number(sib.shipment_id), 'completed');
+          await this.trackingStore.updateRoutePlanStatus(Number(sib.route_id), 'completed');
+          await this.notificationsService.createNotification(
+            Number(sib.customer_id),
+            'Ngựa đã tới địa điểm bàn giao an toàn!',
+            `Chuyến vận chuyển #${sib.request_code} đã hoàn thành toàn bộ lộ trình và cập bến tại ${sibDest}. Sẵn sàng bàn giao ngựa.`,
+            'handover_complete',
+            Number(sib.shipment_id),
+          );
+          const actor = await this.resolveStaffActor(Number(sib.shipment_id), user);
+          await this.notifyCoordinator(
+            sib.assigned_coordinator_id,
+            `Chuyến đi #${sib.request_code} đã hoàn thành bàn giao`,
+            `${actor.displayName} đã xác nhận cập bến chuyến ghép #${targetLeg.road_trip_id} (${sibDest}).`,
+            'handover_complete',
+            Number(sib.shipment_id),
+          );
+        }
+        await this.trackingStore.recordTripStatusLog({
+          shipmentId: Number(sib.shipment_id),
+          routeId: Number(sib.route_id),
+          legId: Number(sib.leg_id),
+          previousStatus: sib.status,
+          newStatus: 'completed',
+          milestoneType: 'leg_arrival',
+          milestoneName: `Hoàn tất chặng ${sib.sequence_no}: Đến ${sibDest}`,
+          notes: notes || `Đồng bộ hoàn tất chuyến ghép #${targetLeg.road_trip_id}`,
+          updatedBy: Number(user.id),
+          updatedByRole: user.role,
+        });
+      }
+    } catch (err) {
+      console.error('Lỗi đồng bộ đến đích chuyến ghép:', err);
+    }
   }
 }

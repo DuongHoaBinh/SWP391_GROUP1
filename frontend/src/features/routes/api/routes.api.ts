@@ -76,7 +76,7 @@ export interface RouteStopItem {
   id?: number;
   sequenceNo: number;
   legSequenceNo?: number;
-  stopType: 'rest' | 'quarantine' | 'refuel' | 'border_check';
+  stopType: 'rest' | 'quarantine' | 'refuel' | 'border_check' | 'transfer_hub' | 'other';
   locationName: string;
   country?: string | null;
   plannedArrival?: string | null;
