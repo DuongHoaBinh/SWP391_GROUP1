@@ -242,7 +242,10 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   const waypoints = routeResult.waypoints;
   const totalDistanceKm = routeResult.distanceKm;
   const estimatedHours = routeResult.durationHours;
-  const customsCount = routeResult.customsCount;
+  const transitStops = waypoints.filter(
+    (w) => w.type === 'checkpoint' || w.type === 'airport' || w.type === 'rest'
+  );
+  const customsCount = transitStops.length;
 
   // Reset osrmDistanceKm when inputs change
   useEffect(() => {
@@ -918,9 +921,42 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <ShieldCheck size={16} color="#059669" />
             <span style={{ fontSize: '12.5px', color: '#475569' }}>Trạm hải quan & kiểm dịch:</span>
-            <strong style={{ fontSize: '14px', color: '#065f46' }}>{customsCount} trạm bắt buộc</strong>
+            <strong style={{ fontSize: '14px', color: '#065f46' }}>
+              {transitStops.length > 0
+                ? `${transitStops.length} trạm kiểm dịch & dừng nghỉ`
+                : '0 trạm bắt buộc'}
+            </strong>
           </div>
         </div>
+
+        {/* Danh sách các trạm khớp với các điểm trên bản đồ */}
+        {transitStops.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', paddingTop: '8px', borderTop: '1px dashed #cbd5e1' }}>
+            <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span>🛡️ Trạm trên tuyến:</span>
+            </span>
+            {transitStops.map((stop, idx) => (
+              <span
+                key={idx}
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  backgroundColor: stop.type === 'checkpoint' ? '#fff7ed' : stop.type === 'airport' ? '#f5f3ff' : '#eff6ff',
+                  color: stop.type === 'checkpoint' ? '#c2410c' : stop.type === 'airport' ? '#7c3aed' : '#1d4ed8',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  border: `1px solid ${stop.type === 'checkpoint' ? '#fed7aa' : stop.type === 'airport' ? '#ddd6fe' : '#bfdbfe'}`,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <span>{stop.type === 'checkpoint' ? '🛂' : stop.type === 'airport' ? '✈️' : '🏥'}</span>
+                <span>#{idx + 1} {stop.name}</span>
+              </span>
+            ))}
+          </div>
+        )}
 
         <div style={{ fontSize: '11.5px', color: '#3b82f6', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
           <Info size={13} />

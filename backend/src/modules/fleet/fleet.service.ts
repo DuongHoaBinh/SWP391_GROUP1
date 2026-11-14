@@ -205,6 +205,26 @@ export class FleetService {
       );
     }
 
+    // TỰ ĐỘNG ĐỒNG BỘ: Nếu đơn hàng này đi ghép chung chuyến đường bộ (road_trip), tự động đồng bộ nhân sự cho các đơn còn lại
+    try {
+      const siblingShipmentIds = await this.fleetStore.findSiblingShipmentsOnSameRoadTrip(shipmentId);
+      for (const sibId of siblingShipmentIds) {
+        await this.fleetStore.assignStaff(sibId, dto.assignments);
+        const sibOrder = await this.ordersStore.findById(sibId);
+        for (const item of dto.assignments) {
+          await this.notificationsService.createNotification(
+            item.userId,
+            'Phân công nhiệm vụ chuyến đi ghép',
+            `Bạn được phân công làm vai trò "${item.roleInShipment}" cho đơn ghép #${sibOrder?.requestCode || sibId}.`,
+            'status_update',
+            sibId,
+          );
+        }
+      }
+    } catch (syncErr) {
+      console.error('Lỗi tự động đồng bộ nhân sự cho đơn ghép:', syncErr);
+    }
+
     return assigned;
   }
 }
