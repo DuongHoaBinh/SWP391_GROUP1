@@ -196,6 +196,7 @@ export const routesApi = {
     data: {
       status: 'approved' | 'rejected';
       rejectionReason?: string;
+      transportCost?: number;
     }
   ): Promise<RouteDetail> => {
     return apiClient(`/routes/plan/${shipmentId}/review`, {

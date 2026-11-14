@@ -26,10 +26,13 @@ import { useCustomerStore } from '@/lib/customer-store';
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ShipmentStatus =
   | 'requested'
+  | 'change_requested'
   | 'under_review'
   | 'approved'
   | 'rejected'
   | 'planning'
+  | 'confirmed'
+  | 'ready_to_depart'
   | 'in_transit'
   | 'completed'
   | 'cancelled';
@@ -82,9 +85,12 @@ type SortOrder = 'asc' | 'desc';
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
   requested: 'Pending Approval',
   under_review: 'Under Review',
+  change_requested: 'Change Requested',
   approved: 'Approved',
   rejected: 'Rejected',
   planning: 'Planning',
+  confirmed: 'Confirmed',
+  ready_to_depart: 'Ready to Depart',
   in_transit: 'In Transit',
   completed: 'Completed',
   cancelled: 'Cancelled',
@@ -93,9 +99,12 @@ const STATUS_LABELS: Record<ShipmentStatus, string> = {
 const STATUS_VARIANT: Record<ShipmentStatus, string> = {
   requested: 'pending',
   under_review: 'pending',
+  change_requested: 'pending',
   approved: 'success',
   rejected: 'danger',
   planning: 'pending',
+  confirmed: 'info',
+  ready_to_depart: 'info',
   in_transit: 'transit',
   completed: 'success',
   cancelled: 'danger',
@@ -104,9 +113,12 @@ const STATUS_VARIANT: Record<ShipmentStatus, string> = {
 const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border: string }> = {
   requested: { bg: '#fef3c7', color: '#b45309', border: '#fde68a' },
   under_review: { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  change_requested: { bg: '#fff7ed', color: '#c2410c', border: '#ffedd5' },
   approved: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   rejected: { bg: '#fee2e2', color: '#b91c1c', border: '#fecaca' },
   planning: { bg: '#f3e8ff', color: '#7c3aed', border: '#ddd6fe' },
+  confirmed: { bg: '#dbeafe', color: '#1d4ed8', border: '#bfdbfe' },
+  ready_to_depart: { bg: '#ccfbf1', color: '#0f766e', border: '#99f6e4' },
   in_transit: { bg: '#e0f2fe', color: '#0369a1', border: '#bae6fd' },
   completed: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   cancelled: { bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0' },
@@ -852,7 +864,7 @@ export default function RequestsPage() {
                             border: `1px solid ${sc.border}`,
                           }}
                         >
-                          {STATUS_LABELS[order.status]}
+                          {STATUS_LABELS[order.status] || order.status}
                         </span>
                       </td>
 

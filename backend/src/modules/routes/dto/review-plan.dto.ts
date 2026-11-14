@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class ReviewPlanDto {
   @ApiProperty({ enum: ['approved', 'rejected'], description: 'Quyết định phê duyệt hoặc từ chối kế hoạch' })
@@ -10,4 +10,9 @@ export class ReviewPlanDto {
   @IsOptional()
   @IsString()
   rejectionReason?: string;
+
+  @ApiPropertyOptional({ description: 'Cước vận chuyển chính thức được Manager chốt sau khi biết lộ trình và khoảng cách thực tế' })
+  @IsOptional()
+  @IsNumber()
+  transportCost?: number;
 }
