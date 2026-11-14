@@ -123,6 +123,7 @@ export interface TripTrackingDetails {
   shipmentStatus: string;
   routePlanStatus: string;
   currentMilestone: string;
+  consolidatedRouteSummary?: string | null;
   eta: string | null;
   totalDistanceKm: number | null;
   assignedVehicle: string | null;

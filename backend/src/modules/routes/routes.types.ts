@@ -26,6 +26,7 @@ export enum RouteStopType {
   QUARANTINE = 'quarantine',
   REFUEL = 'refuel',
   BORDER_CHECK = 'border_check',
+  TRANSFER_HUB = 'transfer_hub',
   OTHER = 'other',
 }
 

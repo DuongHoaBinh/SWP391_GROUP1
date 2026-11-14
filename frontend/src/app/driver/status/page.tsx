@@ -249,6 +249,12 @@ export default function DriverStatusPage() {
           <p className="text-sm text-slate-500 mt-1">
             Chuyến: <strong className="text-blue-600">#{currentTrip?.request_code || 'Chưa chọn'}</strong> • Tuyến: {currentTrip?.origin_location} → {currentTrip?.destination_location}
           </p>
+          {trackingDetails?.consolidatedRouteSummary && (
+            <div className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 border border-blue-200 text-xs font-medium text-blue-800">
+              <Truck size={13} className="text-blue-600 shrink-0" />
+              <span>{trackingDetails.consolidatedRouteSummary}</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
