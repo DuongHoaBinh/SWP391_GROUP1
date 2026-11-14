@@ -28,7 +28,18 @@ import { bookingName, bookingQuotePayload, type BookingType } from '@/features/o
 import { buildEquineRoute } from '@/lib/geo-corridors';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
-type ShipmentStatus = 'requested' | 'under_review' | 'approved' | 'rejected' | 'planning' | 'in_transit' | 'completed' | 'cancelled';
+type ShipmentStatus =
+  | 'requested'
+  | 'change_requested'
+  | 'under_review'
+  | 'approved'
+  | 'rejected'
+  | 'planning'
+  | 'confirmed'
+  | 'ready_to_depart'
+  | 'in_transit'
+  | 'completed'
+  | 'cancelled';
 
 interface OrderHorse extends Partial<InsuredHorse> {
   horseId?: number;
@@ -85,9 +96,12 @@ type SortOrder = 'asc' | 'desc';
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
   requested: 'Pending Approval',
   under_review: 'Under Review',
+  change_requested: 'Change Requested',
   approved: 'Approved',
   rejected: 'Rejected',
   planning: 'Planning',
+  confirmed: 'Confirmed',
+  ready_to_depart: 'Ready to Depart',
   in_transit: 'In Transit',
   completed: 'Completed',
   cancelled: 'Cancelled',
@@ -96,9 +110,12 @@ const STATUS_LABELS: Record<ShipmentStatus, string> = {
 const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border: string }> = {
   requested: { bg: '#fef3c7', color: '#b45309', border: '#fde68a' },
   under_review: { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  change_requested: { bg: '#fff7ed', color: '#c2410c', border: '#ffedd5' },
   approved: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   rejected: { bg: '#fee2e2', color: '#b91c1c', border: '#fecaca' },
   planning: { bg: '#f3e8ff', color: '#7c3aed', border: '#ddd6fe' },
+  confirmed: { bg: '#dbeafe', color: '#1d4ed8', border: '#bfdbfe' },
+  ready_to_depart: { bg: '#ccfbf1', color: '#0f766e', border: '#99f6e4' },
   in_transit: { bg: '#e0f2fe', color: '#0369a1', border: '#bae6fd' },
   completed: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   cancelled: { bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0' },
@@ -548,7 +565,7 @@ export default function ManagerRequestsPage() {
           {/* Status Filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
             <Filter size={14} color="#64748b" />
-            {(['all', 'requested', 'approved', 'rejected', 'planning', 'in_transit', 'completed', 'cancelled'] as const).map((s) => (
+            {(['all', 'requested', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed', 'cancelled', 'rejected'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setFilterStatus(s)}
@@ -653,7 +670,7 @@ export default function ManagerRequestsPage() {
                 </tr>
               ) : (
                 displayedOrders.map((order) => {
-                  const sc = STATUS_COLORS[order.status] || STATUS_COLORS.cancelled;
+                  const sc = STATUS_COLORS[order.status] || { bg: '#f1f5f9', color: '#475569', border: '#e2e8f0' };
                   return (
                     <tr key={order.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '14px 16px', fontWeight: 700, color: '#1d4ed8', fontSize: '13px' }}>
@@ -675,7 +692,7 @@ export default function ManagerRequestsPage() {
                       </td>
                       <td style={{ padding: '14px 16px' }}>
                         <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, backgroundColor: sc.bg, color: sc.color, border: `1px solid ${sc.border}` }}>
-                          {STATUS_LABELS[order.status]}
+                          {STATUS_LABELS[order.status] || order.status}
                         </span>
                       </td>
                       <td style={{ padding: '14px 16px', fontSize: '12px', color: '#64748b' }}>{formatDate(order.createdAt)}</td>

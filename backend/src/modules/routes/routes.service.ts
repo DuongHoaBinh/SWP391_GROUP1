@@ -268,6 +268,15 @@ export class RoutesService implements OnModuleInit {
     if (route.planStatus !== PlanStatus.PENDING_APPROVAL) throw new BadRequestException('Chỉ phê duyệt kế hoạch đang chờ duyệt.');
 
     if (dto.status === 'approved') {
+      if (dto.transportCost != null && Number(dto.transportCost) >= 0) {
+        const insuranceFee = Number(order.insuranceFee || 0);
+        const finalTransportCost = Math.round(Number(dto.transportCost));
+        const finalTotalCost = finalTransportCost + insuranceFee;
+        const horseCount = Math.max(1, order.requestedHorseCount || 1);
+        const stallUnitPrice = order.bookingType === 'shared_stall' ? Math.round(finalTransportCost / horseCount) : null;
+        await this.ordersStore.updatePricing(shipmentId, finalTransportCost, finalTotalCost, stallUnitPrice);
+      }
+
       await this.routesStore.updatePlanStatus(
         route.id,
         PlanStatus.APPROVED,

@@ -400,6 +400,16 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return this.updateShipmentStatus(shipmentId, status);
   }
 
+  async updatePricing(shipmentId: number, transportCost: number, totalCost: number, stallUnitPrice?: number | null): Promise<boolean> {
+    const [result] = await this.pool.execute(
+      `UPDATE shipment
+       SET transport_cost = ?, total_cost = ?, stall_unit_price = COALESCE(?, stall_unit_price), updated_at = NOW()
+       WHERE shipment_id = ?`,
+      [transportCost, totalCost, stallUnitPrice ?? null, shipmentId],
+    );
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
   async cancelShipment(shipmentId: number): Promise<boolean> {
     const db = await this.pool.getConnection();
     try {

@@ -323,6 +323,20 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async findSiblingShipmentsOnSameRoadTrip(shipmentId: number): Promise<number[]> {
+    const [rows] = await this.pool.execute<any[]>(`
+      SELECT DISTINCT r2.shipment_id
+      FROM route_leg l1
+      JOIN route r1 ON r1.route_id = l1.route_id
+      JOIN route_leg l2 ON l2.road_trip_id = l1.road_trip_id AND l2.leg_id <> l1.leg_id
+      JOIN route r2 ON r2.route_id = l2.route_id
+      JOIN shipment s2 ON s2.shipment_id = r2.shipment_id
+      WHERE r1.shipment_id = ? AND l1.road_trip_id IS NOT NULL
+        AND s2.status NOT IN ('completed', 'cancelled', 'rejected')
+    `, [shipmentId]);
+    return rows.map((r) => Number(r.shipment_id));
+  }
+
   async findAvailableStaff(): Promise<AvailableStaff[]> {
     const [rows] = await this.pool.execute<any[]>(
       `SELECT u.user_id, u.full_name, u.email, u.phone, u.status, u.specialization, r.role_id, r.role_name,

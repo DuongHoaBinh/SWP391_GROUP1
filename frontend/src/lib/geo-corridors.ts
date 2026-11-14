@@ -1886,7 +1886,7 @@ export function buildEquineRoute(
     }
   }
 
-  const customsCount = waypoints.filter((w) => w.type === 'checkpoint' || w.type === 'airport').length;
+  const customsCount = waypoints.filter((w) => w.type === 'checkpoint' || w.type === 'airport' || w.type === 'rest').length;
 
   const summaryNote = `${isDomestic ? 'Nội địa' : 'Xuyên biên giới'}: ${origin.name} ➔ ${destination.name} (${mode === 'air' ? 'Hàng không' : 'Đường bộ'})`;
 
