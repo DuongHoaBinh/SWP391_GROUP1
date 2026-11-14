@@ -1025,29 +1025,12 @@ function CreateTransportRequestForm() {
           borderTop: '1px solid var(--border-light)',
           padding: '16px 32px',
           display: 'flex',
-          justifyContent: 'space-between',
+          justifyContent: 'flex-end',
           alignItems: 'center',
           boxShadow: '0 -4px 12px rgba(15, 23, 42, 0.05)',
           zIndex: 40,
         }}
       >
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button
-            onClick={() => router.push('/customer/requests')}
-            style={{
-              padding: '9px 18px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#ffffff',
-              fontSize: '13.5px',
-              fontWeight: 600,
-              color: '#64748b',
-            }}
-          >
-            Cancel
-          </button>
-        </div>
-
         <div style={{ display: 'flex', gap: '12px' }}>
           {currentStep > 1 && (
             <button

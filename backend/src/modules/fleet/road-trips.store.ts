@@ -80,9 +80,13 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
       if (leg.roadTripId && usedTrips.has(leg.roadTripId)) throw new BadRequestException('Một đơn chỉ được có một phân bổ trên cùng chuyến đường bộ');
       const [conflicts] = await db.execute<RowDataPacket[]>(`SELECT l.road_trip_id, l.stalls_booked, s.booking_type, s.requested_horse_count
         FROM route_leg l JOIN route r ON r.route_id = l.route_id JOIN shipment s ON s.shipment_id = r.shipment_id
-        WHERE l.vehicle_id = ? AND s.shipment_id <> ? AND s.status NOT IN ('cancelled','rejected')
-        AND (l.planned_departure IS NULL OR l.planned_arrival IS NULL OR (l.planned_departure < ? AND l.planned_arrival > ?))`,
-        [leg.vehicleId, order.shipment_id, end, start]);
+        WHERE l.vehicle_id = ? AND s.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','rejected')
+        AND (
+          (l.planned_departure IS NOT NULL AND l.planned_arrival IS NOT NULL AND l.planned_departure < ? AND l.planned_arrival > ?)
+          OR
+          (l.planned_departure IS NULL AND s.requested_date IS NOT NULL AND s.requested_date >= DATE_SUB(?, INTERVAL 2 DAY) AND s.requested_date <= DATE_ADD(?, INTERVAL 2 DAY))
+        )`,
+        [leg.vehicleId, order.shipment_id, end, start, start, end]);
       const [unscheduled] = await db.execute<RowDataPacket[]>(`SELECT sv.shipment_id FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id
         WHERE sv.vehicle_id = ? AND s.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','rejected')
         AND NOT EXISTS (SELECT 1 FROM route_leg l JOIN route r ON r.route_id = l.route_id WHERE r.shipment_id = s.shipment_id AND l.vehicle_id = sv.vehicle_id)`, [leg.vehicleId, order.shipment_id]);
