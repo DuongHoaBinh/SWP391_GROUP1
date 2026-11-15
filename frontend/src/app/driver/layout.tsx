@@ -17,7 +17,7 @@ import {
   X,
   Plus,
 } from 'lucide-react';
-import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser } from '@/lib/auth';
+import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { apiClient } from '@/lib/api-client';
 import toast from 'react-hot-toast';
@@ -130,36 +130,37 @@ export default function DriverLayout({
     window.location.reload();
   };
 
-  const isEscortRole = currentPersona === 'escort';
+  const isEscortRole = currentPersona === 'escort' || pathname?.startsWith('/escort');
+  const basePath = isEscortRole ? '/escort' : '/driver';
 
   const navItems: NavItem[] = [
     {
       label: 'Dashboard',
-      href: '/driver',
+      href: basePath,
       icon: <LayoutDashboard size={18} />,
     },
     {
       label: 'My Trips',
-      href: '/driver/trips',
+      href: `${basePath}/trips`,
       icon: <Truck size={18} />,
     },
     {
       label: 'Trip Status',
-      href: '/driver/status',
+      href: `${basePath}/status`,
       icon: <Crosshair size={18} />,
     },
     ...(isEscortRole
       ? [
           {
             label: 'Horse Health',
-            href: '/driver/health',
+            href: `${basePath}/health`,
             icon: <Stethoscope size={18} />,
           },
         ]
       : []),
     {
       label: 'Incident Reports',
-      href: '/driver/incidents',
+      href: `${basePath}/incidents`,
       icon: <AlertTriangle size={18} />,
     },
   ];
@@ -167,21 +168,20 @@ export default function DriverLayout({
   const managementItems: NavItem[] = [
     {
       label: 'Notifications',
-      href: '/driver/notifications',
+      href: `${basePath}/notifications`,
       icon: <Bell size={18} />,
       badge: unreadNotifs > 0 ? unreadNotifs : undefined,
     },
     {
       label: 'Profile',
-      href: '/driver/profile',
+      href: `${basePath}/profile`,
       icon: <User size={18} />,
     },
   ];
 
   const handleLogoutConfirm = () => {
     setShowLogoutModal(false);
-    clearAuthSession();
-    router.push('/login');
+    logout();
   };
 
   return (
@@ -273,7 +273,9 @@ export default function DriverLayout({
             </p>
             <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
               {navItems.map((item) => {
-                const isActive = item.href === '/driver' ? pathname === '/driver' : pathname?.startsWith(item.href);
+                const isActive = (item.href === basePath || item.href === '/driver' || item.href === '/escort')
+                  ? (pathname === '/driver' || pathname === '/escort')
+                  : (pathname?.startsWith(item.href) || pathname?.startsWith(item.href.replace(/^\/escort/, '/driver')) || pathname?.startsWith(item.href.replace(/^\/driver/, '/escort')));
 
                 return (
                   <Link
@@ -320,7 +322,10 @@ export default function DriverLayout({
             </p>
             <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
               {managementItems.map((item) => {
-                const isActive = pathname?.startsWith(item.href);
+                const isActive =
+                  pathname?.startsWith(item.href) ||
+                  pathname?.startsWith(item.href.replace(/^\/escort/, '/driver')) ||
+                  pathname?.startsWith(item.href.replace(/^\/driver/, '/escort'));
 
                 return (
                   <Link
@@ -503,27 +508,33 @@ export default function DriverLayout({
                   Overview
                 </p>
                 <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                  {navItems.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setMobileMenuOpen(false)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '9px 12px',
-                        borderRadius: '8px',
-                        fontSize: '13.5px',
-                        color: pathname === item.href ? '#ffffff' : '#94a3b8',
-                        backgroundColor: pathname === item.href ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                      }}
-                    >
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        {item.icon} {item.label}
-                      </span>
-                    </Link>
-                  ))}
+                  {navItems.map((item) => {
+                    const isItemActive = (item.href === basePath || item.href === '/driver' || item.href === '/escort')
+                      ? (pathname === '/driver' || pathname === '/escort')
+                      : (pathname?.startsWith(item.href) || pathname?.startsWith(item.href.replace(/^\/escort/, '/driver')) || pathname?.startsWith(item.href.replace(/^\/driver/, '/escort')));
+
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '9px 12px',
+                          borderRadius: '8px',
+                          fontSize: '13.5px',
+                          color: isItemActive ? '#ffffff' : '#94a3b8',
+                          backgroundColor: isItemActive ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                        }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {item.icon} {item.label}
+                        </span>
+                      </Link>
+                    );
+                  })}
                 </nav>
               </div>
 
@@ -642,7 +653,7 @@ export default function DriverLayout({
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
 
             <button
-              onClick={() => router.push('/driver/notifications')}
+              onClick={() => router.push(`${basePath}/notifications`)}
               style={{
                 width: '36px',
                 height: '36px',

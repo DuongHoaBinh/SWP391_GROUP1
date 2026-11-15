@@ -19,7 +19,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser } from '@/lib/auth';
+import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { apiClient } from '@/lib/api-client';
 
@@ -138,8 +138,7 @@ export default function ManagerLayout({
 
   const handleConfirmLogout = () => {
     setShowLogoutModal(false);
-    clearAuthSession();
-    router.push('/login');
+    logout();
   };
 
   return (

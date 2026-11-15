@@ -38,3 +38,39 @@ export async function loginWithPassword(apiUrl: string, email: string, password:
   return { accessToken: data.accessToken.trim(), user: { ...user, id: String(user.id), role: role as UserRole,
     name: user.fullName || user.name || user.email.split('@')[0] } };
 }
+
+export async function loginWithGoogle(apiUrl: string, token: string): Promise<LoginSession> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl.replace(/\/$/, '')}/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch {
+    throw new Error('Không kết nối được máy chủ đăng nhập. Hãy kiểm tra Backend rồi thử lại.');
+  }
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = typeof data?.message === 'string' ? data.message : Array.isArray(data?.message) ? data.message.join(', ') : '';
+    throw new Error(detail || 'Đăng nhập Google thất bại. Vui lòng thử lại.');
+  }
+  const user = data?.user;
+  const rawRole = typeof user?.role === 'string' ? user.role.trim().toUpperCase() : '';
+  const role = rawRole === 'COORDINATOR' ? 'FLEET_ROUTE_COORDINATOR' : rawRole === 'DRIVER' ? 'DRIVER_ESCORT' : rawRole;
+  if (typeof data?.accessToken !== 'string' || !data.accessToken.trim() || !user ||
+    !['string', 'number'].includes(typeof user.id) || !String(user.id).trim() ||
+    typeof user.email !== 'string' || !user.email.trim() || !roles.has(role)) {
+    throw new Error('Phản hồi đăng nhập không hợp lệ. Vui lòng kiểm tra Backend rồi thử lại.');
+  }
+  return {
+    accessToken: data.accessToken.trim(),
+    user: {
+      ...user,
+      id: String(user.id),
+      role: role as UserRole,
+      name: user.fullName || user.name || user.email.split('@')[0],
+    },
+  };
+}
