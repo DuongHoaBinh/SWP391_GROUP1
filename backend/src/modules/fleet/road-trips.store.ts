@@ -3,6 +3,7 @@ import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise'
 import { CreateRoadTripDto } from './dto/create-road-trip.dto';
 import { RouteLegDto } from '../routes/dto/build-detailed-plan.dto';
 import { assertRoadCapacity } from './capacity-policy';
+import { scheduleInstant } from '../../common/schedule-time';
 
 @Injectable()
 export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
@@ -28,8 +29,9 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async create(dto: CreateRoadTripDto, actorId: number) {
-    if (!dto.originLocation.trim() || !dto.destinationLocation.trim() || !Number.isFinite(new Date(dto.plannedDeparture).getTime()) ||
-      !Number.isFinite(new Date(dto.plannedArrival).getTime()) || new Date(dto.plannedArrival) <= new Date(dto.plannedDeparture)) {
+    const departure = scheduleInstant(dto.plannedDeparture, 'Giờ đi chuyến đường bộ');
+    const arrival = scheduleInstant(dto.plannedArrival, 'Giờ đến chuyến đường bộ');
+    if (!dto.originLocation.trim() || !dto.destinationLocation.trim() || arrival <= departure || departure < Date.now()) {
       throw new BadRequestException('Cần tuyến và khoảng thời gian chuyến đường bộ hợp lệ');
     }
     const [vehicles] = await this.pool.execute<RowDataPacket[]>('SELECT * FROM vehicle WHERE vehicle_id = ?', [dto.vehicleId]);
@@ -75,7 +77,8 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
       const vehicle = vehicles.find(v => Number(v.vehicle_id) === leg.vehicleId)!;
       if (vehicle.vehicle_type === 'aircraft_stall' || vehicle.status === 'maintenance') throw new BadRequestException('Phương tiện đường bộ không hoạt động');
       if (!leg.plannedDeparture || !leg.plannedArrival) throw new BadRequestException('Cần giờ đi/đến để giữ chỗ xe');
-      const start = new Date(leg.plannedDeparture), end = new Date(leg.plannedArrival);
+      const start = new Date(scheduleInstant(leg.plannedDeparture, 'Giờ đi chặng đường bộ'));
+      const end = new Date(scheduleInstant(leg.plannedArrival, 'Giờ đến chặng đường bộ'));
       if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) throw new BadRequestException('Khoảng thời gian giữ chỗ xe không hợp lệ');
       if (leg.roadTripId && usedTrips.has(leg.roadTripId)) throw new BadRequestException('Một đơn chỉ được có một phân bổ trên cùng chuyến đường bộ');
       const [conflicts] = await db.execute<RowDataPacket[]>(`SELECT l.road_trip_id, l.stalls_booked, s.booking_type, s.requested_horse_count

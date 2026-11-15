@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { getAuthToken, getCurrentUser } from '@/lib/auth';
 
 export interface AvailableStaff {
   id: number;
@@ -535,9 +536,13 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
   }, []);
 
   const refreshStaff = useCallback(async () => {
+    if (!getAuthToken() || !['FLEET_ROUTE_COORDINATOR', 'LOGISTICS_MANAGER', 'ADMIN'].includes(getCurrentUser().role)) {
+      setAvailableStaff([]);
+      return;
+    }
     try {
       const staffList = await apiClient<AvailableStaff[]>('/fleet/staff');
-      if (Array.isArray(staffList) && staffList.length > 0) {
+      if (Array.isArray(staffList)) {
         setAvailableStaff(staffList);
       }
     } catch (err) {
@@ -595,7 +600,7 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
     window.addEventListener('storage', handleStorageChange);
 
     // Live sync with Backend
-    refreshVehicles();
+    if (getAuthToken()) void refreshVehicles();
     refreshStaff();
 
     return () => {

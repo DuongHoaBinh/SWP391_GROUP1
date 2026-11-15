@@ -5,6 +5,7 @@ import { CreateOrderDto, HorseInfoDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { calculateInsurance, totalInsuranceFee } from './insurance-policy';
 import { BookingQuote, BookingType, calculateBookingQuote, normalizeBookingType } from './booking-policy';
+import { validateRequestDates, vietnamCalendarDay } from './request-dates';
 
 interface ShipmentRow extends RowDataPacket {
   transport_mode: 'road' | 'air' | null;
@@ -111,6 +112,12 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       if (seen.has(horseId)) throw new BadRequestException('Một hồ sơ ngựa chỉ được xuất hiện một lần trong đơn');
       seen.add(horseId);
       if (horse.status !== 'active' && !(old && horse.status === 'in_transit')) throw new BadRequestException(`Ngựa "${horse.name}" hiện không sẵn sàng vận chuyển.`);
+      if (!old) {
+        const [reservations] = await db.execute<RowDataPacket[]>(`SELECT sh.shipment_id FROM shipment_horse sh
+          JOIN shipment s ON s.shipment_id = sh.shipment_id
+          WHERE sh.horse_id = ? AND s.status NOT IN ('completed','cancelled','rejected') LIMIT 1`, [horseId]);
+        if (reservations.length) throw new BadRequestException(`Ngựa "${horse.name}" đã được giữ chỗ trong đơn vận chuyển khác.`);
+      }
       const quantity = h.quantity ?? Number(old?.quantity ?? 1);
       if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > Number(horse.quantity ?? 1)) throw new BadRequestException(`Số lượng ngựa "${horse.name}" không hợp lệ hoặc vượt số lượng trong hồ sơ.`);
       const declaration = {
@@ -143,16 +150,17 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async createShipment(customerId: number, dto: CreateOrderDto): Promise<number> {
+    const dates = validateRequestDates(dto.requestedDate ?? vietnamCalendarDay(), dto.expectedArrivalDate);
     return this.transaction(async db => {
       const horses = await this.insuredHorses(db, customerId, this.horseInputs(dto));
       const count = horses.reduce((sum, h) => sum + h.quantity, 0);
       if (count !== dto.requestedHorseCount) throw new BadRequestException('Số lượng ngựa khai báo phải khớp danh sách được chọn');
       const [result] = await db.execute(`INSERT INTO shipment (customer_id, requested_by, contact_name, contact_address, contact_phone,
-        contact_email, requested_horse_count, origin_location, destination_location, requested_date, transportation_type,
+        contact_email, requested_horse_count, origin_location, destination_location, requested_date, expected_arrival_date, transportation_type,
         special_requirements, status, total_cost, transport_cost, insurance_fee, booking_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0, NULL, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0, NULL, ?, ?)`,
         [customerId, customerId, dto.contactName ?? null, dto.contactAddress ?? null, dto.contactPhone, dto.contactEmail,
-        count, dto.originLocation, dto.destinationLocation, dto.requestedDate ? new Date(dto.requestedDate) : new Date(),
+        count, dto.originLocation, dto.destinationLocation, dates.requestedDate, dates.expectedArrivalDate,
         dto.transportationType ?? null, dto.specialRequirements ?? null, totalInsuranceFee(horses), normalizeBookingType(dto.bookingType)]);
       const shipmentId = (result as { insertId: number }).insertId;
       await this.insertInsuredHorses(db, shipmentId, horses);
@@ -419,6 +427,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return this.transaction(async db => {
       const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? AND customer_id = ? FOR UPDATE', [shipmentId, customerId]);
       if (!orders[0] || orders[0].status !== 'change_requested') throw new BadRequestException('Chỉ được gửi lại yêu cầu đang cần chỉnh sửa');
+      const dateChanged = dto.requestedDate != null || dto.expectedArrivalDate != null;
+      const dates = dateChanged ? validateRequestDates(dto.requestedDate ?? vietnamCalendarDay(new Date(orders[0].requested_date)),
+        dto.expectedArrivalDate ?? (orders[0].expected_arrival_date ? vietnamCalendarDay(new Date(orders[0].expected_arrival_date)) : undefined),
+        new Date(), dto.requestedDate != null) : null;
       const bookingType = normalizeBookingType(dto.bookingType ?? orders[0].booking_type);
       if (bookingType !== orders[0].booking_type) {
         await db.execute('INSERT INTO shipment_booking_revision (shipment_id, changed_by, previous_booking_type, booking_type) VALUES (?, ?, ?, ?)',
@@ -440,11 +452,12 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       }
       await db.execute(`UPDATE shipment SET contact_name = COALESCE(?, contact_name), contact_address = COALESCE(?, contact_address),
         contact_phone = COALESCE(?, contact_phone), contact_email = COALESCE(?, contact_email), origin_location = COALESCE(?, origin_location),
-        destination_location = COALESCE(?, destination_location), requested_date = COALESCE(?, requested_date),
+        destination_location = COALESCE(?, destination_location), requested_date = COALESCE(?, requested_date), expected_arrival_date = COALESCE(?, expected_arrival_date),
         special_requirements = COALESCE(?, special_requirements), requested_horse_count = ?, insurance_fee = ?,
         total_cost = 0, transport_cost = NULL, stall_unit_price = NULL, booking_type = ?, change_request_notes = NULL, status = 'requested' WHERE shipment_id = ?`,
         [dto.contactName ?? null, dto.contactAddress ?? null, dto.contactPhone ?? null, dto.contactEmail ?? null,
-        dto.originLocation ?? null, dto.destinationLocation ?? null, dto.requestedDate ? new Date(dto.requestedDate) : null,
+        dto.originLocation ?? null, dto.destinationLocation ?? null,
+        dto.requestedDate != null ? dates!.requestedDate : null, dto.expectedArrivalDate != null ? dates!.expectedArrivalDate : null,
         dto.specialRequirements ?? null, count, fee, bookingType, shipmentId]);
       if (dto.medicalDocumentUrl) await db.execute("INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'document', ?)", [shipmentId, dto.medicalDocumentUrl, customerId]);
       return true;

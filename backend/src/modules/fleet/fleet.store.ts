@@ -237,6 +237,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   async assignVehicles(shipmentId: number, vehicleIds: number[]): Promise<void> {
     const db = await this.pool.getConnection();
     try {
+    await db.execute('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
     await db.beginTransaction();
     const [orders] = await db.execute<RowDataPacket[]>('SELECT status, requested_horse_count FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
     if (!orders[0] || !['approved', 'planning'].includes(orders[0].status)) throw new BadRequestException('Chỉ phân công xe trước khi kế hoạch được xác nhận');
@@ -247,6 +248,11 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       const [conflicts] = await db.execute<RowDataPacket[]>(`SELECT sv.shipment_id FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id
         WHERE sv.vehicle_id IN (${ids.map(() => '?').join(',')}) AND sv.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','rejected')`, [...ids, shipmentId]);
       if (conflicts.length) throw new BadRequestException('Xe đã có phân công. Hãy chọn chuyến đường bộ trong màn hình lập tuyến để ghép chỗ và kiểm tra lịch');
+      const [reservations] = await db.execute<RowDataPacket[]>(`SELECT l.leg_id FROM route_leg l
+        JOIN route r ON r.route_id = l.route_id JOIN shipment s ON s.shipment_id = r.shipment_id
+        WHERE l.vehicle_id IN (${ids.map(() => '?').join(',')}) AND s.shipment_id <> ?
+        AND s.status NOT IN ('completed','cancelled','rejected')`, [...ids, shipmentId]);
+      if (reservations.length) throw new BadRequestException('Xe đã được giữ chỗ trong lộ trình. Hãy dùng màn hình lập tuyến để kiểm tra lịch và ghép chỗ');
     }
     const [planned] = await db.execute<RowDataPacket[]>('SELECT l.leg_id FROM route_leg l JOIN route r ON r.route_id = l.route_id WHERE r.shipment_id = ? AND l.vehicle_id IS NOT NULL', [shipmentId]);
     if (planned.length) throw new BadRequestException('Xe đã có trong kế hoạch. Hãy điều chỉnh tại màn hình lập tuyến');

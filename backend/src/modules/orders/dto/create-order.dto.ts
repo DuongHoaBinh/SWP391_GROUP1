@@ -121,6 +121,11 @@ export class CreateOrderDto {
   @IsString()
   requestedDate?: string;
 
+  @ApiPropertyOptional({ example: '2099-02-03', description: 'Ngày đến mong muốn YYYY-MM-DD, không phải cam kết giao hàng' })
+  @IsOptional()
+  @IsString()
+  expectedArrivalDate?: string;
+
   @ApiPropertyOptional({
     example: 'International',
     enum: ['International', 'Domestic'],

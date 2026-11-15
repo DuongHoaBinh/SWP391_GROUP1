@@ -72,13 +72,13 @@ export default function ManagerDashboardPage() {
   );
 
   // Modal States
-  const [activeModal, setActiveModal] = useState<'NONE' | 'APPROVE' | 'REJECT' | 'CHANGE'>('NONE');
+  const [activeModal, setActiveModal] = useState<'NONE' | 'REJECT' | 'CHANGE'>('NONE');
   const [selectedOrderId, setSelectedOrderId] = useState<number | string | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState('');
 
-  const openModal = (type: 'APPROVE' | 'REJECT' | 'CHANGE', id: number | string) => {
+  const openModal = (type: 'REJECT' | 'CHANGE', id: number | string) => {
     setActiveModal(type);
     setSelectedOrderId(id);
     setInputValue('');
@@ -98,18 +98,7 @@ export default function ManagerDashboardPage() {
     setModalError('');
 
     try {
-      if (activeModal === 'APPROVE') {
-        const cost = parseFloat(inputValue);
-        if (isNaN(cost) || cost <= 0) {
-          setModalError('Please enter a valid positive cost amount.');
-          setIsSubmitting(false);
-          return;
-        }
-        await apiClient(`/orders/${selectedOrderId}/approve`, {
-          method: 'PATCH',
-          body: JSON.stringify({ totalCost: cost }),
-        });
-      } else if (activeModal === 'REJECT') {
+      if (activeModal === 'REJECT') {
         if (!inputValue.trim()) {
           setModalError('Please enter a reason for rejection.');
           setIsSubmitting(false);
@@ -135,8 +124,7 @@ export default function ManagerDashboardPage() {
       closeModal();
       
       // Toast Notification
-      if (activeModal === 'APPROVE') toast.success(`Request ${selectedOrderId} approved successfully!`);
-      else if (activeModal === 'REJECT') toast.success(`Request ${selectedOrderId} has been rejected.`);
+      if (activeModal === 'REJECT') toast.success(`Request ${selectedOrderId} has been rejected.`);
       else if (activeModal === 'CHANGE') toast.success(`Changes requested for ${selectedOrderId}.`);
       
     } catch (err) {
@@ -955,7 +943,7 @@ export default function ManagerDashboardPage() {
                             {req.status === 'requested' && (
                               <>
                                 <button
-                                  onClick={() => openModal('APPROVE', req.id)}
+                                  onClick={() => router.push(`/manager/requests/${req.id}`)}
                                   style={{
                                     padding: '6px 12px',
                                     border: '1px solid #10b981',
@@ -1562,9 +1550,7 @@ export default function ManagerDashboardPage() {
         isOpen={activeModal !== 'NONE'}
         onClose={closeModal}
         title={
-          activeModal === 'APPROVE'
-            ? 'Approve Transport Request'
-            : activeModal === 'REJECT'
+          activeModal === 'REJECT'
             ? 'Reject Transport Request'
             : 'Request Changes'
         }
@@ -1576,32 +1562,6 @@ export default function ManagerDashboardPage() {
             <div style={{ marginBottom: '16px', padding: '12px', borderRadius: '8px', backgroundColor: '#fef2f2', color: '#b91c1c', fontSize: '13px', border: '1px solid #fecaca' }}>
               <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px' }} />
               {modalError}
-            </div>
-          )}
-
-          {activeModal === 'APPROVE' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Total Cost (USD)</label>
-              <input
-                type="number"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder="e.g. 15000"
-                style={{
-                  padding: '12px',
-                  borderRadius: '8px',
-                  border: '1px solid #d1d5db',
-                  fontSize: '14px',
-                  outline: 'none',
-                  boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
-                  width: '100%',
-                  boxSizing: 'border-box'
-                }}
-                autoFocus
-              />
-              <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
-                Please specify the agreed total transport cost to proceed.
-              </p>
             </div>
           )}
 
@@ -1684,7 +1644,7 @@ export default function ManagerDashboardPage() {
                 padding: '10px 20px',
                 borderRadius: '8px',
                 border: 'none',
-                backgroundColor: activeModal === 'APPROVE' ? '#10b981' : activeModal === 'REJECT' ? '#ef4444' : '#2563eb',
+                backgroundColor: activeModal === 'REJECT' ? '#ef4444' : '#2563eb',
                 color: '#ffffff',
                 fontWeight: 600,
                 fontSize: '13px',
@@ -1699,7 +1659,6 @@ export default function ManagerDashboardPage() {
                 <>Processing...</>
               ) : (
                 <>
-                  {activeModal === 'APPROVE' && <CheckCircle2 size={16} />}
                   {activeModal === 'REJECT' && <X size={16} />}
                   {activeModal === 'CHANGE' && <AlertTriangle size={16} />}
                   Confirm

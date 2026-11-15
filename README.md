@@ -64,6 +64,25 @@ The authentication API is backend-only on this feature branch. Customer registra
 
 With this configuration, `POST /api/auth/register` stores the pending OTP and password hash in MySQL and sends the OTP by email. `POST /api/auth/verify-otp` creates the `Customer` row in `user`, and `POST /api/auth/login` reads the account from MySQL.
 
+### Updating an existing database for insurance and road bookings
+
+Back up the local database, check the connection in `backend/.env`, then run from `backend`:
+
+```powershell
+npm run migrate:order-features
+```
+
+This first ensures the missing `shipment.transportation_type` column through idempotent migration 021, then applies feature migrations 015–020, including insurance declarations, booking/pricing, road-trip reservations and invoices. It does not infer or overwrite historical scope values. To repair only `Unknown column 'transportation_type'`, run `npm run migrate:transportation-type` after backing up the target database. Do not reimport the base schema over existing data. Historical order totals and quantities are retained. Set `INSURANCE_USD_TO_VND` to the team's approved rate to enable USD declarations; leave it empty for VND only. A local test rate is not a live bank exchange rate.
+
+The full isolated HTTP/MySQL suite uses Docker by default. If Docker is unavailable, an existing MySQL installation can supply the executable, without sharing its database:
+
+```powershell
+$env:TEST_MYSQL_BASEDIR = 'C:\path\to\mysql'
+npm run test:insurance
+```
+
+The runner initializes a fresh temporary MySQL data directory, binds a separate loopback port, executes migration/HTTP/concurrency/payment tests and checks invoice/payment persistence after restarting the test API. It never migrates the application database. Shared/Dedicated operations cover road transport; air sharing/charter operations require a separately approved model.
+
 For local development, start the backend on port `5000` and the Next.js frontend on port `3001` (for example, `next dev -p 3001`).
 
 ### Login troubleshooting

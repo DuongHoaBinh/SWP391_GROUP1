@@ -2,6 +2,8 @@
   "name": "racehorse-transport-backend",
   "private": true,
   "scripts": {
+    "migrate:order-features": "npm run migrate:transportation-type && npm run migrate:sepay && npm run migrate:payment-gate && npm run migrate:insurance && npm run migrate:booking && npm run migrate:road-trips && npm run migrate:transport-mode",
+    "migrate:transportation-type": "node ../database/apply-transportation-type-migration.cjs",
     "migrate:booking": "node ../database/apply-booking-migration.cjs",
     "test:booking": "npm run build && node scripts/test-payment-gate.cjs",
     "build": "nest build",

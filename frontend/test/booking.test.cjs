@@ -22,7 +22,18 @@ function load(file) {
 const { previewBookingQuote, bookingQuotePayload } = load('booking-policy.ts');
 const { BookingChoice } = load('components/BookingChoice.tsx');
 const { BookingSummary, BookingQuoteSummary } = load('components/BookingSummary.tsx');
+const { getReservedHorseIds } = load('horse-availability.ts');
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
+
+test('horse selection respects unfinished order reservations even when profile availability is stale', () => {
+  const reserved = getReservedHorseIds([
+    { status: 'requested', horses: [{ horseId: 1 }] }, { status: 'confirmed', horses: [{ horseId: 2 }] },
+    { status: 'ready_to_depart', horses: [{ horseId: 1 }, { horseId: 3 }] },
+    { status: 'completed', horses: [{ horseId: 4 }] }, { status: 'cancelled', horses: [{ horseId: 5 }] },
+    { status: 'rejected', horses: [{ horseId: 6 }] },
+  ]);
+  assert.deepEqual([...reserved].sort(), ['1', '2', '3']);
+});
 
 test('shared quote multiplies total quantity; charter remains flat with separate insurance', () => {
   assert.equal(previewBookingQuote('2000000', 'shared_stall', 2).freight, 4000000);
@@ -38,6 +49,7 @@ test('booking cards keep both options available and label recommendations withou
     assert.equal((html.match(/type="radio"/g) || []).length, 2);
     assert.equal((html.match(/checked=""/g) || []).length, 1);
     assert.doesNotMatch(html, /disabled/); assert.match(html, /Ghép ô chuồng/); assert.match(html, /Bao nguyên xe/);
+    assert.match(html, /hàng không, phương án đặt chỗ cần được xác nhận riêng/);
     assert.match(html, horseCount <= 2 ? /Phù hợp với số lượng đang chọn/ : /Gợi ý cho đoàn của bạn/);
   }
 });

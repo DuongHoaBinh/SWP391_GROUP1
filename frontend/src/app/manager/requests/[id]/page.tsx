@@ -43,9 +43,11 @@ const fetcher = (url: string) => apiClient<any>(url);
 const STATUS_CONFIG: Record<string, { label: string; bg: string; color: string; border: string }> = {
   requested: { label: 'Chờ duyệt', bg: '#fef3c7', color: '#b45309', border: '#fde68a' },
   under_review: { label: 'Đang xem xét', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  change_requested: { label: 'Cần chỉnh sửa', bg: '#fff7ed', color: '#9a3412', border: '#fed7aa' },
   approved: { label: 'Đã duyệt báo giá', bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   rejected: { label: 'Đã từ chối', bg: '#fee2e2', color: '#b91c1c', border: '#fecaca' },
   planning: { label: 'Đang lập kế hoạch', bg: '#f3e8ff', color: '#7c3aed', border: '#ddd6fe' },
+  confirmed: { label: 'Đã xác nhận lịch trình', bg: '#eef2ff', color: '#4338ca', border: '#c7d2fe' },
   ready_to_depart: { label: 'Sẵn sàng xuất phát', bg: '#ccfbf1', color: '#0f766e', border: '#99f6e4' },
   in_transit: { label: 'Đang vận chuyển', bg: '#e0f2fe', color: '#0369a1', border: '#bae6fd' },
   completed: { label: 'Đã hoàn thành', bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
@@ -114,7 +116,8 @@ export default function ManagerRequestDetailPage() {
   );
 
   const statusKey = String(order?.status || 'requested').toLowerCase();
-  const statusMeta = STATUS_CONFIG[statusKey] || STATUS_CONFIG.requested;
+  const statusMeta = STATUS_CONFIG[statusKey]?.label ? STATUS_CONFIG[statusKey] :
+    { label: 'Trạng thái chưa xác định', bg: '#f1f5f9', color: '#475569', border: '#e2e8f0' };
 
   // Determine transportation type
   const rawType = String(order?.transportationType || order?.transportType || '').toLowerCase();
@@ -284,7 +287,7 @@ export default function ManagerRequestDetailPage() {
               <ChevronRight size={12} />
               <span className="text-slate-700 font-bold">{requestCode}</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
                 Chi Tiết Đơn Vận Chuyển {requestCode}
               </h1>

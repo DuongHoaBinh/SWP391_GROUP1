@@ -44,6 +44,7 @@ export default function CoordinatorLayout({
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const [currentUser, setCurrentUser] = useState<ReturnType<typeof getCurrentUser> | null>(null);
 
   const fetchUnread = async () => {
     try {
@@ -71,9 +72,11 @@ export default function CoordinatorLayout({
       });
     }
 
+    setCurrentUser(getCurrentUser());
     fetchUnread();
 
     const handleNotificationsUpdated = () => {
+      setCurrentUser(getCurrentUser());
       fetchUnread();
     };
     window.addEventListener('notifications-updated', handleNotificationsUpdated);
@@ -134,6 +137,10 @@ export default function CoordinatorLayout({
     },
   ];
 
+  const currentPageTitle = [...navItems, ...managementItems]
+    .filter(item => pathname === item.href || pathname.startsWith(item.href + '/'))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.label ?? t('coordinator.title', 'Dashboard');
+
   const handleLogoutConfirm = () => {
     setShowLogoutModal(false);
     clearAuthSession();
@@ -156,7 +163,6 @@ export default function CoordinatorLayout({
           width: '260px',
           backgroundColor: '#0f172a',
           color: '#94a3b8',
-          display: 'flex',
           flexDirection: 'column',
           height: '100%',
           zIndex: 40,
@@ -346,11 +352,11 @@ export default function CoordinatorLayout({
                   flexShrink: 0,
                 }}
               >
-                AM
+                {currentUser?.initials || 'FC'}
               </div>
               <div style={{ minWidth: 0 }}>
                 <p style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  Alex Morgan
+                  {currentUser?.name || 'Fleet Coordinator'}
                 </p>
                 <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   Route Coordinator
@@ -547,6 +553,7 @@ export default function CoordinatorLayout({
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100%', overflow: 'hidden' }}>
         {/* TOP HEADER */}
         <header
+          className="gap-3 px-4 sm:px-6"
           style={{
             height: '72px',
             backgroundColor: '#ffffff',
@@ -554,7 +561,6 @@ export default function CoordinatorLayout({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0 24px',
             position: 'sticky',
             top: 0,
             zIndex: 30,
@@ -562,17 +568,16 @@ export default function CoordinatorLayout({
           }}
         >
           {/* Left: Mobile Menu Toggle & Title */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div className="min-w-0 flex-1" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Open mobile menu"
-              className="md:hidden"
+              className="md:hidden flex items-center justify-center shrink-0"
               style={{
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
                 padding: '4px',
-                display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#374151',
@@ -580,26 +585,26 @@ export default function CoordinatorLayout({
             >
               <Menu size={22} />
             </button>
-            <div>
-              <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1.2 }}>
-                {t('coordinator.title', 'Dashboard')}
+            <div className="min-w-0">
+              <h2 className="truncate" style={{ fontSize: '17px', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1.2 }}>
+                {currentPageTitle}
               </h2>
-              <p style={{ fontSize: '13px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }} className="hidden sm:block">
+              {pathname === '/coordinator' && <p style={{ fontSize: '13px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }} className="hidden sm:block">
                 {t('coordinator.subtitle', 'Overview of fleet, routes and transportation schedules.')}
-              </p>
+              </p>}
             </div>
           </div>
 
           {/* Center: Search */}
           <div
-            className="hidden sm:flex"
+            className="hidden xl:flex"
             style={{
               alignItems: 'center',
               backgroundColor: '#f9fafb',
               border: '1px solid #e5e7eb',
               borderRadius: '8px',
               padding: '8px 14px',
-              width: '380px',
+              width: '320px',
               position: 'relative',
             }}
           >
@@ -704,10 +709,10 @@ export default function CoordinatorLayout({
                   fontWeight: 700,
                 }}
               >
-                AM
+                {currentUser?.initials || 'FC'}
               </div>
-              <div style={{ textAlign: 'left', lineHeight: 1.2 }}>
-                <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0 }}>Alex Morgan</p>
+              <div className="hidden lg:block" style={{ textAlign: 'left', lineHeight: 1.2, maxWidth: '160px' }}>
+                <p className="truncate" style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0 }}>{currentUser?.name || 'Fleet Coordinator'}</p>
                 <p style={{ fontSize: '10px', color: '#6b7280', margin: 0, fontWeight: 500, display: 'flex', alignItems: 'center', gap: '3px' }}>
                   Route Coordinator <ChevronDown size={10} />
                 </p>

@@ -15,6 +15,13 @@ const previous = { horse_id: 1, quantity: 3, declared_value: '10000', declared_c
   emergency_vet_covered: 1, insurance_policy_version: 'equine-v1' };
 const horseDb = { execute: async () => [[{ horse_id: 1, name: 'Horse', status: 'in_transit', quantity: 5 }]] };
 
+test('a stale active horse flag cannot bypass an unfinished shipment reservation', async () => {
+  const db = { execute: async sql => sql.includes('FROM horse\n')
+    ? [[{ horse_id: 1, name: 'Horse', status: 'active', quantity: 5 }]]
+    : [[{ shipment_id: 99 }]] };
+  await assert.rejects(new OrdersStore().insuredHorses(db, 2, [{ horseId: 1, name: 'Horse' }]), /đơn vận chuyển khác/);
+});
+
 test('partial policy changes preserve omitted package, currency and quantity', async () => {
   const before = process.env.INSURANCE_USD_TO_VND;
   try {

@@ -10,17 +10,44 @@ const { renderToStaticMarkup } = require('react-dom/server');
 function load(file) {
   const filename = path.resolve(__dirname, '../src/features/orders', file);
   const compiled = new Module(filename, module); compiled.filename = filename; compiled.paths = module.paths;
-  compiled.require = name => name.startsWith('.') ? load(path.relative(path.resolve(__dirname, '../src/features/orders'), path.resolve(path.dirname(filename), name + '.tsx')).replace(/insurance-policy\.tsx$/, 'insurance-policy.ts')) : require(name);
+  compiled.require = name => {
+    if (!name.startsWith('.')) return require(name);
+    const base = path.resolve(path.dirname(filename), name);
+    const resolved = ['.ts', '.tsx'].map(extension => base + extension).find(candidate => fs.existsSync(candidate));
+    return load(path.relative(path.resolve(__dirname, '../src/features/orders'), resolved));
+  };
   compiled._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename);
   return compiled.exports;
 }
 const { previewInsurance, defaultInsurance } = load('insurance-policy.ts');
+const { formatDeclaredValue, parseDeclaredValueEntry, normalizeDeclaredValuePaste } = load('declared-value-input.ts');
 const { InsuranceSelection } = load('components/InsuranceSelection.tsx');
 const { CostSummary, InsuranceSummary } = load('components/InsuranceSummary.tsx');
 const policy = { version: 'equine-v1', usdToVnd: 25000, packages: [
   { code: 'basic', feeBasisPoints: 0 }, { code: 'standard', feeBasisPoints: 150 }, { code: 'premium', feeBasisPoints: 300 },
 ] };
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
+
+test('grouped horse valuations retain their exact value and produce the same premium', () => {
+  for (const [entry, canonical, display] of [['1000000', '1000000', '1.000.000'], ['1.000.000', '1000000', '1.000.000'],
+    ['1.000.000,50', '1000000.50', '1.000.000,50'], ['0,01', '0.01', '0,01'], ['', '', '']]) {
+    const parsed = parseDeclaredValueEntry(entry);
+    assert.equal(parsed, canonical); assert.equal(formatDeclaredValue(parsed), display);
+    assert.equal(Number(parsed || 0), Number(canonical || 0));
+  }
+  const value = parseDeclaredValueEntry('1.000.000');
+  assert.equal(previewInsurance({ declaredValue: value, declaredCurrency: 'VND', insurancePackage: 'standard' }, policy).fee, 15000);
+  assert.equal(previewInsurance({ declaredValue: parseDeclaredValueEntry('1.000,50'), declaredCurrency: 'USD', insurancePackage: 'premium' }, policy).fee, 750375);
+});
+
+test('pasted Vietnamese, plain API decimals and English grouped amounts retain cents; malformed input is refused', () => {
+  for (const entry of ['1.000.000,50', '1000000.50', '1,000,000.50']) {
+    assert.equal(parseDeclaredValueEntry(normalizeDeclaredValuePaste(entry)), '1000000.50');
+  }
+  assert.equal(formatDeclaredValue('1000.'), '1.000,');
+  assert.equal(parseDeclaredValueEntry('1.000,'), '1000.');
+  for (const entry of ['-100', '1e6', 'abc', '1,2345', '12.34.56', '1,2,3']) assert.equal(normalizeDeclaredValuePaste(entry), null);
+});
 
 test('insurance previews match policy fees and reject invalid paid valuations', () => {
   assert.equal(previewInsurance(defaultInsurance, null).fee, 0);
@@ -54,6 +81,24 @@ test('saved policy summary renders compensation, veterinary coverage and stored 
     maxCompensation: 250000000, emergencyVetCovered: true }], transportCost: 10000000, insuranceFee: 15000000, totalCost: 25000000 });
   assert.match(html, /tỷ giá đã lưu/); assert.match(html, /250\.000\.000 VNĐ/); assert.match(html, /cấp cứu thú y/);
   assert.match(html, /25\.000\.000 VNĐ/); assert.doesNotMatch(html, /<script>/);
+});
+
+test('approval policy details can omit the saved cost table when a live quote summary is present', () => {
+  const html = render(InsuranceSummary, { horses: [{ name: 'Horse', insurancePackage: 'standard' }],
+    transportCost: null, insuranceFee: 1500000, showCostSummary: false });
+  assert.match(html, /Giá trị khai báo/);
+  assert.doesNotMatch(html, /Tóm tắt chi phí|Chờ Manager báo giá/);
+});
+
+test('an unchanged stored USD declaration remains selectable without a current USD rate', () => {
+  const saved = { horseId: 1, name: 'Horse', declaredValue: 10000, declaredCurrency: 'USD',
+    insurancePackage: 'standard', exchangeRate: 20000, insuranceFee: 3000000 };
+  const html = render(InsuranceSelection, { horses: [{ id: '1', name: 'Horse' }],
+    values: { '1': { declaredValue: '10000', declaredCurrency: 'USD', insurancePackage: 'standard' } },
+    savedPolicies: { '1': saved }, policy: null, onChange() {}, onRetry() {} });
+  assert.doesNotMatch(html, /<option value="USD" disabled/);
+  assert.match(html, /USD \(tỷ giá đã lưu\)/);
+  assert.match(html, /3\.000\.000 VNĐ/);
 });
 
 test('insurance amendments preserve stored USD premiums until the declaration changes', () => {

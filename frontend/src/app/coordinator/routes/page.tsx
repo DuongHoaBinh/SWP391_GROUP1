@@ -25,6 +25,8 @@ import {
 import { buildEquineRoute, normalizeVietnamese } from '@/lib/geo-corridors';
 import { bookingName, type BookingType } from '@/features/orders/booking-policy';
 import { RoadTripPicker, LegScheduleFields } from '@/features/routes/components/RoadTripPicker';
+import { StopScheduleFields } from '@/features/routes/components/StopScheduleFields';
+import { savedPlanView } from '@/features/routes/plan-display';
 
 const RoutePlanningMap = dynamic(
   () => import('@/components/maps/RoutePlanningMap'),
@@ -66,7 +68,7 @@ function renderHorseNamesDisplay(horses?: Array<{ name?: string }>, horseCount?:
     return (
       <span className="flex items-center gap-1.5">
         <span>{names[0]}</span>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">1 con</span>
+        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">{count} con</span>
       </span>
     );
   }
@@ -76,7 +78,7 @@ function renderHorseNamesDisplay(horses?: Array<{ name?: string }>, horseCount?:
         <span className="text-slate-900">{names[0]}</span>
         <span className="text-slate-400">&amp;</span>
         <span className="text-slate-900">{names[1]}</span>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-200">2 ngựa</span>
+        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-200">{count} ngựa</span>
       </span>
     );
   }
@@ -127,7 +129,7 @@ export default function RoutePlanningPage() {
   const [searchMode, setSearchMode] = useState<'air' | 'road'>('air');
   const [transportTypeChoice, setTransportTypeChoice] = useState<'auto' | 'Domestic' | 'International'>('auto');
   const [simulatedKm, setSimulatedKm] = useState<number>(1450);
-  const [simulatedHours, setSimulatedHours] = useState<number>(6);
+  const [simulatedHours, setSimulatedHours] = useState<number | null>(null);
   const [catalogSearchTerm, setCatalogSearchTerm] = useState<string>('');
 
   // Catalog Modals (Xem chi tiết & Tạo tuyến mẫu mới)
@@ -269,7 +271,7 @@ export default function RoutePlanningPage() {
             origin: o.originLocation || 'Cu Chi Stables, HCMC',
             destination: o.destinationLocation || 'Singapore Turf Club',
             departureDate: o.requestedDate
-              ? new Date(o.requestedDate).toLocaleDateString('vi-VN')
+              ? new Date(o.requestedDate).toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
               : 'Oct 20, 2026',
             status: o.status,
             paymentState: o.paymentStatus === 'succeeded' ? 'PAID' : o.paymentStatus === 'pending' ? 'PENDING' : o.paymentStatus === 'review' ? 'NEEDS_REVIEW' : 'UNPAID',
@@ -491,6 +493,19 @@ export default function RoutePlanningPage() {
   const handleOpenDetailModal = (order: PlanningOrder, templateToApply?: RouteItem) => {
     setSelectedPlanningOrder(order);
     const existingRoute = order.routeDetail;
+
+    const lockedPlan = existingRoute && (['approved', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(existingRoute.planStatus) ||
+      ['in_transit', 'completed'].includes(order.status));
+    if (lockedPlan && (!existingRoute.activeIncident || order.status === 'completed')) {
+      const saved = savedPlanView(existingRoute);
+      setPlanRouteName(saved.routeName);
+      setPlanTotalDistanceKm(saved.distanceKm);
+      setNotes(saved.notes);
+      setLegs(saved.legs);
+      setStops(saved.stops);
+      setIsDetailModalOpen(true);
+      return;
+    }
 
     setNotes(existingRoute?.strategicNotes || 'Nhiệt độ khoang xe 18°C. Cung cấp nước điện giải sau mỗi 3 giờ.');
 
@@ -1024,7 +1039,7 @@ export default function RoutePlanningPage() {
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-slate-900 m-0">Cross-Border Route Planning</h1>
             <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800">
               Điều Phối Tuyến &amp; Kế Hoạch Thực Thi
@@ -1085,7 +1100,7 @@ export default function RoutePlanningPage() {
       {activeTab === 'flow3_planning' && (
         <div className="flex flex-col gap-5">
           {/* Search bar */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center justify-between">
+          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 w-full sm:w-96">
               <Search size={16} className="text-slate-400 mr-2 shrink-0" />
               <input
@@ -1096,7 +1111,7 @@ export default function RoutePlanningPage() {
                 className="border-none outline-none text-sm w-full bg-transparent"
               />
             </div>
-            <div className="text-xs text-slate-500 flex items-center gap-1.5">
+            <div className="text-xs text-slate-500 flex flex-wrap items-center gap-1.5 [&>*]:whitespace-nowrap">
               <span>Định hướng từ Manager</span>
               <span className="text-slate-400">→</span>
               <strong className="text-blue-700">Dựng chặng chi tiết</strong>
@@ -1121,7 +1136,7 @@ export default function RoutePlanningPage() {
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                     <div className="flex items-center gap-3">
-                      <span className="font-extrabold text-blue-600 text-sm bg-blue-50 px-2.5 py-1 rounded-md">
+                      <span className="shrink-0 whitespace-nowrap font-extrabold text-blue-600 text-sm bg-blue-50 px-2.5 py-1 rounded-md">
                         {order.requestCode}
                       </span>
                       <div>
@@ -1296,7 +1311,7 @@ export default function RoutePlanningPage() {
                         {order.origin} → {order.destination}
                       </p>
                       <p className="text-slate-500 m-0 mt-1">
-                        Tên tuyến: <strong>{route?.routeName || 'Chưa đặt tên'}</strong> • Cự ly: <strong>{route?.totalDistanceKm || 850} km</strong>
+                        Tên tuyến: <strong>{route?.routeName || 'Chưa đặt tên'}</strong> • Cự ly: <strong>{route?.totalDistanceKm != null ? `${route.totalDistanceKm} km` : 'Chưa cập nhật'}</strong>
                       </p>
                     </div>
 
@@ -1662,6 +1677,7 @@ export default function RoutePlanningPage() {
             maxWidth="920px"
           >
             <div className="flex flex-col gap-6 max-h-[75vh] overflow-y-auto pr-1">
+              {isReadOnlyModal && legs.length === 0 && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Kế hoạch đã khóa nhưng chưa có chặng được lưu trong hệ thống. Vui lòng kiểm tra dữ liệu với Manager; không có xe hoặc chặng mẫu nào được coi là phân bổ đã xác nhận.</p>}
               <p className="rounded-lg bg-blue-50 p-3 font-semibold text-blue-800">{bookingName(selectedPlanningOrder.bookingType)} · {selectedPlanningOrder.horseCount} ô chuồng{selectedPlanningOrder.transportMode ? ` · ${selectedPlanningOrder.transportMode === 'road' ? 'Đường bộ' : 'Hàng không'}` : ''}</p>
               {/* IN-TRANSIT & INCIDENT & APPROVAL & COMPLETED BANNERS */}
               {isCompleted ? (
@@ -1737,19 +1753,19 @@ export default function RoutePlanningPage() {
                 <div>
                   <span className="text-slate-400 block text-[10px] uppercase font-bold">Loại xe Manager chọn:</span>
                   <strong className="text-blue-900">
-                    {selectedPlanningOrder.routeDetail?.managerVehicleType || 'Xe chuyên dụng 4 stall'}
+                    {selectedPlanningOrder.routeDetail?.managerVehicleType || 'Chưa chỉ định'}
                   </strong>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px] uppercase font-bold">Hãng hàng không:</span>
                   <strong className="text-blue-900">
-                    {selectedPlanningOrder.routeDetail?.managerAirlineName || 'Singapore Airlines Cargo'}
+                    {selectedPlanningOrder.routeDetail?.managerAirlineName || 'Chưa chỉ định / không áp dụng'}
                   </strong>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px] uppercase font-bold">Cặp Sân bay:</span>
                   <strong className="text-blue-900">
-                    {selectedPlanningOrder.routeDetail?.managerDepartureAirportCode || 'SGN'} → {selectedPlanningOrder.routeDetail?.managerArrivalAirportCode || 'SIN'}
+                    {selectedPlanningOrder.routeDetail?.managerDepartureAirportCode || '—'} → {selectedPlanningOrder.routeDetail?.managerArrivalAirportCode || '—'}
                   </strong>
                 </div>
               </div>
@@ -1866,6 +1882,7 @@ export default function RoutePlanningPage() {
                 <input
                   type="text"
                   value={planRouteName}
+                  disabled={isReadOnlyModal}
                   onChange={(e) => setPlanRouteName(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold focus:border-blue-500 outline-none"
                   placeholder="Ví dụ: Hành lang Củ Chi - Tân Sơn Nhất - Singapore Turf Club"
@@ -1878,6 +1895,7 @@ export default function RoutePlanningPage() {
                 <input
                   type="number"
                   value={planTotalDistanceKm}
+                  disabled={isReadOnlyModal}
                   onChange={(e) => setPlanTotalDistanceKm(Number(e.target.value))}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold focus:border-blue-500 outline-none"
                 />
@@ -2325,7 +2343,8 @@ export default function RoutePlanningPage() {
               )}
 
               {/* Stops Table */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <p className="text-xs text-slate-600">Lập giờ đến/rời trạm theo Việt Nam (UTC+07:00). Chọn chặng chứa trạm nếu phù hợp; trạm trung chuyển giữa hai chặng có thể để trong toàn hành trình. Tính đủ thời gian nghỉ, kiểm dịch và bàn giao trước khi gửi duyệt.</p>
+              <div className="border border-slate-200 rounded-xl overflow-x-auto">
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase">
                     <tr>
@@ -2371,6 +2390,8 @@ export default function RoutePlanningPage() {
                             }}
                             className="w-full px-2 py-1 rounded border border-slate-200 text-xs font-medium"
                           />
+                          <StopScheduleFields stop={stop} legs={legs} readOnly={isReadOnlyModal}
+                            onChange={next => setStops(current => current.map((item, index) => index === idx ? next : item))} />
                         </td>
                         <td className="p-2.5">
                           <select
@@ -2429,6 +2450,7 @@ export default function RoutePlanningPage() {
               <textarea
                 rows={2}
                 value={notes}
+                disabled={isReadOnlyModal}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Nhiệt độ khoang xe, lịch tiêm/kiểm tra thú y FEI, hướng dẫn bàn giao tại cửa khẩu..."
                 className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:border-blue-500 outline-none resize-none"

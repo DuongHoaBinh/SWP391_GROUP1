@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { vietnamDateString } from '@/lib/transport-dates';
 import { useRouter } from 'next/navigation';
 import {
   Search,
@@ -28,7 +29,7 @@ import { bookingName, bookingQuotePayload, type BookingType } from '@/features/o
 import { buildEquineRoute } from '@/lib/geo-corridors';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
-type ShipmentStatus = 'requested' | 'under_review' | 'approved' | 'rejected' | 'planning' | 'in_transit' | 'completed' | 'cancelled';
+type ShipmentStatus = 'requested' | 'under_review' | 'change_requested' | 'approved' | 'rejected' | 'planning' | 'confirmed' | 'ready_to_depart' | 'in_transit' | 'completed' | 'cancelled';
 
 interface OrderHorse extends Partial<InsuredHorse> {
   horseId?: number;
@@ -85,9 +86,12 @@ type SortOrder = 'asc' | 'desc';
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
   requested: 'Pending Approval',
   under_review: 'Under Review',
+  change_requested: 'Changes Requested',
   approved: 'Approved',
   rejected: 'Rejected',
   planning: 'Planning',
+  confirmed: 'Confirmed',
+  ready_to_depart: 'Ready to Depart',
   in_transit: 'In Transit',
   completed: 'Completed',
   cancelled: 'Cancelled',
@@ -96,9 +100,12 @@ const STATUS_LABELS: Record<ShipmentStatus, string> = {
 const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border: string }> = {
   requested: { bg: '#fef3c7', color: '#b45309', border: '#fde68a' },
   under_review: { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  change_requested: { bg: '#fff7ed', color: '#9a3412', border: '#fed7aa' },
   approved: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   rejected: { bg: '#fee2e2', color: '#b91c1c', border: '#fecaca' },
   planning: { bg: '#f3e8ff', color: '#7c3aed', border: '#ddd6fe' },
+  confirmed: { bg: '#eef2ff', color: '#4338ca', border: '#c7d2fe' },
+  ready_to_depart: { bg: '#ecfdf5', color: '#047857', border: '#a7f3d0' },
   in_transit: { bg: '#e0f2fe', color: '#0369a1', border: '#bae6fd' },
   completed: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   cancelled: { bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0' },
@@ -106,17 +113,14 @@ const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border:
 
 function formatDate(iso: string | null) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 function toLocalDateString(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return vietnamDateString(d);
 }
 
 function formatCurrency(n: number) {
@@ -188,7 +192,7 @@ function exportQuotationPDF(order: TransportOrder) {
       <div class="doc-title">BÁO GIÁ VẬN CHUYỂN</div>
       <div class="doc-id">Mã yêu cầu: ${escapeQuotationText(order.requestCode || `#${order.id}`)}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
-      <div><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
+      <div><span class="status-badge">${typeof STATUS_LABELS[order.status] === 'string' ? STATUS_LABELS[order.status] : 'Unknown Status'}</span></div>
     </div>
   </div>
 
@@ -505,7 +509,7 @@ export default function ManagerRequestsPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-heading, #0f172a)', margin: 0 }}>
             Transport Requests
@@ -534,7 +538,7 @@ export default function ManagerRequestsPage() {
         {/* Row 1: Search + Status tabs */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           {/* Search */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 14px', minWidth: '260px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 14px', minWidth: 0, flex: '1 1 260px', maxWidth: '340px' }}>
             <Search size={15} color="#94a3b8" />
             <input
               type="text"
@@ -548,7 +552,7 @@ export default function ManagerRequestsPage() {
           {/* Status Filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
             <Filter size={14} color="#64748b" />
-            {(['all', 'requested', 'approved', 'rejected', 'planning', 'in_transit', 'completed', 'cancelled'] as const).map((s) => (
+            {(['all', 'requested', 'change_requested', 'approved', 'rejected', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed', 'cancelled'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setFilterStatus(s)}
@@ -619,7 +623,8 @@ export default function ManagerRequestsPage() {
         ) : error ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#dc2626', fontSize: '14px' }}>{error}</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <div className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" tabIndex={0} role="region" aria-label="Transport requests table, scroll horizontally for all columns">
+          <table className="min-w-[1100px] [&_td:first-child]:whitespace-nowrap [&_td:nth-child(4)]:whitespace-nowrap [&_td:nth-child(5)]:whitespace-nowrap [&_td:nth-child(7)]:whitespace-nowrap" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead style={{ backgroundColor: '#f8fafc' }}>
               <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
                 <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>REQ-ID</th>
@@ -653,7 +658,7 @@ export default function ManagerRequestsPage() {
                 </tr>
               ) : (
                 displayedOrders.map((order) => {
-                  const sc = STATUS_COLORS[order.status] || STATUS_COLORS.cancelled;
+                  const sc = STATUS_COLORS[order.status]?.bg ? STATUS_COLORS[order.status] : STATUS_COLORS.cancelled;
                   return (
                     <tr key={order.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '14px 16px', fontWeight: 700, color: '#1d4ed8', fontSize: '13px' }}>
@@ -674,8 +679,8 @@ export default function ManagerRequestsPage() {
                         {formatCurrency(order.totalCost)}
                       </td>
                       <td style={{ padding: '14px 16px' }}>
-                        <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, backgroundColor: sc.bg, color: sc.color, border: `1px solid ${sc.border}` }}>
-                          {STATUS_LABELS[order.status]}
+                        <span style={{ display: 'inline-flex', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, backgroundColor: sc.bg, color: sc.color, border: `1px solid ${sc.border}` }}>
+                          {typeof STATUS_LABELS[order.status] === 'string' ? STATUS_LABELS[order.status] : 'Unknown Status'}
                         </span>
                       </td>
                       <td style={{ padding: '14px 16px', fontSize: '12px', color: '#64748b' }}>{formatDate(order.createdAt)}</td>
@@ -728,8 +733,10 @@ export default function ManagerRequestsPage() {
               )}
             </tbody>
           </table>
+          </div>
         )}
 
+        {!loading && !error && orders.length > 0 && <p className="px-4 py-2 text-xs text-slate-500 2xl:hidden">Cuộn ngang bảng để xem đủ thông tin và nút thao tác.</p>}
         {/* Pagination */}
         {!loading && pagination.totalPages > 1 && (
           <div style={{ padding: '16px 20px', borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -779,15 +786,16 @@ export default function ManagerRequestsPage() {
         const orderCode = approveOrder.requestCode || `REQ-${String(approveOrder.id).padStart(3, "0")}`;
 
         return (
-          <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="approve-request-title" style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
             <div style={{ background: "#fff", borderRadius: "16px", padding: "24px 28px", width: "100%", maxWidth: "560px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
               {/* Header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                <h3 style={{ fontSize: "18px", fontWeight: 800, color: "#0f172a", margin: 0 }}>
+                <h3 id="approve-request-title" style={{ fontSize: "18px", fontWeight: 800, color: "#0f172a", margin: 0 }}>
                   Phê duyệt đơn vận chuyển {orderCode}
                 </h3>
                 <button
                   type="button"
+                  aria-label="Đóng báo giá"
                   onClick={() => setApproveOrder(null)}
                   style={{ background: "transparent", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "18px", padding: "4px" }}
                 >
@@ -875,7 +883,7 @@ export default function ManagerRequestsPage() {
                 </div>
 
                 <div className="my-4"><BookingQuoteSummary input={totalCostInput} bookingType={approveOrder.bookingType} horseCount={horseCount} currency={costCurrency} insuranceFee={Number(approveOrder.insuranceFee ?? 0)} /></div>
-                <InsuranceSummary horses={(approveOrder.horses ?? []).map(h => ({ ...h, name: h.name ?? 'Ngựa' }))} transportCost={approveOrder.transportCost ?? null} insuranceFee={Number(approveOrder.insuranceFee ?? 0)} totalCost={approveOrder.totalCost} />
+                <InsuranceSummary horses={(approveOrder.horses ?? []).map(h => ({ ...h, name: h.name ?? 'Ngựa' }))} transportCost={approveOrder.transportCost ?? null} insuranceFee={Number(approveOrder.insuranceFee ?? 0)} totalCost={approveOrder.totalCost} showCostSummary={false} />
                 {approveOrder.horses && approveOrder.horses.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "140px", overflowY: "auto" }}>
                     {approveOrder.horses.map((horse, idx) => (
@@ -889,10 +897,10 @@ export default function ManagerRequestsPage() {
                             {horse.breed || "Ngựa đua"}
                           </span>
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px", fontSize: "11px", color: "#64748b" }}>
-                          <div>Tuổi / Giới tính: <strong style={{ color: "#0f172a" }}>{horse.age ? `${horse.age} tuổi` : "N/A"} • {horse.gender === "male" ? "Đực" : horse.gender === "female" ? "Cái" : horse.gender || "N/A"}</strong></div>
-                          <div>Màu / Cân nặng: <strong style={{ color: "#0f172a" }}>{horse.color || "Chestnut"} {horse.weight ? `• ${horse.weight} kg` : ""}</strong></div>
-                          <div>Microchip/Passport: <strong style={{ color: "#0f172a", fontFamily: "monospace" }}>{horse.microchipNo || horse.passportNo || "981456789234123"}</strong></div>
+                        <div className="grid gap-2 sm:grid-cols-3" style={{ fontSize: "11px", color: "#64748b" }}>
+                          <div>Tuổi / Giới tính: <strong style={{ color: "#0f172a" }}>{horse.age != null ? `${horse.age} tuổi` : "Chưa cập nhật"} • {horse.gender === "male" ? "Đực" : horse.gender === "female" ? "Cái" : horse.gender || "Chưa cập nhật"}</strong></div>
+                          <div>Màu / Cân nặng: <strong style={{ color: "#0f172a" }}>{horse.color || "Chưa cập nhật"} {horse.weight ? `• ${String(horse.weight).trim().replace(/\s*kg$/i, '')} kg` : ""}</strong></div>
+                          <div>Microchip/Passport: <strong className="break-all" style={{ color: "#0f172a", fontFamily: "monospace" }}>{horse.microchipNo || horse.passportNo || "Chưa cập nhật"}</strong></div>
                         </div>
                         {horse.medicalStatus && (
                           <div style={{ marginTop: "4px", fontSize: "11px", color: "#b45309" }}>
@@ -1023,17 +1031,18 @@ export default function ManagerRequestsPage() {
       })()}
       {/* Reject Modal */}
       {rejectOrder && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', borderRadius: '16px', padding: '28px', width: '440px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#b91c1c', margin: '0 0 8px' }}>Reject Request #{rejectOrder.id}</h3>
+        <div role="dialog" aria-modal="true" aria-labelledby="reject-request-title" style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#fff', borderRadius: '16px', padding: '28px', width: '440px', maxWidth: '100%', maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+            <h3 id="reject-request-title" style={{ fontSize: '18px', fontWeight: 800, color: '#b91c1c', margin: '0 0 8px' }}>Reject Request #{rejectOrder.id}</h3>
             <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 20px' }}>
               {rejectOrder.originLocation} → {rejectOrder.destinationLocation}<br />
               Customer: {rejectOrder.contactName || rejectOrder.customerEmail}
             </p>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a', display: 'block', marginBottom: '6px' }}>
+            <label htmlFor="reject-request-reason" style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a', display: 'block', marginBottom: '6px' }}>
               Rejection Reason <span style={{ color: '#dc2626' }}>*</span>
             </label>
             <textarea
+              id="reject-request-reason"
               rows={3}
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}

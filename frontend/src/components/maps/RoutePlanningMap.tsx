@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Plane, Truck, Navigation, Info, ShieldCheck, Clock, MapPin, Layers } from 'lucide-react';
+import { mapText, mapWaypointGuidance, routePreviewMetrics, travelDurationLabel, type NavigationEstimate, type RoutePreviewMetrics } from '@/features/routes/route-metrics';
 
 import {
   buildEquineRoute,
@@ -65,7 +66,8 @@ export interface RoutePlanningMapProps {
   originText?: string;
   destinationText?: string;
   transportType?: 'International' | 'Domestic';
-  onRouteCalculated?: (data: { distanceKm: number; durationHours: number; mode: 'air' | 'road' }) => void;
+  initialMode?: 'air' | 'road';
+  onRouteCalculated?: (data: RoutePreviewMetrics) => void;
   onApplyPreset?: (preset: RoutePreset) => void;
 }
 
@@ -73,6 +75,7 @@ interface OsrmResult {
   coordinates: [number, number][]; // [lat, lng] for Leaflet
   distanceKm: number;
   durationHours: number;
+  fullyRouted: boolean;
 }
 
 const osrmCache = new Map<string, OsrmResult>();
@@ -109,7 +112,8 @@ async function fetchOsrmDrivingRoute(
     const distanceKm = Math.round((route.distance / 1000) * 10) / 10;
     const durationHours = Math.round((route.duration / 3600) * 10) / 10;
 
-    const result: OsrmResult = { coordinates, distanceKm, durationHours };
+    if (!Number.isFinite(distanceKm) || distanceKm < 0 || !Number.isFinite(durationHours) || durationHours < 0) return null;
+    const result: OsrmResult = { coordinates, distanceKm, durationHours, fullyRouted: true };
     osrmCache.set(key, result);
     return result;
   } catch {
@@ -153,6 +157,7 @@ async function fetchOsrmFullRoute(
         coordinates: allCoords,
         distanceKm: Math.round(totalDist * 10) / 10,
         durationHours: Math.round(totalDur * 10) / 10,
+        fullyRouted: successCount === points.length - 1,
       };
     }
   }
@@ -164,6 +169,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   originText = 'Trang trại Củ Chi, TP.HCM',
   destinationText = 'Singapore Turf Club, Singapore',
   transportType,
+  initialMode = 'air',
   onRouteCalculated,
   onApplyPreset,
 }) => {
@@ -171,13 +177,15 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   const mapInstanceRef = useRef<any>(null);
   const layersGroupRef = useRef<any>(null);
 
-  const [mode, setMode] = useState<'air' | 'road'>('air');
+  const [mode, setMode] = useState<'air' | 'road'>(initialMode);
   const [mapStyle, setMapStyle] = useState<'streets' | 'satellite'>('streets');
   const [selectedWaypoint, setSelectedWaypoint] = useState<Waypoint | null>(null);
-  const [osrmDistanceKm, setOsrmDistanceKm] = useState<number | null>(null);
+  const [navigationEstimate, setNavigationEstimate] = useState<NavigationEstimate | null>(null);
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
-  const [customOriginGeo, setCustomOriginGeo] = useState<GeocodedLocation | null>(null);
-  const [customDestGeo, setCustomDestGeo] = useState<GeocodedLocation | null>(null);
+  const [customOriginGeo, setCustomOriginGeo] = useState<(GeocodedLocation & { query: string }) | null>(null);
+  const [customDestGeo, setCustomDestGeo] = useState<(GeocodedLocation & { query: string }) | null>(null);
+  const activeOriginGeo = customOriginGeo?.query === originText ? customOriginGeo : null;
+  const activeDestGeo = customDestGeo?.query === destinationText ? customDestGeo : null;
   const [isGeocoding, setIsGeocoding] = useState<boolean>(false);
 
   const requestIdRef = useRef<number>(0);
@@ -196,7 +204,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         setIsGeocoding(true);
         const geoOrigin = await geocodeAddress(originText, controller.signal);
         if (active) {
-          setCustomOriginGeo(geoOrigin);
+          setCustomOriginGeo(geoOrigin ? { ...geoOrigin, query: originText } : null);
         }
       } else if (active) {
         setCustomOriginGeo(null);
@@ -207,7 +215,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         setIsGeocoding(true);
         const geoDest = await geocodeAddress(destinationText, controller.signal);
         if (active) {
-          setCustomDestGeo(geoDest);
+          setCustomDestGeo(geoDest ? { ...geoDest, query: destinationText } : null);
         }
       } else if (active) {
         setCustomDestGeo(null);
@@ -232,29 +240,31 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
       destinationText,
       mode,
       transportType,
-      customOriginGeo?.coords ?? null,
-      customDestGeo?.coords ?? null,
-      customOriginGeo,
-      customDestGeo
+      activeOriginGeo?.coords ?? null,
+      activeDestGeo?.coords ?? null,
+      activeOriginGeo,
+      activeDestGeo
     );
-  }, [originText, destinationText, mode, transportType, customOriginGeo, customDestGeo]);
+  }, [originText, destinationText, mode, transportType, activeOriginGeo, activeDestGeo]);
 
   const waypoints = routeResult.waypoints;
   const totalDistanceKm = routeResult.distanceKm;
-  const estimatedHours = routeResult.durationHours;
   const customsCount = routeResult.customsCount;
+  const routeKey = JSON.stringify([originText, destinationText, routeResult.mode, waypoints.map(w => w.coords)]);
+  const currentNavigation = navigationEstimate?.key === routeKey ? navigationEstimate : null;
+  const metrics = routePreviewMetrics(routeResult.mode, totalDistanceKm, currentNavigation);
 
-  // Reset osrmDistanceKm when inputs change
+  // Never reuse a previous address/mode's routing result while new geometry loads.
   useEffect(() => {
-    setOsrmDistanceKm(null);
-  }, [originText, destinationText, mode, transportType, customOriginGeo, customDestGeo]);
+    setNavigationEstimate(null);
+    setSelectedWaypoint(null);
+  }, [routeKey]);
 
   useEffect(() => {
     if (onRouteCalculated) {
-      const finalDist = osrmDistanceKm ?? totalDistanceKm;
-      onRouteCalculated({ distanceKm: finalDist, durationHours: estimatedHours, mode });
+      onRouteCalculated(metrics);
     }
-  }, [mode, originText, destinationText, transportType, totalDistanceKm, estimatedHours, osrmDistanceKm]);
+  }, [metrics.distanceKm, metrics.durationHours, metrics.mode, metrics.source, onRouteCalculated]);
 
   const leafletRef = useRef<any>(null);
   const tileLayerRef = useRef<any>(null);
@@ -418,7 +428,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         setSelectedWaypoint(wp);
       });
 
-      marker.bindTooltip(`<strong>${wp.name}</strong><br/><span style="color:#64748b;font-size:11px;">${wp.label}</span>`, {
+      marker.bindTooltip(`<strong>${mapText(wp.name)}</strong><br/><span style="color:#64748b;font-size:11px;">${mapText(wp.label)}</span>`, {
         direction: 'top',
         offset: [0, -24],
         opacity: 0.95,
@@ -426,10 +436,10 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
 
       marker.bindPopup(`
         <div style="font-family: inherit; font-size: 13px; line-height: 1.5; min-width: 220px;">
-          <div style="font-weight: 700; color: #0f172a; margin-bottom: 2px;">${wp.name}</div>
-          <div style="font-size: 11.5px; color: #2563eb; font-weight: 600; margin-bottom: 6px;">${wp.label} • ${wp.country}</div>
+          <div style="font-weight: 700; color: #0f172a; margin-bottom: 2px;">${mapText(wp.name)}</div>
+          <div style="font-size: 11.5px; color: #2563eb; font-weight: 600; margin-bottom: 6px;">${mapText(wp.label)} • ${mapText(wp.country)}</div>
           <div style="font-size: 12px; color: #475569; background: #f8fafc; padding: 6px 8px; border-radius: 6px; border: 1px solid #e2e8f0;">
-            ${wp.details}
+            ${mapText(mapWaypointGuidance(wp.type))}
           </div>
         </div>
       `);
@@ -464,7 +474,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         dashArray: '8, 8',
         opacity: 0.95,
       }).addTo(group);
-      flightPolyline.bindTooltip('Chặng 2: Hành lang bay quốc tế (IATA LAR)', { sticky: true });
+      flightPolyline.bindTooltip('Chặng bay minh họa; chưa có lịch bay xác nhận', { sticky: true });
 
       // Leg 3: Destination Airport to Turf Club (Driving - Solid Blue)
       const leg3Coords = [wps[2].coords, wps[3].coords];
@@ -488,7 +498,8 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           if (resLeg1 && resLeg1.coordinates.length > 0) {
             leg1Polyline.setLatLngs(resLeg1.coordinates);
           }
-          if (resLeg3 && resLeg3.coordinates.length > 0) {
+          const leg3Accepted = resLeg3 && resLeg3.coordinates.length > 0 && resLeg3.distanceKm <= Math.max(80, calculateHaversine(wps[2].coords, wps[3].coords) * 3.5);
+          if (leg3Accepted) {
             const directLeg3 = calculateHaversine(wps[2].coords, wps[3].coords);
             if (resLeg3.distanceKm <= Math.max(80, directLeg3 * 3.5)) {
               leg3Polyline.setLatLngs(resLeg3.coordinates);
@@ -497,13 +508,10 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
 
           const leg1Dist = resLeg1 ? resLeg1.distanceKm : calculateHaversine(wps[0].coords, wps[1].coords);
           const flightDist = calculateHaversine(wps[1].coords, wps[2].coords);
-          const leg3Dist = resLeg3 ? resLeg3.distanceKm : calculateHaversine(wps[2].coords, wps[3].coords);
+          const leg3Dist = leg3Accepted ? resLeg3.distanceKm : calculateHaversine(wps[2].coords, wps[3].coords);
           const totalAirRealKm = Math.round(leg1Dist + flightDist + leg3Dist);
 
-          setOsrmDistanceKm(totalAirRealKm);
-          if (onRouteCalculated) {
-            onRouteCalculated({ distanceKm: totalAirRealKm, durationHours: estimatedHours, mode: 'air' });
-          }
+          setNavigationEstimate({ key: routeKey, distanceKm: totalAirRealKm, durationHours: 0, fullyRouted: false });
         })
         .catch(() => {
           if (currentReqId === requestIdRef.current) {
@@ -529,10 +537,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
 
           if (res && res.coordinates.length > 0) {
             roadPolyline.setLatLngs(res.coordinates);
-            setOsrmDistanceKm(res.distanceKm);
-            if (onRouteCalculated) {
-              onRouteCalculated({ distanceKm: res.distanceKm, durationHours: estimatedHours, mode: 'road' });
-            }
+            setNavigationEstimate({ key: routeKey, distanceKm: res.distanceKm, durationHours: res.durationHours, fullyRouted: res.fullyRouted });
           }
         })
         .catch(() => {
@@ -593,10 +598,10 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           </div>
           <div>
             <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
-              Bản đồ Lộ trình Vận chuyển & Cửa khẩu Hải quan
+              Bản đồ lộ trình tham khảo
             </div>
             <div style={{ fontSize: '12px', color: '#64748b' }}>
-              Tích hợp hành lang kiểm dịch quốc tế (IATA LAR & ASEAN Veterinary Transit)
+              Khoảng cách và điểm kiểm soát dự kiến; chờ điều phối và chuyên viên xác nhận
             </div>
           </div>
         </div>
@@ -756,7 +761,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
               <>
                 Nhận diện: <strong>{routeResult.origin.name}</strong> ➔ <strong>{routeResult.destination.name}</strong> (
                 {routeResult.isDomestic ? 'Nội địa' : 'Quốc tế'}
-                {customDestGeo || customOriginGeo ? ' • GPS Dynamic' : ''})
+                {activeDestGeo || activeOriginGeo ? ' • GPS Dynamic' : ''})
               </>
             )}
           </span>
@@ -794,11 +799,11 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#d97706' }} />
-            <span>Cửa khẩu / Sân bay kiểm dịch</span>
+            <span>Cửa khẩu / Sân bay tham khảo</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#0284c7' }} />
-            <span>Trạm nghỉ & Bác sĩ thú y (Vet Stop)</span>
+            <span>Điểm nghỉ dự kiến</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#dc2626' }} />
@@ -806,12 +811,12 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '4px', borderTop: '1px dashed #cbd5e1' }}>
             <span style={{ width: '16px', height: '4px', backgroundColor: '#0284c7', borderRadius: '2px' }} />
-            <span style={{ fontWeight: 600 }}>Tuyến đường bộ (Cao tốc / Quốc lộ thực tế)</span>
+            <span style={{ fontWeight: 600 }}>Chặng đường bộ tham khảo</span>
           </div>
           {mode === 'air' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ width: '16px', height: '0px', borderTop: '2.5px dashed #8b5cf6' }} />
-              <span style={{ fontWeight: 600 }}>Hành lang hàng không (IATA LAR)</span>
+              <span style={{ fontWeight: 600 }}>Chặng bay minh họa</span>
             </div>
           )}
         </div>
@@ -854,7 +859,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
               </button>
             </div>
             <div style={{ fontSize: '12px', color: '#475569', marginTop: '8px', lineHeight: 1.5 }}>
-              {selectedWaypoint.details}
+              {mapWaypointGuidance(selectedWaypoint.type)}
             </div>
           </div>
         )}
@@ -876,11 +881,11 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Navigation size={16} color="#2563eb" />
-            <span style={{ fontSize: '12.5px', color: '#475569' }}>Tổng quãng đường:</span>
+            <span style={{ fontSize: '12.5px', color: '#475569' }}>Quãng đường tham khảo:</span>
             <strong style={{ fontSize: '14px', color: '#1e40af' }}>
-              {(osrmDistanceKm ?? totalDistanceKm).toLocaleString()} km
+              {metrics.distanceKm.toLocaleString('vi-VN')} km
             </strong>
-            {osrmDistanceKm !== null ? (
+            {currentNavigation ? (
               <span
                 style={{
                   fontSize: '11px',
@@ -894,37 +899,36 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                   alignItems: 'center',
                   gap: '4px',
                 }}
-                title="Đã tính toán chính xác theo mạng lưới đường bộ & cao tốc thực tế (OSRM Navigation Engine)"
+                title={metrics.source === 'road-routing' ? 'OSRM định tuyến đường bộ; chưa gồm nghỉ, giao nhận, chờ hoặc kiểm dịch' : 'Có chặng bay hoặc chặng chưa định tuyến; không phải quãng đường khai thác đã xác nhận'}
               >
-                <span>✨</span>
-                <span>Lộ trình đường bộ thực tế</span>
+                <span>{metrics.source === 'road-routing' ? 'Đường bộ · dữ liệu OSRM' : metrics.mode === 'air' ? 'Đường bộ + khoảng cách bay ước tính' : 'Ước tính; còn chặng chưa định tuyến'}</span>
               </span>
             ) : isNavigating ? (
               <span style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <span>⏳</span>
-                <span>Đang nắn tuyến cao tốc...</span>
+                <span>Đang tra cứu các chặng đường bộ…</span>
               </span>
             ) : null}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Clock size={16} color="#2563eb" />
-            <span style={{ fontSize: '12.5px', color: '#475569' }}>Thời gian ước tính:</span>
+            <span style={{ fontSize: '12.5px', color: '#475569' }}>{metrics.mode === 'air' ? 'Lịch vận chuyển:' : 'Thời gian chạy xe tham khảo:'}</span>
             <strong style={{ fontSize: '14px', color: '#1e40af' }}>
-              {mode === 'air' ? `~${estimatedHours} tiếng` : `~${Math.round(estimatedHours / 24)} ngày (${estimatedHours}h)`}
+              {travelDurationLabel(metrics.durationHours)}
             </strong>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <ShieldCheck size={16} color="#059669" />
-            <span style={{ fontSize: '12.5px', color: '#475569' }}>Trạm hải quan & kiểm dịch:</span>
-            <strong style={{ fontSize: '14px', color: '#065f46' }}>{customsCount} trạm bắt buộc</strong>
+            <span style={{ fontSize: '12.5px', color: '#475569' }}>Điểm kiểm soát dự kiến trên bản đồ:</span>
+            <strong style={{ fontSize: '14px', color: '#065f46' }}>{customsCount} điểm tham khảo</strong>
           </div>
         </div>
 
         <div style={{ fontSize: '11.5px', color: '#3b82f6', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
           <Info size={13} />
-          <span>Nhấn vào các trạm trên bản đồ để xem chi tiết thủ tục kiểm dịch</span>
+          <span>Nhấn điểm trên bản đồ để xem thông tin tham khảo. Thời gian chạy xe chưa gồm nghỉ, chờ, trung chuyển hoặc kiểm dịch; lịch bay và ngày giao do điều phối xác nhận.</span>
         </div>
       </div>
     </div>

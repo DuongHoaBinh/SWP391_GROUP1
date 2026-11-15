@@ -44,6 +44,8 @@ import { SepayPayment } from '@/features/orders/components/SepayPayment';
 import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
 import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { InsuranceAmendmentForm } from '@/features/orders/components/InsuranceAmendmentForm';
+import { calendarDayLabel } from '@/lib/transport-dates';
+import { SavedTransportSchedule } from '@/features/routes/components/SavedTransportSchedule';
 
 const fetcher = async (url: string) => {
   const data = await apiClient<any>(url);
@@ -178,7 +180,6 @@ const fetcher = async (url: string) => {
       : 'road'
     : null;
   const savedDistKm = routeMatch ? Number(routeMatch[2].replace(/,/g, '')) : null;
-  const savedHours = routeMatch ? Number(routeMatch[3]) : null;
 
   // 4. Determine domestic vs international
   const rawType = String(data.transportationType || data.transportType || '').toLowerCase();
@@ -241,9 +242,8 @@ const fetcher = async (url: string) => {
   );
 
   const finalDistKm = savedDistKm ?? routeCalc.distanceKm;
-  const finalHours = savedHours ?? routeCalc.durationHours;
   const estimatedDistance = data.estimatedDistance || `${finalDistKm.toLocaleString()} km`;
-  const estimatedDuration = data.estimatedDuration || (isDomestic ? `~${finalHours} hours` : `~${finalHours} hours (${preferredMode === 'air' ? 'Air Flight' : 'Road Transit'})`);
+  const estimatedDuration = 'Chờ điều phối xác nhận lịch; xem kế hoạch đã lưu';
   const transitName = isDomestic
     ? (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'rest')?.name || 'Trạm kiểm dịch nội địa')
     : (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'airport')?.name || 'Border / Transit Checkpoint');
@@ -272,12 +272,8 @@ const fetcher = async (url: string) => {
     estimatedDistance,
     estimatedDuration,
     createdDate: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-GB') : '23 Sep 2026',
-    departureDate: data.requestedDate ? new Date(data.requestedDate).toLocaleDateString('en-GB') : 'TBD',
-    estimatedArrivalDate: data.expectedArrivalDate
-      ? new Date(data.expectedArrivalDate).toLocaleDateString('en-GB')
-      : data.requestedDate
-      ? new Date(new Date(data.requestedDate).getTime() + (routeCalc.durationHours || 12) * 3600 * 1000).toLocaleDateString('en-GB')
-      : 'TBD',
+    departureDate: calendarDayLabel(data.requestedDate),
+    estimatedArrivalDate: calendarDayLabel(data.expectedArrivalDate),
     totalCost: Number(data.totalCost || data.total_cost || 0),
     notes: data.specialRequirements || 'No special requirements specified.',
   };
@@ -861,13 +857,13 @@ export default function RequestDetailPage() {
                 </p>
               </div>
               <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Departure</span>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Ngày đi mong muốn</span>
                 <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
                   {request.departureDate}
                 </p>
               </div>
               <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Expected Arrival</span>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Ngày đến mong muốn</span>
                 <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
                   {request.estimatedArrivalDate}
                 </p>
@@ -889,6 +885,7 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
+          <SavedTransportSchedule shipmentId={Number(request.id)} />
           <BookingSummary bookingType={request.bookingType} horseCount={Number(request.requestedHorseCount ?? request.horses?.length ?? 1)} stallUnitPrice={request.stallUnitPrice} />
           <InsuranceSummary horses={request.insuranceHorses ?? []}
             transportCost={request.transportCost ?? null} insuranceFee={Number(request.insuranceFee ?? 0)}
@@ -961,7 +958,7 @@ export default function RequestDetailPage() {
               </div>
 
               <div style={{ textAlign: 'center', marginTop: '24px', fontSize: '12px', color: '#64748b', fontWeight: 500 }}>
-                Estimated Distance: <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDistance || '1,100 km'}</strong> &nbsp;|&nbsp; Estimated Time: <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDuration || '12 hours'}</strong>
+                Quãng đường tham khảo: <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDistance || 'Chưa xác định'}</strong> &nbsp;|&nbsp; <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDuration}</strong>
               </div>
             </div>
           </div>
@@ -1687,13 +1684,13 @@ export default function RequestDetailPage() {
                   </div>
                 </div>
                 <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Departure Date</span>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Ngày đi mong muốn</span>
                   <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
                     {request.departureDate}
                   </div>
                 </div>
                 <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Expected Arrival</span>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Ngày đến mong muốn</span>
                   <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
                     {request.estimatedArrivalDate}
                   </div>

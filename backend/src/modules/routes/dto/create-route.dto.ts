@@ -21,6 +21,12 @@ export class RouteStopItemDto {
   @Min(1)
   sequenceNo!: number;
 
+  @ApiPropertyOptional({ description: 'Thứ tự chặng chứa điểm dừng' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  legSequenceNo?: number;
+
   @ApiProperty({
     description: 'Loại điểm dừng',
     enum: RouteStopType,

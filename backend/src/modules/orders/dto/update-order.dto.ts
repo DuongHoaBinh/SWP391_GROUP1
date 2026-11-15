@@ -76,6 +76,11 @@ export class UpdateOrderDto {
   @IsString()
   requestedDate?: string;
 
+  @ApiPropertyOptional({ example: '2099-02-03', description: 'Ngày đến mong muốn; bỏ qua để giữ ngày đã lưu' })
+  @IsOptional()
+  @IsString()
+  expectedArrivalDate?: string;
+
   @ApiPropertyOptional({
     example: 'Cần xe có hệ thống điều hòa đặc biệt cho ngựa thi đấu',
     description: 'Special requirements',

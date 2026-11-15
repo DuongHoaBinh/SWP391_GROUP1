@@ -83,6 +83,7 @@ export interface RouteStopEntity {
   id: number;
   routeId: number;
   legId?: number | null;
+  legSequenceNo?: number;
   sequenceNo: number;
   stopType: RouteStopType;
   locationName: string;

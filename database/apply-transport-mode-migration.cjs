@@ -5,10 +5,11 @@ require('../backend/node_modules/dotenv').config({ path: path.join(__dirname, '.
 
 async function main() {
   const db = await mysql.createConnection({ host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 3306),
-    database: process.env.DB_NAME ?? 'horse_transport_system', user: process.env.DB_USER ?? 'root', password: process.env.DB_PASSWORD ?? '' });
+    database: process.env.DB_NAME ?? 'horse_transport_system', user: process.env.DB_USER ?? 'root', password: process.env.DB_PASSWORD ?? '', multipleStatements: true });
   try {
     const sql = fs.readFileSync(path.join(__dirname, 'migrations/020_separate_transport_mode.sql'), 'utf8');
-    for (const statement of sql.split(';').map(value => value.trim()).filter(Boolean)) await db.query(statement);
+    // Execute this fixed, repository-owned SQL file intact: comments can contain semicolons.
+    await db.query(sql);
     console.log('Transport mode migration 020 applied. Historical scope and quotes are unchanged.');
   } finally { await db.end(); }
 }

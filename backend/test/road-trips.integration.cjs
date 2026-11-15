@@ -83,6 +83,74 @@ test('road booking: real HTTP/MySQL allocation, concurrency, privacy and six ins
       assert.equal(corrected.insuranceFee, 18000000); assert.equal(corrected.transportCost, null);
       const [[history]] = await db.execute('SELECT COUNT(*) AS n FROM shipment_insurance_revision WHERE shipment_id = ?', [order.id]); assert.equal(history.n, 1);
     });
+    await t.test('road-trip creation rejects impossible dates, timezone-less, past and inverted intervals without saving', async () => {
+      const v = await vehicle(4);
+      const body = { vehicleId: v.id, bookingType: 'shared_stall', originLocation: 'A', destinationLocation: 'B', plannedDeparture: '2099-03-01T01:00:00Z', plannedArrival: '2099-03-01T03:00:00Z' };
+      for (const change of [{ plannedDeparture: '2099-02-30T01:00:00Z' }, { plannedDeparture: '2099-03-01T01:00:00' },
+        { plannedArrival: body.plannedDeparture }, { plannedDeparture: '2020-01-01T01:00:00Z', plannedArrival: '2020-01-01T03:00:00Z' }])
+        await request('coordinator', '/fleet/road-trips', 'POST', { ...body, ...change }, 400);
+      const [[saved]] = await db.execute('SELECT COUNT(*) AS n FROM road_trip WHERE vehicle_id=?', [v.id]);
+      assert.equal(Number(saved.n), 0);
+    });
+
+    await t.test('route schedule rejects impossible dates, missing timezone and overlapping leg chronology atomically', async () => {
+      const order = await create(); await approve(order); await framework(order);
+      const first = { sequenceNo: 1, legType: 'road', originLocation: 'A', destinationLocation: 'B', plannedDeparture: '2099-03-01T01:00:00Z', plannedArrival: '2099-03-01T03:00:00Z' };
+      for (const legs of [[{ ...first, plannedDeparture: '2099-02-30T01:00:00Z' }],
+        [{ ...first, plannedDeparture: '2099-03-01T01:00:00' }], [{ ...first, plannedArrival: '2099-03-01T00:00:00Z' }],
+        [first, { ...first, sequenceNo: 2, plannedDeparture: '2099-03-01T02:00:00Z', plannedArrival: '2099-03-01T04:00:00Z' }],
+        [first, { ...first, sequenceNo: 1, plannedDeparture: '2099-03-01T04:00:00Z', plannedArrival: '2099-03-01T05:00:00Z' }]]) {
+        await request('coordinator', `/routes/plan/${order.id}/build-detail`, 'POST', { routeName: 'Invalid chronology', legs, stops: [] }, 400);
+      }
+      const [[saved]] = await db.execute('SELECT COUNT(*) AS n FROM route_leg l JOIN route r ON r.route_id=l.route_id WHERE r.shipment_id=?', [order.id]);
+      assert.equal(Number(saved.n), 0);
+    });
+
+    await t.test('stop updates preserve omitted values and validate leg bounds, ownership and whole-schedule rollback', async () => {
+      const order = await create(); await approve(order); await framework(order);
+      const route = await request('coordinator', `/routes/plan/${order.id}/build-detail`, 'POST', {
+        routeName: 'Timed stops', legs: [
+          { sequenceNo: 1, legType: 'road', originLocation: 'A', destinationLocation: 'B', plannedDeparture: '2099-03-01T01:00:00Z', plannedArrival: '2099-03-01T03:00:00Z' },
+          { sequenceNo: 2, legType: 'road', originLocation: 'B', destinationLocation: 'C', plannedDeparture: '2099-03-01T03:00:00Z', plannedArrival: '2099-03-01T06:00:00Z' }],
+        stops: [
+          { sequenceNo: 1, legSequenceNo: 1, stopType: 'rest', locationName: 'First rest', plannedArrival: '2099-03-01T01:30:00Z', plannedDeparture: '2099-03-01T02:00:00Z' },
+          { sequenceNo: 2, legSequenceNo: 2, stopType: 'rest', locationName: 'Second rest', plannedArrival: '2099-03-01T04:00:00Z', plannedDeparture: '2099-03-01T05:00:00Z' }],
+      }, 201);
+      const first = route.stops[0], second = route.stops[1];
+      assert.equal(first.legId, route.legs[0].id, 'Stop-to-leg association survives persistence');
+      assert.equal(first.legSequenceNo, 1);
+      await request('customer', `/routes/${route.id}/schedule`, 'PATCH', { reason: 'Forbidden', stops: [{ stopId: first.id, plannedArrival: '2099-03-01T01:45:00Z' }] }, 403);
+      const corrected = await request('coordinator', `/routes/${route.id}/schedule`, 'PATCH', { reason: 'Revised reception time', stops: [{ stopId: first.id, plannedArrival: '2099-03-01T01:45:00Z' }] });
+      assert.equal(corrected.stops[0].plannedDeparture, first.plannedDeparture);
+      assert.equal(corrected.stops[0].plannedArrival, '2099-03-01T01:45:00.000Z');
+      for (const stops of [
+        [{ stopId: first.id, plannedDeparture: '2099-03-01T03:30:00Z' }],
+        [{ stopId: first.id, plannedArrival: '2099-03-01T01:50:00Z' }, { stopId: second.id, plannedArrival: '2099-03-01T02:00:00Z' }],
+        [{ stopId: first.id, plannedArrival: '2099-03-01T01:00:00' }],
+        [{ stopId: first.id, plannedArrival: '' }],
+        [{ stopId: 2147483647, plannedArrival: '2099-03-01T01:50:00Z' }],
+        [{ stopId: first.id }, { stopId: first.id }],
+      ]) await request('coordinator', `/routes/${route.id}/schedule`, 'PATCH', { reason: 'Invalid schedule', stops }, 400);
+      const reloaded = await request('customer', `/routes/shipment/${order.id}`);
+      assert.deepEqual(reloaded.stops, corrected.stops, 'No valid item may commit when another item is invalid');
+      await request('coordinator', `/routes/plan/${order.id}/build-detail`, 'POST', { routeName: 'Incomplete draft', legs: [{ sequenceNo: 1, legType: 'road', originLocation: 'A', destinationLocation: 'B' }], stops: [] }, 201);
+      await request('coordinator', `/routes/plan/${order.id}/submit`, 'POST', {}, 400);
+    });
+
+    await t.test('confirmation cannot invoice a historical plan with invalid persisted times', async () => {
+      const order = await create(); await approve(order); await framework(order);
+      const scheduled = await trip(await vehicle(4));
+      const route = await build(order, scheduled.id);
+      await request('coordinator', `/routes/plan/${order.id}/submit`, 'POST', {}, 201);
+      await request('manager', `/routes/plan/${order.id}/review`, 'POST', { status: 'approved' }, 201);
+      await request('coordinator', `/fleet/shipments/${order.id}/assign-staff`, 'POST', { assignments: [{ userId: ids.driver, roleInShipment: 'driver' }] }, 201);
+      await db.execute('UPDATE route_leg SET planned_arrival = planned_departure WHERE leg_id = ?', [route.legs[0].id]);
+      await request('driver', `/routes/plan/${order.id}/driver-confirm`, 'POST', {}, 400);
+      const [[invoices]] = await db.execute('SELECT COUNT(*) AS n FROM shipment_invoice WHERE shipment_id = ?', [order.id]);
+      assert.equal(Number(invoices.n), 0);
+      const [[assignment]] = await db.execute("SELECT is_confirmed FROM shipment_assignment WHERE shipment_id = ? AND role_in_shipment='driver'", [order.id]);
+      assert.equal(Number(assignment.is_confirmed), 0);
+    });
 
     await t.test('two customers share one trip; aggregate capacity and customer privacy are enforced', async () => {
       const v = await vehicle(4), shared = await trip(v);
@@ -91,6 +159,7 @@ test('road booking: real HTTP/MySQL allocation, concurrency, privacy and six ins
       const trips = await request('coordinator', '/fleet/road-trips');
       assert.equal(trips.find(row => row.id === shared.id).bookedStalls, 4);
       await request('customer', '/fleet/road-trips', 'GET', undefined, 403);
+      await request('customer', '/fleet/staff', 'GET', undefined, 403);
       await request('customer', `/orders/${b.id}`, 'GET', undefined, 403);
       await request('customer', `/routes/shipment/${b.id}`, 'GET', undefined, 403);
       await request('customer', `/routes/shipment/${b.id}/plan`, 'GET', undefined, 403);
@@ -102,12 +171,43 @@ test('road booking: real HTTP/MySQL allocation, concurrency, privacy and six ins
     });
 
     for (const bookingType of ['shared_stall', 'dedicated_charter']) await t.test(`${bookingType}: concurrent allocation cannot double-book the vehicle`, async () => {
+      for (let attempt = 0; attempt < 5; attempt++) {
       const v = await vehicle(4), shared = await trip(v, bookingType);
       const orders = [await create('customer', bookingType, 3), await create('other', bookingType, 3)];
       for (const order of orders) { await approve(order); await framework(order); }
       const results = await Promise.all(orders.map(order => call('coordinator', `/routes/plan/${order.id}/build-detail`, 'POST', planBody(shared.id))));
       assert.deepEqual(results.map(result => result.status).sort(), [201, 400], JSON.stringify(results));
       const list = await request('coordinator', '/fleet/road-trips'); assert.equal(list.find(row => row.id === shared.id).bookedStalls, 3);
+      const loser = orders[results.findIndex(result => result.status === 400)];
+      const [[saved]] = await db.execute('SELECT COUNT(*) AS n FROM route_leg l JOIN route r ON r.route_id=l.route_id WHERE r.shipment_id=?', [loser.id]);
+      assert.equal(Number(saved.n), 0, 'Rejected reservation must not leave partial route legs');
+      }
+    });
+
+    await t.test('concurrent compatible shared orders both succeed when aggregate capacity permits', async () => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const v = await vehicle(4), shared = await trip(v);
+        const orders = [await create('customer', 'shared_stall', 2), await create('other', 'shared_stall', 2)];
+        for (const order of orders) { await approve(order); await framework(order); }
+        const results = await Promise.all(orders.map(order => call('coordinator', `/routes/plan/${order.id}/build-detail`, 'POST', planBody(shared.id))));
+        assert.deepEqual(results.map(result => result.status), [201, 201], JSON.stringify(results));
+        const trips = await request('coordinator', '/fleet/road-trips');
+        assert.equal(trips.find(row => row.id === shared.id).bookedStalls, 4);
+        const [[saved]] = await db.execute('SELECT SUM(l.stalls_booked) AS n FROM route_leg l WHERE l.road_trip_id = ?', [shared.id]);
+        assert.equal(Number(saved.n), 4);
+      }
+    });
+
+    await t.test('legacy road reservations cannot be bypassed through unscheduled fleet assignment', async () => {
+      const v = await vehicle(10), exclusive = await trip(v, 'dedicated_charter');
+      const a = await create('customer', 'dedicated_charter', 3); await approve(a); await framework(a); await build(a, exclusive.id);
+      // Older exports may have route legs without the duplicated shipment_vehicle link/status.
+      await db.execute('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [a.id]);
+      await db.execute("UPDATE vehicle SET status = 'available' WHERE vehicle_id = ?", [v.id]);
+      const b = await create('other', 'shared_stall', 1); await approve(b);
+      await request('coordinator', `/fleet/shipments/${b.id}/assign-vehicles`, 'POST', { vehicleIds: [v.id] }, 400);
+      const [[links]] = await db.execute('SELECT COUNT(*) AS n FROM shipment_vehicle WHERE shipment_id = ?', [b.id]);
+      assert.equal(Number(links.n), 0);
     });
 
     await t.test('dedicated blocks overlaps but allows a later nonoverlapping trip on the same vehicle', async () => {

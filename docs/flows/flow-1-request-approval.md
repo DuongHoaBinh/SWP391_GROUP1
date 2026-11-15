@@ -55,3 +55,21 @@ Requested corrections merge omitted policy fields and quantities with the existi
 6. Requested corrections can change booking type through the Customer detail modal. Save old/new choices and actor in `shipment_booking_revision`, preserve the horse insurance unless explicitly changed, clear freight/unit price, and return to Manager review. Changes after approval are rejected.
 
 Role notifications use existing active accounts with the requested role. If no account matches, no recipient is invented; approval still succeeds. This prevents false approval errors and notifications sent to unrelated users on databases without all staff accounts.
+
+### Approval entry points and legacy horse reservations (14/11/2026)
+
+- Dashboard Approve opens the full request-detail quotation. It does not accept a separate ambiguous USD total or bypass the Shared unit-price/Dedicated flat-price and insurance review.
+- An existing unfinished shipment-horse reservation blocks selection into a new request even if the reusable horse profile incorrectly says `active`. Check under the horse row lock; reject the entire new request without orphan records. Requested corrections retain their existing horse reservations.
+
+### Requested dates and confirmed schedules (14/11/2026)
+
+- Customer chooses a desired departure calendar day in Vietnam time and an optional desired arrival day. Departure cannot be in the past; arrival cannot precede departure. Same-day requests are allowed and require Coordinator feasibility review.
+- Both dates are persisted (`requested_date`, existing `expected_arrival_date`) and returned on reload. A partial correction preserves omitted dates and validates the merged pair; leaving historical dates unchanged does not silently replace them.
+- These dates express customer preferences. Do not generate an arrival date by adding a fixed driving/flight duration. Customer detail shows the saved route's actual planned departure/arrival separately, and distinguishes a draft from a confirmed plan.
+- A map preview is a reference only. Road-only driving time uses a successful complete OSRM response; it excludes rest, pickup/handover, border/quarantine waiting, congestion and other operational allowances. Air/mixed previews have no invented total duration or confirmed flight path. A waypoint count is not a legally validated list of mandatory checkpoints.
+
+### Customer draft recovery (15/11/2026)
+
+- The new-request wizard saves form fields, current step, horse quantities, booking choice, insurance declarations and reference route metrics in browser session storage, keyed by account and optional preselected horse. Reload in the same tab restores the draft; it is not an order and makes no reservation.
+- Discard malformed/expired drafts; storage failure displays a warning instead of crashing. Successful submission clears the draft; an API error retains it and displays a retry message. Restored selections must still pass current ownership/availability, date and insurance validation.
+- The global fleet provider does not request the restricted staff catalog for Customers or before login. Backend roles and ownership restrictions remain unchanged.

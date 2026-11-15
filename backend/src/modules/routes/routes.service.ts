@@ -27,6 +27,7 @@ import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { RecordStopProgressDto } from './dto/record-stop-progress.dto';
 import { PublishTripDto } from './dto/publish-trip.dto';
+import { validatePlanSchedule } from './schedule-policy';
 import { SetStrategicFrameworkDto } from './dto/set-strategic-framework.dto';
 import { BuildDetailedPlanDto } from './dto/build-detailed-plan.dto';
 import { ReviewPlanDto } from './dto/review-plan.dto';
@@ -227,6 +228,10 @@ export class RoutesService implements OnModuleInit {
     if (!route.legs || route.legs.length === 0) {
       throw new BadRequestException('Vui lòng dựng đầy đủ các chặng vận chuyển trước khi gửi duyệt');
     }
+
+    validatePlanSchedule(route.legs, (route.stops ?? []).map(stop => ({ sequenceNo: stop.sequenceNo,
+      legSequenceNo: route.legs?.find(leg => leg.id === stop.legId)?.sequenceNo,
+      plannedArrival: stop.plannedArrival, plannedDeparture: stop.plannedDeparture })), true, true);
 
     if (route.planStatus !== PlanStatus.DRAFT) throw new BadRequestException('Chỉ gửi duyệt kế hoạch nháp.');
     await this.routesStore.updatePlanStatus(route.id, PlanStatus.PENDING_APPROVAL);
@@ -438,9 +443,11 @@ export class RoutesService implements OnModuleInit {
     let routeId: number;
 
     if (route) {
+      validatePlanSchedule(route.legs ?? [], dto.stops);
       routeId = route.id;
       await this.routesStore.updateRouteDetails(routeId, dto.routeName, dto.totalDistanceKm);
     } else {
+      validatePlanSchedule([], dto.stops);
       routeId = await this.routesStore.createRoute(shipmentId, dto.routeName, dto.totalDistanceKm);
     }
 
@@ -467,9 +474,7 @@ export class RoutesService implements OnModuleInit {
       throw new BadRequestException('Bắt buộc phải cung cấp lý do điều chỉnh lịch trình (reason)');
     }
 
-    for (const item of dto.stops) {
-      await this.routesStore.updateStopSchedule(item.stopId, item.plannedArrival, item.plannedDeparture);
-    }
+    await this.routesStore.rescheduleStops(routeId, dto.stops);
 
     const order = await this.ordersStore.findById(route.shipmentId);
     if (order) {

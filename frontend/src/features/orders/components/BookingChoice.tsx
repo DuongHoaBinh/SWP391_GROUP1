@@ -7,7 +7,7 @@ export function BookingChoice({ value, onChange, horseCount }: {
 }) {
   return <fieldset className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
     <legend className="px-1 font-semibold text-slate-900">Hình thức đặt chỗ vận chuyển</legend>
-    <p className="text-sm text-slate-600">Áp dụng cho cả đường bộ và hàng không. Gợi ý theo số ngựa, bạn có thể chọn cả hai hình thức.</p>
+    <p className="text-sm text-slate-600">Gợi ý theo số ngựa, bạn có thể chọn cả hai hình thức. Ghép chuyến hoặc bao xe đường bộ do điều phối xác nhận. Với hàng không, phương án đặt chỗ cần được xác nhận riêng.</p>
     {(['shared_stall', 'dedicated_charter'] as const).map(type => <label key={type}
       className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 ${value === type ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
       <input type="radio" name="bookingType" value={type} checked={value === type} onChange={() => onChange(type)} className="mt-1 h-4 w-4 shrink-0" />

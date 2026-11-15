@@ -107,11 +107,11 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header
+      className="gap-3 px-4 sm:px-6 xl:px-8"
       style={{
         height: '76px',
         backgroundColor: '#ffffff',
         borderBottom: '1px solid #e2e8f0',
-        padding: '0 32px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -121,20 +121,20 @@ export const Header: React.FC<HeaderProps> = ({
       }}
     >
       {/* Title & Subtitle */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div className="min-w-0 flex-1" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         {onMenuClick && (
           <button
             onClick={onMenuClick}
-            className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shrink-0"
+            className="md:hidden flex items-center justify-center w-11 h-11 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors shrink-0"
             aria-label="Open navigation menu"
           >
             <Menu size={20} />
           </button>
         )}
-        <div>
+        <div className="min-w-0">
           <h1
+            className="truncate text-base sm:text-xl"
             style={{
-              fontSize: '20px',
               fontWeight: 800,
               color: '#0f172a',
               letterSpacing: '-0.02em',
@@ -144,7 +144,8 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {title}
           </h1>
-          <p
+          {subtitle && <p
+            className="hidden truncate lg:block"
             style={{
               fontSize: '13px',
               color: '#64748b',
@@ -153,15 +154,15 @@ export const Header: React.FC<HeaderProps> = ({
             }}
           >
             {subtitle}
-          </p>
+          </p>}
         </div>
       </div>
 
       {/* Right Controls: Search Bar + Notifications + User Profile */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <div className="flex shrink-0 items-center gap-2 lg:gap-4">
         {/* Search Bar */}
         <div
-          className="hidden sm:flex"
+          className="hidden xl:flex"
           style={{
             alignItems: 'center',
             backgroundColor: '#ffffff',
@@ -209,7 +210,8 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Language Switcher */}
-        <LanguageSwitcher variant="pill" />
+        <div className="sm:hidden"><LanguageSwitcher variant="compact" className="min-h-11" /></div>
+        <div className="hidden sm:block"><LanguageSwitcher variant="pill" /></div>
 
         {/* Notification Bell Dropdown */}
         <div style={{ position: 'relative' }}>
@@ -219,8 +221,8 @@ export const Header: React.FC<HeaderProps> = ({
               setShowUserMenu(false);
             }}
             style={{
-              width: '38px',
-              height: '38px',
+              width: '44px',
+              height: '44px',
               borderRadius: '10px',
               border: '1px solid #e2e8f0',
               display: 'flex',
@@ -254,11 +256,8 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Notifications Flyout */}
           {showNotifications && (
             <div
+              className="fixed left-4 right-4 top-[68px] sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-[340px]"
               style={{
-                position: 'absolute',
-                top: '48px',
-                right: 0,
-                width: '340px',
                 backgroundColor: '#ffffff',
                 borderRadius: '14px',
                 border: '1px solid #e2e8f0',
@@ -327,12 +326,15 @@ export const Header: React.FC<HeaderProps> = ({
         {/* User Profile Button */}
         <div style={{ position: 'relative' }}>
           <button
+            aria-label={`Account: ${currentUser.name || currentUser.email}`}
+            aria-expanded={showUserMenu}
             onClick={() => {
               setShowUserMenu(!showUserMenu);
               setShowNotifications(false);
             }}
             style={{
               display: 'flex',
+              minHeight: '44px',
               alignItems: 'center',
               gap: '10px',
               padding: '4px 8px 4px 4px',
@@ -360,7 +362,7 @@ export const Header: React.FC<HeaderProps> = ({
             >
               {currentUser.initials || 'CU'}
             </div>
-            <div style={{ textAlign: 'left', lineHeight: 1.2, maxWidth: '140px', overflow: 'hidden' }}>
+            <div className="hidden xl:block" style={{ textAlign: 'left', lineHeight: 1.2, maxWidth: '140px', overflow: 'hidden' }}>
               <div
                 suppressHydrationWarning
                 style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}
@@ -374,7 +376,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {currentUser.role === 'CUSTOMER' ? 'Customer' : currentUser.role}
               </div>
             </div>
-            <ChevronDown size={14} color="#64748b" style={{ marginLeft: '4px' }} />
+            <ChevronDown size={14} className="hidden xl:block" color="#64748b" style={{ marginLeft: '4px' }} />
           </button>
 
           {/* User Menu Dropdown */}

@@ -142,3 +142,16 @@ Ready to depart ──► [Chuyển giao sang Flow 4: Theo dõi hành trình]
 - Chưa được duyệt mô hình vận hành ghép/thuê riêng hàng không. Giữ nguyên các trường hãng bay, flight booking reference và stalls hiện có; không thêm quy tắc thuê cả chuyến bay/khoang riêng.
 - Migration 019 thêm road_trip và route_leg.road_trip_id; không backfill hoặc sửa giá/booking lịch sử. Chạy sau các migration hiện có trên môi trường được phép.
 - Migration 020 lưu riêng shipment.transport_mode (road/air), không thay Domestic/International. Chọn mode tại bước duyệt giá và giữ trong response/snapshot; dữ liệu cũ không bị suy đoán hoặc sửa tự động.
+
+### Kiểm soát phân bổ đồng thời (14/11/2026)
+
+- Lưu kế hoạch và xác nhận/phát hành hóa đơn dùng `READ COMMITTED` cho riêng transaction kế tiếp, vẫn khóa shipment, route và xe theo thứ tự hiện có. Điều này tránh khóa khoảng trống route_leg gây deadlock giữa hai đơn và bảo đảm kiểm tra capacity đọc được phân bổ vừa commit sau khi chờ khóa xe.
+- API phân công xe chưa có lịch kiểm tra cả `shipment_vehicle` và `route_leg`. Dữ liệu cũ thiếu liên kết xe hoặc có trạng thái xe chưa đồng bộ không được dùng để bỏ qua reservation trong lộ trình. Ghép chuyến vẫn thực hiện tại màn hình lập tuyến có thời gian rõ ràng.
+
+### Ngày giờ và tính khả thi của lịch (14/11/2026)
+
+- Màn hình nhập giờ Coordinator dùng cố định Việt Nam (UTC+07:00); không phụ thuộc múi giờ máy. Chặng quốc tế phải quy đổi giờ địa phương trước khi nhập. API nhận ISO với `Z` hoặc offset và lưu cùng một thời điểm.
+- Giờ đến mỗi chặng phải sau giờ đi. Các chặng theo sequence không được chồng chéo; trạm phải theo thứ tự và nằm trong khoảng của chặng đã liên kết (hoặc hành trình nếu chưa liên kết). `legSequenceNo` được lưu qua `route_stop.leg_id` và trả lại khi đọc kế hoạch.
+- Nháp có thể thiếu giờ ở chặng chưa phân bổ; giữ chỗ xe cần đủ khoảng giờ. Gửi duyệt và xác nhận phát hành hóa đơn đều kiểm tra lại toàn bộ lịch đã lưu, yêu cầu đủ giờ từng chặng. Lịch mới không được xuất phát ở quá khứ. Không sửa ngầm đơn cũ.
+- API điều chỉnh trạm giữ nguyên giờ không được gửi, từ chối mã trạm lạ/trùng, kiểm tra toàn bộ lịch đã ghép rồi lưu trong một transaction. Một mục không hợp lệ phải rollback toàn bộ cập nhật. Vẫn yêu cầu lý do và gửi thông báo theo luồng hiện tại.
+- Coordinator chịu trách nhiệm xác nhận giờ xe, lịch bay, thời gian nghỉ, bàn giao, trung chuyển và kiểm dịch trước khi gửi duyệt. Chưa áp ngưỡng tự động về tốc độ, thời gian nghỉ hoặc nối chuyến khi chưa có chính sách được duyệt; hệ thống không khẳng định ETA đã tính đủ các yếu tố này.

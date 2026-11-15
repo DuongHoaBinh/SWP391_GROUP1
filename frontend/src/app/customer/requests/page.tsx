@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { vietnamDateString } from '@/lib/transport-dates';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -27,9 +28,12 @@ import { useCustomerStore } from '@/lib/customer-store';
 type ShipmentStatus =
   | 'requested'
   | 'under_review'
+  | 'change_requested'
   | 'approved'
   | 'rejected'
   | 'planning'
+  | 'confirmed'
+  | 'ready_to_depart'
   | 'in_transit'
   | 'completed'
   | 'cancelled';
@@ -82,9 +86,12 @@ type SortOrder = 'asc' | 'desc';
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
   requested: 'Pending Approval',
   under_review: 'Under Review',
+  change_requested: 'Changes Requested',
   approved: 'Approved',
   rejected: 'Rejected',
   planning: 'Planning',
+  confirmed: 'Confirmed',
+  ready_to_depart: 'Ready to Depart',
   in_transit: 'In Transit',
   completed: 'Completed',
   cancelled: 'Cancelled',
@@ -93,9 +100,12 @@ const STATUS_LABELS: Record<ShipmentStatus, string> = {
 const STATUS_VARIANT: Record<ShipmentStatus, string> = {
   requested: 'pending',
   under_review: 'pending',
+  change_requested: 'pending',
   approved: 'success',
   rejected: 'danger',
   planning: 'pending',
+  confirmed: 'success',
+  ready_to_depart: 'success',
   in_transit: 'transit',
   completed: 'success',
   cancelled: 'danger',
@@ -104,9 +114,12 @@ const STATUS_VARIANT: Record<ShipmentStatus, string> = {
 const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border: string }> = {
   requested: { bg: '#fef3c7', color: '#b45309', border: '#fde68a' },
   under_review: { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  change_requested: { bg: '#fff7ed', color: '#9a3412', border: '#fed7aa' },
   approved: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   rejected: { bg: '#fee2e2', color: '#b91c1c', border: '#fecaca' },
   planning: { bg: '#f3e8ff', color: '#7c3aed', border: '#ddd6fe' },
+  confirmed: { bg: '#eef2ff', color: '#4338ca', border: '#c7d2fe' },
+  ready_to_depart: { bg: '#ecfdf5', color: '#047857', border: '#a7f3d0' },
   in_transit: { bg: '#e0f2fe', color: '#0369a1', border: '#bae6fd' },
   completed: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   cancelled: { bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0' },
@@ -115,6 +128,7 @@ const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border:
 function formatDate(iso: string | null) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -125,10 +139,7 @@ function toLocalDateString(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return vietnamDateString(d);
 }
 
 function formatCurrency(n: number) {
@@ -141,7 +152,7 @@ function exportQuotationPDF(order: TransportOrder) {
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
 
-  const statusColor = STATUS_COLORS[order.status] || STATUS_COLORS.cancelled;
+  const statusColor = STATUS_COLORS[order.status]?.bg ? STATUS_COLORS[order.status] : STATUS_COLORS.cancelled;
 
   const horsesRows =
     order.horses
@@ -204,7 +215,7 @@ function exportQuotationPDF(order: TransportOrder) {
       <div class="doc-title">BÁO GIÁ DỰ KIẾN</div><p style="font-size:12px;margin-top:8px">Chưa yêu cầu thanh toán. Hóa đơn được phát hành sau khi lộ trình được xác nhận.</p>
       <div class="doc-id">Mã yêu cầu: ${escapeQuotationText(order.requestCode || `#${order.id}`)}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
-      <div style="text-align:right"><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
+      <div style="text-align:right"><span class="status-badge">${typeof STATUS_LABELS[order.status] === 'string' ? STATUS_LABELS[order.status] : 'Unknown Status'}</span></div>
     </div>
   </div>
 
@@ -412,7 +423,7 @@ export default function RequestsPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Top Breadcrumb & Action */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Link
             href="/customer"
@@ -474,7 +485,9 @@ export default function RequestsPage() {
               border: '1px solid #e2e8f0',
               borderRadius: '8px',
               padding: '8px 14px',
-              minWidth: '280px',
+              minWidth: 0,
+              flex: '1 1 260px',
+              maxWidth: '340px',
             }}
           >
             <Search size={16} color="#94a3b8" />
@@ -500,9 +513,12 @@ export default function RequestsPage() {
               [
                 'all',
                 'requested',
+                'change_requested',
                 'approved',
                 'rejected',
                 'planning',
+                'confirmed',
+                'ready_to_depart',
                 'in_transit',
                 'completed',
                 'cancelled',
@@ -625,7 +641,8 @@ export default function RequestsPage() {
             {error}
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <div className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" tabIndex={0} role="region" aria-label="Transport requests table, scroll horizontally for all columns">
+          <table className="min-w-[1100px] [&_td:first-child]:whitespace-nowrap [&_td:nth-child(4)]:whitespace-nowrap [&_td:nth-child(5)]:whitespace-nowrap [&_td:nth-child(7)]:whitespace-nowrap" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-light)' }}>
                 <th
@@ -761,7 +778,7 @@ export default function RequestsPage() {
               ) : (
                 displayedOrders.map((order) => {
                   const sc =
-                    STATUS_COLORS[order.status] || STATUS_COLORS.cancelled;
+                    STATUS_COLORS[order.status]?.bg ? STATUS_COLORS[order.status] : STATUS_COLORS.cancelled;
                   return (
                     <tr
                       key={order.id}
@@ -843,6 +860,8 @@ export default function RequestsPage() {
                       <td style={{ padding: '14px 14px' }}>
                         <span
                           style={{
+                            display: 'inline-flex',
+                            whiteSpace: 'nowrap',
                             padding: '3px 10px',
                             borderRadius: '6px',
                             fontSize: '12px',
@@ -852,7 +871,7 @@ export default function RequestsPage() {
                             border: `1px solid ${sc.border}`,
                           }}
                         >
-                          {STATUS_LABELS[order.status]}
+                          {typeof STATUS_LABELS[order.status] === 'string' ? STATUS_LABELS[order.status] : 'Unknown Status'}
                         </span>
                       </td>
 
@@ -921,8 +940,10 @@ export default function RequestsPage() {
               )}
             </tbody>
           </table>
+          </div>
         )}
 
+        {!loading && !error && orders.length > 0 && <p className="px-4 py-2 text-xs text-slate-500 2xl:hidden">Cuộn ngang bảng để xem đủ thông tin và nút thao tác.</p>}
         {/* Pagination Footer */}
         {!loading && pagination.totalPages >= 1 && (
           <div

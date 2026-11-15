@@ -1,6 +1,7 @@
 'use client';
 
 import { defaultInsurance, insuranceNames, previewInsurance, unchangedInsurance, vnd, type InsuranceInput, type InsurancePolicy, type InsuredHorse } from '../insurance-policy';
+import { DeclaredValueInput } from './DeclaredValueInput';
 
 export function InsuranceSelection({ horses, values, onChange, policy, error, onRetry, savedPolicies }: {
   horses: Array<{ id: string; name: string; quantity?: number }>;
@@ -17,18 +18,20 @@ export function InsuranceSelection({ horses, values, onChange, policy, error, on
       const preview = previewInsurance(value, policy, saved);
       const keepsPolicy = saved && unchangedInsurance(value, saved);
       const rate = keepsPolicy ? saved.exchangeRate : policy?.usdToVnd;
+      const canRestoreUsd = saved?.declaredCurrency === 'USD' && Number(saved.exchangeRate) > 0 &&
+        Number(value.declaredValue || 0) === saved.declaredValue && value.insurancePackage === saved.insurancePackage;
+      const usdAvailable = Boolean(policy?.usdToVnd || canRestoreUsd);
       return <fieldset key={horse.id} className="space-y-3 rounded-xl border border-slate-200 p-4">
         <legend className="px-1 font-semibold text-slate-900">{horse.name} · {horse.quantity ?? 1} ngựa</legend>
         <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
           <label className="text-sm font-medium">Giá trị ước tính / ngựa
-            <input type="number" min="0" max="9999999999999.99" step="0.01" inputMode="decimal" value={value.declaredValue}
-              aria-invalid={Boolean(preview.error)} aria-describedby={`insurance-help-${horse.id}`} placeholder="Ví dụ: 100000000"
-              onChange={e => onChange(horse.id, { ...value, declaredValue: e.target.value })}
-              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            <DeclaredValueInput value={value.declaredValue} invalid={Boolean(preview.error)} describedBy={`insurance-help-${horse.id} insurance-format-${horse.id}`}
+              onChange={declaredValue => onChange(horse.id, { ...value, declaredValue })} />
+            <span id={`insurance-format-${horse.id}`} className="mt-1 block text-xs font-normal text-slate-500">Dấu chấm phân cách hàng nghìn; dấu phẩy cho phần thập phân, ví dụ 1.000.000,50.</span>
           </label>
           <label className="text-sm font-medium">Loại tiền
             <select value={value.declaredCurrency} onChange={e => onChange(horse.id, { ...value, declaredCurrency: e.target.value as 'VND' | 'USD' })} className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3">
-              <option value="VND">VNĐ</option><option value="USD" disabled={!policy?.usdToVnd}>USD{!policy?.usdToVnd ? ' (chưa có tỷ giá)' : ''}</option>
+              <option value="VND">VNĐ</option><option value="USD" disabled={!usdAvailable}>USD{!policy?.usdToVnd ? canRestoreUsd ? ' (tỷ giá đã lưu)' : ' (chưa có tỷ giá)' : ''}</option>
             </select>
           </label>
         </div>

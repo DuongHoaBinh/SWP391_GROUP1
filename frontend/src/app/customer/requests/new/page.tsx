@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -20,8 +20,9 @@ import {
 import { useCustomerStore } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
 import { AddHorseModal } from '@/components/horses/AddHorseModal';
+import { HorseProfileModal } from '@/components/horses/HorseProfileModal';
 import { apiClient } from '@/lib/api-client';
-import { getCurrentUser } from '@/lib/auth';
+import { getAuthToken, getCurrentUser } from '@/lib/auth';
 import dynamic from 'next/dynamic';
 import useSWR from 'swr';
 import { InsuranceSelection } from '@/features/orders/components/InsuranceSelection';
@@ -30,6 +31,10 @@ import { BookingChoice } from '@/features/orders/components/BookingChoice';
 import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { type BookingType } from '@/features/orders/booking-policy';
 import { defaultInsurance, insuranceNames, previewInsurance, vnd, type InsuranceInput, type InsurancePolicy } from '@/features/orders/insurance-policy';
+import { getReservedHorseIds, type HorseReservationOrder } from '@/features/orders/horse-availability';
+import { vietnamDateString, requestedDateError, validCalendarDay } from '@/lib/transport-dates';
+import { travelDurationLabel, type RoutePreviewMetrics } from '@/features/routes/route-metrics';
+import { readRequestDraft, requestDraftKey, saveRequestDraft } from '@/features/orders/request-draft';
 
 const RoutePlanningMap = dynamic(
   () => import('@/components/maps/RoutePlanningMap'),
@@ -58,12 +63,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 
-const getTodayString = () => new Date().toISOString().split('T')[0];
-const getTomorrowString = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
-};
+const getTodayString = () => vietnamDateString();
 
 const formSchema = z
   .object({
@@ -75,11 +75,7 @@ const formSchema = z
       .string()
       .min(1, 'Departure date is required')
       .refine((val) => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const dep = new Date(val);
-        dep.setHours(0, 0, 0, 0);
-        return dep >= today;
+        return validCalendarDay(val) && val >= vietnamDateString();
       }, 'Ngày khởi hành không được chọn ngày trong quá khứ'),
     arrivalDate: z.string().optional(),
     horseCount: z.coerce.number().min(1),
@@ -88,11 +84,7 @@ const formSchema = z
   .refine(
     (data) => {
       if (data.arrivalDate && data.departureDate) {
-        const dep = new Date(data.departureDate);
-        const arr = new Date(data.arrivalDate);
-        dep.setHours(0, 0, 0, 0);
-        arr.setHours(0, 0, 0, 0);
-        return arr >= dep;
+        return !requestedDateError(data.departureDate, data.arrivalDate);
       }
       return true;
     },
@@ -108,15 +100,24 @@ function CreateTransportRequestForm() {
   const searchParams = useSearchParams();
   const preselectedHorseId = searchParams.get('horseId');
 
-  const { horses, refreshHorses } = useCustomerStore();
+  const { horses: storedHorses, refreshHorses } = useCustomerStore();
+  const { data: reservationOrders, error: reservationError, isLoading: loadingReservations, mutate: reloadReservations } = useSWR<HorseReservationOrder[]>('/orders/my-orders', (url: string) => apiClient<HorseReservationOrder[]>(url));
+  const reservedIds = useMemo(() => getReservedHorseIds(reservationOrders ?? []), [reservationOrders]);
+  const horses = useMemo(() => storedHorses.map(horse => reservedIds.has(String(horse.id))
+    ? { ...horse, status: 'in_transit', availabilityStatus: 'In Transit' } : horse), [storedHorses, reservedIds]);
 
   // Step state (1 to 3)
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
+  const [profileHorseId, setProfileHorseId] = useState<number | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftNotice, setDraftNotice] = useState('');
+  const [submitError, setSubmitError] = useState('');
+  const draftStorageKey = useRef<string | null>(null);
+  const draftSubmitted = useRef(false);
 
   const todayStr = getTodayString();
-  const tomorrowStr = getTomorrowString();
 
   // Form states using react-hook-form
   const {
@@ -124,6 +125,7 @@ function CreateTransportRequestForm() {
     handleSubmit,
     watch,
     setValue,
+    reset,
     trigger,
     formState: { errors },
   } = useForm<FormData>({
@@ -134,7 +136,7 @@ function CreateTransportRequestForm() {
       origin: 'Ho Chi Minh City, Vietnam',
       destination: 'Singapore Turf Club',
       departureDate: todayStr,
-      arrivalDate: tomorrowStr,
+      arrivalDate: '',
       horseCount: 1,
       specialReqs: '',
     },
@@ -143,7 +145,7 @@ function CreateTransportRequestForm() {
   const formValues = watch();
 
   // Route calculation and corridor metrics from Leaflet map
-  const [routeData, setRouteData] = useState<{ distanceKm: number; durationHours: number; mode: 'air' | 'road' } | null>(null);
+  const [routeData, setRouteData] = useState<RoutePreviewMetrics | null>(null);
 
   // Horse quantities mapping: horseId -> quantity
   const [horseQuantities, setHorseQuantities] = useState<Record<string, number>>({});
@@ -155,12 +157,48 @@ function CreateTransportRequestForm() {
   const refreshedStep = useRef<number | null>(null);
   const initializedSelection = useRef<string | null>(null);
   useEffect(() => {
+    if (getAuthToken() && getCurrentUser().role === 'CUSTOMER') {
+      const key = requestDraftKey(String(getCurrentUser().id), preselectedHorseId);
+      draftStorageKey.current = key;
+      let saved = null;
+      try { saved = readRequestDraft(sessionStorage, key); } catch {}
+      if (saved) {
+        reset(saved.fields);
+        setCurrentStep(saved.currentStep);
+        setHorseQuantities(saved.horseQuantities);
+        setBookingType(saved.bookingType);
+        setInsuranceValues(saved.insuranceValues);
+        setRouteData(saved.routeData);
+        initializedSelection.current = preselectedHorseId ?? 'default';
+      }
+    }
+    setDraftReady(true);
+  }, [preselectedHorseId, reset]);
+
+  useEffect(() => {
+    if (!draftReady || !draftStorageKey.current || draftSubmitted.current) return;
+    let saved = false;
+    try { saved = saveRequestDraft(sessionStorage, draftStorageKey.current, { version: 1, savedAt: Date.now(), fields: formValues,
+      currentStep, horseQuantities, bookingType, insuranceValues, routeData }); } catch {}
+    setDraftNotice(saved ? 'Nội dung được tự lưu trong phiên trình duyệt này. Tải lại trang sẽ khôi phục bản nháp theo tài khoản.'
+      : 'Trình duyệt chưa lưu được bản nháp. Vui lòng giữ trang mở để tránh mất thông tin.');
+  }, [draftReady, formValues, currentStep, horseQuantities, bookingType, insuranceValues, routeData]);
+
+  useEffect(() => {
+    if (!draftReady || loadingReservations || reservationError) return;
+    setHorseQuantities(previous => {
+      const entries = Object.entries(previous).filter(([id]) => !reservedIds.has(id));
+      return entries.length === Object.keys(previous).length ? previous : Object.fromEntries(entries);
+    });
+  }, [reservedIds, draftReady, loadingReservations, reservationError]);
+  useEffect(() => {
     if (refreshedStep.current === currentStep) return;
     refreshedStep.current = currentStep;
     void refreshHorses();
   }, [currentStep, refreshHorses]);
 
   useEffect(() => {
+    if (!draftReady || loadingReservations || reservationError) return;
     const selectionKey = preselectedHorseId ?? 'default';
     if (initializedSelection.current === selectionKey) return;
     if (preselectedHorseId) {
@@ -178,14 +216,15 @@ function CreateTransportRequestForm() {
         initializedSelection.current = selectionKey;
       }
     }
-  }, [preselectedHorseId, horses]);
+  }, [preselectedHorseId, horses, loadingReservations, reservationError, draftReady]);
 
   const selectedHorseIds = Object.keys(horseQuantities).filter((id) => (horseQuantities[id] || 0) > 0);
   const totalSelectedHorses = Object.values(horseQuantities).reduce((sum, q) => sum + (q || 0), 0);
 
   useEffect(() => {
+    if (!draftReady) return;
     setValue('horseCount', Math.max(1, totalSelectedHorses));
-  }, [totalSelectedHorses, setValue]);
+  }, [totalSelectedHorses, setValue, draftReady]);
 
   const selectedHorses = horses
     .filter((h) => (horseQuantities[h.id] || 0) > 0)
@@ -196,6 +235,14 @@ function CreateTransportRequestForm() {
 
   const estimatedInsuranceFee = selectedHorses.reduce((sum, h) => sum + previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null).fee * h.quantity, 0);
   const validateInsurance = () => {
+    if (loadingReservations || reservationError) {
+      setInsuranceError('Chưa kiểm tra được ngựa đang có trong đơn khác. Vui lòng tải lại danh sách đặt chỗ.');
+      return false;
+    }
+    if (!totalSelectedHorses || selectedHorses.reduce((sum, horse) => sum + horse.quantity, 0) !== totalSelectedHorses) {
+      setInsuranceError('Chưa tải đủ hồ sơ ngựa trong bản nháp. Vui lòng quay lại bước chọn ngựa để kiểm tra.');
+      return false;
+    }
     const invalid = selectedHorses.map(h => ({ name: h.name, ...previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null) })).find(p => p.error);
     const message = invalid ? `${invalid.name}: ${invalid.error}` : estimatedInsuranceFee > 9999999999999 ? 'Tổng phí bảo hiểm vượt giới hạn đơn hàng.' : '';
     setInsuranceError(message);
@@ -209,6 +256,7 @@ function CreateTransportRequestForm() {
   }, {} as Record<string, number>);
 
   const toggleHorseSelection = (id: string) => {
+    if (loadingReservations || reservationError) return;
     const target = horses.find((h) => h.id === id);
     if (!target) return;
     const isUnavailable =
@@ -232,7 +280,7 @@ function CreateTransportRequestForm() {
 
   const handleContinue = async () => {
     if (currentStep === 1) {
-      const isValid = await trigger(['title', 'origin', 'destination', 'departureDate']);
+      const isValid = await trigger(['title', 'origin', 'destination', 'departureDate', 'arrivalDate']);
       if (!isValid) return;
     }
     if (currentStep === 2) {
@@ -267,6 +315,7 @@ function CreateTransportRequestForm() {
 
   const onSubmitForm = async (data: FormData) => {
     if (isSubmitting || !validateInsurance()) return;
+    setSubmitError('');
     setIsSubmitting(true);
     try {
       const selectedHorsesData: Array<{
@@ -296,7 +345,7 @@ function CreateTransportRequestForm() {
 
       const currentUser = getCurrentUser();
       const routeNote = routeData
-        ? `[Lộ trình: ${routeData.mode === 'air' ? 'Đường Hàng Không' : 'Đường Bộ Liên Vận'}, ${routeData.distanceKm} km, ~${routeData.durationHours}h]`
+        ? `[Lộ trình tham khảo: ${routeData.mode === 'air' ? 'Đường Hàng Không' : 'Đường Bộ Liên Vận'}, ${routeData.distanceKm} km; ${travelDurationLabel(routeData.durationHours)}; chưa gồm thời gian chờ, nghỉ và kiểm dịch]`
         : '';
       const typeNote = `[Hình thức: ${data.transportType === 'International' ? 'Quốc tế (International)' : 'Nội địa (Domestic)'}]`;
       const titleNote = data.title ? `[Tiêu đề: ${data.title.trim()}]` : '';
@@ -310,7 +359,8 @@ function CreateTransportRequestForm() {
         requestedHorseCount: totalSelectedHorses || (data.horseCount ? Number(data.horseCount) : 1),
         originLocation: data.origin,
         destinationLocation: data.destination,
-        requestedDate: new Date(data.departureDate).toISOString(),
+        requestedDate: data.departureDate,
+        expectedArrivalDate: data.arrivalDate || undefined,
         transportationType: data.transportType,
         transportType: data.transportType,
         specialRequirements: combinedReqs || undefined,
@@ -326,6 +376,10 @@ function CreateTransportRequestForm() {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+      draftSubmitted.current = true;
+      if (draftStorageKey.current) {
+        try { sessionStorage.removeItem(draftStorageKey.current); } catch {}
+      }
 
       // Refresh horse stock in store
       try {
@@ -335,15 +389,20 @@ function CreateTransportRequestForm() {
       router.push(`/customer/requests/${newReq.id}`);
     } catch (error: any) {
       console.error('Failed to create request:', error);
-      alert(error?.message || 'Failed to submit request. Please try again.');
+      setSubmitError(`${error?.message || 'Chưa gửi được yêu cầu.'} Nội dung vẫn được giữ lại, bạn có thể thử gửi lại.`);
       setIsSubmitting(false);
     }
   };
 
   const progressPercent = ((currentStep - 1) / 2) * 100;
 
+  if (!draftReady) return <p role="status" className="p-6 text-sm text-slate-600">Đang khôi phục thông tin yêu cầu…</p>;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '90px' }}>
+      {draftNotice && <p role="status" className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">{draftNotice}</p>}
+      {submitError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{submitError}</p>}
+      {currentStep === 3 && insuranceError && <p role="alert" className="text-sm text-red-700">{insuranceError}</p>}
       {/* Top Breadcrumb */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
@@ -565,6 +624,7 @@ function CreateTransportRequestForm() {
 
               {/* Interactive Route & Border Checkpoints Map */}
               <RoutePlanningMap
+                initialMode={routeData?.mode}
                 originText={formValues.origin}
                 destinationText={formValues.destination}
                 transportType={formValues.transportType}
@@ -580,19 +640,13 @@ function CreateTransportRequestForm() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
                 <div>
                   <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Departure Date <span style={{ color: '#dc2626' }}>*</span>
+                    Ngày đi mong muốn (giờ Việt Nam) <span style={{ color: '#dc2626' }}>*</span>
                   </label>
                   <input
                     type="date"
                     min={todayStr}
-                    {...register('departureDate', {
-                      onChange: (e) => {
-                        const newDep = e.target.value;
-                        if (formValues.arrivalDate && formValues.arrivalDate < newDep) {
-                          setValue('arrivalDate', newDep, { shouldValidate: true });
-                        }
-                      },
-                    })}
+                    {...register('departureDate', { onChange: () => { void trigger('arrivalDate'); } })}
+                    aria-label="Ngày đi mong muốn (giờ Việt Nam)"
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -611,12 +665,13 @@ function CreateTransportRequestForm() {
 
                 <div>
                   <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Expected Arrival
+                    Ngày đến mong muốn (không bắt buộc)
                   </label>
                   <input
                     type="date"
                     min={formValues.departureDate || todayStr}
                     {...register('arrivalDate')}
+                    aria-label="Ngày đến mong muốn"
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -633,6 +688,8 @@ function CreateTransportRequestForm() {
                   )}
                 </div>
               </div>
+
+              <p className="mt-3 text-sm text-slate-600">Đây là ngày khách mong muốn, chưa phải lịch vận chuyển đã xác nhận. Có thể để trống ngày đến nếu chưa rõ. Điều phối sẽ lập giờ đi/đến, thời gian nghỉ, trung chuyển và kiểm dịch rồi gửi duyệt; thời gian trên bản đồ không phải cam kết giao hàng.</p>
 
               {/* Row 4: Special Requirements */}
               <div>
@@ -721,8 +778,11 @@ function CreateTransportRequestForm() {
               </button>
             </div>
 
-            <div style={{ padding: '24px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            {loadingReservations && <p role="status" className="px-6 pt-4 text-sm text-slate-600">Đang kiểm tra các đơn đang giữ chỗ ngựa…</p>}
+            {reservationError && <p role="alert" className="px-6 pt-4 text-sm text-red-700">Không tải được trạng thái giữ chỗ ngựa. <button type="button" className="underline" onClick={() => void reloadReservations()}>Thử lại</button></p>}
+            <div className="p-4 sm:p-6">
+              <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Horse selection table, scroll horizontally for all columns">
+              <table className="min-w-[700px]" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
                     <th style={{ padding: '12px 16px', width: '40px' }} />
@@ -738,7 +798,7 @@ function CreateTransportRequestForm() {
                     const isInTransit = h.status === 'in_transit' || h.availabilityStatus === 'In Transit';
                     const isDelivered = h.status === 'delivered' || h.availabilityStatus === 'Delivered';
                     const isRetired = h.status === 'retired' || h.status === 'deceased';
-                    const isUnavailable = isInTransit || isDelivered || isRetired;
+                    const isUnavailable = isInTransit || isDelivered || isRetired || loadingReservations || Boolean(reservationError);
                     const isSelected = (horseQuantities[h.id] || 0) > 0;
                     return (
                       <tr
@@ -752,6 +812,7 @@ function CreateTransportRequestForm() {
                         <td style={{ padding: '16px', textAlign: 'center' }}>
                           <input
                             type="checkbox"
+                            aria-label={`Chọn ngựa ${h.name}`}
                             checked={isSelected}
                             disabled={isUnavailable}
                             onChange={() => !isUnavailable && toggleHorseSelection(h.id)}
@@ -796,7 +857,7 @@ function CreateTransportRequestForm() {
                               </label>}
                               {isInTransit ? (
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#e0e7ff', color: '#4338ca', fontSize: '11px', fontWeight: 700 }}>
-                                  <Truck size={12} /> Đang vận chuyển
+                                  <Truck size={12} /> {reservedIds.has(String(h.id)) ? 'Đã có đơn vận chuyển' : 'Đang vận chuyển'}
                                 </div>
                               ) : isDelivered ? (
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#ecfdf5', color: '#047857', fontSize: '11px', fontWeight: 700 }}>
@@ -825,19 +886,23 @@ function CreateTransportRequestForm() {
                           </span>
                         </td>
                         <td style={{ padding: '16px', textAlign: 'right' }}>
-                          <Link href={`/customer/horses/${h.id}`} target="_blank" style={{ fontSize: '12.5px', color: 'var(--primary)', fontWeight: 600 }}>
-                            View Profile ↗
-                          </Link>
+                          <button type="button" onClick={() => setProfileHorseId(h.backendId ?? Number(h.id))}
+                            aria-haspopup="dialog" aria-label={`View Profile · ${h.name}`}
+                            className="min-h-11 rounded-lg px-2 text-sm font-semibold text-blue-600 hover:bg-blue-50 focus-visible:outline-blue-600">
+                            View Profile
+                          </button>
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+              </div>
+              <p className="mt-2 text-xs text-slate-500 lg:hidden">Cuộn ngang bảng để xem đủ hồ sơ ngựa.</p>
               <BookingChoice value={bookingType} onChange={setBookingType} horseCount={totalSelectedHorses} />
               {selectedHorses.length > 0 && <InsuranceSelection horses={selectedHorses} values={insuranceValues}
                 onChange={(id, value) => { setInsuranceValues(previous => ({ ...previous, [id]: value })); setInsuranceError(''); }}
-                policy={policy ?? null} error={policyError ? 'Chưa tải được chính sách bảo hiểm.' : insuranceError} onRetry={() => void reloadPolicy()} />}
+                policy={policy ?? null} error={policyError ? 'Chưa tải được chính sách bảo hiểm.' : insuranceError} onRetry={() => { void reloadPolicy(); void reloadReservations(); }} />}
             </div>
           </div>
         )}
@@ -875,8 +940,9 @@ function CreateTransportRequestForm() {
                   </div>
                 </div>
                 <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Departure Date</span>
+                  <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Ngày đi mong muốn</span>
                   <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>{formValues.departureDate}</div>
+                  <div className="mt-2 text-sm text-slate-600">Ngày đến mong muốn: {formValues.arrivalDate || 'Chưa chọn; chờ điều phối tư vấn'}</div>
                 </div>
               </div>
 
@@ -915,7 +981,7 @@ function CreateTransportRequestForm() {
                         Lộ trình: {routeData.mode === 'air' ? 'Đường Hàng Không (Air Freight Corridor)' : 'Đường Bộ Liên Vận (Overland Road)'}
                       </div>
                       <div style={{ fontSize: '12.5px', color: '#475569' }}>
-                        Quãng đường: <strong style={{ color: '#0f172a' }}>{routeData.distanceKm.toLocaleString()} km</strong> • Thời gian ước tính: <strong style={{ color: '#0f172a' }}>~{routeData.durationHours} giờ</strong>
+                        Quãng đường tham khảo: <strong style={{ color: '#0f172a' }}>{routeData.distanceKm.toLocaleString('vi-VN')} km</strong> • Thời gian chạy xe tham khảo: <strong style={{ color: '#0f172a' }}>{travelDurationLabel(routeData.durationHours)}</strong>
                       </div>
                     </div>
                   </div>
@@ -1072,7 +1138,7 @@ function CreateTransportRequestForm() {
             </button>
           ) : (
             <button
-              onClick={handleSubmit(onSubmitForm)}
+              onClick={handleSubmit(onSubmitForm, () => { setCurrentStep(1); setSubmitError('Vui lòng kiểm tra lại thông tin lộ trình và ngày mong muốn trước khi gửi.'); })}
               disabled={isSubmitting}
               style={{
                 padding: '9px 26px',
@@ -1103,6 +1169,7 @@ function CreateTransportRequestForm() {
         </div>
       </div>
 
+      {profileHorseId != null && <HorseProfileModal key={profileHorseId} horseId={profileHorseId} onClose={() => setProfileHorseId(null)} />}
       <AddHorseModal
         isOpen={isAddHorseModalOpen}
         onClose={() => setIsAddHorseModalOpen(false)}

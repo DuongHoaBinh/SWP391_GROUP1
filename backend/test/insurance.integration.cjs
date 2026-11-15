@@ -34,6 +34,37 @@ test('equine insurance: persisted declarations, exact quote totals, ownership, r
       assert.equal(order.horses[0].insurancePackage, 'basic'); assert.equal(order.horses[0].maxCompensation, 50000000);
       assert.equal(order.horses[0].emergencyVetCovered, false);
     });
+    await t.test('customer requested departure and expected arrival dates persist through reload and partial corrections', async () => {
+      const input = { ...payload([await horse()]), requestedDate: '2099-02-01', expectedArrivalDate: '2099-02-03' };
+      const order = await req('customer', '/orders', 'POST', input, 201);
+      assert.equal(order.requestedDate.slice(0, 10), '2099-02-01');
+      assert.equal(order.expectedArrivalDate?.slice(0, 10), '2099-02-03');
+      await req('manager', `/orders/${order.id}/request-changes`, 'PATCH', { reason: 'Date revision' });
+      const revised = await req('customer', `/orders/${order.id}`, 'PUT', { expectedArrivalDate: '2099-02-04' });
+      assert.equal(revised.requestedDate.slice(0, 10), '2099-02-01');
+      assert.equal((await req('customer', `/orders/${order.id}`)).expectedArrivalDate.slice(0, 10), '2099-02-04');
+      const [[saved]] = await db.execute('SELECT expected_arrival_date FROM shipment WHERE shipment_id=?', [order.id]);
+      assert.ok(saved.expected_arrival_date);
+    });
+    await t.test('partial arrival correction respects legacy Vietnam-midnight departure without shifting the saved timestamp', async () => {
+      const order = await req('customer', '/orders', 'POST', { ...payload([await horse()]), requestedDate: '2099-02-02' }, 201);
+      const historicalInstant = '2099-02-01T17:00:00.000Z';
+      await db.execute('UPDATE shipment SET requested_date=? WHERE shipment_id=?', [new Date(historicalInstant), order.id]);
+      await req('manager', `/orders/${order.id}/request-changes`, 'PATCH', { reason: 'Test legacy calendar boundaries' });
+      await req('customer', `/orders/${order.id}`, 'PUT', { expectedArrivalDate: '2099-02-01' }, 400);
+      const revised = await req('customer', `/orders/${order.id}`, 'PUT', { expectedArrivalDate: '2099-02-02' });
+      assert.equal(revised.requestedDate, historicalInstant);
+      assert.equal(revised.expectedArrivalDate.slice(0, 10), '2099-02-02');
+    });
+    await t.test('invalid calendars, past departure and arrival before departure are rejected without reserving horses', async () => {
+      for (const dates of [{ requestedDate: '2099-02-30' }, { requestedDate: 'yesterday' }, { requestedDate: '2000-01-01' },
+        { requestedDate: '2099-02-03', expectedArrivalDate: '2099-02-02' }, { expectedArrivalDate: '2099-02-30' }]) {
+        const h = await horse();
+        await req('customer', '/orders', 'POST', { ...payload([h]), ...dates }, 400);
+        const [[row]] = await db.execute('SELECT status FROM horse WHERE horse_id=?', [h.horseId]);
+        assert.equal(row.status, 'active');
+      }
+    });
     await t.test('mixed packages, source currencies and quantities persist; client premiums are ignored', async () => {
       const a = await horse(), b = await horse();
       const order = await create([{ ...a, quantity: 2, declaredValue: 100000000, insurancePackage: 'standard', insuranceFee: 1, maxCompensation: 1 },
@@ -107,6 +138,15 @@ test('equine insurance: persisted declarations, exact quote totals, ownership, r
       const responses = await Promise.all([1, 2].map(() => fetch(base + '/orders', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokens.customer}` }, body: JSON.stringify(body) })));
       assert.deepEqual(responses.map(r => r.status).sort(), [201, 400]);
       const [[count]] = await db.execute('SELECT COUNT(*) AS n FROM shipment_horse WHERE horse_id = ?', [h.horseId]); assert.equal(count.n, 1);
+    });
+    await t.test('legacy active status cannot double-book a horse still attached to an unfinished order', async () => {
+      const h = await horse();
+      const first = await create([h]);
+      await db.execute("UPDATE horse SET status = 'active' WHERE horse_id = ?", [h.horseId]);
+      await req('customer', '/orders', 'POST', payload([h]), 400);
+      const [[count]] = await db.execute('SELECT COUNT(*) AS n FROM shipment_horse WHERE horse_id = ?', [h.horseId]);
+      assert.equal(Number(count.n), 1);
+      assert.equal((await req('customer', `/orders/${first.id}`)).status, 'requested');
     });
     await t.test('concurrent approval and change request cannot reopen an approved insurance quote', async () => {
       const order = await create([{ ...await horse(), declaredValue: 100000000, insurancePackage: 'premium' }]);

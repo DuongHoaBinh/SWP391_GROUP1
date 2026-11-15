@@ -1,21 +1,20 @@
-const { execFileSync, spawn } = require('node:child_process');
+const { spawn } = require('node:child_process');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const mysql = require('mysql2/promise');
 const assert = require('node:assert/strict');
+const { startDisposableMysql } = require('./disposable-mysql.cjs');
 
-// Disposable MySQL container: never reads or migrates the developer's database.
+// Disposable MySQL server: never reads or migrates the developer's database.
 async function main() {
   const root = path.resolve(__dirname, '../..');
-  const name = `swp-payment-test-${randomBytes(6).toString('hex')}`;
-  const password = randomBytes(24).toString('hex');
-  let server, db;
+  let server, db, database;
   try {
-    execFileSync('docker', ['run', '-d', '--name', name, '-e', 'MYSQL_ROOT_PASSWORD', '-p', '127.0.0.1::3306', 'mysql:8.0'], {
-      env: { ...process.env, MYSQL_ROOT_PASSWORD: password }, stdio: 'pipe', timeout: 120000,
-    });
-    const port = Number(execFileSync('docker', ['inspect', '--format', '{{(index (index .NetworkSettings.Ports "3306/tcp") 0).HostPort}}', name], { encoding: 'utf8', timeout: 15000 }).trim());
+    database = await startDisposableMysql();
+    const { port, password } = database;
     for (let attempt = 0; attempt < 90; attempt++) {
       try { db = await mysql.createConnection({ host: '127.0.0.1', port, user: 'root', password, multipleStatements: true }); break; }
       catch { await new Promise(resolve => setTimeout(resolve, 1000)); }
@@ -66,6 +65,31 @@ async function main() {
       SEPAY_ACCOUNT_NUMBER: '0123456789', SEPAY_ACCOUNT_NAME: 'TEST ONLY', SEPAY_PAYMENT_PREFIX: 'DH', SEPAY_CODE_LENGTH: '8',
       SEPAY_WEBHOOK_SECRET: randomBytes(32).toString('hex'), MOMO_SANDBOX_ENABLED: 'true', MOMO_ENDPOINT: 'https://test-payment.momo.vn/v2/gateway/api/create',
       MOMO_PARTNER_CODE: 'TEST', MOMO_ACCESS_KEY: randomBytes(16).toString('hex'), MOMO_SECRET_KEY: randomBytes(32).toString('hex') };
+    // Exercise the actual commands used on developer machines, not only raw SQL.
+    // Reproduce the local-export failure in an isolated schema, then exercise the real CLI twice.
+    await db.query('CREATE DATABASE scope_upgrade_fixture');
+    await db.query('CREATE TABLE scope_upgrade_fixture.shipment (shipment_id INT PRIMARY KEY, total_cost DECIMAL(15,2), special_requirements TEXT)');
+    await db.query("INSERT INTO scope_upgrade_fixture.shipment VALUES (1, 1234567, 'Domestic note must not become an inferred scope')");
+    await assert.rejects(db.query('SELECT transportation_type FROM scope_upgrade_fixture.shipment'), error => error.code === 'ER_BAD_FIELD_ERROR');
+    for (let repeat = 0; repeat < 2; repeat++) await promisify(execFile)(process.execPath, [path.join(root, 'database/apply-transportation-type-migration.cjs')], {
+      cwd: path.join(root, 'backend'), env: { ...env, DB_NAME: 'scope_upgrade_fixture' }, timeout: 30000, windowsHide: true,
+    });
+    const [[scopeFixture]] = await db.query('SELECT * FROM scope_upgrade_fixture.shipment');
+    assert.equal(Number(scopeFixture.total_cost), 1234567); assert.equal(scopeFixture.transportation_type, null);
+    assert.equal(scopeFixture.special_requirements, 'Domestic note must not become an inferred scope');
+    await db.query("UPDATE scope_upgrade_fixture.shipment SET transportation_type='Domestic'");
+    await promisify(execFile)(process.execPath, [path.join(root, 'database/apply-transportation-type-migration.cjs')], {
+      cwd: path.join(root, 'backend'), env: { ...env, DB_NAME: 'scope_upgrade_fixture' }, timeout: 30000, windowsHide: true,
+    });
+    const [[retainedScope]] = await db.query('SELECT transportation_type FROM scope_upgrade_fixture.shipment');
+    assert.equal(retainedScope.transportation_type, 'Domestic');
+    console.log('PASS: missing transportation_type reproduced; migration 021 upgrades old schema, repeats safely and preserves historical fields.');
+    for (const feature of ['transportation-type', 'sepay', 'payment-gate', 'insurance', 'booking', 'road-trip', 'transport-mode']) {
+      await promisify(execFile)(process.execPath, [path.join(root, `database/apply-${feature}-migration.cjs`)], {
+        cwd: path.join(root, 'backend'), env, timeout: 30000, windowsHide: true,
+      });
+    }
+    console.log('PASS: actual migration CLI commands also support repeated execution.');
     server = spawn(process.execPath, ['dist/main.js'], { cwd: path.join(root, 'backend'), env, stdio: ['ignore', 'pipe', 'pipe'] });
     let startup = '';
     server.stdout.on('data', data => { startup += data; }); server.stderr.on('data', data => { startup += data; });
@@ -77,14 +101,52 @@ async function main() {
     }
     if (!ready) throw new Error(`Test API did not start: ${startup}`);
     console.log('Disposable MySQL + Nest API ready. Running payment regression tests.');
-    const test = spawn(process.execPath, ['--test', 'test/sepay.integration.cjs', 'test/payment-gating.test.cjs', 'test/insurance-policy.test.cjs', 'test/insurance.integration.cjs', 'test/booking-policy.test.cjs', 'test/booking.integration.cjs', 'test/controlled-fixes.test.cjs', 'test/road-trips-policy.test.cjs', 'test/road-trips.integration.cjs'], { cwd: path.join(root, 'backend'), env, stdio: 'inherit' });
+    // Suites share one disposable database; SePay deletes its own users during cleanup.
+    // Run suites in sequence so role-notification reads cannot race fixture deletion.
+    // Explicit Promise.all allocation tests still exercise simultaneous HTTP writes.
+    const test = spawn(process.execPath, ['--test', '--test-concurrency=1', 'test/sepay.integration.cjs', 'test/payment-gating.test.cjs', 'test/insurance-policy.test.cjs', 'test/insurance.integration.cjs', 'test/booking-policy.test.cjs', 'test/booking.integration.cjs', 'test/controlled-fixes.test.cjs', 'test/road-trips-policy.test.cjs', 'test/road-trips.integration.cjs', 'test/merge-resolution.test.cjs', 'test/transport-schedule.test.cjs'], { cwd: path.join(root, 'backend'), env, stdio: 'inherit' });
     const code = await new Promise((resolve, reject) => { test.on('error', reject); test.on('exit', resolve); });
-    if (code) throw new Error(`Payment tests failed (${code}). API diagnostics:\n${startup.slice(-14000)}`);
+    if (code) {
+      const [locks] = await db.query('SHOW ENGINE INNODB STATUS');
+      console.error(locks[0]?.Status ?? 'No InnoDB diagnostics');
+      throw new Error(`Payment tests failed (${code}). API diagnostics:\n${startup.slice(-14000)}`);
+    }
+    const [persisted] = await db.execute(`SELECT DISTINCT i.shipment_id, i.amount, i.snapshot, s.customer_id
+      FROM shipment_invoice i JOIN shipment s ON s.shipment_id = i.shipment_id
+      JOIN shipment_sepay_payment p ON p.shipment_id = s.shipment_id
+      WHERE s.status = 'completed' AND p.status = 'succeeded'`);
+    assert.ok(persisted.length >= 6, 'Six completed booking/insurance flows must have durable invoices');
+    server.kill();
+    await new Promise(resolve => server.exitCode !== null ? resolve() : server.once('exit', resolve));
+    server = spawn(process.execPath, ['dist/main.js'], { cwd: path.join(root, 'backend'), env, stdio: ['ignore', 'pipe', 'pipe'] });
+    server.stdout.on('data', data => { startup += data; }); server.stderr.on('data', data => { startup += data; });
+    ready = false;
+    for (let attempt = 0; attempt < 45; attempt++) {
+      try { if ((await fetch('http://127.0.0.1:5012/api/payments/sepay/webhook')).ok) { ready = true; break; } } catch {}
+      if (server.exitCode !== null) break;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    assert.ok(ready, 'Isolated API must restart');
+    const { JwtService } = require('@nestjs/jwt');
+    const jwt = new JwtService({ secret: env.JWT_SECRET });
+    const combinations = new Set();
+    for (const row of persisted) {
+      const headers = { Authorization: `Bearer ${jwt.sign({ sub: String(row.customer_id), role: 'CUSTOMER' })}` };
+      const response = await fetch(`http://127.0.0.1:5012/api/orders/${row.shipment_id}/payments/sepay`, { headers });
+      assert.equal(response.status, 200);
+      const billing = await response.json();
+      const snapshot = typeof row.snapshot === 'string' ? JSON.parse(row.snapshot) : row.snapshot;
+      assert.equal(billing.invoice.amount, Number(row.amount));
+      assert.deepEqual(billing.invoice.snapshot, snapshot);
+      assert.equal(billing.payment.status, 'succeeded');
+      combinations.add(`${snapshot.bookingType}/${snapshot.horses[0].insurancePackage}`);
+    }
+    assert.equal(combinations.size, 6);
+    console.log('PASS: all six booking/insurance invoice snapshots and official test-bank payments survive an API restart.');
   } finally {
     if (server) { server.kill(); await new Promise(resolve => server.exitCode !== null ? resolve() : server.once('exit', resolve)); }
     if (db) await db.end();
-    try { execFileSync('docker', ['rm', '-f', '-v', name], { stdio: 'pipe', timeout: 15000 }); }
-    catch { console.error(`Cleanup could not verify removal of test container ${name}; original failure is preserved.`); }
+    if (database) await database.cleanup();
   }
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });
