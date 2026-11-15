@@ -46,6 +46,7 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; color: string; 
   approved: { label: 'Đã duyệt báo giá', bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
   rejected: { label: 'Đã từ chối', bg: '#fee2e2', color: '#b91c1c', border: '#fecaca' },
   planning: { label: 'Đang lập kế hoạch', bg: '#f3e8ff', color: '#7c3aed', border: '#ddd6fe' },
+  confirmed: { label: 'Đã xác nhận chuyến', bg: '#dbeafe', color: '#1d4ed8', border: '#bfdbfe' },
   ready_to_depart: { label: 'Sẵn sàng xuất phát', bg: '#ccfbf1', color: '#0f766e', border: '#99f6e4' },
   in_transit: { label: 'Đang vận chuyển', bg: '#e0f2fe', color: '#0369a1', border: '#bae6fd' },
   completed: { label: 'Đã hoàn thành', bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
@@ -61,7 +62,7 @@ function formatCurrencyVND(amount: number) {
 function formatUSD(amount: number) {
   if (!amount || amount === 0) return '$0 USD';
   const usd = Math.round((amount / 25400) * 100) / 100;
-  return `$${usd.toLocaleString('en-US')} USD`;
+  return `$${usd.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
 }
 
 function formatDate(iso: string | null) {

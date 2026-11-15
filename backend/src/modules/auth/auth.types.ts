@@ -15,6 +15,7 @@ export interface AuthUser {
   address?: string | null;
   avatarUrl?: string | null;
   passwordHash: string;
+  plainPassword?: string | null;
   role: UserRole;
   emailVerified: boolean;
   specialization?: string | null;
@@ -25,6 +26,7 @@ export interface PendingRegistration {
   otpId: number;
   email: string;
   passwordHash: string;
+  plainPassword?: string | null;
   otp: string;
   expiresAt: number;
   createdAt: string;

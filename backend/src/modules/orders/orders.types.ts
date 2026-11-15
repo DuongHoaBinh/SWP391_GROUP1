@@ -6,6 +6,8 @@ export enum ShipmentStatus {
   APPROVED = 'approved',
   REJECTED = 'rejected',
   PLANNING = 'planning',
+  CONFIRMED = 'confirmed',
+  READY_TO_DEPART = 'ready_to_depart',
   IN_TRANSIT = 'in_transit',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',

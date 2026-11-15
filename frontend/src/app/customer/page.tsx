@@ -687,7 +687,7 @@ export default function CustomerDashboardPage() {
                       <td style={{ padding: '16px 20px' }}>{getStatusBadge(order.status)}</td>
                       <td style={{ padding: '16px 24px', textAlign: 'right' }}>
                         <button
-                          onClick={() => router.push(`/customer/requests/${reqCode.toLowerCase()}`)}
+                          onClick={() => router.push(`/customer/requests/${order.id}`)}
                           style={{
                             padding: '6px 14px',
                             borderRadius: '6px',
@@ -875,7 +875,7 @@ export default function CustomerDashboardPage() {
             <button
               onClick={() => {
                 if (upcomingTrip) {
-                  router.push(`/customer/requests/${(upcomingTrip.requestCode || `req-${upcomingTrip.id}`).toLowerCase()}`);
+                  router.push(`/customer/requests/${upcomingTrip.id}`);
                 } else {
                   router.push('/customer/requests/new');
                 }
@@ -940,7 +940,7 @@ export default function CustomerDashboardPage() {
                   return (
                     <div
                       key={req.id}
-                      onClick={() => router.push(`/customer/requests/${code.toLowerCase()}`)}
+                      onClick={() => router.push(`/customer/requests/${req.id}`)}
                       style={{
                         display: 'flex',
                         alignItems: 'center',

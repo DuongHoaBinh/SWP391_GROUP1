@@ -215,7 +215,7 @@ CREATE TABLE route_stop (
   route_stop_id INT AUTO_INCREMENT PRIMARY KEY,
   route_id INT NOT NULL,
   sequence_no INT NOT NULL,
-  stop_type ENUM('rest','quarantine','refuel','border_check','other') NOT NULL,
+  stop_type ENUM('rest','quarantine','refuel','border_check','transfer_hub','other') NOT NULL,
   location_name VARCHAR(255) NOT NULL,
   country VARCHAR(100),
   planned_arrival DATETIME,

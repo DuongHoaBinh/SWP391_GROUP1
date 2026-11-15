@@ -29,7 +29,8 @@ export async function apiClient<T>(
   });
 
   if (response.status === 401) {
-    if (typeof window !== 'undefined' && !redirectingToLogin && getAuthToken() === token &&
+    const isManualLogout = typeof window !== 'undefined' && typeof sessionStorage !== 'undefined' && sessionStorage.getItem('equitransit_manual_logout') === '1';
+    if (typeof window !== 'undefined' && !isManualLogout && !redirectingToLogin && getAuthToken() === token &&
         headers.get('Authorization') === (token ? `Bearer ${token}` : null) &&
         !/^\/(login|register|forgot-password)(\/|$)/.test(window.location.pathname)) {
       const returnPath = window.location.pathname + window.location.search + window.location.hash;
