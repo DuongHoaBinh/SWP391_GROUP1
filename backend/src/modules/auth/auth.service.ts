@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { OAuth2Client } from 'google-auth-library';
 import * as bcrypt from 'bcryptjs';
 import { randomInt, randomUUID } from 'crypto';
 import { LoginDto } from './dto/login.dto';
@@ -13,6 +14,7 @@ import { RegisterDto } from './dto/register.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
 import { AuthStore } from './auth.store';
 import { AuthUser, PendingRegistration, UserRole } from './auth.types';
 import { MailService } from './mail.service';
@@ -20,6 +22,7 @@ import { MailService } from './mail.service';
 @Injectable()
 export class AuthService {
   private readonly otpTtlMs = 10 * 60 * 1000;
+  private readonly googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
   constructor(
     private readonly authStore: AuthStore,
@@ -41,6 +44,7 @@ export class AuthService {
       otpId: 0,
       email,
       passwordHash: await bcrypt.hash(dto.password, 12),
+      plainPassword: dto.password,
       otp,
       expiresAt: Date.now() + this.otpTtlMs,
       createdAt: new Date().toISOString(),
@@ -72,6 +76,7 @@ export class AuthService {
       id: randomUUID(),
       email,
       passwordHash: pending.passwordHash,
+      plainPassword: pending.plainPassword ?? null,
       role: UserRole.CUSTOMER,
       emailVerified: true,
       createdAt: new Date().toISOString(),
@@ -186,10 +191,106 @@ export class AuthService {
     }
 
     const newHash = await bcrypt.hash(dto.newPassword, 12);
-    await this.authStore.updateUserPassword(userId, newHash);
+    await this.authStore.updateUserPassword(userId, newHash, dto.newPassword);
 
     return {
       message: 'Mật khẩu đã được thay đổi thành công',
+    };
+  }
+
+  async verifyGoogleToken(token: string): Promise<{
+    googleId: string;
+    email: string;
+    name: string;
+    picture?: string;
+  }> {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+
+    // 1. Try verifying as Google ID Token (JWT)
+    try {
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken: token,
+        audience: clientId || undefined,
+      });
+      const payload = ticket.getPayload();
+      if (payload && payload.email) {
+        return {
+          googleId: payload.sub,
+          email: payload.email.toLowerCase(),
+          name: payload.name || payload.email.split('@')[0],
+          picture: payload.picture,
+        };
+      }
+    } catch {
+      // Fallback to fetch APIs
+    }
+
+    // 2. Try verifying via Google userinfo endpoint (supports access_token)
+    try {
+      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        if (data.email) {
+          return {
+            googleId: data.sub,
+            email: data.email.toLowerCase(),
+            name: data.name || data.email.split('@')[0],
+            picture: data.picture,
+          };
+        }
+      }
+    } catch {}
+
+    // 3. Fallback: Google tokeninfo endpoint
+    try {
+      const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`);
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        if (data.email) {
+          return {
+            googleId: data.sub,
+            email: data.email.toLowerCase(),
+            name: data.name || data.email.split('@')[0],
+            picture: data.picture,
+          };
+        }
+      }
+    } catch {}
+
+    throw new UnauthorizedException('Token xác thực Google không hợp lệ hoặc đã hết hạn');
+  }
+
+  async loginWithGoogle(dto: GoogleLoginDto) {
+    const rawToken = dto.token?.trim() || '';
+    if (!rawToken) {
+      throw new BadRequestException('Token Google không được để trống');
+    }
+
+    const googleInfo = await this.verifyGoogleToken(rawToken);
+    const user = await this.authStore.findOrCreateGoogleUser(googleInfo);
+
+    const accessToken = await this.jwtService.signAsync({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    return {
+      accessToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        fullName: user.fullName || '',
+        name: user.fullName || user.email.split('@')[0],
+        phone: user.phone || '',
+        address: user.address || '',
+        avatarUrl: user.avatarUrl || '',
+        specialization: user.specialization ?? null,
+        persona: user.specialization || (user.email.includes('escort') ? 'escort' : 'driver'),
+      },
     };
   }
 }

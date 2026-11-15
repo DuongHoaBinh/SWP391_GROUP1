@@ -15,7 +15,7 @@ import {
   Settings,
   X,
 } from 'lucide-react';
-import { clearAuthSession, getCurrentUser } from '@/lib/auth';
+import { clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { apiClient } from '@/lib/api-client';
 import { mockCurrentUser } from '@/lib/mock-data';
 import { UserProfile } from '@/lib/types';
@@ -139,8 +139,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
 
   const handleConfirmLogout = () => {
     setShowLogoutModal(false);
-    clearAuthSession();
-    router.push('/login');
+    logout();
   };
 
   return (

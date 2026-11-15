@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bell, ChevronDown, Search, LogOut, Check, ExternalLink, Settings, Menu } from 'lucide-react';
-import { getCurrentUser, clearAuthSession } from '@/lib/auth';
+import { getCurrentUser, clearAuthSession, logout } from '@/lib/auth';
 import { apiClient } from '@/lib/api-client';
 import { mockCurrentUser, mockNotifications } from '@/lib/mock-data';
 import { UserProfile, NotificationItem } from '@/lib/types';
@@ -101,8 +101,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleConfirmLogout = () => {
     setShowLogoutModal(false);
-    clearAuthSession();
-    router.push('/login');
+    logout();
   };
 
   return (

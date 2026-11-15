@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import {
   Truck,
   Crosshair,
@@ -23,17 +23,22 @@ import { getCurrentUser } from '@/lib/auth';
 
 export default function DriverDashboardPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [activeTrip, setActiveTrip] = useState<any>(null);
   const [todayTripsCount, setTodayTripsCount] = useState(1);
   const [assignedHorsesCount, setAssignedHorsesCount] = useState(1);
-  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+  const [mounted, setMounted] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   const isEscort =
     currentUser?.persona === 'escort' ||
     currentUser?.specialization === 'escort' ||
-    currentUser?.email?.toLowerCase().includes('escort');
+    currentUser?.email?.toLowerCase().includes('escort') ||
+    pathname?.startsWith('/escort');
+  const basePath = isEscort ? '/escort' : '/driver';
 
   useEffect(() => {
+    setMounted(true);
     const user = getCurrentUser();
     setCurrentUser(user);
     const loadDashboard = async () => {
@@ -101,10 +106,16 @@ export default function DriverDashboardPage() {
           <p style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.12em', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '6px' }}>
             Saturday, September 26
           </p>
-          <h2 style={{ fontSize: '26px', fontWeight: 700, color: '#ffffff', margin: '0 0 4px 0', lineHeight: 1.2 }}>
-            Good morning, {currentUser?.name || (isEscort ? 'BS. Hoàng Văn Y' : 'Trần Văn Lái')}
+          <h2
+            suppressHydrationWarning
+            style={{ fontSize: '26px', fontWeight: 700, color: '#ffffff', margin: '0 0 4px 0', lineHeight: 1.2 }}
+          >
+            Good morning, {mounted && currentUser?.name ? currentUser.name : (isEscort ? 'BS. Hoàng Văn Y' : 'Trần Văn Lái')}
           </h2>
-          <p style={{ fontSize: '13.5px', color: '#94a3b8', margin: 0, fontWeight: 500 }}>
+          <p
+            suppressHydrationWarning
+            style={{ fontSize: '13.5px', color: '#94a3b8', margin: 0, fontWeight: 500 }}
+          >
             {isEscort 
               ? '🩺 Chuyên viên Hộ Tống / Bác Sĩ Thú Y — Theo dõi sinh hiệu và phúc lợi ngựa đua'
               : '🚚 Tài Xế Vận Chuyển — Phụ trách hành trình đường bộ và an toàn phương tiện'}
@@ -173,7 +184,7 @@ export default function DriverDashboardPage() {
 
         {isEscort ? (
           <button
-            onClick={() => router.push('/driver/health')}
+            onClick={() => router.push(`${basePath}/health`)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -196,7 +207,7 @@ export default function DriverDashboardPage() {
           </button>
         ) : (
           <button
-            onClick={() => router.push('/driver/status')}
+            onClick={() => router.push(`${basePath}/status`)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -350,7 +361,7 @@ export default function DriverDashboardPage() {
               {/* Action Buttons */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                 <button
-                  onClick={() => router.push('/driver/status')}
+                  onClick={() => router.push(`${basePath}/status`)}
                   style={{
                     flex: '1 1 200px',
                     padding: '14px 20px',
@@ -371,7 +382,7 @@ export default function DriverDashboardPage() {
                   Update Status <ChevronRight size={16} />
                 </button>
                 <button
-                  onClick={() => router.push('/driver/status')}
+                  onClick={() => router.push(`${basePath}/status`)}
                   style={{
                     padding: '14px 20px',
                     borderRadius: '10px',
@@ -389,7 +400,7 @@ export default function DriverDashboardPage() {
                   <Map size={16} /> View Route
                 </button>
                 <button
-                  onClick={() => router.push('/driver/health')}
+                  onClick={() => router.push(`${basePath}/health`)}
                   style={{
                     padding: '14px 20px',
                     borderRadius: '10px',
@@ -515,7 +526,7 @@ export default function DriverDashboardPage() {
                   <Clock size={13} /> Last Check: 08:40
                 </p>
                 <button
-                  onClick={() => router.push('/driver/health')}
+                  onClick={() => router.push(`${basePath}/health`)}
                   style={{
                     width: '100%',
                     padding: '10px',
@@ -563,7 +574,7 @@ export default function DriverDashboardPage() {
                   <Clock size={13} /> Last Check: 09:15
                 </p>
                 <button
-                  onClick={() => router.push('/driver/health')}
+                  onClick={() => router.push(`${basePath}/health`)}
                   style={{
                     width: '100%',
                     padding: '10px',
@@ -682,7 +693,7 @@ export default function DriverDashboardPage() {
           {/* Action 1: Status for Driver, Health for Escort */}
           {isEscort ? (
             <div
-              onClick={() => router.push('/driver/health')}
+              onClick={() => router.push(`${basePath}/health`)}
               style={{ backgroundColor: '#059669', color: '#ffffff', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(5, 150, 105, 0.2)' }}
             >
               <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
@@ -692,7 +703,7 @@ export default function DriverDashboardPage() {
             </div>
           ) : (
             <div
-              onClick={() => router.push('/driver/status')}
+              onClick={() => router.push(`${basePath}/status`)}
               style={{ backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(37, 99, 235, 0.2)' }}
             >
               <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
@@ -704,7 +715,7 @@ export default function DriverDashboardPage() {
 
           {/* Action 2: Trips list */}
           <div
-            onClick={() => router.push('/driver/trips')}
+            onClick={() => router.push(`${basePath}/trips`)}
             style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
           >
             <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
@@ -715,7 +726,7 @@ export default function DriverDashboardPage() {
 
           {/* Action 3: Route map or check */}
           <div
-            onClick={() => router.push('/driver/status')}
+            onClick={() => router.push(`${basePath}/status`)}
             style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
           >
             <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>

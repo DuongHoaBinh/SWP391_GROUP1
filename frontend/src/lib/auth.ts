@@ -81,3 +81,12 @@ export function clearAuthSession() {
   document.cookie = `${TOKEN_KEY}=; path=/; max-age=0; SameSite=Lax`;
   document.cookie = `equitransit_role=; path=/; max-age=0; SameSite=Lax`;
 }
+
+export function logout() {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem('equitransit_manual_logout', '1');
+  } catch {}
+  clearAuthSession();
+  window.location.replace('/login');
+}
