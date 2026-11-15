@@ -19,7 +19,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser } from '@/lib/auth';
+import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
@@ -136,8 +136,7 @@ export default function CoordinatorLayout({
 
   const handleLogoutConfirm = () => {
     setShowLogoutModal(false);
-    clearAuthSession();
-    router.push('/login');
+    logout();
   };
 
   return (

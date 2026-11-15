@@ -21,7 +21,7 @@ const factory = compile(`exports.make = function(deps) {
 const redirectFile = path.resolve(__dirname, '../src/lib/auth-redirect.ts');
 const { getPostLoginRedirect } = compile(fs.readFileSync(redirectFile, 'utf8'), redirectFile);
 const loginFile = path.resolve(__dirname, '../src/lib/auth-login.ts');
-const loginWithPassword = fs.existsSync(loginFile) ? compile(fs.readFileSync(loginFile, 'utf8'), loginFile).loginWithPassword : undefined;
+const { loginWithPassword, loginWithGoogle } = fs.existsSync(loginFile) ? compile(fs.readFileSync(loginFile, 'utf8'), loginFile) : {};
 
 async function runLogin({ status = 200, body, offline = false, redirect = null } = {}) {
   const state = { sessions: [], errors: [], successes: [], fullNavigations: [], routerNavigations: [] };
@@ -72,4 +72,49 @@ test('mounting login does not clear an existing session during navigation', () =
   let clears = 0; const old = global.localStorage;
   try { global.localStorage = { getItem: () => null }; run({ searchParams: new URLSearchParams(), clearAuthSession: () => { clears++; }, setEmail() {}, setRememberMe() {} }); assert.equal(clears, 0); }
   finally { if (old === undefined) delete global.localStorage; else global.localStorage = old; }
+});
+
+test('loginWithGoogle throws user-friendly error on backend failure', async () => {
+  const oldFetch = global.fetch;
+  try {
+    global.fetch = async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ message: 'Token xác thực Google không hợp lệ hoặc đã hết hạn' }),
+    });
+    await assert.rejects(
+      async () => loginWithGoogle('http://localhost:5000/api', 'invalid-google-token'),
+      /Token xác thực Google không hợp lệ hoặc đã hết hạn/
+    );
+  } finally {
+    global.fetch = oldFetch;
+  }
+});
+
+test('loginWithGoogle successfully formats customer session from valid response', async () => {
+  const oldFetch = global.fetch;
+  try {
+    global.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: 'valid-google-jwt',
+        user: {
+          id: '10',
+          email: 'google.customer@example.com',
+          role: 'Customer',
+          fullName: 'Google Customer',
+          avatarUrl: 'https://lh3.googleusercontent.com/avatar',
+        },
+      }),
+    });
+    const session = await loginWithGoogle('http://localhost:5000/api', 'valid-google-token');
+    assert.equal(session.accessToken, 'valid-google-jwt');
+    assert.equal(session.user.id, '10');
+    assert.equal(session.user.email, 'google.customer@example.com');
+    assert.equal(session.user.role, 'CUSTOMER');
+    assert.equal(session.user.name, 'Google Customer');
+  } finally {
+    global.fetch = oldFetch;
+  }
 });

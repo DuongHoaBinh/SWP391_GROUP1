@@ -19,7 +19,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import { getAuthToken, setAuthSession, clearAuthSession } from '@/lib/auth';
+import { getAuthToken, setAuthSession, clearAuthSession, logout } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { apiClient } from '@/lib/api-client';
 
@@ -138,8 +138,7 @@ export default function SpecialistLayout({
 
   const handleLogoutConfirm = () => {
     setShowLogoutModal(false);
-    clearAuthSession();
-    router.push('/login');
+    logout();
   };
 
   return (
