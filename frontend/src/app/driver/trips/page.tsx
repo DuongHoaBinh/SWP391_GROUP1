@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { 
   Truck, MapPin, Calendar, Clock, ChevronRight, CheckCircle2, Navigation, 
   ShieldCheck, AlertCircle, RefreshCw, Send, Check, Plane, Info, Stethoscope,
@@ -36,6 +37,7 @@ interface DriverTripItem {
 }
 
 export default function DriverTripsPage() {
+  const pathname = usePathname();
   const [trips, setTrips] = useState<DriverTripItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -45,7 +47,9 @@ export default function DriverTripsPage() {
   const isEscort =
     currentUser?.persona === 'escort' ||
     currentUser?.specialization === 'escort' ||
-    currentUser?.email?.toLowerCase().includes('escort');
+    currentUser?.email?.toLowerCase().includes('escort') ||
+    pathname?.startsWith('/escort');
+  const basePath = isEscort ? '/escort' : '/driver';
 
   // Confirmation Modal
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
@@ -440,7 +444,7 @@ export default function DriverTripsPage() {
                   )}
 
                   {/* Driver gets prominent Journey Update; Escort gets outline view button */}
-                  <Link href={`/driver/status?shipmentId=${trip.id}`}>
+                  <Link href={`${basePath}/status?shipmentId=${trip.id}`}>
                     <Button
                       variant={!isEscort ? 'primary' : 'outline'}
                       size="sm"
@@ -465,7 +469,7 @@ export default function DriverTripsPage() {
 
                   {/* ONLY Escort sees the Health Observation button; Driver does NOT see it! */}
                   {isEscort && (
-                    <Link href="/driver/health">
+                    <Link href={`${basePath}/health`}>
                       <Button
                         variant={isCompleted ? 'outline' : 'primary'}
                         size="sm"

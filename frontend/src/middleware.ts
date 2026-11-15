@@ -30,8 +30,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 3. Protected actor routes: protect /customer, /manager, /coordinator, /driver, /specialist
-  const protectedPrefixes = ['/customer', '/manager', '/coordinator', '/driver', '/specialist', '/admin'];
+  // 3. Protected actor routes: protect /customer, /manager, /coordinator, /driver, /escort, /specialist
+  const protectedPrefixes = ['/customer', '/manager', '/coordinator', '/driver', '/escort', '/specialist', '/admin'];
   const matchedPrefix = protectedPrefixes.find((prefix) => pathname.startsWith(prefix));
 
   if (matchedPrefix) {
@@ -45,7 +45,11 @@ export function middleware(request: NextRequest) {
     }
 
     // Role enforcement: Prevent users from accessing other roles' dashboards
-    if (normalizedRole !== 'ADMIN' && matchedPrefix !== userDashboard) {
+    const isDriverOrEscort =
+      (normalizedRole === 'DRIVER_ESCORT' || normalizedRole === 'DRIVER') &&
+      (matchedPrefix === '/driver' || matchedPrefix === '/escort');
+
+    if (normalizedRole !== 'ADMIN' && !isDriverOrEscort && matchedPrefix !== userDashboard) {
       return NextResponse.redirect(new URL(userDashboard, request.url));
     }
   }
