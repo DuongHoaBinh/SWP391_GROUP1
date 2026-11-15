@@ -21,6 +21,7 @@ import {
   RouteEntity,
   RouteStatus,
   RouteStopEntity,
+  RouteStopType,
   TripPlanReadiness,
 } from './routes.types';
 import { CreateRouteDto } from './dto/create-route.dto';
@@ -64,17 +65,40 @@ export class RoutesService implements OnModuleInit {
     return { airlines, airports, masterStops };
   }
 
+  private redactRouteForCustomer(route: RouteEntity, order: { originLocation: string; destinationLocation: string }): RouteEntity {
+    const visibleStops = (route.stops || [])
+      .filter((s) => s.stopType !== RouteStopType.TRANSFER_HUB)
+      .map((s, idx) => ({ ...s, sequenceNo: idx + 1 }));
+    const rawLegs = route.legs || [];
+    const maskedLegs = rawLegs.map((leg, idx) => {
+      if (!leg.roadTripId) return leg;
+      return {
+        ...leg,
+        roadTripId: null,
+        originLocation: idx === 0 ? order.originLocation : leg.originLocation,
+        destinationLocation: idx === rawLegs.length - 1 ? order.destinationLocation : leg.destinationLocation,
+      };
+    });
+    return {
+      ...route,
+      stops: visibleStops,
+      legs: maskedLegs,
+    };
+  }
+
   async getRouteByShipmentId(shipmentId: number, user?: AuthenticatedUser): Promise<RouteEntity> {
+    let customerOrder: { originLocation: string; destinationLocation: string; customerId: number } | undefined;
     if (user?.role === UserRole.CUSTOMER) {
       const order = await this.ordersStore.findById(shipmentId);
       if (!order) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
       if (order.customerId !== Number(user.id)) throw new ForbiddenException('Bạn chỉ được xem lộ trình đơn của mình');
+      customerOrder = order;
     }
     const route = await this.routesStore.findRouteByShipmentId(shipmentId);
     if (!route) {
       throw new NotFoundException(`Chưa có lộ trình nào được lập cho đơn vận chuyển #${shipmentId}`);
     }
-    return route;
+    return customerOrder ? this.redactRouteForCustomer(route, customerOrder) : route;
   }
 
   async getFullTripPlan(shipmentId: number, user?: AuthenticatedUser): Promise<FullTripPlan> {
@@ -85,7 +109,8 @@ export class RoutesService implements OnModuleInit {
 
     if (user?.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) throw new ForbiddenException('Bạn chỉ được xem kế hoạch đơn của mình');
 
-    const route = await this.routesStore.findRouteByShipmentId(shipmentId);
+    const rawRoute = await this.routesStore.findRouteByShipmentId(shipmentId);
+    const route = rawRoute && user?.role === UserRole.CUSTOMER ? this.redactRouteForCustomer(rawRoute, order) : rawRoute;
     const assignedVehicles = await this.fleetStore.findAssignedVehicles(shipmentId);
     const assignedStaff = await this.fleetStore.findAssignedStaff(shipmentId);
 
@@ -268,6 +293,15 @@ export class RoutesService implements OnModuleInit {
     if (route.planStatus !== PlanStatus.PENDING_APPROVAL) throw new BadRequestException('Chỉ phê duyệt kế hoạch đang chờ duyệt.');
 
     if (dto.status === 'approved') {
+      if (dto.transportCost != null && Number(dto.transportCost) >= 0) {
+        const insuranceFee = Number(order.insuranceFee || 0);
+        const finalTransportCost = Math.round(Number(dto.transportCost));
+        const finalTotalCost = finalTransportCost + insuranceFee;
+        const horseCount = Math.max(1, order.requestedHorseCount || 1);
+        const stallUnitPrice = order.bookingType === 'shared_stall' ? Math.round(finalTransportCost / horseCount) : null;
+        await this.ordersStore.updatePricing(shipmentId, finalTransportCost, finalTotalCost, stallUnitPrice);
+      }
+
       await this.routesStore.updatePlanStatus(
         route.id,
         PlanStatus.APPROVED,

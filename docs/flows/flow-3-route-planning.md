@@ -11,7 +11,10 @@
   - **Cấp chiến lược (Strategic Framework):** Logistics Manager thiết lập định hướng tổng thể, chọn loại phương tiện, hãng bay, tuyến chính và chỉ định Coordinator.
   - **Cấp thực thi (Operational Details):** Fleet & Route Coordinator chọn xe cụ thể, dựng chi tiết các chặng (legs), điểm dừng, giờ giấc và thông tin booking chuyến bay.
 - **Tích hợp bên ngoài:** Không kết nối API đặt vé hãng bay thật; Coordinator đặt chỗ bên ngoài và nhập mã booking, số stall vào hệ thống.
-- **Hình thức đặt chỗ:** `order.bookingType` từ Flow 1 phân biệt `shared_stall` (chỉ mua số ô bằng số ngựa trên hành lang chung) và `dedicated_charter` (dịch vụ riêng cho đoàn, ưu tiên tuyến thẳng/giờ yêu cầu). Đây là lựa chọn dịch vụ độc lập với đường bộ/hàng không. Coordinator sắp xếp booking thực tế phù hợp lựa chọn; tính năng lựa chọn/báo giá không tự gom nhiều đơn vào một chuyến hay tự đặt vé hãng bay.
+- **Hình thức đặt chỗ & Gom chuyến (Consolidation):** `order.bookingType` phân biệt `shared_stall` (ghép ô chuồng trên hành lang chung) và `dedicated_charter` (xe riêng cho đoàn, ưu tiên tuyến thẳng/giờ yêu cầu).
+  - *Đường bộ ghép chuồng:* Tuyến Multi-stop (nhiều điểm đón, nhiều điểm trả dọc trục Bắc – Nam). Coordinator sắp xếp thứ tự ô chuồng trên xe logic (ngựa xuống trước ở khoang ngoài gần cửa dỡ, ngựa đi xa nhất ở trong cùng).
+  - *Hàng không ghép chuồng:* Mô hình Hub-to-Hub cố định giữa các sân bay cargo lớn (Tân Sơn Nhất SGN, Nội Bài HAN, Changi, v.v.) kết hợp xe tải trung chuyển chặng đầu và chặng cuối. Thùng Airstall/ULD ghép tối đa 3 ngựa.
+  - *Khung thời hạn (SLA):* Đặt chỗ $\ge 7$ ngày; nộp hồ sơ thú y $\ge 5$ ngày; Coordinator chốt sổ lộ trình và vị trí chuồng trước giờ chạy 72 giờ (3 ngày - Cut-off time).
 - Khi phát hành invoice sau xác nhận, lưu `bookingType`, `stallUnitPrice` (nếu có), số ngựa, cước và bảo hiểm trong snapshot. Thanh toán vẫn đợi Flow 3 xác nhận, điều kiện xuất phát vẫn yêu cầu đủ tiền và đủ hồ sơ.
 
 ---
@@ -142,3 +145,6 @@ Ready to depart ──► [Chuyển giao sang Flow 4: Theo dõi hành trình]
 - Chưa được duyệt mô hình vận hành ghép/thuê riêng hàng không. Giữ nguyên các trường hãng bay, flight booking reference và stalls hiện có; không thêm quy tắc thuê cả chuyến bay/khoang riêng.
 - Migration 019 thêm road_trip và route_leg.road_trip_id; không backfill hoặc sửa giá/booking lịch sử. Chạy sau các migration hiện có trên môi trường được phép.
 - Migration 020 lưu riêng shipment.transport_mode (road/air), không thay Domestic/International. Chọn mode tại bước duyệt giá và giữ trong response/snapshot; dữ liệu cũ không bị suy đoán hoặc sửa tự động.
+- Migration 021 (`021_add_transfer_hub_stop_type.sql`) bổ sung `'transfer_hub'` vào `route_stop.stop_type` ENUM để lưu các điểm đón/trả ghép trung gian trên chuyến đường bộ hợp nhất.
+- Khi ghép nhiều đơn `shared_stall` khác điểm đón hoặc khác điểm trả vào cùng `road_trip`, `routes.store` (`consolidateSharedRoadTripWaypoints` cùng helper `road-trip-sequencing.ts`) tự động sắp xếp lộ trình vật lý dọc hành lang: Điểm đón xa nhất -> Điểm đón ghép gần hơn (`stop_type = 'transfer_hub'`) -> Các trạm dừng chung dọc tuyến -> Điểm trả ghép gần hơn (`stop_type = 'transfer_hub'`) -> Điểm trả xa nhất, cập nhật `road_trip` và đồng bộ `route_stop` trên các đơn cùng chuyến.
+- API đọc route (`routes.service`) thực hiện ẩn dữ liệu phía server cho role `Customer`: loại bỏ điểm `transfer_hub`, ẩn `roadTripId` và giữ nguyên điểm đi/đến thuộc chính đơn của khách hàng.

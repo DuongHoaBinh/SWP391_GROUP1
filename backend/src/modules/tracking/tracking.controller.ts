@@ -90,6 +90,15 @@ export class TrackingController {
     return this.trackingService.createHealthLog(user, shipmentId, dto);
   }
 
+  @Get('horses/:horseId/health-logs')
+  @ApiOperation({ summary: 'Lấy lịch sử theo dõi sức khỏe của con ngựa theo trạm/chuyến' })
+  async getHorseHealthLogs(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('horseId', ParseIntPipe) horseId: number,
+  ): Promise<any[]> {
+    return this.trackingService.getHealthLogsByHorseId(user, horseId);
+  }
+
   @Post('shipments/:shipmentId/complete')
   async completeShipment(
     @CurrentUser() user: AuthenticatedUser,

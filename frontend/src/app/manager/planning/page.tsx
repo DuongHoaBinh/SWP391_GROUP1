@@ -44,6 +44,10 @@ interface OrderItem {
   specialRequirements?: string;
   routePlan?: RouteDetail | null;
   readiness?: TripPlanReadiness | null;
+  totalCost?: number;
+  transportCost?: number;
+  insuranceFee?: number;
+  bookingType?: string;
 }
 
 export default function ManagerPlanningPage() {
@@ -98,6 +102,7 @@ export default function ManagerPlanningPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [isRejecting, setIsRejecting] = useState(false);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [reviewTransportCost, setReviewTransportCost] = useState<number | string>('');
 
   // Modal 3: Step 3 - Staff Assignment Modal
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
@@ -403,6 +408,7 @@ export default function ManagerPlanningPage() {
     setLoadingRouteDetail(true);
     setIsRejecting(false);
     setRejectionReason('');
+    setReviewTransportCost(order.transportCost ?? order.totalCost ?? '');
     try {
       const detail = await routesApi.getRouteByShipmentId(order.id);
       setDetailedRoute(detail);
@@ -417,7 +423,11 @@ export default function ManagerPlanningPage() {
     if (!selectedOrderForReview) return;
     setIsSubmittingReview(true);
     try {
-      await routesApi.reviewTripPlan(selectedOrderForReview.id, { status: 'approved' });
+      const transportCostNum = reviewTransportCost !== '' ? Number(reviewTransportCost) : undefined;
+      await routesApi.reviewTripPlan(selectedOrderForReview.id, {
+        status: 'approved',
+        transportCost: transportCostNum,
+      });
       toast.success(`Kế hoạch chuyến đi ${selectedOrderForReview.requestCode} ĐÃ ĐƯỢC PHÊ DUYỆT!`);
       setIsReviewModalOpen(false);
       loadData();
@@ -555,7 +565,7 @@ export default function ManagerPlanningPage() {
         body: JSON.stringify({ assignments }),
       });
 
-      toast.success(`Đã phân công nhân sự và gửi thông báo nhận chuyến cho đơn ${selectedOrderForAssign.requestCode}!`);
+      toast.success(`Đã phân công nhân sự cho đơn ${selectedOrderForAssign.requestCode} (và tự động đồng bộ cho các đơn ghép chung chuyến)!`);
       setIsAssignModalOpen(false);
       loadData();
     } catch (err: any) {
@@ -1387,6 +1397,51 @@ export default function ManagerPlanningPage() {
                 </div>
               )}
 
+              {/* Pricing Confirmation Section */}
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-lg p-3">
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="font-bold text-emerald-900 text-xs flex items-center gap-1.5">
+                    💵 Chốt cước vận chuyển chính thức cho lộ trình này
+                  </span>
+                  <span className="text-[11px] text-emerald-700 font-medium">
+                    Hình thức: {selectedOrderForReview?.bookingType === 'dedicated_charter' ? 'Bao chuyến' : 'Ghép ô chuồng'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Cước vận chuyển chính thức (VNĐ) *
+                    </label>
+                    <input
+                      type="number"
+                      value={reviewTransportCost}
+                      onChange={(e) => setReviewTransportCost(e.target.value)}
+                      placeholder="Nhập giá cước chính thức..."
+                      className="w-full px-3 py-1.5 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <span className="text-[10px] text-slate-500 mt-0.5 block">
+                      Quãng đường thực tế: {detailedRoute.totalDistanceKm || 0} km
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-600 space-y-1">
+                      <div className="flex justify-between">
+                        <span>Phí bảo hiểm đã khai báo:</span>
+                        <strong className="text-slate-800">
+                          {Number(selectedOrderForReview?.insuranceFee || 0).toLocaleString('vi-VN')} ₫
+                        </strong>
+                      </div>
+                      <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs">
+                        <span className="font-bold text-emerald-950">Tổng hóa đơn khách trả:</span>
+                        <strong className="font-bold text-emerald-700 text-sm">
+                          {(Number(reviewTransportCost || 0) + Number(selectedOrderForReview?.insuranceFee || 0)).toLocaleString('vi-VN')} ₫
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Action Buttons */}
               <div className="border-t border-slate-200 pt-3 mt-2">
                 {selectedOrderForReview?.status === 'completed' || selectedOrderForReview?.routePlan?.planStatus === 'completed' ? (
@@ -1460,6 +1515,9 @@ export default function ManagerPlanningPage() {
           <div className="bg-indigo-50 border border-indigo-200 p-3 rounded-lg text-indigo-900 leading-relaxed">
             <strong>Phân công nhân sự:</strong> Chọn tài xế chính (Driver) và người hộ tống (Escort/Vet). Sau khi bạn bấm lưu,
             hệ thống sẽ tự động gửi thông báo đến tài xế để họ bấm <strong>"Xác nhận nhận chuyến"</strong> trên app Driver.
+            <p className="mt-1 text-emerald-800 font-semibold">
+              💡 <strong>Tự động đồng bộ ghép chuồng:</strong> Khi bạn phân công tài xế cho đơn này, hệ thống sẽ tự động áp dụng luôn cho các đơn hàng khác đi cùng chuyến xe mà bạn không cần phải phân công lại!
+            </p>
           </div>
 
           <div>

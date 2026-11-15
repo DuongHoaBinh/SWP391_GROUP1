@@ -9,7 +9,7 @@ import { MailService } from './mail.service';
   imports: [
     JwtModule.register({
       secret: process.env.JWT_SECRET ?? 'development-only-secret',
-      signOptions: { expiresIn: '1h' },
+      signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN ?? '24h') as any },
     }),
   ],
   controllers: [AuthController],

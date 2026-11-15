@@ -19,7 +19,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser } from '@/lib/auth';
+import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { apiClient } from '@/lib/api-client';
 
@@ -138,8 +138,7 @@ export default function ManagerLayout({
 
   const handleConfirmLogout = () => {
     setShowLogoutModal(false);
-    clearAuthSession();
-    router.push('/login');
+    logout();
   };
 
   return (
@@ -517,25 +516,6 @@ export default function ManagerLayout({
 
         {/* Bottom Area */}
         <div style={{ padding: '16px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <Link
-            href="/manager/support"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '8px 12px',
-              fontSize: '13px',
-              color: '#94a3b8',
-              textDecoration: 'none',
-              borderRadius: '8px',
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = '#ffffff')}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
-          >
-            <HelpCircle size={17} color="#64748b" />
-            <span>Help & Support</span>
-          </Link>
-
           <div
             style={{
               backgroundColor: 'rgba(255, 255, 255, 0.05)',

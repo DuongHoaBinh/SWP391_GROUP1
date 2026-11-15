@@ -19,7 +19,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser } from '@/lib/auth';
+import { getAuthToken, setAuthSession, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
@@ -136,8 +136,7 @@ export default function CoordinatorLayout({
 
   const handleLogoutConfirm = () => {
     setShowLogoutModal(false);
-    clearAuthSession();
-    router.push('/login');
+    logout();
   };
 
   return (
@@ -302,23 +301,6 @@ export default function CoordinatorLayout({
 
         {/* Bottom Area */}
         <div style={{ padding: '16px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <Link
-            href="/coordinator/support"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '8px 12px',
-              fontSize: '13px',
-              color: '#94a3b8',
-              textDecoration: 'none',
-              borderRadius: '8px',
-            }}
-          >
-            <HelpCircle size={17} color="#64748b" />
-            <span>Help & Support</span>
-          </Link>
-
           <div
             style={{
               backgroundColor: 'rgba(255, 255, 255, 0.05)',

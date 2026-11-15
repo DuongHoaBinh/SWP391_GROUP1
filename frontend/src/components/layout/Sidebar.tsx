@@ -15,7 +15,7 @@ import {
   Settings,
   X,
 } from 'lucide-react';
-import { clearAuthSession, getCurrentUser } from '@/lib/auth';
+import { clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { apiClient } from '@/lib/api-client';
 import { mockCurrentUser } from '@/lib/mock-data';
 import { UserProfile } from '@/lib/types';
@@ -139,8 +139,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
 
   const handleConfirmLogout = () => {
     setShowLogoutModal(false);
-    clearAuthSession();
-    router.push('/login');
+    logout();
   };
 
   return (
@@ -499,26 +498,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
           gap: '10px',
         }}
       >
-        {/* Help & Support */}
-        <Link
-          href="/customer/support"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            padding: '9px 12px',
-            borderRadius: '8px',
-            fontSize: '13px',
-            color: '#94a3b8',
-            textDecoration: 'none',
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = '#ffffff')}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
-        >
-          <HelpCircle size={17} color="#64748b" />
-          <span>Help & Support</span>
-        </Link>
-
         {/* User Card */}
         <div
           style={{
