@@ -2,9 +2,9 @@
 -- Cross-Border Racehorse Transport System
 -- MySQL 8.0+ / InnoDB / utf8mb4
 --
--- This is the reviewed MySQL version of the supplied horse_transport_schema.sql.
--- The backend currently does not connect to this database; auth uses in-memory
--- storage for local API testing. Run this script only when MySQL is available.
+-- Canonical MySQL 8.0+ schema for Cross-Border Racehorse Transport System.
+-- Run `node database/migrate.cjs` (or `npm run migrate:all` in backend/) after loading base schema
+-- to apply incremental feature tables/migrations and record them in `schema_migrations`.
 -- ============================================================================
 
 CREATE DATABASE IF NOT EXISTS horse_transport_system
@@ -24,6 +24,7 @@ CREATE TABLE `role` (
 CREATE TABLE `user` (
   user_id INT AUTO_INCREMENT PRIMARY KEY,
   role_id INT NOT NULL,
+  specialization VARCHAR(50) NULL DEFAULT NULL,
   full_name VARCHAR(150) NOT NULL,
   email VARCHAR(150) NOT NULL UNIQUE,
   phone VARCHAR(20),
@@ -37,6 +38,8 @@ CREATE TABLE `user` (
   avatar_url VARCHAR(500),
   gender ENUM('male','female','other'),
   status ENUM('active','inactive','suspended') NOT NULL DEFAULT 'active',
+  current_shift VARCHAR(100) NULL DEFAULT 'Ca Hành Chính (08:00 - 17:00)',
+  duty_status VARCHAR(32) NULL DEFAULT 'ON_DUTY',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_user_role FOREIGN KEY (role_id) REFERENCES `role`(role_id),
@@ -67,6 +70,7 @@ CREATE TABLE horse (
   age INT,
   microchip_no VARCHAR(50) UNIQUE,
   passport_no VARCHAR(50) UNIQUE,
+  photo_url VARCHAR(500) NULL,
   color VARCHAR(100),
   weight VARCHAR(100),
   medical_status VARCHAR(255),
@@ -79,6 +83,12 @@ CREATE TABLE horse (
 CREATE TABLE regulation (
   regulation_id INT AUTO_INCREMENT PRIMARY KEY,
   country VARCHAR(100) NOT NULL,
+  border_gate VARCHAR(100) NULL,
+  transport_mode ENUM('road','air','both') NOT NULL DEFAULT 'both',
+  doc_tier ENUM('A','B') NOT NULL DEFAULT 'A',
+  lead_time_days INT NOT NULL DEFAULT 5,
+  requires_authority_approval BOOLEAN NOT NULL DEFAULT FALSE,
+  min_validity_buffer_hours INT NOT NULL DEFAULT 24,
   document_type VARCHAR(100) NOT NULL,
   description TEXT,
   effective_date DATE,
@@ -97,6 +107,8 @@ CREATE TABLE transport_document (
   expiry_date DATE,
   status ENUM('draft','submitted','approved','rejected','expired') NOT NULL DEFAULT 'draft',
   reviewer_notes VARCHAR(500),
+  is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+  superseded_by_document_id INT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_doc_horse FOREIGN KEY (horse_id) REFERENCES horse(horse_id),
   CONSTRAINT fk_doc_regulation FOREIGN KEY (regulation_id) REFERENCES regulation(regulation_id),
@@ -127,6 +139,7 @@ CREATE TABLE shipment (
   requested_horse_count INT NOT NULL DEFAULT 1,
   origin_location VARCHAR(255) NOT NULL,
   destination_location VARCHAR(255) NOT NULL,
+  transportation_type VARCHAR(50) NULL DEFAULT NULL,
   requested_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   departure_date DATETIME,
   expected_arrival_date DATETIME,
@@ -134,7 +147,7 @@ CREATE TABLE shipment (
   special_requirements TEXT,
   rejection_reason VARCHAR(500),
   change_request_notes VARCHAR(500),
-  status ENUM('requested','change_requested','approved','rejected','planning','in_transit','completed','cancelled') NOT NULL DEFAULT 'requested',
+  status ENUM('requested','change_requested','approved','rejected','planning','confirmed','ready_to_depart','in_transit','completed','cancelled','cancelled_operational') NOT NULL DEFAULT 'requested',
   total_cost DECIMAL(15,2) NOT NULL DEFAULT 0,
   transport_cost DECIMAL(15,2) NULL DEFAULT NULL,
   insurance_fee DECIMAL(15,2) NOT NULL DEFAULT 0,
@@ -142,6 +155,19 @@ CREATE TABLE shipment (
   booking_type ENUM('shared_stall','dedicated_charter') NOT NULL DEFAULT 'shared_stall',
   stall_unit_price DECIMAL(15,2) NULL DEFAULT NULL,
   transport_mode ENUM('road','air') NULL DEFAULT NULL,
+  excused_delay BOOLEAN NOT NULL DEFAULT FALSE,
+  excused_delay_reason TEXT NULL,
+  excused_delay_confirmed_by INT NULL,
+  excused_delay_confirmed_at DATETIME NULL,
+  in_transit_compliance_alert BOOLEAN NOT NULL DEFAULT FALSE,
+  cancellation_category VARCHAR(64) NULL,
+  cancellation_reason TEXT NULL,
+  cancelled_by INT NULL,
+  cancelled_at DATETIME NULL,
+  payment_overdue BOOLEAN NOT NULL DEFAULT FALSE,
+  sla_escalation_status VARCHAR(40) NULL,
+  sla_fallback_option VARCHAR(40) NULL,
+  sla_fallback_notes TEXT NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_shipment_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id),
   CONSTRAINT fk_shipment_requester FOREIGN KEY (requested_by) REFERENCES `user`(user_id),
@@ -220,7 +246,7 @@ CREATE TABLE route_stop (
   country VARCHAR(100),
   planned_arrival DATETIME,
   planned_departure DATETIME,
-  status ENUM('pending','arrived','cleared','departed') NOT NULL DEFAULT 'pending',
+  status ENUM('pending','arrived','cleared','customs_cleared','departed') NOT NULL DEFAULT 'pending',
   CONSTRAINT fk_stop_route FOREIGN KEY (route_id) REFERENCES route(route_id),
   UNIQUE KEY uq_route_sequence (route_id, sequence_no)
 ) ENGINE=InnoDB;
@@ -231,6 +257,13 @@ CREATE TABLE shipment_assignment (
   user_id INT NOT NULL,
   role_in_shipment ENUM('transport_specialist','fleet_coordinator','driver','escort') NOT NULL,
   assigned_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  is_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+  confirmed_at DATETIME NULL,
+  confirmation_notes TEXT NULL,
+  is_backup_pool BOOLEAN NOT NULL DEFAULT FALSE,
+  sla_due_at DATETIME NULL,
+  sla_reminder_sent_at DATETIME NULL,
+  sla_escalated_at DATETIME NULL,
   CONSTRAINT fk_sa_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
   CONSTRAINT fk_sa_user FOREIGN KEY (user_id) REFERENCES `user`(user_id)
 ) ENGINE=InnoDB;
@@ -239,10 +272,12 @@ CREATE TABLE route_stop_update (
   update_id INT AUTO_INCREMENT PRIMARY KEY,
   route_stop_id INT NOT NULL,
   updated_by INT NOT NULL,
+  updated_by_role VARCHAR(50) NULL,
   actual_arrival DATETIME,
   actual_departure DATETIME,
   status ENUM('departed','arrived','customs_cleared','delivered') NOT NULL,
   notes TEXT,
+  is_backdated BOOLEAN NOT NULL DEFAULT FALSE,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_rsu_stop FOREIGN KEY (route_stop_id) REFERENCES route_stop(route_stop_id),
   CONSTRAINT fk_rsu_user FOREIGN KEY (updated_by) REFERENCES `user`(user_id)
@@ -267,6 +302,12 @@ CREATE TABLE incident_report (
   description TEXT NOT NULL,
   severity ENUM('low','medium','high','critical') NOT NULL DEFAULT 'medium',
   status ENUM('open','in_review','resolved','closed') NOT NULL DEFAULT 'open',
+  location_text VARCHAR(255) NULL,
+  immediate_actions TEXT NULL,
+  resolution_notes TEXT NULL,
+  resolved_by INT NULL,
+  affected_border_gate VARCHAR(150) NULL,
+  evidence_urls_json MEDIUMTEXT NULL,
   reported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   resolved_at DATETIME,
   CONSTRAINT fk_ir_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
@@ -276,7 +317,7 @@ CREATE TABLE incident_report (
 
 CREATE TABLE attachment (
   attachment_id INT AUTO_INCREMENT PRIMARY KEY,
-  related_type ENUM('shipment','horse_condition_log','incident_report') NOT NULL,
+  related_type ENUM('shipment','horse_condition_log','incident_report','delivery_handover') NOT NULL,
   related_id INT NOT NULL,
   file_url VARCHAR(500) NOT NULL,
   file_type ENUM('image','document','video') NOT NULL DEFAULT 'document',
@@ -312,6 +353,13 @@ CREATE TABLE shipment_change_request (
   old_value VARCHAR(500),
   new_value VARCHAR(500),
   reason TEXT NOT NULL,
+  estimated_extra_cost BIGINT NOT NULL DEFAULT 0,
+  cost_allocation ENUM('none','operating_cost','emergency_vet_covered','customer_addendum') NOT NULL DEFAULT 'none',
+  crosses_new_border BOOLEAN NOT NULL DEFAULT FALSE,
+  decision_notes TEXT NULL,
+  published_at DATETIME NULL,
+  published_by INT NULL,
+  ripple_notified_count INT NOT NULL DEFAULT 0,
   status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
   requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   approved_at DATETIME,
@@ -327,12 +375,25 @@ CREATE TABLE delivery_handover (
   shipment_horse_id INT,
   handed_over_by INT NOT NULL,
   received_by_name VARCHAR(150) NOT NULL,
+  handover_location VARCHAR(255) NULL,
   handover_datetime DATETIME NOT NULL,
+  delivered_quantity INT NOT NULL DEFAULT 1,
   horse_condition_at_handover ENUM('healthy','minor_issue','needs_attention') NOT NULL DEFAULT 'healthy',
+  identity_verified BOOLEAN NOT NULL DEFAULT TRUE,
+  documents_handed_over BOOLEAN NOT NULL DEFAULT TRUE,
   customer_signature_url VARCHAR(500),
+  evidence_urls_json MEDIUMTEXT NULL,
   notes TEXT,
+  dispute_reason TEXT NULL,
   status ENUM('pending','confirmed','disputed') NOT NULL DEFAULT 'pending',
+  confirmed_by INT NULL,
+  confirmed_at DATETIME NULL,
+  resolution_notes TEXT NULL,
+  compensation_amount BIGINT NOT NULL DEFAULT 0,
+  resolved_by INT NULL,
+  resolved_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_dh_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
   CONSTRAINT fk_dh_sh FOREIGN KEY (shipment_horse_id) REFERENCES shipment_horse(shipment_horse_id),
   CONSTRAINT fk_dh_driver FOREIGN KEY (handed_over_by) REFERENCES `user`(user_id)
@@ -358,11 +419,24 @@ CREATE TABLE IF NOT EXISTS shipment_invoice (
   shipment_id INT NOT NULL,
   route_id INT NOT NULL,
   customer_id INT NOT NULL,
+  invoice_type ENUM('primary','supplemental') NOT NULL DEFAULT 'primary',
+  status ENUM('active','paid','void','overdue') NOT NULL DEFAULT 'active',
+  parent_invoice_id INT NULL,
   amount BIGINT NOT NULL,
   currency CHAR(3) NOT NULL DEFAULT 'VND',
   snapshot JSON NOT NULL,
   issued_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  UNIQUE KEY uq_invoice_route (route_id),
+  payment_due_at DATETIME(3) NULL,
+  grace_granted_at DATETIME(3) NULL,
+  grace_due_at DATETIME(3) NULL,
+  grace_count TINYINT NOT NULL DEFAULT 0,
+  grace_granted_by INT NULL,
+  payment_reminder_sent_at DATETIME(3) NULL,
+  active_primary_route_id INT GENERATED ALWAYS AS (
+    CASE WHEN invoice_type = 'primary' AND status <> 'void' THEN route_id ELSE NULL END
+  ) STORED,
+  INDEX idx_invoice_route (route_id),
+  UNIQUE KEY uq_active_primary_invoice_route (active_primary_route_id),
   INDEX idx_invoice_shipment (shipment_id, issued_at),
   CONSTRAINT fk_invoice_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
   CONSTRAINT fk_invoice_route FOREIGN KEY (route_id) REFERENCES route(route_id),
@@ -400,3 +474,235 @@ CREATE TABLE IF NOT EXISTS road_trip (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- route_leg is introduced by migration 010; migration 019 adds its road_trip_id reference.
+
+CREATE TABLE IF NOT EXISTS shipment_sandbox_payment (
+  payment_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  customer_id INT NOT NULL,
+  partner_code VARCHAR(50) NOT NULL,
+  request_type VARCHAR(32) NOT NULL DEFAULT 'captureWallet',
+  order_id VARCHAR(100) NOT NULL UNIQUE,
+  request_id VARCHAR(100) NOT NULL UNIQUE,
+  order_info VARCHAR(255) NOT NULL,
+  amount BIGINT NOT NULL,
+  status ENUM('creating','pending','succeeded','failed','unknown') NOT NULL DEFAULT 'creating',
+  pay_url TEXT NULL,
+  qr_content TEXT NULL,
+  result_code INT NULL,
+  result_message VARCHAR(1000) NULL,
+  trans_id VARCHAR(30) NULL,
+  last_checked_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_sandbox_payment_shipment (shipment_id, payment_id),
+  CONSTRAINT fk_sandbox_payment_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_sandbox_payment_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shipment_sandbox_payment_event (
+  event_id INT AUTO_INCREMENT PRIMARY KEY,
+  payment_id INT NOT NULL,
+  event_key VARCHAR(100) NOT NULL,
+  source ENUM('create','query','ipn') NOT NULL,
+  new_status ENUM('creating','pending','succeeded','failed','unknown') NOT NULL,
+  result_code INT NULL,
+  result_message VARCHAR(1000) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uq_sandbox_payment_event (payment_id, event_key),
+  CONSTRAINT fk_sandbox_payment_event FOREIGN KEY (payment_id) REFERENCES shipment_sandbox_payment(payment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shipment_sepay_payment (
+  payment_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  invoice_id INT NULL,
+  customer_id INT NOT NULL,
+  payment_code VARCHAR(32) NOT NULL,
+  amount BIGINT NOT NULL,
+  bank_code VARCHAR(30) NOT NULL,
+  account_number VARCHAR(34) NOT NULL,
+  account_name VARCHAR(150) NOT NULL,
+  status ENUM('pending','review','succeeded','cancelled') NOT NULL DEFAULT 'pending',
+  transaction_id BIGINT UNSIGNED NULL,
+  paid_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  active_shipment_invoice_key VARCHAR(64) GENERATED ALWAYS AS (
+    CASE WHEN status <> 'cancelled' THEN CONCAT(shipment_id, ':', COALESCE(invoice_id, 0)) ELSE NULL END
+  ) STORED,
+  INDEX idx_sepay_shipment (shipment_id),
+  UNIQUE KEY uq_sepay_active_shipment_invoice (active_shipment_invoice_key),
+  UNIQUE KEY uq_sepay_code (payment_code),
+  UNIQUE KEY uq_sepay_paid_transaction (transaction_id),
+  CONSTRAINT fk_sepay_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_sepay_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id),
+  CHECK (amount > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS sepay_webhook_receipt (
+  transaction_id BIGINT UNSIGNED PRIMARY KEY,
+  payment_id INT NULL,
+  identity_hash CHAR(64) NOT NULL,
+  outcome VARCHAR(30) NOT NULL,
+  payload JSON NOT NULL,
+  received_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_sepay_receipt_payment (payment_id, received_at),
+  CONSTRAINT fk_sepay_receipt_payment FOREIGN KEY (payment_id) REFERENCES shipment_sepay_payment(payment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS route_schedule_history (
+  history_id INT AUTO_INCREMENT PRIMARY KEY,
+  route_stop_id INT NOT NULL,
+  old_planned_arrival DATETIME NULL,
+  new_planned_arrival DATETIME NULL,
+  old_planned_departure DATETIME NULL,
+  new_planned_departure DATETIME NULL,
+  reason TEXT NOT NULL,
+  changed_by INT NOT NULL,
+  changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_rsh_stop (route_stop_id),
+  CONSTRAINT fk_rsh_stop FOREIGN KEY (route_stop_id) REFERENCES route_stop(route_stop_id),
+  CONSTRAINT fk_rsh_user FOREIGN KEY (changed_by) REFERENCES `user`(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shipment_operating_cost (
+  cost_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  route_leg_id INT NULL,
+  cost_category ENUM(
+    'fuel',
+    'toll_border',
+    'airline_freight',
+    'quarantine_fee',
+    'staff_allowance',
+    'incident_absorbed',
+    'disbursement_absorbed_on_company_fault'
+  ) NOT NULL,
+  amount DECIMAL(15,2) NOT NULL,
+  receipt_url VARCHAR(500) NULL,
+  notes TEXT NULL,
+  recorded_by INT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_soc_shipment (shipment_id),
+  INDEX idx_soc_category (cost_category),
+  CONSTRAINT fk_soc_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_soc_recorded_by FOREIGN KEY (recorded_by) REFERENCES `user`(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shipment_disbursement (
+  disbursement_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  authority_name VARCHAR(150) NOT NULL,
+  fee_type VARCHAR(80) NOT NULL,
+  amount BIGINT NOT NULL,
+  authority_receipt_url VARCHAR(500) NULL,
+  notes TEXT NULL,
+  settled_status ENUM('advanced','reimbursed','deducted_from_refund','absorbed_company_fault') NOT NULL DEFAULT 'advanced',
+  recorded_by INT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_sd_shipment (shipment_id),
+  CONSTRAINT fk_sd_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_sd_recorded_by FOREIGN KEY (recorded_by) REFERENCES `user`(user_id),
+  CHECK (amount > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shipment_refund_record (
+  refund_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  customer_id INT NOT NULL,
+  cancellation_category VARCHAR(64) NOT NULL,
+  refund_mode ENUM('cash_refund','credit_30d') NOT NULL DEFAULT 'cash_refund',
+  freight_refund_amount BIGINT NOT NULL DEFAULT 0,
+  insurance_refund_amount BIGINT NOT NULL DEFAULT 0,
+  non_refundable_air_deduction BIGINT NOT NULL DEFAULT 0,
+  disbursement_deduction BIGINT NOT NULL DEFAULT 0,
+  amount BIGINT NOT NULL DEFAULT 0,
+  receivable_excess_amount BIGINT NOT NULL DEFAULT 0,
+  status ENUM(
+    'pending_approval',
+    'pending_second_approval',
+    'approved_for_transfer',
+    'transferred',
+    'converted_to_credit',
+    'rejected'
+  ) NOT NULL DEFAULT 'pending_approval',
+  requires_dual_approval BOOLEAN NOT NULL DEFAULT FALSE,
+  requested_by INT NOT NULL,
+  approved_by INT NULL,
+  approved_at DATETIME NULL,
+  second_approved_by INT NULL,
+  second_approved_at DATETIME NULL,
+  transferred_by INT NULL,
+  transferred_at DATETIME NULL,
+  recipient_bank_account VARCHAR(100) NULL,
+  bank_transaction_ref VARCHAR(150) NULL,
+  transfer_receipt_url VARCHAR(500) NULL,
+  credit_expires_at DATETIME NULL,
+  notes TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_srr_shipment (shipment_id),
+  INDEX idx_srr_status (status),
+  CONSTRAINT fk_srr_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_srr_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id),
+  CONSTRAINT fk_srr_requested_by FOREIGN KEY (requested_by) REFERENCES `user`(user_id),
+  CHECK (amount >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS equine_vital_config (
+  config_id INT AUTO_INCREMENT PRIMARY KEY,
+  config_name VARCHAR(100) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  temp_green_min DECIMAL(4,2) NOT NULL DEFAULT 37.50,
+  temp_green_max DECIMAL(4,2) NOT NULL DEFAULT 38.50,
+  temp_amber_low_min DECIMAL(4,2) NOT NULL DEFAULT 37.00,
+  temp_amber_high_max DECIMAL(4,2) NOT NULL DEFAULT 39.30,
+  hr_green_min INT NOT NULL DEFAULT 28,
+  hr_green_max INT NOT NULL DEFAULT 44,
+  hr_amber_low_min INT NOT NULL DEFAULT 24,
+  hr_amber_high_max INT NOT NULL DEFAULT 60,
+  consecutive_alert_window_hours INT NOT NULL DEFAULT 6,
+  escalatable_conditions JSON NOT NULL,
+  observational_conditions JSON NOT NULL,
+  calibrated_by VARCHAR(150) NULL,
+  updated_by INT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS trip_status_log (
+  log_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  route_id INT NOT NULL,
+  leg_id INT NULL,
+  route_stop_id INT NULL,
+  previous_status VARCHAR(50) NULL,
+  new_status VARCHAR(50) NOT NULL,
+  milestone_type VARCHAR(50) NOT NULL,
+  milestone_name VARCHAR(255) NOT NULL,
+  notes TEXT NULL,
+  updated_by INT NOT NULL,
+  updated_by_role VARCHAR(50) NOT NULL,
+  is_backdated BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_tsl_shipment (shipment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS horse_health_log (
+  log_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  horse_id INT NULL,
+  horse_name VARCHAR(150) NOT NULL,
+  leg_name VARCHAR(255) NULL,
+  recorded_by INT NOT NULL,
+  recorded_by_role VARCHAR(50) NULL,
+  condition_status ENUM('stable','not_eating','stressed','climate_change','other') NOT NULL DEFAULT 'stable',
+  temperature_c DECIMAL(5,2) NULL,
+  heart_rate_bpm INT NULL,
+  alert_tier ENUM('green','amber_observational','amber_escalatable','red') NOT NULL DEFAULT 'green',
+  alert_reason VARCHAR(500) NULL,
+  notes TEXT NULL,
+  attachments_json MEDIUMTEXT NULL,
+  recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_hhl_shipment (shipment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

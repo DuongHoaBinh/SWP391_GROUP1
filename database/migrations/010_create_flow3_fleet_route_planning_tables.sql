@@ -44,19 +44,27 @@ CREATE TABLE IF NOT EXISTS `master_stop` (
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
--- 4. Extend Route table with Strategic Framework and Plan Status
-ALTER TABLE `route`
-  ADD COLUMN `assigned_coordinator_id` INT NULL,
-  ADD COLUMN `manager_vehicle_type` VARCHAR(100) NULL,
-  ADD COLUMN `manager_airline_id` INT NULL,
-  ADD COLUMN `manager_departure_airport_id` INT NULL,
-  ADD COLUMN `manager_arrival_airport_id` INT NULL,
-  ADD COLUMN `manager_main_corridor` VARCHAR(255) NULL,
-  ADD COLUMN `strategic_notes` TEXT NULL,
-  ADD COLUMN `rejection_reason` VARCHAR(500) NULL,
-  ADD COLUMN `plan_status` ENUM('draft', 'pending_approval', 'approved', 'confirmed', 'ready_to_depart', 'in_transit', 'completed', 'cancelled') NOT NULL DEFAULT 'draft',
-  ADD COLUMN `approved_by` INT NULL,
-  ADD COLUMN `approved_at` DATETIME NULL;
+-- 4. Extend Route table with Strategic Framework and Plan Status (idempotent)
+SET @ddl_route_ext = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'route' AND COLUMN_NAME = 'assigned_coordinator_id') = 0,
+  'ALTER TABLE `route`
+    ADD COLUMN `assigned_coordinator_id` INT NULL,
+    ADD COLUMN `manager_vehicle_type` VARCHAR(100) NULL,
+    ADD COLUMN `manager_airline_id` INT NULL,
+    ADD COLUMN `manager_departure_airport_id` INT NULL,
+    ADD COLUMN `manager_arrival_airport_id` INT NULL,
+    ADD COLUMN `manager_main_corridor` VARCHAR(255) NULL,
+    ADD COLUMN `strategic_notes` TEXT NULL,
+    ADD COLUMN `rejection_reason` VARCHAR(500) NULL,
+    ADD COLUMN `plan_status` ENUM(''draft'', ''pending_approval'', ''approved'', ''confirmed'', ''ready_to_depart'', ''in_transit'', ''completed'', ''cancelled'') NOT NULL DEFAULT ''draft'',
+    ADD COLUMN `approved_by` INT NULL,
+    ADD COLUMN `approved_at` DATETIME NULL',
+  'SELECT 1'
+);
+PREPARE stmt_route_ext FROM @ddl_route_ext;
+EXECUTE stmt_route_ext;
+DEALLOCATE PREPARE stmt_route_ext;
 
 -- 5. Multi-modal Route Legs
 CREATE TABLE IF NOT EXISTS `route_leg` (
@@ -89,15 +97,30 @@ CREATE TABLE IF NOT EXISTS `route_leg` (
   CONSTRAINT `fk_leg_airline` FOREIGN KEY (`airline_id`) REFERENCES `airline`(`airline_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 6. Link Route Stop to Route Leg
-ALTER TABLE `route_stop`
-  ADD COLUMN `leg_id` INT NULL;
+-- 6. Link Route Stop to Route Leg (idempotent)
+SET @ddl_stop_leg = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'route_stop' AND COLUMN_NAME = 'leg_id') = 0,
+  'ALTER TABLE `route_stop` ADD COLUMN `leg_id` INT NULL',
+  'SELECT 1'
+);
+PREPARE stmt_stop_leg FROM @ddl_stop_leg;
+EXECUTE stmt_stop_leg;
+DEALLOCATE PREPARE stmt_stop_leg;
 
--- 7. Extend Shipment Assignment with Driver / Staff Confirmation
-ALTER TABLE `shipment_assignment`
-  ADD COLUMN `is_confirmed` BOOLEAN NOT NULL DEFAULT FALSE,
-  ADD COLUMN `confirmed_at` DATETIME NULL,
-  ADD COLUMN `confirmation_notes` VARCHAR(255) NULL;
+-- 7. Extend Shipment Assignment with Driver / Staff Confirmation (idempotent)
+SET @ddl_sa_confirm = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shipment_assignment' AND COLUMN_NAME = 'is_confirmed') = 0,
+  'ALTER TABLE `shipment_assignment`
+    ADD COLUMN `is_confirmed` BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN `confirmed_at` DATETIME NULL,
+    ADD COLUMN `confirmation_notes` VARCHAR(255) NULL',
+  'SELECT 1'
+);
+PREPARE stmt_sa_confirm FROM @ddl_sa_confirm;
+EXECUTE stmt_sa_confirm;
+DEALLOCATE PREPARE stmt_sa_confirm;
 
 -- 8. Extend Shipment Status ENUM to include 'confirmed' and 'ready_to_depart'
 ALTER TABLE `shipment`

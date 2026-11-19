@@ -1,11 +1,15 @@
--- Migration 011: Add specialization to user table for field staff (driver vs medical escort/vet)
+-- Migration 011: Add specialization to user table for field staff (idempotent)
 
-USE horse_transport_system;
+SET @user_spec_ddl = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'specialization') = 0,
+  'ALTER TABLE `user` ADD COLUMN `specialization` VARCHAR(50) NULL DEFAULT NULL AFTER `role_id`',
+  'SELECT 1'
+);
+PREPARE user_spec_stmt FROM @user_spec_ddl;
+EXECUTE user_spec_stmt;
+DEALLOCATE PREPARE user_spec_stmt;
 
-ALTER TABLE `user`
-  ADD COLUMN `specialization` VARCHAR(50) NULL DEFAULT NULL AFTER `role_id`;
-
--- Update existing driver / escort seed accounts
 UPDATE `user`
 SET `specialization` = 'driver'
 WHERE `role_id` = 5 AND (`full_name` LIKE '%Tài xế%' OR `full_name` LIKE '%Driver%' OR `email` LIKE '%driver%');
