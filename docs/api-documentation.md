@@ -115,6 +115,23 @@ Response:
 }
 ```
 
+### `POST /auth/forgot-password`
+
+Requests a password-reset OTP email for an active account. Protected by per-IP rate limiting (`RateLimitGuard`).
+
+### `POST /auth/reset-password`
+
+Resets the account password using `{ email, otp, newPassword, confirmPassword }`. Protected by rate limiting and max failed-attempt lockouts.
+
+### Rate Limiting & Security Defaults
+
+- Authentication mutation routes (`register`, `verify-otp`, `login`, `forgot-password`, `reset-password`, `google`) enforce sliding-window rate limits via `@RateLimit`.
+- JWT verification requires an active database user account (`is_active`) and a configured secret (`JWT_SECRET`, minimum 32 characters in production).
+
+### `GET /health`
+
+Public health probe verifying API readiness and MySQL connectivity (`SELECT 1`). Returns `{ status: "ok", db: "up", uptimeSeconds, timestamp }` or HTTP 503 if MySQL is unreachable.
+
 ## Local MySQL and SMTP configuration
 
 The backend reads database and SMTP settings from `backend/.env`. `SMTP_USER` and `SMTP_PASSWORD` belong to a dedicated system sender account, not to the customer. The customer email from `POST /auth/register` is passed as the recipient of the OTP email. Required values for the real registration flow are `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASSWORD`. For Gmail, use an App Password with two-step verification enabled. Never commit `backend/.env` or expose `SMTP_PASSWORD`.
@@ -278,6 +295,8 @@ Retrieves all notifications for the authenticated user (sorted newest first).
 Marks a notification as read.
 
 ## Horses endpoints
+
+Valid `horse.status` values are `active`, `in_transit`, `retired`, and `deceased` (`delivered` is not used). Creating a transport request atomically sets selected horses to `in_transit` (meaning held/reserved by a non-terminal shipment from `requested` through `in_transit`), and releases them back to `active` when removed in `change_requested` or when the shipment transitions to `cancelled`, `rejected`, `cancelled_operational`, or `completed`.
 
 ### `GET /horses`
 Retrieves all racehorses belonging to the authenticated customer.
@@ -510,7 +529,7 @@ Responses include per horse: the source value/currency, saved rate, `declaredVal
 
 ### `PATCH /orders/:id/approve`
 
-Manager/Admin sends `{ "transportCost": 10000000 }` for base freight. The example above yields `transportCost: 10000000`, `insuranceFee: 3000000`, `totalCost: 13000000`. Legacy `totalCost` request field remains a base-freight alias. If both fields are sent with differing values, return 400; insurance is never added twice. Confirmation and SePay QR use the combined total. Customer insurance changes after approval are rejected.
+Manager/Admin sends `{ "transportCost": 10000000 }` for base freight. The example above yields `transportCost: 10000000`, `insuranceFee: 3000000`, `totalCost: 13000000`. Legacy `totalCost` request field remains a base-freight alias. If both fields are sent with differing values, return 400; insurance is never added twice. The approved order JSON payload returned by `PATCH /orders/:id/approve` and `GET /orders/:id` (`requestCode`, `bookingType`, `stallUnitPrice`, `transportMode`, `requestedHorseCount`, `transportCost`, `insuranceFee`, `totalCost`, and per-horse `horses[]` policy details) serves as the quotation data source for client-side HTML/PDF printing; there is no server-side PDF quotation endpoint. Confirmation and SePay QR use the combined total. Customer insurance changes after approval are rejected.
 
 ### Migration / testing
 
@@ -556,3 +575,57 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
 - MoMo confirm-atm requires sandbox enabled and non-production. Sandbox uses the exact stored VND amount and never updates official payment status or readiness. No live bank transaction is used in the regression suite.
 - Apply 019 after existing migrations with `npm run migrate:road-trips`. `npm run test:controlled` runs focused regressions; the isolated backend runner includes real HTTP/MySQL road tests and upgrade/repeat checks. No new environment variable is added.
 - Apply 020 with `npm run migrate:transport-mode` after 019. Order responses add nullable `transportMode` (`road`/`air`), set by Manager approval. Domestic/International and existing quotes are preserved. Customer, Manager and Coordinator prefer the typed mode; legacy note inference remains a UI fallback.
+
+## Security, Compliance, Fleet CRUD & Reports Hardening
+
+- **Documents (`backend/src/modules/documents`):**
+  - `GET /documents/:id/file`: Streams uploaded compliance files only to authorized owners or staff roles (`TRANSPORT_SPECIALIST`, `LOGISTICS_MANAGER`, `FLEET_ROUTE_COORDINATOR`, `DRIVER_ESCORT`, `ADMIN`), with `Content-Security-Policy` sandbox headers. Static `/uploads/documents` directory serving is disabled.
+  - `PATCH /documents/regulations/:id`: (`TRANSPORT_SPECIALIST`, `ADMIN`) Updates quarantine regulation fields (`country`, `documentType`, `description`, `effectiveDate`).
+  - Document & horse image uploads validate both extension/MIME and file magic bytes (`verifyUploadedFileMagicBytes`).
+- **Fleet (`backend/src/modules/fleet`):**
+  - `PATCH /fleet/vehicles/:id` & `DELETE /fleet/vehicles/:id`: (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`) Update or remove fleet equipment.
+  - `POST /fleet/staff`: Restricted to Manager/Admin for internal non-admin staff roles (`TRANSPORT_SPECIALIST`, `FLEET_ROUTE_COORDINATOR`, `DRIVER_ESCORT`).
+- **Reports (`backend/src/modules/reports`):**
+  - `GET /reports/performance`: Restricted to `LOGISTICS_MANAGER` / `ADMIN`; aggregates real MySQL shipment, revenue, corridor, and status breakdown metrics.
+- **Database Migration Runner:** `023_drop_plain_password.sql` removes plaintext password columns from `user` and `otp_verification`; run all pending SQL migrations idempotently via `npm run migrate:all` in `backend/`.
+
+## Spec v3.1 Endpoints (Waves 0–5: Governance, Compliance, SLA, Vitals, Flow 5 & Flow 6)
+
+- **Orders Cutoff & Operational Governance (`OrdersController`, `OrdersOpsController`):**
+  - `GET /orders/cutoff-policy`: Authenticated users query dynamic `Order Cutoff` minimum lead days (`MAX(4d charter | 7d shared, maxTierALead + 2d)`) and `earliestDepartureDate` (UTC) by `destinationLocation`, `originLocation`, `bookingType`, `transportMode`, `transportationType`.
+  - `POST /orders` (`CUSTOMER`) & `PUT /orders/:id` (`CUSTOMER`): Enforce dynamic `Order Cutoff`; departures earlier than `earliestDepartureDate` return `422 Unprocessable Entity` with `code: 'ORDER_CUTOFF_VIOLATION'`. Wrong-state mutations and race conditions return `409 Conflict`.
+  - `POST /orders/:id/operational-cancel` (`LOGISTICS_MANAGER`, `ADMIN`): Transitions shipment to `cancelled_operational` (forbidden once `in_transit` -> `409 Conflict`), computes refund/credit policy matrix, deducts logged disbursements, and creates `shipment_refund_record`.
+  - `GET /orders/refunds` (`LOGISTICS_MANAGER`, `ADMIN`) & `GET /orders/:id/refunds` (authorized order viewers): Lists manual refund / 30-day credit records.
+  - `PATCH /orders/refunds/:refundId/approve` (`LOGISTICS_MANAGER`, `ADMIN`): Approves refund or credit; `>= 20,000,000 VND` cash refunds require Dual Approval (`second_approved_by != approved_by`, else `403 Forbidden`).
+  - `POST /orders/refunds/:refundId/transfer` (`ADMIN`): Multipart/JSON bank-transfer confirmation with `magic bytes` validation; enforces server-side SoD (`transferred_by != approved_by` / `second_approved_by`, else `403 Forbidden`).
+  - `GET /orders/refunds/:refundId/receipt` & `GET /orders/disbursements/:disbursementId/receipt`: Authenticated receipt streams (`Cache-Control: private, no-store`, CSP sandbox).
+  - `GET /orders/:id/disbursements` & `POST /orders/:id/disbursements` (`LOGISTICS_MANAGER`, `ADMIN`, `TRANSPORT_SPECIALIST`): Records reimbursable statutory fees with multipart receipt upload.
+  - `POST /orders/:id/upgrade-charter` & `POST /orders/:id/reschedule-shared` (`LOGISTICS_MANAGER`, `ADMIN`, `CUSTOMER`): Handles `D-3` fallback (`void` + replacement invoice pre-payment or `supplemental_invoice` post-payment).
+  - `POST /orders/:id/payment-grace` (`LOGISTICS_MANAGER`, `ADMIN`): Grants single payment grace (`MIN(granted + 10h, departure - 24h)`); subsequent attempts return `409 Conflict`.
+  - `POST /orders/:id/sla-fallback` & `POST /orders/sla/run-sweep` (`LOGISTICS_MANAGER`, `ADMIN`): Executes `T-52h` fallback actions and SLA/grace expiry auto-cancellation sweep.
+
+- **Compliance & Regulations (`DocumentsController`):**
+  - `GET /documents/order/:orderId/checklist`: Evaluates horse ownership (`horse.owner_id`), multidimensional `regulation` matching (`borderGate`, `transportMode`, `docTier`, `leadTimeDays`, `requiresAuthorityApproval`, `minValidityBufferHours`), 2-tier authority approvals (`document_approval`), safety buffers (`24h` domestic / `48h` international), dynamic `orderCutoffDate` & `tierADeadline`, and non-blocking Tier-B `earlyIssuanceWarning`. Also exposes `BR-F2-06` `in_transit_compliance_alert` blocking `customs_cleared` (`422`) when compliance lapses mid-transit.
+
+- **Routes & Fleet (`RoutesController`, `FleetController`):**
+  - `GET /routes/shipment/:shipmentId/optional`: Non-404 read endpoint returning `{ route: RouteEntity | null }` (`200 OK`) for unplanned orders while preserving the same customer ownership check and `transfer_hub` / `roadTripId` redaction as `GET /routes/shipment/:shipmentId`.
+  - `POST /routes/plan/:shipmentId/build-detail` (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`): Enforces `BR-F3-03` (unique `sequenceNo`, valid leg windows, chronological non-overlapping legs, and mandatory `border_check` or `quarantine` stop on International orders -> `400 Bad Request`), `BR-F3-04` LIFO `stall_number` auto-assignment (`S1`, `S2`, ...) on consolidated road trips, and returns `409 Conflict` when editing confirmed/locked plans (`setStrategicFramework`, `buildDetailedPlan`, legacy routes).
+  - `PATCH /fleet/staff/:userId/shift` (`LOGISTICS_MANAGER`, `ADMIN`): Persists staff shift assignments and availability status in MySQL.
+
+- **Tracking, Equine Vitals & Flow 6 Handover (`TrackingController`, `HandoverController`):**
+  - `GET /tracking/vital-config` & `PATCH /tracking/vital-config` (`LOGISTICS_MANAGER`, `ADMIN`, `TRANSPORT_SPECIALIST`): Reads/updates 3-tier closed vital thresholds (`equine_vital_config`) with `<= 6h` consecutive escalatable-amber escalation.
+  - `POST /tracking/shipments/:shipmentId/health-logs/upload` (`DRIVER_ESCORT`, `FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`): Multipart health-log creation (up to 5 images `<= 5MB` validated via magic bytes) replacing legacy base64 JSON; `GET /tracking/health-logs/attachments/:filename` streams files behind auth.
+  - `POST /tracking/shipments/:shipmentId/coordinator-override` (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`): Append-only status override recording `updated_by_role` and `isBackdated` checks (`notes` mandatory if `> 30m` late).
+  - `GET /tracking/handovers` (`LOGISTICS_MANAGER`, `FLEET_ROUTE_COORDINATOR`, `ADMIN`) & `GET /tracking/shipments/:shipmentId/handovers`: Lists Flow 6 per-horse handover records (`delivery_handover`).
+  - `POST /tracking/shipments/:shipmentId/handovers` (`DRIVER_ESCORT`, `FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`), `POST /tracking/handovers/:handoverId/respond` (`CUSTOMER`, `ADMIN`), `POST /tracking/handovers/:handoverId/resolve-dispute` (`LOGISTICS_MANAGER`, `ADMIN`), and `GET /tracking/handovers/attachments/:filename`: Driver submission, Customer confirmation/dispute (with mandatory evidence on dispute), and Manager resolution capped at `maxCompensation`.
+
+- **Flow 5 Incidents & Change Requests (`IncidentsController`):**
+  - `GET /incidents`, `GET /incidents/:incidentId`, `GET /incidents/attachments/:filename`, `POST /incidents/shipments/:shipmentId` (`DRIVER_ESCORT`, `FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`), `PATCH /incidents/:incidentId/assess`, `POST /incidents/:incidentId/resolve` (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`).
+  - `GET /incidents/change-requests`, `POST /incidents/:incidentId/change-requests` (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`), `POST /incidents/change-requests/:changeId/review` (`LOGISTICS_MANAGER`, `ADMIN`), `POST /incidents/change-requests/:changeId/publish` (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`): Two-step incident route/cost change workflow (`emergency_vet_covered` requires Premium package -> `422` otherwise; `operating_cost` approval records `shipment_operating_cost` without mutating `shipment_invoice`).
+
+- **Reports & Operating Costs (`ReportsController`):**
+  - `GET /reports/performance` (`LOGISTICS_MANAGER`, `ADMIN`): Live DB aggregations for Gross/Adjusted OTD, Quarantine pass rates, revenue, `retainedCancellationRevenue`, `creditLiabilityBalance`, `netRealizedCashRevenue`, operating costs, and gross profit.
+  - `GET /reports/shipments/:shipmentId/operating-costs` & `POST /reports/shipments/:shipmentId/operating-costs` (`LOGISTICS_MANAGER`, `FLEET_ROUTE_COORDINATOR`, `ADMIN`), `DELETE /reports/operating-costs/:costId` (`LOGISTICS_MANAGER`, `ADMIN`), and `PATCH /reports/shipments/:shipmentId/excused-delay` (`LOGISTICS_MANAGER`, `ADMIN`; locked `409 Conflict` after 48h from arrival).
+
+- **Migrations:** Run `024_wave0_schema_hotfixes.sql`, `025_wave1_g1_g2_reports_compliance.sql`, `026_wave2_g3_g4_ops_refunds_sla_vitals.sql`, and `027_wave3_flow5_incidents_and_flow6_handover.sql` (or `npm run migrate:all` in `backend/`).
+

@@ -10,7 +10,7 @@ Customer, Logistics Manager
 2. Customer submits the request and uploads available identity/medical documents.
 3. The system creates the request as `DRAFT` or `SUBMITTED` and records the customer and timestamp.
 4. Logistics Manager reviews feasibility, service scope, dates, and requested requirements.
-5. Manager either requests changes, rejects the request with a reason, or approves it for planning. Approval produces an estimated VND quotation (printable PDF), not an invoice or payment request.
+5. Manager either requests changes, rejects the request with a reason, or approves it for planning. Approval locks and returns a structured estimated VND quotation payload in the order API response (`PATCH /orders/:id/approve`, `GET /orders/:id`), which the frontend renders as a client-side printable HTML/PDF document (`window.print()`) with no server-side PDF endpoint; it is not an invoice or payment request.
 6. For an approved request, the manager assigns work to the Transport Specialist, Fleet & Route Coordinator, and Driver / Escort as planning becomes available.
 
 ## Key rules
@@ -35,7 +35,7 @@ Approved order, assigned work items, order status history, and customer notifica
 ## Equine value and insurance
 
 1. In the horse-selection step, the customer enters a value per horse and chooses Basic, Standard or Premium. Standard/Premium require a positive declared value; Basic defaults to zero premium and permits an undeclared value for backward compatibility.
-2. The backend validates owned, available horses, quantities, currency and package. A create transaction either reserves every selected horse and stores all policies or rolls back entirely. No orphan order is left on an invalid policy/horse.
+2. The backend validates owned, available horses (`horse.status = 'active'`), quantities, currency and package. A create transaction either reserves every selected horse by setting `horse.status = 'in_transit'` and stores all policies or rolls back entirely. In this domain model, `horse.status = 'in_transit'` means the horse is currently held/reserved by a non-terminal shipment (`requested` through `in_transit`) to prevent double-booking rather than strictly indicating physical movement; it returns to `'active'` when removed in `change_requested` or when the shipment ends (`cancelled`, `rejected`, `cancelled_operational`, or `completed`), and `'delivered'` is not a `horse.status` value. No orphan order is left on an invalid policy/horse.
 3. Declared values have at most two decimal places. USD uses the configured server rate (up to six decimal places); converted VND value is rounded to two decimal places. The per-horse premium is rounded half up to one whole VND, then multiplied by quantity. Maximum stored values follow `DECIMAL(15,2)`.
 4. Before approval, the UI shows insurance fees and pending freight. Manager approval requires explicit positive whole-VND base freight; missing, null, empty, zero, negative and invalid prices are rejected by the backend. Existing zero quotes are not rewritten. The server adds the aggregate premium once. Both Manager approval surfaces show the breakdown. Legacy `totalCost` approval input is treated as base freight; new clients use `transportCost`.
 5. A change-request resubmission can update a policy only while the order is `change_requested`. The customer detail modal allows editing values/packages and adding notes without replacing the original route requirements. The existing horse identity is preserved; removed horses are released. The former policy rows are appended to `shipment_insurance_revision` before replacement. Unchanged declarations keep their stored exchange rate and premium, even when the configured rate changes or USD is no longer enabled. A substantive value/currency/package change uses the current server rate. The old quote is cleared until the Manager approves again. Concurrent approval, cancellation and change requests cannot reopen a finalized decision.
@@ -54,11 +54,53 @@ Requested corrections merge omitted policy fields and quantities with the existi
 5. For compatibility, existing `transportCost`/`totalCost` approval fields still mean total freight. Never reinterpret a legacy total as a unit rate or multiply an old quote again. These historical/legacy quotes have `stallUnitPrice = null`; no invented unit price appears in the saved summary.
 6. Requested corrections can change booking type through the Customer detail modal. Save old/new choices and actor in `shipment_booking_revision`, preserve the horse insurance unless explicitly changed, clear freight/unit price, and return to Manager review. Changes after approval are rejected.
 
-7. **Quy chuẩn thời gian ghép chuồng (Consolidation SLA & Lead Time):**
-   - **Mốc 1 (Đặt yêu cầu):** Khách hàng tạo đơn đặt chỗ ghép chuồng trước ngày khởi hành dự kiến tối thiểu **7 ngày** ($\ge D - 7$) để hệ thống có thời gian gom đơn cùng hành lang.
-   - **Mốc 2 (Hạn nộp hồ sơ thú y):** Khách hàng hoàn tất nộp giấy tờ tiêm phòng và xét nghiệm máu trước ngày khởi hành tối thiểu **5 ngày** ($\ge D - 5$). Chuyên viên Logistics (Specialist) thẩm định và làm thủ tục xin Giấy kiểm dịch động vật liên tỉnh với Chi cục Thú y (thời gian xử lý 24–48h). Nếu nộp trễ hạn, đơn không đủ điều kiện ghép vào chuyến.
-   - **Mốc 3 (Chốt sổ ghép tuyến - Cut-off):** Đúng **72 giờ trước giờ chạy** ($D - 3$), hệ thống đóng nhận đơn mới cho chuyến. Điều phối viên (Coordinator) chốt lộ trình multi-stop (thứ tự đón/trả, vị trí ô chuồng trên xe), gán tài xế, nhân viên y tế/chăm sóc và hệ thống phát hành hóa đơn (Invoice).
-   - **Mốc 4 (Thanh toán giữ chỗ):** Khách hàng thanh toán qua cổng SePay trong vòng 24 giờ sau khi hóa đơn được phát hành để khóa ô chuồng chắc chắn.
-   - **Chính sách không đủ số lượng ghép:** Nếu đến mốc Cut-off ($D - 3$) chưa đủ người ghép trên cùng tuyến, hệ thống thông báo cho khách hàng với 2 phương án: (1) **Lùi ngày khởi hành** sang chuyến ghép tiếp theo (hoàn toàn miễn phí); hoặc (2) **Nâng cấp Bao trọn chuyến (Charter)** bù thêm chi phí chênh lệch để xe xuất phát riêng đúng ngày.
+7. **Quy chuẩn thời gian ghép chuồng (Consolidation SLA & Dynamic Lead Time — Hòa giải Spec v3.1, `DEC-03` & `DEC-05` Approved):**
+   - **Lead Time Động cho Hồ sơ Tầng A (`Target Spec v3.1 (Planned)`):**
+     - `Tier_A_Deadline = departure_date - MAX(base_days, MAX(regulation.lead_time_days))` với `base_days = 5` ngày cho `shared_stall` và `base_days = 3` ngày cho `dedicated_charter`.
+     - `Order_Cutoff = departure_date - MAX(7 ngày [shared] hoặc 4 ngày [charter], MaxLeadTime + 2 ngày)`.
+     - *Ghi chú hòa giải:* Thay cho mốc cứng `D - 5` đối với các tuyến quốc tế có giấy phép nhập khẩu cần `14–30` ngày, đồng thời chỉ áp dụng mốc sớm cho **Tầng A** (hộ chiếu, tiêm phòng, xét nghiệm máu dài hạn). Giấy kiểm dịch **Tầng B** ngắn hạn (48–72h) chỉ cấp từ `D - 1` (`T - 24h` → `T - 6h`) để đảm bảo hiệu lực vượt qua thời điểm thông quan/đến nơi.
+   - **Mốc Chốt sổ ghép tuyến (`D - 3` / `T - 72h`) vs Phát hành Hóa đơn (`≤ T - 58h`, Hard Cap `T - 52h`):**
+     - Đúng `T - 72h`, đóng nhận đơn ghép mới. Coordinator chốt lộ trình Multi-stop + vị trí ô chuồng và phân công nhân sự chậm nhất `T - 70h`.
+     - Driver/Escort chính xác nhận theo **SLA 4 giờ làm việc (`08:00–18:00`) hoặc tối đa 12 giờ đồng hồ liên tục** (mục tiêu phát hành hóa đơn chậm nhất **`T - 58h`**). Quá SLA → chuyển Backup Pool (**Backup SLA 4 giờ đồng hồ**, trần cứng hóa đơn **`T - 52h`**). Quá `T - 52h` kích hoạt xử lý ngoại lệ của Manager (`BR-F3-06`).
+   - **Cửa sổ Thanh toán Động & Tự hủy khi Hết Gia hạn (`Target Spec v3.1 (Planned)`):**
+     - Hạn thanh toán chuẩn neo theo thời điểm xuất hóa đơn thực tế: `payment_due_at = MIN(invoice_issued_at + 24h, departure_at - 30h)` (nhắc trước hạn 6h).
+     - Quá `payment_due_at` gắn cờ `payment_overdue`: Manager giải phóng chuồng (`cancelled_operational`) trước `T - 28h` hoặc gia hạn **1 lần duy nhất** tới `grace_due_at = MIN(grace_granted_at + 10h, departure_at - 24h)`. Quá `grace_due_at` tự động chuyển `cancelled_operational` (`payment_overdue_expired`).
+   - **Chính sách không đủ số lượng ghép tại `D - 3`:** Khách chọn (1) Dời sang chuyến ghép tiếp theo miễn phí; hoặc (2) Nâng cấp `dedicated_charter` bù chênh lệch cước:
+     - *Chưa có SePay `succeeded`:* Đánh dấu hóa đơn cũ `void`, ghi `shipment_booking_revision`, xuất hóa đơn thay thế theo giá charter và đóng QR cũ.
+     - *Đã có SePay `succeeded`:* Giữ nguyên hóa đơn & giao dịch SePay gốc, ghi `shipment_booking_revision`, và phát hành **`supplemental_invoice`** đúng bằng `charter_freight - shared_freight`.
 
 Role notifications use existing active accounts with the requested role. If no account matches, no recipient is invented; approval still succeeds. This prevents false approval errors and notifications sent to unrelated users on databases without all staff accounts.
+
+## Hủy vận hành (`cancelled_operational`), Hoàn tiền Thủ công & SoD (`DEC-04` — Ready for Finance/Legal Sign-off, `Target Spec v3.1 (Planned)`)
+
+> [!IMPORTANT]
+> Phân quyền thực hiện tuân thủ Ma trận RACI tại [actors-and-roles.md](file:///f:/SWP/Project/SWP391_GROUP1/docs/actors-and-roles.md). Quy tắc ma trận hoàn tiền dưới đây đang ở trạng thái **Ready for Finance/Legal Sign-off** trước khi Go-Live thương mại.
+
+### Quy tắc Nghiệp vụ Bổ sung (`BR-F1-07` → `BR-F1-09`)
+
+- **`BR-F1-07` (Luật Chuyển trạng thái `cancelled_operational`):**
+  - Chỉ cho phép từ `approved`, `planning`, `confirmed`, `ready_to_depart` bởi `LOGISTICS_MANAGER` / `ADMIN` (hoặc tự động khi `grace_expired`), bắt buộc có `cancellation_reason` và `cancellation_category` (`company_fault` | `vet_unfit_certified` | `vet_unfit_uncertified` | `payment_overdue` | `payment_overdue_expired` | `customer_request_post_approval` | `force_majeure`).
+  - **Cấm tuyệt đối** từ `in_transit` (`409 Conflict` — phải xử lý bằng Flow 5) hoặc trạng thái kết thúc (`completed`, `rejected`, `cancelled`, `cancelled_operational`).
+  - Trong 1 transaction: trả `horse.status = active`, giải phóng slot `road_trip`, vô hiệu hóa QR `pending`, giữ nguyên `shipment_invoice` và `shipment_sepay_payment` gốc.
+- **`BR-F1-08` (Hoàn tiền Thủ công qua `shipment_refund_record` & Tách nhiệm vụ SoD):**
+  - SePay chỉ đối soát VietQR (`sepay-payment.service.ts`), không có API hoàn tiền tự động. Mọi khoản hoàn sau khi đã có SePay `succeeded` đi qua `shipment_refund_record`: `pending_approval` → `approved_for_transfer` *(Manager duyệt)* → `transferred` *(`ADMIN`/`FINANCE` chuyển khoản thủ công ngoài hệ thống kèm STK, mã giao dịch ngân hàng, ảnh ủy nhiệm chi)* hoặc `converted_to_credit` *(bảo lưu 30 ngày)*.
+  - Ràng buộc SoD cứng: **`transferred_by != approved_by`** (trùng trả `403 Forbidden`); khoản `>= 20,000,000 VND` yêu cầu Dual-Approval.
+- **`BR-F1-09` (Kế toán Phí Cơ quan Chức năng — `shipment_disbursement`):**
+  - Lệ phí cơ quan nhà nước (kiểm dịch, XNK, hải quan) không nằm trong `shipment_invoice` gốc mà theo dõi qua khoản ứng trước có biên lai (`authority_receipt_url`).
+  - Đơn hủy (trừ `company_fault`): khoản đã ứng trước có biên lai được khấu trừ minh bạch: `refund_amount = MAX(0, refundable_freight + insurance_fee - verified_advanced_disbursement)`. Nếu `company_fault`, công ty chịu 100%.
+- **Ma trận Hoàn tiền Cấu phần `transport_cost` (Bảo hiểm luôn hoàn 100% khi chưa chạy):**
+  - `company_fault`: Hoàn **100%**.
+  - `vet_unfit_certified` *(có giấy cơ quan thú y/bác sĩ chỉ định, bất kỳ lúc nào trước `in_transit` kể cả `< 24h`)*: Ưu tiên **Bảo lưu 100% / 30 ngày** hoặc **Hoàn 80%** (trừ vé bay không hoàn có chứng từ).
+  - `vet_unfit_uncertified` *(báo `< 24h` không giấy thú y)*: **Bảo lưu 80% / 30 ngày** hoặc **Hoàn 50%**.
+  - `customer_request_post_approval`: `>= 72h` *(chỉ áp dụng `dedicated_charter` / hóa đơn thu sớm; `shared_stall` trước `T-72h` chưa thu tiền)* → **90%**; `24h–<72h` → **50%**; `< 24h`/no-show → **0%**.
+  - `force_majeure`: Hoàn **100%** phần chưa chi bên thứ 3.
+
+### Acceptance Criteria (BDD — Flow 1)
+
+- **AC-F1-01 (Tính giá, Báo giá JSON & Bảo hiểm):** *Given* 2 ngựa `active`, `shared_stall`, `standard` giá trị 100,000,000 VND/ngựa. *When* Manager duyệt `stallUnitPrice = 2,000,000`, `transportMode = road`. *Then* response duyệt và `GET /orders/:id` trả đầy đủ payload báo giá ước tính (`bookingType = shared_stall`, `stallUnitPrice = 2,000,000`, `transportMode = road`, `requestedHorseCount = 2`, `insuranceFee = 3,000,000`, `transportCost = 4,000,000`, `totalCost = 7,000,000`, cùng chi tiết bảo hiểm từng ngựa trong `horses[]`) để frontend xuất bản in/PDF phía client (không có endpoint sinh file PDF phía backend), và `paymentUnlocked = false`.
+- **AC-F1-02 (Race Condition Duyệt vs Hủy):** *Given* đơn `requested`. *When* hủy và duyệt đồng thời. *Then* chỉ 1 giao dịch thành công; giao dịch còn lại trả `409 Conflict`.
+- **AC-F1-03 (Stale View khi Duyệt):** *Given* Manager gửi payload duyệt cũ (`shared_stall`, 1 ngựa) sau khi đơn đổi sang `dedicated_charter`, 2 ngựa. *Then* trả `409 Conflict`.
+- **AC-F1-04 (Cấm Hủy khi `in_transit`):** *Given* đơn đang `in_transit`. *When* Manager gọi `cancelled_operational`. *Then* trả `409 Conflict`.
+- **AC-F1-05 (Hủy `vet_unfit_certified` ở `T - 12h` & Khấu trừ Phí Ứng trước):** *Given* đơn `ready_to_depart` đã trả SePay `7,000,000 VND` (`4,000,000` cước + `3,000,000` bảo hiểm), trượt kiểm dịch tại `T - 12h` có biên bản thú y, phí ứng nộp biên lai `500,000 VND`. *When* chuyển `cancelled_operational` và khách rút tiền mặt. *Then* SePay/Invoice gốc giữ nguyên; sinh `shipment_refund_record` ở `pending_approval` với `refund_amount = 5,700,000 VND` (`6,200,000` nếu không có biên lai ứng trước).
+- **AC-F1-06 (Thực thi Hoàn tiền Thủ công & SoD):** *Given* Manager A duyệt `approved_for_transfer`. *When* Manager A tự gọi `transferred`, sau đó Admin/Finance B gọi `transferred` kèm STK, mã giao dịch, ủy nhiệm chi. *Then* Manager A bị từ chối `403 Forbidden`; Admin/Finance B thành công.
+- **AC-F1-07 (Nâng cấp `shared_stall` → `dedicated_charter` tại `D - 3`):** *Given* đơn `shared_stall` tổng `7,000,000`, nâng cấp charter `9,000,000` (chênh `+5,000,000`). *When* chưa trả tiền vs đã trả SePay `7,000,000`. *Then* chưa trả → `void` hóa đơn cũ & xuất hóa đơn `12,000,000 VND`; đã trả → giữ hóa đơn gốc & xuất `supplemental_invoice` `5,000,000 VND`.

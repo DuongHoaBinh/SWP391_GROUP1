@@ -16,6 +16,7 @@ The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with
 ## Important relationships
 
 - A customer owns one or more horses and creates transport orders.
+- `horse.status` uses `ENUM('active','in_transit','retired','deceased')` (`'delivered'` is not used): `'in_transit'` means the horse is currently held/reserved by a non-terminal shipment (`requested` through `in_transit`) and returns to `'active'` upon removal during `change_requested` or terminal shipment states (`cancelled`, `rejected`, `cancelled_operational`, `completed`).
 - An order contains one or more horses and can become one transport plan/trip.
 - A horse has a document set whose required documents depend on destination country and border gate.
 - A trip uses a route made of ordered legs and stops, and has assigned vehicle/capacity and staff.
@@ -57,3 +58,26 @@ The database schema is the executable source of truth; this document explains ow
 
 - `shipment.transport_mode ENUM('road','air') NULL`: the Manager's selected mode. This is independent of `transportation_type` (Domestic/International) and `booking_type` (Shared/Dedicated).
 - New approval writes the mode without overwriting geographic scope. Responses and invoice snapshots include the mode. Old rows remain null; older UI note-based inference remains a fallback, with no automatic historical rewrite.
+
+## Target Schema Extensions (BA Spec v3.1 — `Planned`, Chưa có Migration)
+
+> [!WARNING]
+> Các mở rộng bảng và cột dưới đây thuộc **BA Spec v3.1 (`Target Spec`)** chưa được tạo thành SQL migration trong `database/migrations/` hay `database/schema.mysql.sql`. Tài liệu này phản ánh đúng ranh giới giữa schema thực thi hiện tại và thiết kế đích cho Release 1.
+
+1. **`shipment` (Mở rộng trạng thái hủy vận hành, OTD & Runtime Compliance):**
+   - Bổ sung `'cancelled_operational'` vào `shipment.status` ENUM.
+   - Bổ sung `cancellation_category`, `cancellation_reason` (hủy vận hành); `excused_delay BOOLEAN`, `excused_delay_reason`, `excused_delay_confirmed_by`, `excused_delay_confirmed_at` (khóa sau 48h theo `DEC-02`); `in_transit_compliance_alert BOOLEAN` (`BR-F2-06`).
+2. **`regulation` (Mở rộng đa chiều & Lead Time động — Gap G2 / `DEC-03`):**
+   - Bổ sung `border_gate VARCHAR(100) NULL`, `transport_mode ENUM('road','air','both')`, `doc_tier ENUM('A','B')`, `lead_time_days INT`, `requires_authority_approval BOOLEAN`, `min_validity_buffer_hours INT`.
+3. **`shipment_invoice` (Quản lý cửa sổ thanh toán động, gia hạn & nâng cấp `D - 3`):**
+   - Bổ sung `status ENUM('active','void','superseded')`, `invoice_type ENUM('standard','replacement','supplemental')`, `payment_due_at DATETIME(3)`, `grace_due_at DATETIME(3)`, `grace_count TINYINT`, `parent_invoice_id INT NULL`.
+4. **`shipment_operating_cost` (Bảng mới — Gap G1 / `DEC-02`):**
+   - Lưu chi phí vận hành thực tế theo chuyến/hạng mục: `cost_id`, `shipment_id`, `route_leg_id NULL`, `cost_category ENUM('fuel','toll_border','airline_freight','quarantine_fee','staff_allowance','incident_absorbed','disbursement_absorbed_on_company_fault')`, `amount DECIMAL(15,2)`, `receipt_url`, `recorded_by`, `created_at`.
+5. **`shipment_refund_record` (Bảng mới — Hoàn tiền Thủ công & SoD / `DEC-04`):**
+   - Lưu chu trình hoàn tiền thủ công ngoài SePay: `refund_id`, `shipment_id`, `payment_id`, `refund_mode ENUM('cash_transfer','credit_30d')`, `amount BIGINT`, `status ENUM('pending_approval','approved_for_transfer','transferred','converted_to_credit','rejected')`, `approved_by`, `approved_at`, `second_approved_by NULL` (Dual-Approval `>= 20M VND`), `transferred_by NULL`, `transferred_at NULL`, `bank_reference`, `transfer_receipt_url`, `credit_expires_at`, ràng buộc nghiệp vụ `transferred_by != approved_by`.
+6. **`shipment_disbursement` (Bảng mới — Ứng trước Phí Cơ quan có Biên lai / `BR-F1-09`):**
+   - Lưu lệ phí cơ quan nhà nước ứng trước cho từng đơn (`disbursement_id`, `shipment_id`, `authority_name`, `amount BIGINT`, `authority_receipt_url`, `settled_status`, `recorded_by`).
+7. **`equine_vital_config` (Bảng mới — Cấu hình Ngưỡng Sinh hiệu 3 Tầng / `DEC-06`):**
+   - Tham số hóa ngưỡng `temp_green_min/max`, `temp_amber_low/high`, `hr_green_min/max`, `hr_amber_low/high`, `escalatable_statuses`, `consecutive_alert_window_hours` (mặc định `6`), `updated_by_vet_name`, `calibrated_at`.
+8. **`route_stop_update` / `trip_status_log` (Mở rộng Audit Thực địa):**
+   - Bổ sung `updated_by_role ENUM('driver','escort','coordinator','manager','admin')` (`DEC-07`) và `is_backdated BOOLEAN` (`BR-F4-05`).
