@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsDateString,
   IsEmail,
   IsIn,
   IsInt,
@@ -73,7 +74,7 @@ export class UpdateOrderDto {
     description: 'Requested transport date (ISO string)',
   })
   @IsOptional()
-  @IsString()
+  @IsDateString({}, { message: 'Ngày khởi hành yêu cầu phải đúng định dạng ISO-8601 (YYYY-MM-DD)' })
   requestedDate?: string;
 
   @ApiPropertyOptional({

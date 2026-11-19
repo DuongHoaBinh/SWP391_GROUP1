@@ -1,17 +1,27 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import * as fs from 'fs';
+import { basename, join } from 'path';
 import { DocumentsStore } from './documents.store';
 import { CreateRegulationDto } from './dto/create-regulation.dto';
+import { UpdateRegulationDto } from './dto/update-regulation.dto';
 import { ApplyRegulationTemplateDto } from './dto/apply-regulation-template.dto';
+import {
+  assertSafeExternalOrUploadUrl,
+  verifyUploadedFileMagicBytes,
+} from '../../common/utils/upload-validation';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { RecordAuthorityApprovalDto } from './dto/record-authority-approval.dto';
 import { NotifyMissingDocumentsDto } from './dto/notify-missing.dto';
 import {
+  AuthorityApprovalStatus,
   DocumentStatus,
   HorseComplianceItem,
   OrderComplianceChecklist,
@@ -27,6 +37,16 @@ import { ShipmentLifecycle } from '../../common/shipment-lifecycle';
 
 @Injectable()
 export class DocumentsService {
+  private static readonly INTERNATIONAL_ONLY_DOC_TYPES = new Set([
+    'import_permit',
+    'export_permit',
+    'customs_declaration',
+    'export_certificate',
+    'import_certificate',
+  ]);
+
+  private readonly logger = new Logger(DocumentsService.name);
+
   constructor(
     private readonly documentsStore: DocumentsStore,
     private readonly notificationsService: NotificationsService,
@@ -55,7 +75,18 @@ export class DocumentsService {
       const shipmentIds = await this.documentsStore.findActiveShipmentIdsByHorseId(horseId);
       for (const orderId of shipmentIds) {
         await this.lifecycle.changed(orderId);
+        const orderDetails = await this.documentsStore.findOrderDetails(orderId);
         const isComplete = await this.isFlow2CompletedForPayment(orderId);
+
+        if (orderDetails?.status === 'in_transit') {
+          if (!isComplete) {
+            await this.flagInTransitComplianceAlert(orderId);
+          } else if (orderDetails.in_transit_compliance_alert && typeof this.documentsStore.setInTransitComplianceAlert === 'function') {
+            await this.documentsStore.setInTransitComplianceAlert(orderId, false);
+          }
+          continue;
+        }
+
         if (!isComplete) continue;
 
         const alreadyNotified = await this.documentsStore.hasDocumentsApprovedManagerNotifSent(orderId);
@@ -71,13 +102,33 @@ export class DocumentsService {
         );
       }
     } catch (err) {
-      console.warn('[DocumentsService] Warning notifying manager after Flow 2 completion:', err);
+      this.logger.warn('Warning notifying manager after Flow 2 completion', err as Error);
     }
   }
 
+  async flagInTransitComplianceAlert(orderId: number, reason?: string): Promise<void> {
+    if (typeof this.documentsStore.setInTransitComplianceAlert === 'function') {
+      await this.documentsStore.setInTransitComplianceAlert(orderId, true);
+    }
+    const code = `REQ-${String(orderId).padStart(3, '0')}`;
+    const title = `🚨 CẢNH BÁO ĐỎ HỒ SƠ ĐANG VẬN CHUYỂN (${code})`;
+    const message =
+      reason ||
+      `Đơn ${code} đang in_transit nhưng phát sinh hồ sơ hết hạn hoặc không đạt chuẩn (BR-F2-06). Thao tác thông quan customs_cleared đã bị khóa cho đến khi gia hạn hoặc mở sự cố biên giới (Flow 5).`;
+    await Promise.allSettled([
+      this.notificationsService.notifyRole('Transport Specialist', title, message, 'incident', orderId),
+      this.notificationsService.notifyRole('Fleet & Route Coordinator', title, message, 'incident', orderId),
+      this.notificationsService.notifyRole('Logistics Manager', title, message, 'incident', orderId),
+    ]);
+  }
+
   // --- Regulations ---
-  async getRegulations(countryFilter?: string): Promise<Regulation[]> {
-    return this.documentsStore.findRegulations(countryFilter);
+  async getRegulations(
+    countryOrFilter?:
+      | string
+      | { country?: string; borderGate?: string; transportMode?: string; docTier?: string },
+  ): Promise<Regulation[]> {
+    return this.documentsStore.findRegulations(countryOrFilter);
   }
 
   getPresetTemplates(): RegulationTemplatePreset[] {
@@ -102,6 +153,14 @@ export class DocumentsService {
         item.documentType,
         item.description,
         effectiveDate,
+        {
+          borderGate: item.borderGate ?? null,
+          transportMode: item.transportMode ?? 'both',
+          docTier: item.docTier,
+          leadTimeDays: item.leadTimeDays,
+          requiresAuthorityApproval: item.requiresAuthorityApproval,
+          minValidityBufferHours: item.minValidityBufferHours,
+        },
       );
     }
 
@@ -137,20 +196,53 @@ export class DocumentsService {
     return created;
   }
 
+  async updateRegulation(
+    _user: AuthenticatedUser,
+    id: number,
+    dto: UpdateRegulationDto,
+  ): Promise<Regulation> {
+    const existing = await this.documentsStore.findRegulationById(id);
+    if (!existing) {
+      throw new NotFoundException(`Quy định mã #${id} không tồn tại`);
+    }
+    await this.documentsStore.updateRegulation(id, dto);
+    const updated = await this.documentsStore.findRegulationById(id);
+    return updated!;
+  }
+
   // --- Documents Upload & Retrieval ---
   async uploadDocument(
     user: AuthenticatedUser,
     dto: UploadDocumentDto,
     file?: Express.Multer.File,
   ): Promise<TransportDocument> {
+    if (file) {
+      verifyUploadedFileMagicBytes(file, 'document');
+    }
+
+    if (user.role === UserRole.CUSTOMER && typeof this.documentsStore.isHorseOwnedByUser === 'function') {
+      const ownsHorse = await this.documentsStore.isHorseOwnedByUser(dto.horseId, Number(user.id));
+      if (!ownsHorse) {
+        if (file?.path && fs.existsSync(file.path)) {
+          try { fs.unlinkSync(file.path); } catch {}
+        }
+        throw new ForbiddenException('Bạn chỉ có thể tải chứng từ cho ngựa thuộc tài khoản của mình');
+      }
+    }
+
     const regulation = await this.documentsStore.findRegulationById(dto.regulationId);
     if (!regulation) {
+      if (file?.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
       throw new BadRequestException(`Quy định ID #${dto.regulationId} không tồn tại trong hệ thống`);
     }
 
     let finalUrl = dto.fileUrl;
     if (file) {
       finalUrl = `/uploads/documents/${file.filename}`;
+    } else {
+      assertSafeExternalOrUploadUrl(dto.fileUrl);
     }
 
     if (!finalUrl || finalUrl.trim().length === 0) {
@@ -180,8 +272,8 @@ export class DocumentsService {
       throw new NotFoundException(`Tài liệu #${documentId} không tồn tại`);
     }
 
-    if (user.role === UserRole.CUSTOMER && doc.uploadedBy !== Number(user.id)) {
-      throw new ForbiddenException('Bạn chỉ có thể xem tài liệu do tài khoản của mình tải lên');
+    if (user.role === UserRole.CUSTOMER && (doc.ownerId ?? doc.uploadedBy) !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ có thể xem tài liệu của ngựa thuộc tài khoản của mình');
     }
 
     return doc;
@@ -191,7 +283,35 @@ export class DocumentsService {
     user: AuthenticatedUser,
     horseId: number,
   ): Promise<TransportDocument[]> {
+    if (
+      user.role === UserRole.CUSTOMER &&
+      typeof this.documentsStore.isHorseOwnedByUser === 'function'
+    ) {
+      const ownsHorse = await this.documentsStore.isHorseOwnedByUser(horseId, Number(user.id));
+      if (!ownsHorse) {
+        throw new ForbiddenException('Bạn chỉ có thể xem tài liệu của ngựa thuộc tài khoản của mình');
+      }
+    }
     return this.documentsStore.findDocumentsByHorseId(horseId);
+  }
+
+  async getAuthorizedDocumentFilePath(
+    user: AuthenticatedUser,
+    documentId: number,
+  ): Promise<{ absolutePath: string; fileName: string; externalUrl?: string }> {
+    const doc = await this.getDocumentById(user, documentId);
+    if (!doc.fileUrl) {
+      throw new NotFoundException('Tài liệu này chưa có tệp đính kèm');
+    }
+    if (/^https?:\/\//i.test(doc.fileUrl)) {
+      return { absolutePath: '', fileName: basename(doc.fileUrl), externalUrl: doc.fileUrl };
+    }
+    const safeName = basename(doc.fileUrl);
+    const absolutePath = join(process.cwd(), 'uploads', 'documents', safeName);
+    if (!fs.existsSync(absolutePath)) {
+      throw new NotFoundException('Không tìm thấy tệp chứng từ trên máy chủ lưu trữ');
+    }
+    return { absolutePath, fileName: safeName };
   }
 
   async getDocuments(
@@ -199,9 +319,9 @@ export class DocumentsService {
     status?: string,
     horseId?: number,
   ): Promise<TransportDocument[]> {
-    const filter: { uploadedBy?: number; status?: string; horseId?: number } = {};
+    const filter: { ownerId?: number; status?: string; horseId?: number } = {};
     if (user.role === UserRole.CUSTOMER) {
-      filter.uploadedBy = Number(user.id);
+      filter.ownerId = Number(user.id);
     }
     if (status) {
       filter.status = status;
@@ -212,63 +332,266 @@ export class DocumentsService {
     return this.documentsStore.findDocuments(filter);
   }
 
+  private static readonly RECOGNIZED_COUNTRY_TOKENS: ReadonlyArray<[string, readonly string[]]> = [
+    ['Singapore', ['singapore']],
+    ['Malaysia', ['malaysia', 'kuala lumpur', 'penang']],
+    ['Vietnam', [
+      'vietnam', 'việt nam', 'hà nội', 'hanoi', 'hồ chí minh', 'ho chi minh',
+      'tp.hcm', 'tphcm', 'hcm', 'saigon', 'sài gòn', 'củ chi', 'cu chi',
+      'đà nẵng', 'da nang', 'bình dương', 'binh duong', 'nha trang',
+      'hải phòng', 'cần thơ', 'huế', 'đồng nai', 'long an', 'vũng tàu',
+    ]],
+    ['Thailand', ['thailand', 'thái lan', 'bangkok']],
+    ['Hong Kong', ['hong kong', 'hongkong', 'hồng kông']],
+    ['Japan', ['japan', 'nhật bản', 'tokyo', 'osaka']],
+    ['United Arab Emirates', ['uae', 'dubai', 'abu dhabi', 'emirates']],
+    ['Qatar', ['qatar', 'doha']],
+    ['Australia', ['australia', 'úc', 'sydney', 'melbourne']],
+    ['France', ['france', 'pháp', 'paris']],
+    ['Germany', ['germany', 'đức', 'berlin']],
+    ['United Kingdom', ['united kingdom', 'uk', 'anh', 'london']],
+    ['United States', ['usa', 'united states', 'mỹ', 'hoa kỳ']],
+    ['South Korea', ['korea', 'hàn quốc', 'seoul']],
+    ['Cambodia', ['cambodia', 'campuchia', 'phnom penh']],
+    ['Laos', ['laos', 'lào', 'vientiane']],
+    ['Indonesia', ['indonesia', 'jakarta']],
+    ['Philippines', ['philippines', 'manila']],
+    ['China', ['china', 'trung quốc', 'beijing', 'shanghai']],
+    ['Canada', ['canada']],
+    ['Belgium', ['belgium']],
+    ['Bahrain', ['bahrain']],
+  ];
+
+  detectRecognizedCountry(location?: string | null): string | null {
+    const normalized = (location || '').toLowerCase();
+    if (!normalized.trim()) return null;
+    for (const [country, tokens] of DocumentsService.RECOGNIZED_COUNTRY_TOKENS) {
+      if (tokens.some((token) => normalized.includes(token))) {
+        return country;
+      }
+    }
+    return null;
+  }
+
   detectDestinationCountry(location: string): string {
-    const dest = (location || '').toLowerCase();
-    if (dest.includes('singapore')) return 'Singapore';
-    if (dest.includes('malaysia') || dest.includes('kuala lumpur') || dest.includes('penang')) return 'Malaysia';
-    if (dest.includes('vietnam') || dest.includes('việt nam') || dest.includes('hà nội') || dest.includes('hồ chí minh') || dest.includes('saigon') || dest.includes('đà nẵng')) return 'Vietnam';
-    if (dest.includes('thailand') || dest.includes('thái lan') || dest.includes('bangkok')) return 'Thailand';
-    if (dest.includes('hong kong') || dest.includes('hongkong') || dest.includes('hồng kông')) return 'Hong Kong';
-    if (dest.includes('japan') || dest.includes('nhật bản') || dest.includes('tokyo') || dest.includes('osaka')) return 'Japan';
-    if (dest.includes('uae') || dest.includes('dubai') || dest.includes('abu dhabi') || dest.includes('emirates')) return 'United Arab Emirates';
-    if (dest.includes('qatar') || dest.includes('doha')) return 'Qatar';
-    if (dest.includes('australia') || dest.includes('úc') || dest.includes('sydney') || dest.includes('melbourne')) return 'Australia';
-    if (dest.includes('france') || dest.includes('pháp') || dest.includes('paris')) return 'France';
-    if (dest.includes('germany') || dest.includes('đức') || dest.includes('berlin')) return 'Germany';
-    if (dest.includes('united kingdom') || dest.includes('uk') || dest.includes('anh') || dest.includes('london')) return 'United Kingdom';
-    if (dest.includes('usa') || dest.includes('united states') || dest.includes('mỹ') || dest.includes('hoa kỳ')) return 'United States';
-    if (dest.includes('korea') || dest.includes('hàn quốc') || dest.includes('seoul')) return 'South Korea';
-    if (dest.includes('cambodia') || dest.includes('campuchia') || dest.includes('phnom penh')) return 'Cambodia';
-    if (dest.includes('laos') || dest.includes('lào') || dest.includes('vientiane')) return 'Laos';
-    if (dest.includes('indonesia') || dest.includes('jakarta')) return 'Indonesia';
-    if (dest.includes('philippines') || dest.includes('manila')) return 'Philippines';
-    return location.trim() || 'Global Baseline';
+    return this.detectRecognizedCountry(location) ?? (location.trim() || 'Global Baseline');
+  }
+
+  private async resolveApplicableRegulations(
+    destinationCountry: string,
+    orderMode: 'road' | 'air' | null,
+    gateTokens: string[],
+    isInternational = true,
+  ): Promise<{
+    applicableRegulations: Regulation[];
+    isUsingGlobalBaseline: boolean;
+    matchedBorderGates: string[];
+  }> {
+    let rawRegulations = await this.documentsStore.findRegulations(destinationCountry);
+    let isUsingGlobalBaseline = false;
+    if (rawRegulations.length === 0) {
+      rawRegulations = await this.documentsStore.findRegulations('Global Baseline');
+      isUsingGlobalBaseline = true;
+    }
+
+    const lowerGateTokens = gateTokens.map((g) => g.toLowerCase().trim()).filter(Boolean);
+    const matchedBorderGates = new Set<string>();
+    const applicableRegulations = rawRegulations.filter((reg) => {
+      if (!isInternational) {
+        const docType = String(reg.documentType || '').toLowerCase().trim();
+        if (DocumentsService.INTERNATIONAL_ONLY_DOC_TYPES.has(docType)) {
+          return false;
+        }
+        if (reg.borderGate && reg.borderGate.trim().length > 0) {
+          return false;
+        }
+      }
+      if (orderMode && reg.transportMode && reg.transportMode !== 'both' && reg.transportMode !== orderMode) {
+        return false;
+      }
+      if (reg.borderGate && reg.borderGate.trim().length > 0) {
+        const needle = reg.borderGate.toLowerCase().trim();
+        const matchesGate = lowerGateTokens.some(
+          (tok) => tok === needle || tok.includes(needle) || needle.includes(tok),
+        );
+        if (!matchesGate) return false;
+        matchedBorderGates.add(reg.borderGate.trim());
+      }
+      return true;
+    });
+
+    return {
+      applicableRegulations,
+      isUsingGlobalBaseline,
+      matchedBorderGates: Array.from(matchedBorderGates),
+    };
+  }
+
+  async computeOrderCutoffPolicy(input: {
+    destinationLocation?: string;
+    originLocation?: string;
+    bookingType?: string;
+    transportMode?: string | null;
+    transportationType?: string | null;
+  }): Promise<{
+    minLeadDays: number;
+    baseCutoffDays: number;
+    maxTierALead: number;
+    isInternational: boolean;
+    destinationCountry: string;
+    earliestDepartureDate: string;
+  }> {
+    const baseCutoffDays = input.bookingType === 'dedicated_charter' ? 4 : 7;
+    const destinationCountry = input.destinationLocation
+      ? this.detectDestinationCountry(input.destinationLocation)
+      : 'Vietnam';
+    const originCountry = this.detectDestinationCountry(input.originLocation || 'Vietnam');
+    const explicitDom = String(input.transportationType || '').toLowerCase().includes('domestic');
+    const isInternational =
+      !explicitDom &&
+      (destinationCountry !== originCountry ||
+        destinationCountry !== 'Vietnam' ||
+        String(input.transportationType || '').toLowerCase().includes('international') ||
+        String(input.transportMode || '').toLowerCase() === 'air');
+
+    const normalizedMode =
+      input.transportMode === 'road' || input.transportMode === 'air'
+        ? input.transportMode
+        : null;
+    const gateTokens = input.destinationLocation ? [input.destinationLocation] : [];
+    const { applicableRegulations } = await this.resolveApplicableRegulations(
+      destinationCountry,
+      normalizedMode,
+      gateTokens,
+      isInternational,
+    );
+
+    const tierARegs = applicableRegulations.filter((r) => (r.docTier || 'A') === 'A');
+    const maxTierALead =
+      tierARegs.length > 0 ? Math.max(...tierARegs.map((r) => Number(r.leadTimeDays ?? 5))) : 0;
+    const minLeadDays = Math.max(baseCutoffDays, maxTierALead + 2);
+    const now = new Date();
+    const earliestUtcMs =
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) +
+      minLeadDays * 86_400_000;
+    const earliestDepartureDate = new Date(earliestUtcMs).toISOString().split('T')[0];
+
+    return {
+      minLeadDays,
+      baseCutoffDays,
+      maxTierALead,
+      isInternational,
+      destinationCountry,
+      earliestDepartureDate,
+    };
+  }
+
+  private parseTripTimestamp(raw: Date | string | null | undefined): Date | null {
+    if (!raw) return null;
+    if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+      const parsed = new Date(`${raw.trim()}T00:00:00.000Z`);
+      return Number.isFinite(parsed.getTime()) ? parsed : null;
+    }
+    const parsed = new Date(raw);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  private computeTripArrivalDateTime(order?: {
+    route_expected_arrival?: Date | string | null;
+    stop_expected_arrival?: Date | string | null;
+    expected_arrival_date?: Date | string | null;
+    departure_date?: Date | string | null;
+    requested_date?: Date | string | null;
+  }): Date | null {
+    const arrivalCandidates = [
+      order?.route_expected_arrival,
+      order?.stop_expected_arrival,
+      order?.expected_arrival_date,
+    ]
+      .map((raw) => this.parseTripTimestamp(raw))
+      .filter((d): d is Date => d !== null);
+
+    if (arrivalCandidates.length > 0) {
+      return arrivalCandidates.reduce((latest, cur) =>
+        cur.getTime() > latest.getTime() ? cur : latest,
+      );
+    }
+
+    return this.parseTripTimestamp(order?.departure_date || order?.requested_date);
   }
 
   private computeTripTargetDate(order?: {
+    route_expected_arrival?: Date | string | null;
+    stop_expected_arrival?: Date | string | null;
     expected_arrival_date?: Date | string | null;
     departure_date?: Date | string | null;
     requested_date?: Date | string | null;
   }): string | null {
-    const raw = order?.expected_arrival_date || order?.departure_date || order?.requested_date;
-    if (!raw) return null;
-    const d = new Date(raw);
-    if (isNaN(d.getTime())) return null;
-    return d.toISOString().split('T')[0];
+    const d = this.computeTripArrivalDateTime(order);
+    return d ? d.toISOString().split('T')[0] : null;
+  }
+
+  private isDocumentApprovedForCompliance(doc: TransportDocument, reg?: Regulation): boolean {
+    if (doc.status !== DocumentStatus.APPROVED || doc.isExpiredForTrip || doc.isArchived) {
+      return false;
+    }
+    if (reg?.requiresAuthorityApproval) {
+      return Boolean(
+        doc.approvals &&
+        doc.approvals.length > 0 &&
+        doc.approvals[0].status === AuthorityApprovalStatus.APPROVED,
+      );
+    }
+    if (doc.approvals && doc.approvals.length > 0) {
+      return doc.approvals[0].status === AuthorityApprovalStatus.APPROVED;
+    }
+    return true;
   }
 
   private evaluateDocumentExpiry(
     expiryDate: string | null,
-    tripTargetDate: string | null,
+    tripArrival: Date | string | null,
+    bufferHours: number = 0,
   ): { isExpiredForTrip: boolean; isExpiringSoonForTrip: boolean; expiryNotice?: string } {
-    if (!expiryDate || !tripTargetDate) {
+    if (!expiryDate || !tripArrival) {
       return { isExpiredForTrip: false, isExpiringSoonForTrip: false };
     }
-    if (expiryDate < tripTargetDate) {
+
+    const expiryMs = /^\d{4}-\d{2}-\d{2}$/.test(expiryDate.trim())
+      ? new Date(`${expiryDate.trim()}T23:59:59.999Z`).getTime()
+      : new Date(expiryDate).getTime();
+
+    const arrivalMs =
+      tripArrival instanceof Date
+        ? tripArrival.getTime()
+        : /^\d{4}-\d{2}-\d{2}$/.test(tripArrival.trim())
+          ? new Date(`${tripArrival.trim()}T00:00:00.000Z`).getTime()
+          : new Date(tripArrival).getTime();
+
+    if (!Number.isFinite(expiryMs) || !Number.isFinite(arrivalMs)) {
+      return { isExpiredForTrip: false, isExpiringSoonForTrip: false };
+    }
+
+    const requiredUntilMs = arrivalMs + Math.max(0, Number(bufferHours || 0)) * 3600 * 1000;
+    const requiredDateLabel = new Date(requiredUntilMs).toISOString().split('T')[0];
+
+    if (expiryMs < requiredUntilMs) {
       return {
         isExpiredForTrip: true,
         isExpiringSoonForTrip: false,
-        expiryNotice: `Hết hạn vào ${expiryDate}, trước ngày đến dự kiến (${tripTargetDate})`,
+        expiryNotice:
+          bufferHours > 0
+            ? `Hết hạn ${expiryDate}, không đủ biên an toàn +${bufferHours}h sau khi đến (${requiredDateLabel})`
+            : `Hết hạn vào ${expiryDate}, trước ngày đến dự kiến (${requiredDateLabel})`,
       };
     }
-    const diffDays = Math.floor(
-      (new Date(expiryDate).getTime() - new Date(tripTargetDate).getTime()) / (1000 * 60 * 60 * 24),
-    );
+
+    const diffDays = Math.floor((expiryMs - requiredUntilMs) / (1000 * 60 * 60 * 24));
     if (diffDays <= 3) {
       return {
         isExpiredForTrip: false,
         isExpiringSoonForTrip: true,
-        expiryNotice: `Sắp hết hạn (${diffDays} ngày sau khi đến nơi)`,
+        expiryNotice: `Sắp hết hạn (${diffDays} ngày sau mốc an toàn)`,
       };
     }
     return { isExpiredForTrip: false, isExpiringSoonForTrip: false };
@@ -288,24 +611,63 @@ export class DocumentsService {
       throw new ForbiddenException('Bạn chỉ có thể xem hồ sơ đơn hàng của chính mình');
     }
 
-    // Xác định quốc gia đích thông minh từ destination_location
+    // Xác định quốc gia đích & ngữ cảnh đa chiều (cửa khẩu, phương thức, quốc tế)
     const destinationCountry = this.detectDestinationCountry(order.destination_location);
+    const originCountry = this.detectDestinationCountry(order.origin_location || 'Vietnam');
+    const explicitDom = String(order.transportation_type || '').toLowerCase().includes('domestic');
+    const isInternational =
+      !explicitDom &&
+      (destinationCountry !== originCountry ||
+        destinationCountry !== 'Vietnam' ||
+        String(order.transportation_type || '').toLowerCase().includes('international') ||
+        String(order.transport_mode || '').toLowerCase() === 'air');
+    const orderMode = (order.transport_mode as 'road' | 'air' | null) ?? null;
 
-    // Lấy tất cả các quy định bắt buộc cho quốc gia đích
-    let applicableRegulations = await this.documentsStore.findRegulations(destinationCountry);
-    let isUsingGlobalBaseline = false;
-    let complianceNotice: string | undefined = undefined;
-
-    // NẾU QUỐC GIA ĐÍCH CHƯA ĐƯỢC THIẾT LẬP QUY CHẾ RIÊNG:
-    // Tự động kích hoạt Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI (Global Baseline)
-    if (applicableRegulations.length === 0) {
-      applicableRegulations = await this.documentsStore.findRegulations('Global Baseline');
-      isUsingGlobalBaseline = true;
-      complianceNotice = `Quốc gia đến "${destinationCountry}" hiện chưa có danh mục quy chế riêng. Hệ thống tự động áp dụng Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI.`;
+    const gateTokens: string[] = [];
+    if (order.arrival_airport_codes) {
+      for (const tok of String(order.arrival_airport_codes).split(',')) {
+        if (tok.trim()) gateTokens.push(tok.trim());
+      }
     }
+    if (order.border_stop_names) {
+      for (const tok of String(order.border_stop_names).split(',')) {
+        if (tok.trim()) gateTokens.push(tok.trim());
+      }
+    }
+    if (order.destination_location) {
+      gateTokens.push(String(order.destination_location).trim());
+    }
+    // Lấy tất cả các quy định bắt buộc cho quốc gia đích và lọc theo mode + border_gate
+    const { applicableRegulations, isUsingGlobalBaseline, matchedBorderGates } =
+      await this.resolveApplicableRegulations(destinationCountry, orderMode, gateTokens, isInternational);
+    const complianceNotice: string | undefined = isUsingGlobalBaseline
+      ? `Quốc gia đến "${destinationCountry}" hiện chưa có danh mục quy chế riêng. Hệ thống tự động áp dụng Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI.`
+      : undefined;
+
+    const baseDays = order.booking_type === 'dedicated_charter' ? 3 : 5;
+    const tierARegs = applicableRegulations.filter((r) => (r.docTier || 'A') === 'A');
+    const maxTierALead = tierARegs.length > 0 ? Math.max(...tierARegs.map((r) => Number(r.leadTimeDays ?? 5))) : 0;
+    const effectiveTierALeadDays = Math.max(baseDays, maxTierALead);
+    const orderCutoffDays = Math.max(order.booking_type === 'dedicated_charter' ? 4 : 7, maxTierALead + 2);
+
+    const depRaw = order.departure_date || order.requested_date;
+    const depMs = depRaw ? new Date(depRaw).getTime() : NaN;
+    const orderCutoffDate = Number.isFinite(depMs)
+      ? new Date(depMs - orderCutoffDays * 86400 * 1000).toISOString().split('T')[0]
+      : null;
+    const tierADeadline = Number.isFinite(depMs)
+      ? new Date(depMs - effectiveTierALeadDays * 86400 * 1000).toISOString().split('T')[0]
+      : null;
+    const tierBWindowStart = Number.isFinite(depMs)
+      ? new Date(depMs - (isInternational ? 48 : 24) * 3600 * 1000).toISOString()
+      : null;
+    const tierBWindowEnd = Number.isFinite(depMs)
+      ? new Date(depMs - 6 * 3600 * 1000).toISOString()
+      : null;
 
     // Lấy danh sách ngựa trong đơn
     const horsesInOrder = await this.documentsStore.findHorsesInOrder(orderId);
+    const tripArrivalDateTime = this.computeTripArrivalDateTime(order);
     const tripTargetDate = this.computeTripTargetDate(order);
 
     const horseItems: HorseComplianceItem[] = [];
@@ -315,20 +677,43 @@ export class DocumentsService {
     for (const h of horsesInOrder) {
       const rawDocs = await this.documentsStore.findDocumentsByHorseId(h.horse_id);
       const docs = rawDocs.map((d) => {
-        const expiryEval = this.evaluateDocumentExpiry(d.expiryDate, tripTargetDate);
+        const reg = applicableRegulations.find((r) => r.id === d.regulationId);
+        const bufferHours =
+          reg && reg.minValidityBufferHours !== undefined && reg.minValidityBufferHours !== null
+            ? Number(reg.minValidityBufferHours)
+            : isInternational
+              ? 48
+              : 0;
+        const expiryEval = this.evaluateDocumentExpiry(d.expiryDate, tripArrivalDateTime, bufferHours);
         if (expiryEval.isExpiredForTrip) {
           hasExpiredDocuments = true;
+        }
+        let earlyIssuanceWarning: string | null = null;
+        if (reg && (reg.docTier || 'A') === 'B' && d.issueDate && Number.isFinite(depMs)) {
+          const issueMs = new Date(d.issueDate).getTime();
+          const earliestRecommendedMs = depMs - (isInternational ? 10 : 2) * 86400 * 1000;
+          if (Number.isFinite(issueMs) && issueMs < earliestRecommendedMs) {
+            earlyIssuanceWarning = isInternational
+              ? 'Cảnh báo: Hồ sơ kiểm dịch ngắn hạn (Tầng B) được cấp sớm hơn D-10 có thể hết hạn trước khi thông quan; cần kiểm tra lại biên an toàn +48h.'
+              : 'Cảnh báo: Giấy kiểm dịch nội địa (Tầng B) thường chỉ cấp từ D-1 (24h–6h trước khởi hành); cấp quá sớm có nguy cơ hết hạn trước khi đến nơi.';
+          }
         }
         return {
           ...d,
           ...expiryEval,
+          earlyIssuanceWarning,
         };
       });
 
-      // Tìm những quy định đã có tài liệu approved VÀ còn hạn đến ngày kết thúc chuyến đi
+      const applicableRegMap = new Map(applicableRegulations.map((r) => [r.id, r]));
+
+      // Tìm những quy định đã có tài liệu approved, đạt chuẩn cơ quan chức năng (2 tầng) VÀ còn hạn + biên an toàn
       const approvedRegIds = new Set(
         docs
-          .filter((d) => d.status === DocumentStatus.APPROVED && !d.isExpiredForTrip)
+          .filter((d) => {
+            const reg = applicableRegMap.get(d.regulationId);
+            return Boolean(reg) && this.isDocumentApprovedForCompliance(d, reg);
+          })
           .map((d) => d.regulationId),
       );
 
@@ -342,7 +727,7 @@ export class DocumentsService {
       // Danh sách quy định thực sự CHƯA TỪNG ĐƯỢC TẢI LÊN lần nào
       const missingRegs = applicableRegulations.filter((reg) => !uploadedRegIds.has(reg.id));
 
-      // Một con ngựa CHỈ ĐẠT CHUẨN (isCompliant) khi TẤT CẢ các quy định đều ĐÃ ĐƯỢC PHÊ DUYỆT (DocumentStatus.APPROVED)
+      // Một con ngựa CHỈ ĐẠT CHUẨN (isCompliant) khi TẤT CẢ các quy định đều ĐÃ ĐƯỢC PHÊ DUYỆT ĐỦ 2 TẦNG
       const isCompliant =
         applicableRegulations.length > 0 &&
         applicableRegulations.every((reg) => approvedRegIds.has(reg.id));
@@ -383,6 +768,15 @@ export class DocumentsService {
       requirementsSent,
       tripTargetDate,
       hasExpiredDocuments,
+      effectiveTierALeadDays,
+      orderCutoffDate,
+      tierADeadline,
+      tierBWindowStart,
+      tierBWindowEnd,
+      inTransitComplianceAlert: Boolean(order.in_transit_compliance_alert),
+      isInternational,
+      transportMode: orderMode,
+      matchedBorderGates: Array.from(matchedBorderGates),
       horses: horseItems,
     };
   }
@@ -473,13 +867,25 @@ export class DocumentsService {
     }
 
     if (dto.status === DocumentStatus.APPROVED && dto.expiryDate) {
+      const reg = typeof this.documentsStore.findRegulationById === 'function'
+        ? await this.documentsStore.findRegulationById(doc.regulationId)
+        : undefined;
       const activeShipmentIds = await this.documentsStore.findActiveShipmentIdsByHorseId(doc.horseId);
       for (const sid of activeShipmentIds) {
         const orderDetails = await this.documentsStore.findOrderDetails(sid);
-        const tripTargetDate = this.computeTripTargetDate(orderDetails);
-        if (tripTargetDate && dto.expiryDate < tripTargetDate) {
+        const arrivalDt = this.computeTripArrivalDateTime(orderDetails);
+        const destCountry = this.detectDestinationCountry(orderDetails?.destination_location || '');
+        const bufferHours =
+          reg && reg.minValidityBufferHours !== undefined && reg.minValidityBufferHours !== null
+            ? Number(reg.minValidityBufferHours)
+            : destCountry !== 'Vietnam'
+              ? 48
+              : 24;
+        const evalResult = this.evaluateDocumentExpiry(dto.expiryDate, arrivalDt, bufferHours);
+        if (evalResult.isExpiredForTrip) {
           throw new BadRequestException(
-            `Tài liệu hết hạn vào ngày ${dto.expiryDate}, trước ngày dự kiến hoàn thành chuyến đi (${tripTargetDate}). Không thể phê duyệt; vui lòng từ chối để khách hàng bổ sung giấy tờ mới.`,
+            evalResult.expiryNotice ||
+              `Tài liệu hết hạn vào ngày ${dto.expiryDate}, không đủ biên an toàn +${bufferHours}h sau khi đến. Không thể phê duyệt.`,
           );
         }
       }
@@ -511,7 +917,7 @@ export class DocumentsService {
     const orderText = doc.requestCode ? ` (Đơn ${doc.requestCode})` : '';
 
     await this.notificationsService.createNotification(
-      doc.uploadedBy,
+      doc.ownerId ?? doc.uploadedBy,
       'Cập nhật trạng thái thẩm định tài liệu kiểm dịch',
       `Tài liệu "${friendlyDocTitle}" của ngựa "${doc.horseName ?? 'ngựa'}"${orderText} ${statusText} bởi Chuyên viên Transport Specialist.`,
       'status_update',
@@ -540,7 +946,7 @@ export class DocumentsService {
       dto,
     );
 
-    if (dto.status === 'approved' && doc.status !== DocumentStatus.APPROVED) {
+    if (dto.status === AuthorityApprovalStatus.APPROVED && doc.status !== DocumentStatus.APPROVED) {
       await this.documentsStore.updateDocumentReview(
         documentId,
         DocumentStatus.APPROVED,
@@ -548,8 +954,16 @@ export class DocumentsService {
         undefined,
         dto.referenceNumber,
       );
-      await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
+    } else if (dto.status === AuthorityApprovalStatus.REJECTED) {
+      await this.documentsStore.updateDocumentReview(
+        documentId,
+        DocumentStatus.REJECTED,
+        `Bị từ chối bởi cơ quan: ${dto.authorityName}. ${dto.notes ?? ''}`.trim(),
+        undefined,
+        dto.referenceNumber,
+      );
     }
+    await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
 
     const docTitleMap: Record<string, string> = {
       health_certificate: 'Giấy chứng nhận kiểm dịch',
@@ -562,7 +976,7 @@ export class DocumentsService {
     const docCode = `DOC-${String(documentId).padStart(3, '0')}`;
 
     await this.notificationsService.createNotification(
-      doc.uploadedBy,
+      doc.ownerId ?? doc.uploadedBy,
       'Cập nhật kết quả phê duyệt từ cơ quan chức năng',
       `Tài liệu "${friendlyDocTitle}" (Mã: ${docCode}) của ngựa "${doc.horseName ?? 'ngựa'}" đã có kết quả từ ${dto.authorityName}: ${dto.status.toUpperCase()}.`,
       'status_update',
@@ -631,33 +1045,53 @@ export class DocumentsService {
     file?: Express.Multer.File,
     dto?: { fileUrl?: string; docNumber?: string; notes?: string },
   ): Promise<TransportDocument> {
+    if (file) {
+      verifyUploadedFileMagicBytes(file, 'document');
+    }
+
     const doc = await this.documentsStore.findDocumentById(documentId);
     if (!doc) {
+      if (file?.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
       throw new NotFoundException(`Tài liệu #${documentId} không tồn tại`);
     }
 
-    if (user.role === UserRole.CUSTOMER && doc.uploadedBy !== Number(user.id)) {
-      throw new ForbiddenException('Bạn chỉ có thể cập nhật tài liệu do chính mình tải lên');
+    if (doc.isArchived) {
+      if (file?.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
+      throw new ConflictException(`Tài liệu #${documentId} đã được thay thế bởi phiên bản mới hơn`);
+    }
+
+    if (user.role === UserRole.CUSTOMER && (doc.ownerId ?? doc.uploadedBy) !== Number(user.id)) {
+      if (file?.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
+      throw new ForbiddenException('Bạn chỉ có thể cập nhật tài liệu của ngựa thuộc tài khoản mình');
     }
 
     let finalUrl = dto?.fileUrl || doc.fileUrl;
     if (file) {
       finalUrl = `/uploads/documents/${file.filename}`;
+    } else if (dto?.fileUrl) {
+      assertSafeExternalOrUploadUrl(dto.fileUrl);
     }
 
     if (!finalUrl || finalUrl.trim().length === 0) {
       throw new BadRequestException('Vui lòng chọn file mới từ máy tính để cập nhật');
     }
 
-    await this.documentsStore.updateDocumentFile(
+    const newDocumentId = await this.documentsStore.supersedeDocument(
       documentId,
+      Number(user.id),
       finalUrl,
       dto?.docNumber,
       dto?.notes ? `[Cập nhật lại]: ${dto.notes}` : null,
     );
     await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
 
-    const updated = await this.documentsStore.findDocumentById(documentId);
+    const updated = await this.documentsStore.findDocumentById(newDocumentId);
     return updated!;
   }
 
@@ -668,15 +1102,25 @@ export class DocumentsService {
     const isAdminOrSpecialist =
       user.role === UserRole.ADMIN || user.role === UserRole.TRANSPORT_SPECIALIST;
     const doc = await this.documentsStore.findDocumentById(documentId);
+    if (!doc || doc.isArchived) {
+      throw new NotFoundException(`Tài liệu #${documentId} không tồn tại hoặc đã bị lưu trữ`);
+    }
+    if (!isAdminOrSpecialist && (doc.ownerId ?? doc.uploadedBy) !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ có thể xóa tài liệu của ngựa thuộc tài khoản mình');
+    }
+    if (!isAdminOrSpecialist && doc.status === DocumentStatus.APPROVED) {
+      throw new ConflictException('Không thể xóa tài liệu đã được phê duyệt');
+    }
+
     const deleted = await this.documentsStore.deleteDocument(
       documentId,
       Number(user.id),
       isAdminOrSpecialist,
     );
     if (!deleted) {
-      throw new NotFoundException(`Tài liệu #${documentId} không tồn tại hoặc bạn không có quyền xóa`);
+      throw new NotFoundException(`Tài liệu #${documentId} không tồn tại hoặc không thể lưu trữ`);
     }
-    if (doc) await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
-    return { success: true, message: `Tài liệu #${documentId} đã được xóa thành công` };
+    await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
+    return { success: true, message: `Tài liệu #${documentId} đã được lưu trữ thành công` };
   }
 }

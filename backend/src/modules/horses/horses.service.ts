@@ -4,12 +4,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import * as fs from 'fs';
+import { basename, join } from 'path';
 import { HorsesStore } from './horses.store';
 import { CreateHorseDto } from './dto/create-horse.dto';
 import { UpdateHorseDto } from './dto/update-horse.dto';
 import { HorseEntity, HorseStatus } from './horses.types';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
+import { verifyUploadedFileMagicBytes } from '../../common/utils/upload-validation';
 
 @Injectable()
 export class HorsesService {
@@ -130,18 +133,34 @@ export class HorsesService {
     if (!file) {
       throw new BadRequestException('Vui lòng chọn file hình ảnh đại diện cho con ngựa');
     }
+    verifyUploadedFileMagicBytes(file, 'image');
 
     const horse = await this.horsesStore.findById(horseId);
     if (!horse) {
+      if (file.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
       throw new NotFoundException(`Horse #${horseId} not found`);
     }
 
     if (user.role === UserRole.CUSTOMER && horse.ownerId !== Number(user.id)) {
+      if (file.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
       throw new ForbiddenException('Bạn chỉ có thể cập nhật ảnh cho ngựa thuộc tài khoản của bạn');
     }
 
+    const oldPhotoUrl = horse.photoUrl;
     const photoUrl = `/uploads/horses/${file.filename}`;
     await this.horsesStore.update(horseId, { photoUrl });
+
+    if (oldPhotoUrl && oldPhotoUrl.startsWith('/uploads/horses/')) {
+      const oldPath = join(process.cwd(), 'uploads', 'horses', basename(oldPhotoUrl));
+      if (oldPath !== file.path && fs.existsSync(oldPath)) {
+        try { fs.unlinkSync(oldPath); } catch {}
+      }
+    }
+
     const updated = await this.horsesStore.findById(horseId);
     return updated!;
   }
@@ -150,6 +169,7 @@ export class HorsesService {
     if (!file) {
       throw new BadRequestException('Vui lòng chọn file hình ảnh');
     }
+    verifyUploadedFileMagicBytes(file, 'image');
     return {
       url: `/uploads/horses/${file.filename}`,
     };

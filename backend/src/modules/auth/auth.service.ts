@@ -15,6 +15,8 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { AuthStore } from './auth.store';
 import { AuthUser, PendingRegistration, UserRole } from './auth.types';
 import { MailService } from './mail.service';
@@ -22,6 +24,8 @@ import { MailService } from './mail.service';
 @Injectable()
 export class AuthService {
   private readonly otpTtlMs = 10 * 60 * 1000;
+  private readonly maxOtpAttempts = 5;
+  private readonly otpAttempts = new Map<string, number>();
   private readonly googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
   constructor(
@@ -29,6 +33,39 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
   ) {}
+
+  private resolvePersona(user: AuthUser): 'driver' | 'escort' | null {
+    if (user.role !== UserRole.DRIVER_ESCORT) {
+      return null;
+    }
+    if (user.specialization === 'escort' || user.email.toLowerCase().includes('escort')) {
+      return 'escort';
+    }
+    return 'driver';
+  }
+
+  private assertActiveAccount(user: AuthUser): void {
+    if (user.status && user.status !== 'active') {
+      throw new UnauthorizedException(
+        'Tài khoản của bạn đã bị vô hiệu hóa hoặc tạm khóa. Vui lòng liên hệ quản trị viên.',
+      );
+    }
+  }
+
+  private buildUserResponse(user: AuthUser) {
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      fullName: user.fullName || '',
+      name: user.fullName || user.email.split('@')[0],
+      phone: user.phone || '',
+      address: user.address || '',
+      avatarUrl: user.avatarUrl || '',
+      specialization: user.specialization ?? null,
+      persona: this.resolvePersona(user),
+    };
+  }
 
   async register(dto: RegisterDto) {
     const email = dto.email.trim().toLowerCase();
@@ -44,13 +81,14 @@ export class AuthService {
       otpId: 0,
       email,
       passwordHash: await bcrypt.hash(dto.password, 12),
-      plainPassword: dto.password,
       otp,
       expiresAt: Date.now() + this.otpTtlMs,
       createdAt: new Date().toISOString(),
     };
+    this.otpAttempts.delete(`reg:${email}`);
     await this.authStore.savePending(pending);
     await this.mailService.sendRegistrationOtp(email, otp);
+
     const response: { message: string; email: string; developmentOtp?: string } = {
       message: 'Registration started. Verify the OTP sent to your email.',
       email,
@@ -63,22 +101,35 @@ export class AuthService {
 
   async verifyOtp(dto: VerifyOtpDto) {
     const email = dto.email.trim().toLowerCase();
+    const attemptKey = `reg:${email}`;
     const pending = await this.authStore.findPending(email);
     if (!pending || pending.expiresAt < Date.now()) {
       await this.authStore.deletePending(email);
-      throw new BadRequestException('OTP is invalid or expired');
-    }
-    if (pending.otp !== dto.otp) {
+      this.otpAttempts.delete(attemptKey);
       throw new BadRequestException('OTP is invalid or expired');
     }
 
+    if (pending.otp !== dto.otp) {
+      const nextAttempts = (this.otpAttempts.get(attemptKey) ?? 0) + 1;
+      if (nextAttempts >= this.maxOtpAttempts) {
+        await this.authStore.deletePending(email);
+        this.otpAttempts.delete(attemptKey);
+        throw new BadRequestException(
+          'Bạn đã nhập sai OTP quá nhiều lần. Vui lòng yêu cầu mã OTP mới.',
+        );
+      }
+      this.otpAttempts.set(attemptKey, nextAttempts);
+      throw new BadRequestException('OTP is invalid or expired');
+    }
+
+    this.otpAttempts.delete(attemptKey);
     const user: AuthUser = {
       id: randomUUID(),
       email,
       passwordHash: pending.passwordHash,
-      plainPassword: pending.plainPassword ?? null,
       role: UserRole.CUSTOMER,
       emailVerified: true,
+      status: 'active',
       createdAt: new Date().toISOString(),
     };
     const userId = await this.authStore.addUserFromRecord(user);
@@ -98,12 +149,87 @@ export class AuthService {
     };
   }
 
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.authStore.findUser(email);
+
+    const genericMessage =
+      'Nếu email này tồn tại trong hệ thống, mã OTP khôi phục mật khẩu đã được gửi tới hộp thư của bạn.';
+
+    if (!user || (user.status && user.status !== 'active')) {
+      return { message: genericMessage, email };
+    }
+
+    const otp = randomInt(100000, 1000000).toString();
+    this.otpAttempts.delete(`reset:${email}`);
+    await this.authStore.savePasswordResetOtp(
+      email,
+      Number(user.id),
+      otp,
+      Date.now() + this.otpTtlMs,
+    );
+    await this.mailService.sendPasswordResetOtp(email, otp);
+
+    const response: { message: string; email: string; developmentOtp?: string } = {
+      message: genericMessage,
+      email,
+    };
+    if (process.env.NODE_ENV !== 'production' && process.env.AUTH_EXPOSE_DEV_OTP === 'true') {
+      response.developmentOtp = otp;
+    }
+    return response;
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const email = dto.email.trim().toLowerCase();
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException('Mật khẩu xác nhận không khớp');
+    }
+
+    const attemptKey = `reset:${email}`;
+    const record = await this.authStore.findPasswordResetOtp(email);
+    if (!record || record.expiresAt < Date.now()) {
+      await this.authStore.deletePasswordResetOtp(email);
+      this.otpAttempts.delete(attemptKey);
+      throw new BadRequestException('Mã OTP không hợp lệ hoặc đã hết hạn');
+    }
+
+    if (record.otp !== dto.otp.trim()) {
+      const nextAttempts = (this.otpAttempts.get(attemptKey) ?? 0) + 1;
+      if (nextAttempts >= this.maxOtpAttempts) {
+        await this.authStore.deletePasswordResetOtp(email);
+        this.otpAttempts.delete(attemptKey);
+        throw new BadRequestException(
+          'Bạn đã nhập sai OTP quá 5 lần. Vui lòng yêu cầu cấp lại mã mới.',
+        );
+      }
+      this.otpAttempts.set(attemptKey, nextAttempts);
+      throw new BadRequestException('Mã OTP không hợp lệ hoặc đã hết hạn');
+    }
+
+    const user = await this.authStore.findUser(email);
+    if (!user) {
+      throw new NotFoundException('Tài khoản không tồn tại');
+    }
+    this.assertActiveAccount(user);
+
+    const newHash = await bcrypt.hash(dto.newPassword, 12);
+    await this.authStore.updateUserPassword(user.id, newHash);
+    await this.authStore.completePasswordResetOtp(email);
+    this.otpAttempts.delete(attemptKey);
+
+    return {
+      message: 'Đặt lại mật khẩu thành công. Bạn có thể đăng nhập bằng mật khẩu mới.',
+    };
+  }
+
   async login(dto: LoginDto) {
     const email = dto.email.trim().toLowerCase();
     const user = await this.authStore.findUser(email);
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
       throw new UnauthorizedException('Invalid email or password');
     }
+    this.assertActiveAccount(user);
     if (!user.emailVerified) {
       throw new UnauthorizedException('Email address has not been verified');
     }
@@ -115,18 +241,7 @@ export class AuthService {
     });
     return {
       accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        fullName: user.fullName || '',
-        name: user.fullName || user.email.split('@')[0],
-        phone: user.phone || '',
-        address: user.address || '',
-        avatarUrl: user.avatarUrl || '',
-        specialization: user.specialization ?? null,
-        persona: user.specialization || (user.email.includes('escort') ? 'escort' : 'driver'),
-      },
+      user: this.buildUserResponse(user),
     };
   }
 
@@ -135,17 +250,9 @@ export class AuthService {
     if (!user) {
       throw new NotFoundException('User profile not found');
     }
+    this.assertActiveAccount(user);
     return {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      fullName: user.fullName || '',
-      name: user.fullName || user.email.split('@')[0],
-      phone: user.phone || '',
-      address: user.address || '',
-      avatarUrl: user.avatarUrl || '',
-      specialization: user.specialization ?? null,
-      persona: user.specialization || (user.email.includes('escort') ? 'escort' : 'driver'),
+      ...this.buildUserResponse(user),
       createdAt: user.createdAt,
     };
   }
@@ -158,14 +265,7 @@ export class AuthService {
     return {
       message: 'Profile updated successfully',
       user: {
-        id: updated.id,
-        email: updated.email,
-        role: updated.role,
-        fullName: updated.fullName || '',
-        name: updated.fullName || updated.email.split('@')[0],
-        phone: updated.phone || '',
-        address: updated.address || '',
-        avatarUrl: updated.avatarUrl || '',
+        ...this.buildUserResponse(updated),
         createdAt: updated.createdAt,
       },
     };
@@ -191,7 +291,7 @@ export class AuthService {
     }
 
     const newHash = await bcrypt.hash(dto.newPassword, 12);
-    await this.authStore.updateUserPassword(userId, newHash, dto.newPassword);
+    await this.authStore.updateUserPassword(userId, newHash);
 
     return {
       message: 'Mật khẩu đã được thay đổi thành công',
@@ -204,16 +304,21 @@ export class AuthService {
     name: string;
     picture?: string;
   }> {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+    if (!clientId) {
+      throw new UnauthorizedException(
+        'Đăng nhập Google chưa được cấu hình (GOOGLE_CLIENT_ID).',
+      );
+    }
 
     // 1. Try verifying as Google ID Token (JWT)
     try {
       const ticket = await this.googleClient.verifyIdToken({
         idToken: token,
-        audience: clientId || undefined,
+        audience: clientId,
       });
       const payload = ticket.getPayload();
-      if (payload && payload.email) {
+      if (payload && payload.email && payload.email_verified === true) {
         return {
           googleId: payload.sub,
           email: payload.email.toLowerCase(),
@@ -222,44 +327,57 @@ export class AuthService {
         };
       }
     } catch {
-      // Fallback to fetch APIs
+      // Fallback to access_token verification with audience check
     }
 
-    // 2. Try verifying via Google userinfo endpoint (supports access_token)
+    // 2. Verify OAuth access_token via Google tokeninfo (strict aud/azp & email_verified check)
     try {
-      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = (await res.json()) as any;
-        if (data.email) {
-          return {
-            googleId: data.sub,
-            email: data.email.toLowerCase(),
-            name: data.name || data.email.split('@')[0],
-            picture: data.picture,
-          };
+      const infoRes = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`,
+      );
+      if (infoRes.ok) {
+        const info = (await infoRes.json()) as {
+          aud?: string;
+          azp?: string;
+          sub?: string;
+          email?: string;
+          email_verified?: string | boolean;
+        };
+        const matchesClient = info.aud === clientId || info.azp === clientId;
+        const verified =
+          info.email_verified === true || info.email_verified === 'true';
+
+        if (matchesClient && verified && info.email) {
+          const userInfoRes = await fetch(
+            'https://www.googleapis.com/oauth2/v3/userinfo',
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          if (userInfoRes.ok) {
+            const profile = (await userInfoRes.json()) as {
+              sub?: string;
+              email?: string;
+              email_verified?: boolean;
+              name?: string;
+              picture?: string;
+            };
+            if (profile.email && profile.email_verified !== false) {
+              return {
+                googleId: profile.sub || info.sub || '',
+                email: profile.email.toLowerCase(),
+                name: profile.name || profile.email.split('@')[0],
+                picture: profile.picture,
+              };
+            }
+          }
         }
       }
-    } catch {}
+    } catch {
+      // Fall through to unauthorized exception
+    }
 
-    // 3. Fallback: Google tokeninfo endpoint
-    try {
-      const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`);
-      if (res.ok) {
-        const data = (await res.json()) as any;
-        if (data.email) {
-          return {
-            googleId: data.sub,
-            email: data.email.toLowerCase(),
-            name: data.name || data.email.split('@')[0],
-            picture: data.picture,
-          };
-        }
-      }
-    } catch {}
-
-    throw new UnauthorizedException('Token xác thực Google không hợp lệ hoặc đã hết hạn');
+    throw new UnauthorizedException(
+      'Token xác thực Google không hợp lệ, chưa xác minh email hoặc đã hết hạn',
+    );
   }
 
   async loginWithGoogle(dto: GoogleLoginDto) {
@@ -270,6 +388,7 @@ export class AuthService {
 
     const googleInfo = await this.verifyGoogleToken(rawToken);
     const user = await this.authStore.findOrCreateGoogleUser(googleInfo);
+    this.assertActiveAccount(user);
 
     const accessToken = await this.jwtService.signAsync({
       sub: user.id,
@@ -279,18 +398,7 @@ export class AuthService {
 
     return {
       accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        fullName: user.fullName || '',
-        name: user.fullName || user.email.split('@')[0],
-        phone: user.phone || '',
-        address: user.address || '',
-        avatarUrl: user.avatarUrl || '',
-        specialization: user.specialization ?? null,
-        persona: user.specialization || (user.email.includes('escort') ? 'escort' : 'driver'),
-      },
+      user: this.buildUserResponse(user),
     };
   }
 }

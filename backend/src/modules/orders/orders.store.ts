@@ -1,5 +1,6 @@
-import { BadRequestException, ForbiddenException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import { MYSQL_POOL } from '../../common/database/database.module';
 import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
 import { CreateOrderDto, HorseInfoDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
@@ -69,19 +70,27 @@ interface HorseRow extends RowDataPacket {
 export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   private pool!: Pool;
 
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
+  }
+
   async onModuleInit(): Promise<void> {
-    this.pool = createPool({
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system',
-      user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '',
-      connectionLimit: 10,
-    });
+    if (!this.pool) {
+      this.pool = createPool({
+        host: process.env.DB_HOST ?? 'localhost',
+        port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system',
+        user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '',
+        connectionLimit: 10,
+      });
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.pool) {
+    if (this.pool && !this.injectedPool) {
       await this.pool.end();
     }
   }
@@ -185,7 +194,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
-       LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
+       LEFT JOIN shipment_sepay_payment sp ON sp.payment_id = (SELECT MAX(sp2.payment_id) FROM shipment_sepay_payment sp2 WHERE sp2.shipment_id = s.shipment_id AND sp2.status <> 'cancelled')
        WHERE s.customer_id = ?
        ORDER BY s.created_at DESC`,
       [customerId],
@@ -208,7 +217,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       FROM shipment s
       JOIN \`user\` u ON u.user_id = s.customer_id
       LEFT JOIN \`user\` a ON a.user_id = s.approved_by
-      LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
+      LEFT JOIN shipment_sepay_payment sp ON sp.payment_id = (SELECT MAX(sp2.payment_id) FROM shipment_sepay_payment sp2 WHERE sp2.shipment_id = s.shipment_id AND sp2.status <> 'cancelled')
     `;
     const params: (string | number)[] = [];
 
@@ -221,6 +230,46 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
     const [rows] = await this.pool.execute<ShipmentRow[]>(query, params);
     return Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
+  }
+
+  async findShipmentsByAssignedStaff(userId: number, statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
+    let query = `
+      SELECT DISTINCT s.*, u.full_name as customer_name, u.email as customer_email, a.full_name as approver_name,
+             CONCAT('REQ-', LPAD(
+               (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
+               3, '0'
+             )) as customer_request_code,
+             CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
+             sp.status as payment_status,
+             sp.payment_code as payment_code,
+             sp.paid_at as paid_at
+      FROM shipment s
+      JOIN shipment_assignment sa ON sa.shipment_id = s.shipment_id
+      JOIN \`user\` u ON u.user_id = s.customer_id
+      LEFT JOIN \`user\` a ON a.user_id = s.approved_by
+      LEFT JOIN shipment_sepay_payment sp ON sp.payment_id = (SELECT MAX(sp2.payment_id) FROM shipment_sepay_payment sp2 WHERE sp2.shipment_id = s.shipment_id AND sp2.status <> 'cancelled')
+      WHERE sa.user_id = ?
+        AND sa.role_in_shipment IN ('driver', 'escort')
+    `;
+    const params: (string | number)[] = [userId];
+
+    if (statusFilter) {
+      query += ' AND s.status = ?';
+      params.push(statusFilter);
+    }
+
+    query += ' ORDER BY s.created_at DESC';
+
+    const [rows] = await this.pool.execute<ShipmentRow[]>(query, params);
+    return Promise.all(rows.map((row) => this.mapShipmentWithAttachments(row)));
+  }
+
+  async isStaffAssignedToShipment(shipmentId: number, userId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT 1 FROM shipment_assignment WHERE shipment_id = ? AND user_id = ? AND role_in_shipment IN ('driver', 'escort') LIMIT 1`,
+      [shipmentId, userId],
+    );
+    return rows.length > 0;
   }
 
   async findShipmentById(shipmentId: number): Promise<TransportOrder | undefined> {
@@ -237,7 +286,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
        LEFT JOIN \`user\` a ON a.user_id = s.approved_by
-       LEFT JOIN shipment_sepay_payment sp ON sp.shipment_id = s.shipment_id
+       LEFT JOIN shipment_sepay_payment sp ON sp.payment_id = (SELECT MAX(sp2.payment_id) FROM shipment_sepay_payment sp2 WHERE sp2.shipment_id = s.shipment_id AND sp2.status <> 'cancelled')
        WHERE s.shipment_id = ?
        LIMIT 1`,
       [shipmentId],
@@ -301,7 +350,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     params.push(shipmentId);
 
     const [result] = await db.execute(query, params);
-    if (!(result as { affectedRows: number }).affectedRows) throw new BadRequestException('Đơn hàng đã thay đổi, vui lòng tải lại trước khi duyệt.');
+    if (!(result as { affectedRows: number }).affectedRows) throw new ConflictException('Đơn hàng đã thay đổi, vui lòng tải lại trước khi duyệt.');
     if (status === ShipmentStatus.REJECTED) {
       await db.execute(
         `UPDATE horse
@@ -325,7 +374,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       if (!assignments.length) throw new ForbiddenException('Bạn không được phân công cho chuyến này');
     }
     if (orders[0].status === 'completed') return false;
-    if (orders[0].status !== 'in_transit') throw new BadRequestException('Chỉ được hoàn tất chuyến đã xuất phát');
+    if (orders[0].status !== 'in_transit') throw new ConflictException('Chỉ được hoàn tất chuyến đã xuất phát');
     const [assignedVehicles] = await db.execute<RowDataPacket[]>('SELECT vehicle_id FROM shipment_vehicle WHERE shipment_id = ? ORDER BY vehicle_id', [shipmentId]);
     const vehicleIds = [...new Set(assignedVehicles.map(v => Number(v.vehicle_id)))];
     if (vehicleIds.length) await db.execute(`SELECT vehicle_id FROM vehicle WHERE vehicle_id IN (${vehicleIds.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, vehicleIds);
@@ -338,14 +387,15 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
     await db.execute(
       `UPDATE horse
-       SET status = 'delivered'
-       WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)`,
+       SET status = 'active'
+       WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+         AND status NOT IN ('retired', 'deceased')`,
       [shipmentId],
     );
 
     await db.execute("UPDATE route SET status = 'completed', plan_status = 'completed' WHERE shipment_id = ? AND plan_status = 'in_transit'", [shipmentId]);
     for (const id of vehicleIds) await db.execute(`UPDATE vehicle v SET status = 'available' WHERE v.vehicle_id = ? AND v.status = 'in_use'
-      AND NOT EXISTS (SELECT 1 FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id WHERE sv.vehicle_id = v.vehicle_id AND s.status NOT IN ('completed','cancelled','rejected'))`, [id]);
+      AND NOT EXISTS (SELECT 1 FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id WHERE sv.vehicle_id = v.vehicle_id AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected'))`, [id]);
 
     return (result as { affectedRows: number }).affectedRows > 0;
     });
@@ -361,7 +411,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
        WHERE shipment_id = ? AND status = 'requested'`,
       [ShipmentStatus.CHANGE_REQUESTED, notes, shipmentId],
     );
-    if (!(result as { affectedRows: number }).affectedRows) throw new BadRequestException('Đơn hàng đã thay đổi, vui lòng tải lại trước khi yêu cầu chỉnh sửa.');
+    if (!(result as { affectedRows: number }).affectedRows) throw new ConflictException('Đơn hàng đã thay đổi, vui lòng tải lại trước khi yêu cầu chỉnh sửa.');
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
@@ -371,20 +421,18 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       [status, shipmentId],
     );
 
-    if (status === ShipmentStatus.COMPLETED || (status as string) === 'completed') {
-      await this.pool.execute(
-        `UPDATE horse
-         SET status = 'delivered'
-         WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
-           AND status NOT IN ('retired', 'deceased')`,
-        [shipmentId],
-      );
-    } else if (status === ShipmentStatus.CANCELLED || status === ShipmentStatus.REJECTED) {
+    if (
+      status === ShipmentStatus.COMPLETED ||
+      (status as string) === 'completed' ||
+      status === ShipmentStatus.CANCELLED ||
+      status === ShipmentStatus.CANCELLED_OPERATIONAL ||
+      status === ShipmentStatus.REJECTED
+    ) {
       await this.pool.execute(
         `UPDATE horse
          SET status = 'active'
          WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
-           AND status NOT IN ('delivered', 'retired', 'deceased')`,
+           AND status NOT IN ('retired', 'deceased')`,
         [shipmentId],
       );
     }
@@ -416,7 +464,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       await db.beginTransaction();
       const [rows] = await db.execute<RowDataPacket[]>('SELECT status FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
       if (rows[0]?.status === 'cancelled') { await db.commit(); return false; }
-      if (!rows[0] || !['requested', 'change_requested'].includes(rows[0].status)) throw new BadRequestException('Chỉ được hủy yêu cầu trước khi phê duyệt.');
+      if (!rows[0] || !['requested', 'change_requested'].includes(rows[0].status)) throw new ConflictException('Chỉ được hủy yêu cầu trước khi phê duyệt.');
       await db.execute("UPDATE shipment SET status = 'cancelled' WHERE shipment_id = ?", [shipmentId]);
       await db.execute("UPDATE horse h JOIN shipment_horse sh ON sh.horse_id = h.horse_id SET h.status = 'active' WHERE sh.shipment_id = ?", [shipmentId]);
       await db.commit();
@@ -428,7 +476,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
   async updateAndResubmitShipment(customerId: number, shipmentId: number, dto: UpdateOrderDto): Promise<boolean> {
     return this.transaction(async db => {
       const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? AND customer_id = ? FOR UPDATE', [shipmentId, customerId]);
-      if (!orders[0] || orders[0].status !== 'change_requested') throw new BadRequestException('Chỉ được gửi lại yêu cầu đang cần chỉnh sửa');
+      if (!orders[0] || orders[0].status !== 'change_requested') throw new ConflictException('Chỉ được gửi lại yêu cầu đang cần chỉnh sửa');
       const bookingType = normalizeBookingType(dto.bookingType ?? orders[0].booking_type);
       if (bookingType !== orders[0].booking_type) {
         await db.execute('INSERT INTO shipment_booking_revision (shipment_id, changed_by, previous_booking_type, booking_type) VALUES (?, ?, ?, ?)',
@@ -510,6 +558,12 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       paymentStatus: row.payment_status ?? 'unpaid',
       paymentCode: row.payment_code ?? null,
       paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
+      cancellationCategory: (row as any).cancellation_category ?? null,
+      cancellationReason: (row as any).cancellation_reason ?? null,
+      cancelledAt: (row as any).cancelled_at ? new Date((row as any).cancelled_at).toISOString() : null,
+      paymentOverdue: Boolean((row as any).payment_overdue),
+      slaEscalationStatus: (row as any).sla_escalation_status ?? null,
+      slaFallbackOption: (row as any).sla_fallback_option ?? null,
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       customerEmail: row.customer_email,

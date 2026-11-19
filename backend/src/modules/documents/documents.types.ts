@@ -12,9 +12,18 @@ export enum AuthorityApprovalStatus {
   REJECTED = 'rejected',
 }
 
+export type RegulationTransportMode = 'road' | 'air' | 'both';
+export type RegulationDocTier = 'A' | 'B';
+
 export interface Regulation {
   id: number;
   country: string;
+  borderGate?: string | null;
+  transportMode: RegulationTransportMode;
+  docTier: RegulationDocTier;
+  leadTimeDays: number;
+  requiresAuthorityApproval: boolean;
+  minValidityBufferHours: number;
   documentType: string;
   description: string | null;
   effectiveDate: string | null;
@@ -35,6 +44,7 @@ export interface DocumentApproval {
 export interface TransportDocument {
   id: number;
   horseId: number;
+  ownerId?: number;
   horseName?: string;
   requestCode?: string;
   regulationId: number;
@@ -52,10 +62,13 @@ export interface TransportDocument {
   status: DocumentStatus;
   reviewerNotes: string | null;
   createdAt: string;
+  isArchived?: boolean;
+  supersededByDocumentId?: number | null;
   approvals?: DocumentApproval[];
   isExpiredForTrip?: boolean;
   isExpiringSoonForTrip?: boolean;
   expiryNotice?: string;
+  earlyIssuanceWarning?: string | null;
 }
 
 export interface HorseComplianceItem {
@@ -82,12 +95,27 @@ export interface OrderComplianceChecklist {
   requirementsSent?: boolean;
   tripTargetDate?: string | null;
   hasExpiredDocuments?: boolean;
+  effectiveTierALeadDays?: number;
+  orderCutoffDate?: string | null;
+  tierADeadline?: string | null;
+  tierBWindowStart?: string | null;
+  tierBWindowEnd?: string | null;
+  inTransitComplianceAlert?: boolean;
+  isInternational?: boolean;
+  transportMode?: 'road' | 'air' | null;
+  matchedBorderGates?: string[];
   horses: HorseComplianceItem[];
 }
 
 export interface RegulationTemplateItem {
   documentType: string;
   description: string;
+  docTier?: RegulationDocTier;
+  leadTimeDays?: number;
+  requiresAuthorityApproval?: boolean;
+  minValidityBufferHours?: number;
+  transportMode?: RegulationTransportMode;
+  borderGate?: string | null;
 }
 
 export interface RegulationTemplatePreset {

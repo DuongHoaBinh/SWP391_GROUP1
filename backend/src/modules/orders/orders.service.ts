@@ -1,8 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { OrdersStore } from './orders.store';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -14,15 +17,96 @@ import { ShipmentStatus, TransportOrder } from './orders.types';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DocumentsService } from '../documents/documents.service';
 
 @Injectable()
 export class OrdersService {
   constructor(
     private readonly ordersStore: OrdersStore,
     private readonly notificationsService: NotificationsService,
+    @Optional() private readonly documentsService?: DocumentsService,
   ) {}
 
+  async getOrderCutoffPolicy(input: {
+    destinationLocation?: string;
+    originLocation?: string;
+    bookingType?: string;
+    transportMode?: string | null;
+    transportationType?: string | null;
+  }): Promise<{
+    minLeadDays: number;
+    baseCutoffDays: number;
+    maxTierALead: number;
+    isInternational: boolean;
+    destinationCountry: string;
+    earliestDepartureDate: string;
+  }> {
+    if (typeof this.documentsService?.computeOrderCutoffPolicy === 'function') {
+      return this.documentsService.computeOrderCutoffPolicy(input);
+    }
+    const baseCutoffDays = input.bookingType === 'dedicated_charter' ? 4 : 7;
+    const now = new Date();
+    const earliestUtcMs =
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) +
+      baseCutoffDays * 86_400_000;
+    return {
+      minLeadDays: baseCutoffDays,
+      baseCutoffDays,
+      maxTierALead: 0,
+      isInternational: String(input.transportationType || '').toLowerCase().includes('international'),
+      destinationCountry: input.destinationLocation || 'Vietnam',
+      earliestDepartureDate: new Date(earliestUtcMs).toISOString().split('T')[0],
+    };
+  }
+
+  private async assertValidRequestedDate(
+    requestedDate?: string,
+    context?: {
+      destinationLocation?: string;
+      originLocation?: string;
+      bookingType?: string;
+      transportMode?: string | null;
+      transportationType?: string | null;
+    },
+  ): Promise<void> {
+    if (!requestedDate) return;
+    const parsed = new Date(requestedDate);
+    if (!Number.isFinite(parsed.getTime())) {
+      throw new BadRequestException('Ngày khởi hành dự kiến không hợp lệ');
+    }
+    if (parsed.getTime() < Date.now() - 24 * 60 * 60 * 1000) {
+      throw new BadRequestException('Ngày khởi hành dự kiến không được nằm trong quá khứ');
+    }
+
+    const policy = await this.getOrderCutoffPolicy(context || {});
+    const now = new Date();
+    const earliestUtc =
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) +
+      policy.minLeadDays * 86_400_000;
+    const requestedDayUtc = Date.UTC(
+      parsed.getUTCFullYear(),
+      parsed.getUTCMonth(),
+      parsed.getUTCDate(),
+    );
+    if (requestedDayUtc < earliestUtc) {
+      throw new UnprocessableEntityException({
+        message: `Ngày khởi hành dự kiến quá sát hạn đặt đơn (Order Cutoff). Tuyến đến ${policy.destinationCountry} yêu cầu đặt trước tối thiểu ${policy.minLeadDays} ngày (sớm nhất: ${policy.earliestDepartureDate}).`,
+        code: 'ORDER_CUTOFF_VIOLATION',
+        minLeadDays: policy.minLeadDays,
+        maxTierALead: policy.maxTierALead,
+        earliestDepartureDate: policy.earliestDepartureDate,
+        destinationCountry: policy.destinationCountry,
+      });
+    }
+  }
+
   async createOrder(user: AuthenticatedUser, dto: CreateOrderDto): Promise<TransportOrder> {
+    await this.assertValidRequestedDate(dto.requestedDate, {
+      destinationLocation: dto.destinationLocation,
+      originLocation: dto.originLocation,
+      bookingType: dto.bookingType,
+      transportationType: dto.transportationType,
+    });
     const customerId = Number(user.id);
     const shipmentId = await this.ordersStore.createShipment(customerId, dto);
     const created = await this.ordersStore.findShipmentById(shipmentId);
@@ -58,7 +142,10 @@ export class OrdersService {
     });
   }
 
-  async getAllOrders(statusFilter?: ShipmentStatus): Promise<TransportOrder[]> {
+  async getAllOrders(statusFilter?: ShipmentStatus, user?: AuthenticatedUser): Promise<TransportOrder[]> {
+    if (user?.role === UserRole.DRIVER_ESCORT) {
+      return this.ordersStore.findShipmentsByAssignedStaff(Number(user.id), statusFilter);
+    }
     return this.ordersStore.findAllShipments(statusFilter);
   }
 
@@ -70,6 +157,13 @@ export class OrdersService {
 
     if (user.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) {
       throw new ForbiddenException('You can only view your own transport orders');
+    }
+
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      const assigned = await this.ordersStore.isStaffAssignedToShipment(orderId, Number(user.id));
+      if (!assigned) {
+        throw new ForbiddenException('You can only view transport orders assigned to you');
+      }
     }
 
     if (user.role === UserRole.CUSTOMER && order.customerRequestCode) {
@@ -93,7 +187,7 @@ export class OrdersService {
     }
 
     if (order.status !== ShipmentStatus.REQUESTED) {
-      throw new BadRequestException(
+      throw new ConflictException(
         `Chỉ đơn hàng đang ở trạng thái "${ShipmentStatus.REQUESTED}" mới có thể phê duyệt. Trạng thái hiện tại: "${order.status}"`,
       );
     }
@@ -148,7 +242,7 @@ export class OrdersService {
     }
 
     if (order.status !== ShipmentStatus.REQUESTED) {
-      throw new BadRequestException(
+      throw new ConflictException(
         `Chỉ đơn hàng đang ở trạng thái "${ShipmentStatus.REQUESTED}" mới có thể từ chối. Trạng thái hiện tại: "${order.status}"`,
       );
     }
@@ -186,7 +280,7 @@ export class OrdersService {
     }
 
     if (order.status !== ShipmentStatus.REQUESTED) {
-      throw new BadRequestException(
+      throw new ConflictException(
         `Chỉ đơn hàng đang ở trạng thái "${ShipmentStatus.REQUESTED}" mới có thể yêu cầu chỉnh sửa. Trạng thái hiện tại: "${order.status}"`,
       );
     }
@@ -222,11 +316,18 @@ export class OrdersService {
     }
 
     if (order.status !== ShipmentStatus.CHANGE_REQUESTED) {
-      throw new BadRequestException(
+      throw new ConflictException(
         `Chỉ đơn hàng ở trạng thái "${ShipmentStatus.CHANGE_REQUESTED}" mới có thể chỉnh sửa. Trạng thái hiện tại: "${order.status}"`,
       );
     }
 
+    await this.assertValidRequestedDate(dto.requestedDate, {
+      destinationLocation: dto.destinationLocation ?? order.destinationLocation,
+      originLocation: dto.originLocation ?? order.originLocation,
+      bookingType: dto.bookingType ?? order.bookingType,
+      transportMode: order.transportMode,
+      transportationType: order.transportationType,
+    });
     const customerId = Number(user.id);
     await this.ordersStore.updateAndResubmitShipment(customerId, orderId, dto);
 
@@ -253,7 +354,7 @@ export class OrdersService {
       throw new ForbiddenException('Bạn không có quyền hoàn tất chuyến');
     }
     if (![ShipmentStatus.IN_TRANSIT, ShipmentStatus.COMPLETED].includes(order.status)) {
-      throw new BadRequestException('Chỉ được hoàn tất chuyến đã xuất phát');
+      throw new ConflictException('Chỉ được hoàn tất chuyến đã xuất phát');
     }
     const changed = await this.ordersStore.completeShipment(orderId, Number(user.id), user.role === UserRole.DRIVER_ESCORT);
     if (!changed) return order;

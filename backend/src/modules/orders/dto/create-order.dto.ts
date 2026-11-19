@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import { BookingType } from '../booking-policy';
 import {
   IsArray,
+  IsDateString,
   IsEmail,
   IsIn,
   IsInt,
@@ -118,7 +119,7 @@ export class CreateOrderDto {
 
   @ApiPropertyOptional({ example: '2026-10-15T08:00:00.000Z', description: 'Requested transport date (ISO string)' })
   @IsOptional()
-  @IsString()
+  @IsDateString({}, { message: 'Ngày khởi hành yêu cầu phải đúng định dạng ISO-8601 (YYYY-MM-DD)' })
   requestedDate?: string;
 
   @ApiPropertyOptional({

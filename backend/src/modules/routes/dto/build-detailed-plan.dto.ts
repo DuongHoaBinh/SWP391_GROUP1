@@ -167,4 +167,9 @@ export class BuildDetailedPlanDto {
   @ValidateNested({ each: true })
   @Type(() => RouteStopItemDto)
   stops!: RouteStopItemDto[];
+
+  @ApiPropertyOptional({ description: 'Ghi chú vận hành và chăm sóc ngựa dọc tuyến' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }

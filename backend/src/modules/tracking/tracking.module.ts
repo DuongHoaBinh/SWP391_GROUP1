@@ -2,13 +2,17 @@ import { Module } from '@nestjs/common';
 import { TrackingController } from './tracking.controller';
 import { TrackingService } from './tracking.service';
 import { TrackingStore } from './tracking.store';
+import { HandoverController } from './handover.controller';
+import { HandoverService } from './handover.service';
+import { HandoverStore } from './handover.store';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RoutesModule } from '../routes/routes.module';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
-  imports: [NotificationsModule, RoutesModule],
-  controllers: [TrackingController],
-  providers: [TrackingService, TrackingStore],
-  exports: [TrackingService, TrackingStore],
+  imports: [NotificationsModule, RoutesModule, DocumentsModule],
+  controllers: [HandoverController, TrackingController],
+  providers: [TrackingService, TrackingStore, HandoverService, HandoverStore],
+  exports: [TrackingService, TrackingStore, HandoverService, HandoverStore],
 })
 export class TrackingModule {}

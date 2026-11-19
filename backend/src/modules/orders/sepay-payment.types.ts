@@ -3,13 +3,14 @@ import { RowDataPacket } from 'mysql2/promise';
 export interface SepayPayment extends RowDataPacket {
   payment_id: number;
   shipment_id: number;
+  invoice_id?: number | null;
   customer_id: number;
   payment_code: string;
   amount: number | string;
   bank_code: string;
   account_number: string;
   account_name: string;
-  status: 'pending' | 'review' | 'succeeded';
+  status: 'pending' | 'review' | 'succeeded' | 'cancelled';
   transaction_id: number | string | null;
   paid_at: Date | null;
   created_at: Date;

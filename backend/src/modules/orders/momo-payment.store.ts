@@ -1,18 +1,28 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, PoolConnection } from 'mysql2/promise';
 import { randomUUID } from 'node:crypto';
 import { SandboxPayment, SandboxPaymentStatus } from './momo-payment.types';
 import { paymentGate } from './payment-gate';
+import { MYSQL_POOL } from '../../common/database/database.module';
 
 @Injectable()
 export class MomoPaymentStore implements OnModuleInit, OnModuleDestroy {
   private pool!: Pool;
-  onModuleInit() {
-    this.pool = createPool({ host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system', user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '', connectionLimit: 5 });
+
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
   }
-  async onModuleDestroy() { await this.pool?.end(); }
+
+  onModuleInit() {
+    if (!this.pool) {
+      this.pool = createPool({ host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system', user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '', connectionLimit: 5 });
+    }
+  }
+  async onModuleDestroy() { if (this.pool && !this.injectedPool) await this.pool.end(); }
 
   private async transaction<T>(action: (db: PoolConnection) => Promise<T>): Promise<T> {
     const db = await this.pool.getConnection();

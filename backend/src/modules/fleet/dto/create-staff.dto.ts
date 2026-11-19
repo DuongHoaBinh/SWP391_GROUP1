@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsInt, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreateStaffDto {
   @ApiProperty({ description: 'Họ và tên nhân sự', example: 'Nguyễn Văn A' })
@@ -21,15 +21,15 @@ export class CreateStaffDto {
     example: 5,
   })
   @IsInt()
+  @IsIn([2, 3, 4, 5], { message: 'Vai trò không hợp lệ (chỉ chấp nhận 2, 3, 4 hoặc 5)' })
   roleId!: number;
 
   @ApiPropertyOptional({
-    description: 'Mật khẩu khởi tạo (Mặc định: Password123)',
-    example: 'Password123',
+    description: 'Mật khẩu khởi tạo (tối thiểu 8 ký tự; nếu bỏ trống hệ thống tự sinh mật khẩu ngẫu nhiên an toàn)',
   })
   @IsOptional()
   @IsString()
-  @MinLength(6, { message: 'Mật khẩu phải tối thiểu 6 ký tự' })
+  @MinLength(8, { message: 'Mật khẩu phải tối thiểu 8 ký tự' })
   password?: string;
 
   @ApiPropertyOptional({
@@ -38,5 +38,6 @@ export class CreateStaffDto {
   })
   @IsOptional()
   @IsString()
+  @IsIn(['driver', 'escort'], { message: 'Chuyên môn chỉ chấp nhận driver hoặc escort' })
   specialization?: string;
 }

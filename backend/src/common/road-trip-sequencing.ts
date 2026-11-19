@@ -527,3 +527,59 @@ export function buildConsolidatedRoadItinerary(params: {
     isConsolidatedMultiPoint: pickupWaypoints.length > 0 || dropoffWaypoints.length > 0,
   };
 }
+
+export interface LifoStallHorseInput {
+  shipmentHorseId: number;
+  shipmentId: number;
+  quantity?: number;
+  stallNumber?: string | null;
+}
+
+export interface LifoStallAssignment {
+  shipmentHorseId: number;
+  shipmentId: number;
+  stallNumber: string;
+}
+
+function parseMaxStallIndex(stallNumber?: string | null): number {
+  if (!stallNumber) return 0;
+  const matches = String(stallNumber).match(/\d+/g);
+  if (!matches || matches.length === 0) return 0;
+  return Math.max(...matches.map((m) => Number(m) || 0));
+}
+
+export function computeLifoStallAssignments(
+  orderedDestinations: Array<{ location: string; shipmentIds: number[]; requestCodes: string[] }>,
+  horses: LifoStallHorseInput[],
+): LifoStallAssignment[] {
+  if (!orderedDestinations.length || !horses.length) return [];
+
+  let nextSlot = horses.reduce((max, h) => Math.max(max, parseMaxStallIndex(h.stallNumber)), 0) + 1;
+  const assignments: LifoStallAssignment[] = [];
+  const seenShipmentIds = new Set<number>();
+
+  // Assign earliest drop-off lowest stall numbers near the rear ramp (LIFO unloading) while preserving manual stalls
+  for (const dest of orderedDestinations) {
+    for (const sid of dest.shipmentIds) {
+      if (seenShipmentIds.has(sid)) continue;
+      seenShipmentIds.add(sid);
+      const group = horses
+        .filter((h) => h.shipmentId === sid)
+        .sort((a, b) => a.shipmentHorseId - b.shipmentHorseId);
+      for (const horse of group) {
+        if (horse.stallNumber && horse.stallNumber.trim().length > 0) {
+          continue;
+        }
+        const qty = Math.max(1, Math.floor(Number(horse.quantity || 1)));
+        const stallNumber = qty === 1 ? `S${nextSlot}` : `S${nextSlot}-S${nextSlot + qty - 1}`;
+        nextSlot += qty;
+        assignments.push({
+          shipmentHorseId: horse.shipmentHorseId,
+          shipmentId: horse.shipmentId,
+          stallNumber,
+        });
+      }
+    }
+  }
+  return assignments;
+}

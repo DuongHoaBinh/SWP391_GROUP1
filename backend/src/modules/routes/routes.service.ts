@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
   OnModuleInit,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { RoutesStore } from './routes.store';
 import { OrdersStore } from '../orders/orders.store';
@@ -86,7 +88,10 @@ export class RoutesService implements OnModuleInit {
     };
   }
 
-  async getRouteByShipmentId(shipmentId: number, user?: AuthenticatedUser): Promise<RouteEntity> {
+  private async resolveRouteForViewer(
+    shipmentId: number,
+    user?: AuthenticatedUser,
+  ): Promise<RouteEntity | null> {
     let customerOrder: { originLocation: string; destinationLocation: string; customerId: number } | undefined;
     if (user?.role === UserRole.CUSTOMER) {
       const order = await this.ordersStore.findById(shipmentId);
@@ -95,10 +100,24 @@ export class RoutesService implements OnModuleInit {
       customerOrder = order;
     }
     const route = await this.routesStore.findRouteByShipmentId(shipmentId);
+    if (!route) return null;
+    return customerOrder ? this.redactRouteForCustomer(route, customerOrder) : route;
+  }
+
+  async getRouteByShipmentId(shipmentId: number, user?: AuthenticatedUser): Promise<RouteEntity> {
+    const route = await this.resolveRouteForViewer(shipmentId, user);
     if (!route) {
       throw new NotFoundException(`Chưa có lộ trình nào được lập cho đơn vận chuyển #${shipmentId}`);
     }
-    return customerOrder ? this.redactRouteForCustomer(route, customerOrder) : route;
+    return route;
+  }
+
+  async findOptionalRouteByShipmentId(
+    shipmentId: number,
+    user?: AuthenticatedUser,
+  ): Promise<{ route: RouteEntity | null }> {
+    const route = await this.resolveRouteForViewer(shipmentId, user);
+    return { route };
   }
 
   async getFullTripPlan(shipmentId: number, user?: AuthenticatedUser): Promise<FullTripPlan> {
@@ -170,7 +189,7 @@ export class RoutesService implements OnModuleInit {
 
     const existing = await this.routesStore.findRouteByShipmentId(shipmentId);
     if (existing && ['confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(existing.planStatus)) {
-      throw new BadRequestException('Lộ trình đã xác nhận và phát hành hóa đơn; cần xử lý thay đổi qua quy trình điều chỉnh.');
+      throw new ConflictException('Lộ trình đã xác nhận và phát hành hóa đơn; cần xử lý thay đổi qua quy trình điều chỉnh.');
     }
     const routeId = await this.routesStore.saveStrategicFramework(shipmentId, dto);
 
@@ -227,11 +246,72 @@ export class RoutesService implements OnModuleInit {
       throw new BadRequestException('Kế hoạch chuyến đi phải có ít nhất 1 chặng vận chuyển (Leg)');
     }
 
+    // BR-F3-03: Enforce unique sequenceNo, valid per-leg window & non-overlapping chronological order
+    const explicitSeqs = dto.legs.map((l) => l.sequenceNo).filter((s) => s !== undefined && s !== null);
+    if (explicitSeqs.length !== new Set(explicitSeqs).size) {
+      throw new BadRequestException('Thứ tự các chặng vận chuyển (sequenceNo) không được trùng lặp');
+    }
+    const orderedLegs = [...dto.legs].sort(
+      (a, b) => Number(a.sequenceNo ?? 0) - Number(b.sequenceNo ?? 0),
+    );
+    for (let i = 0; i < orderedLegs.length; i++) {
+      const curr = orderedLegs[i];
+      const currStart = curr.plannedDeparture ? new Date(curr.plannedDeparture).getTime() : NaN;
+      const currEnd = curr.plannedArrival ? new Date(curr.plannedArrival).getTime() : NaN;
+      if (Number.isFinite(currStart) && Number.isFinite(currEnd) && currEnd <= currStart) {
+        throw new BadRequestException(
+          `Thời điểm đến dự kiến của chặng #${curr.sequenceNo ?? i + 1} phải sau thời điểm xuất phát`,
+        );
+      }
+      if (i + 1 < orderedLegs.length) {
+        const next = orderedLegs[i + 1];
+        const nextStart = next.plannedDeparture ? new Date(next.plannedDeparture).getTime() : NaN;
+        if (Number.isFinite(currEnd) && Number.isFinite(nextStart) && nextStart < currEnd) {
+          throw new BadRequestException(
+            `Chặng #${next.sequenceNo ?? i + 2} không được xuất phát trước thời điểm đến dự kiến của chặng #${curr.sequenceNo ?? i + 1}`,
+          );
+        }
+      }
+    }
+
     const emergencyReroute = route?.planStatus === PlanStatus.IN_TRANSIT && Boolean(route.activeIncident);
-    if (route && !['draft', 'pending_approval'].includes(route.planStatus) && !emergencyReroute) throw new BadRequestException('Chỉ sửa kế hoạch khi còn ở giai đoạn lập/duyệt hoặc đang xử lý sự cố trên đường.');
+    if (route && !['draft', 'pending_approval'].includes(route.planStatus) && !emergencyReroute) throw new ConflictException('Chỉ sửa kế hoạch khi còn ở giai đoạn lập/duyệt hoặc đang xử lý sự cố trên đường.');
+
+    if (this.isInternationalOrder(order)) {
+      const effectiveStops = [
+        ...(dto.stops || []),
+        ...(emergencyReroute && route?.stops ? route.stops : []),
+      ];
+      const hasBorderOrQuarantine = effectiveStops.some(
+        (s) => s.stopType === RouteStopType.BORDER_CHECK || s.stopType === RouteStopType.QUARANTINE,
+      );
+      if (!hasBorderOrQuarantine) {
+        throw new BadRequestException(
+          'Tuyến vận chuyển quốc tế bắt buộc phải có ít nhất 1 điểm dừng cửa khẩu hoặc kiểm dịch (border_check / quarantine) theo quy tắc BR-F3-03',
+        );
+      }
+    }
+
     await this.routesStore.saveDetailedPlan(routeId, dto, Number(user.id));
 
     return (await this.routesStore.findRouteById(routeId))!;
+  }
+
+  private isInternationalOrder(order: {
+    transportationType?: string | null;
+    originLocation?: string | null;
+    destinationLocation?: string | null;
+  }): boolean {
+    const tType = String(order.transportationType || '').toLowerCase();
+    if (tType.includes('international')) return true;
+    if (tType.includes('domestic')) return false;
+    if (typeof this.documentsService?.detectRecognizedCountry === 'function') {
+      const dest = this.documentsService.detectRecognizedCountry(order.destinationLocation);
+      const orig = this.documentsService.detectRecognizedCountry(order.originLocation);
+      if (dest && dest !== 'Vietnam') return true;
+      if (orig && dest && orig !== dest) return true;
+    }
+    return false;
   }
 
   // --- Coordinator Submits Plan For Manager Approval ---
@@ -290,16 +370,18 @@ export class RoutesService implements OnModuleInit {
 
     const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
 
-    if (route.planStatus !== PlanStatus.PENDING_APPROVAL) throw new BadRequestException('Chỉ phê duyệt kế hoạch đang chờ duyệt.');
+    if (route.planStatus !== PlanStatus.PENDING_APPROVAL) throw new ConflictException('Chỉ phê duyệt kế hoạch đang chờ duyệt.');
 
     if (dto.status === 'approved') {
-      if (dto.transportCost != null && Number(dto.transportCost) >= 0) {
-        const insuranceFee = Number(order.insuranceFee || 0);
-        const finalTransportCost = Math.round(Number(dto.transportCost));
-        const finalTotalCost = finalTransportCost + insuranceFee;
-        const horseCount = Math.max(1, order.requestedHorseCount || 1);
-        const stallUnitPrice = order.bookingType === 'shared_stall' ? Math.round(finalTransportCost / horseCount) : null;
-        await this.ordersStore.updatePricing(shipmentId, finalTransportCost, finalTotalCost, stallUnitPrice);
+      if (dto.transportCost !== undefined && dto.transportCost !== null) {
+        const currentTransportCost = Math.round(
+          Number(order.transportCost ?? Math.max(0, Number(order.totalCost || 0) - Number(order.insuranceFee || 0))),
+        );
+        if (Math.round(Number(dto.transportCost)) !== currentTransportCost) {
+          throw new ConflictException(
+            'Không được thay đổi cước vận chuyển đã chốt tại Flow 1 khi duyệt lộ trình Flow 3',
+          );
+        }
       }
 
       await this.routesStore.updatePlanStatus(
@@ -472,6 +554,11 @@ export class RoutesService implements OnModuleInit {
     let routeId: number;
 
     if (route) {
+      if (![PlanStatus.DRAFT, PlanStatus.PENDING_APPROVAL].includes(route.planStatus)) {
+        throw new ConflictException(
+          `Không thể ghi đè lộ trình bằng endpoint cũ khi kế hoạch đang ở trạng thái "${route.planStatus}"`,
+        );
+      }
       routeId = route.id;
       await this.routesStore.updateRouteDetails(routeId, dto.routeName, dto.totalDistanceKm);
     } else {
@@ -502,7 +589,13 @@ export class RoutesService implements OnModuleInit {
     }
 
     for (const item of dto.stops) {
-      await this.routesStore.updateStopSchedule(item.stopId, item.plannedArrival, item.plannedDeparture);
+      await this.routesStore.updateStopScheduleWithHistory(
+        item.stopId,
+        item.plannedArrival,
+        item.plannedDeparture,
+        dto.reason,
+        Number(user.id),
+      );
     }
 
     const order = await this.ordersStore.findById(route.shipmentId);
@@ -516,6 +609,8 @@ export class RoutesService implements OnModuleInit {
       );
     }
 
+    await this.evaluateReadyToDepartGate(route.shipmentId);
+
     return (await this.routesStore.findRouteById(routeId))!;
   }
 
@@ -525,13 +620,19 @@ export class RoutesService implements OnModuleInit {
     dto: PublishTripDto,
   ): Promise<FullTripPlan> {
     const readiness = await this.getTripPlanReadiness(user, shipmentId);
-    if (!readiness.isReadyToDepart) throw new BadRequestException(readiness.pendingConditions.join('; '));
+    if (!readiness.isReadyToDepart) {
+      throw new UnprocessableEntityException({
+        message: readiness.pendingConditions.join('; '),
+        missingRequirements: readiness.pendingConditions,
+      });
+    }
     const plan = await this.getFullTripPlan(shipmentId);
 
     if (!plan.isReadyToPublish) {
-      throw new BadRequestException(
-        `Không thể xuất bản kế hoạch chuyến đi do chưa đủ điều kiện: ${plan.missingRequirements.join('; ')}`,
-      );
+      throw new UnprocessableEntityException({
+        message: `Không thể xuất bản kế hoạch chuyến đi do chưa đủ điều kiện: ${plan.missingRequirements.join('; ')}`,
+        missingRequirements: plan.missingRequirements,
+      });
     }
 
     await this.ordersStore.updateStatus(shipmentId, ShipmentStatus.IN_TRANSIT);
@@ -596,9 +697,27 @@ export class RoutesService implements OnModuleInit {
     shipmentId: number,
     dto: { incidentType: string; description: string; severity?: string },
   ): Promise<{ success: boolean; incidentId: number }> {
+    const allowedRoles = new Set<string>([
+      UserRole.DRIVER_ESCORT,
+      UserRole.FLEET_ROUTE_COORDINATOR,
+      UserRole.LOGISTICS_MANAGER,
+      UserRole.ADMIN,
+    ]);
+    if (!allowedRoles.has(user.role)) {
+      throw new ForbiddenException('Chỉ nhân sự vận hành hoặc điều phối mới có quyền báo cáo sự cố chuyến đi');
+    }
+
     const order = await this.ordersStore.findById(shipmentId);
     if (!order) {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    if (user.role === UserRole.DRIVER_ESCORT && typeof this.fleetStore?.findAssignedStaff === 'function') {
+      const assigned = await this.fleetStore.findAssignedStaff(shipmentId);
+      const isAssigned = assigned.some((s) => Number(s.userId) === Number(user.id));
+      if (!isAssigned) {
+        throw new ForbiddenException('Bạn chỉ có thể báo cáo sự cố cho chuyến đi được phân công cho mình');
+      }
     }
 
     const incidentId = await this.routesStore.reportIncident({
@@ -639,5 +758,9 @@ export class RoutesService implements OnModuleInit {
       success: true,
       message: 'Đã giải quyết sự cố và hoàn tất điều chỉnh lộ trình an toàn.',
     };
+  }
+
+  async getAllIncidents() {
+    return this.routesStore.findAllIncidents();
   }
 }

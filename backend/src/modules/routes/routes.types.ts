@@ -3,6 +3,7 @@ export enum RouteStatus {
   ACTIVE = 'active',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
+  CANCELLED_OPERATIONAL = 'cancelled_operational',
 }
 
 export enum PlanStatus {
@@ -14,6 +15,7 @@ export enum PlanStatus {
   IN_TRANSIT = 'in_transit',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
+  CANCELLED_OPERATIONAL = 'cancelled_operational',
 }
 
 export enum LegType {
@@ -34,6 +36,7 @@ export enum RouteStopStatus {
   PENDING = 'pending',
   ARRIVED = 'arrived',
   CLEARED = 'cleared',
+  CUSTOMS_CLEARED = 'customs_cleared',
   DEPARTED = 'departed',
 }
 

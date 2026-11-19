@@ -1,9 +1,16 @@
-import { ConflictException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { AuthUser, PendingRegistration, UserRole } from './auth.types';
-
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { MYSQL_POOL } from '../../common/database/database.module';
 
 interface SeedAccount {
   email: string;
@@ -19,9 +26,9 @@ interface UserRow extends RowDataPacket {
   address: string | null;
   avatar_url: string | null;
   password_hash: string;
-  plain_password?: string | null;
   role_name: string;
   email_verified: number;
+  status?: 'active' | 'inactive' | 'suspended';
   created_at: Date;
   specialization?: string | null;
 }
@@ -29,8 +36,8 @@ interface UserRow extends RowDataPacket {
 interface PendingRow extends RowDataPacket {
   otp_id: number;
   email: string;
+  user_id?: number | null;
   password_hash: string;
-  plain_password?: string | null;
   otp_code: string;
   expires_at: Date;
   created_at: Date;
@@ -40,18 +47,28 @@ interface PendingRow extends RowDataPacket {
 export class AuthStore implements OnModuleInit, OnModuleDestroy {
   private pool!: Pool;
 
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
+  }
+
   async onModuleInit(): Promise<void> {
-    this.pool = createPool({
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system',
-      user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '',
-      connectionLimit: 10,
-    });
+    if (!this.pool) {
+      this.pool = createPool({
+        host: process.env.DB_HOST ?? 'localhost',
+        port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system',
+        user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '',
+        connectionLimit: 10,
+      });
+    }
     await this.pool.query('SELECT 1');
 
-    const rawAccounts = process.env.AUTH_INTERNAL_USERS_JSON;
+    const rawAccounts =
+      process.env.AUTH_INTERNAL_USERS_JSON?.trim() ||
+      process.env.INTERNAL_SEED_ACCOUNTS?.trim();
     if (!rawAccounts) {
       return;
     }
@@ -62,15 +79,20 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
         if (!account.email || !account.password || account.role === UserRole.CUSTOMER) {
           continue;
         }
-        await this.addUser(account.email, account.password, account.role);
+        const existing = await this.findUser(account.email);
+        if (!existing) {
+          await this.addUser(account.email, account.password, account.role);
+        }
       }
     } catch {
-      throw new Error('AUTH_INTERNAL_USERS_JSON must contain a valid account array');
+      throw new Error(
+        'AUTH_INTERNAL_USERS_JSON / INTERNAL_SEED_ACCOUNTS must contain a valid account array',
+      );
     }
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.pool) {
+    if (this.pool && !this.injectedPool) {
       await this.pool.end();
     }
   }
@@ -90,16 +112,16 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
     }
     const passwordHash = await bcrypt.hash(password, 12);
     const [result] = await this.pool.execute(
-      'INSERT INTO `user` (role_id, full_name, email, password_hash, plain_password, account_origin, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [roleRows[0].role_id, normalizedEmail, normalizedEmail, passwordHash, password, 'system_created', true],
+      'INSERT INTO `user` (role_id, full_name, email, password_hash, account_origin, email_verified, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [roleRows[0].role_id, normalizedEmail, normalizedEmail, passwordHash, 'system_created', true, 'active'],
     );
     return {
       id: String((result as { insertId: number }).insertId),
       email: normalizedEmail,
       passwordHash,
-      plainPassword: password,
       role,
       emailVerified: true,
+      status: 'active',
       createdAt: new Date().toISOString(),
     };
   }
@@ -116,42 +138,33 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       throw new Error(`Role ${user.role} is not seeded in the database`);
     }
     const [result] = await this.pool.execute(
-      'INSERT INTO `user` (role_id, full_name, email, password_hash, plain_password, account_origin, auth_provider, email_verified, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [roleRows[0].role_id, user.email, user.email, user.passwordHash, user.plainPassword ?? null, 'self_registered', 'local', true, 'active'],
+      'INSERT INTO `user` (role_id, full_name, email, password_hash, account_origin, auth_provider, email_verified, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [roleRows[0].role_id, user.fullName || user.email, user.email, user.passwordHash, 'self_registered', 'local', true, 'active'],
     );
     return String((result as { insertId: number }).insertId);
   }
 
   async findUser(email: string): Promise<AuthUser | undefined> {
     const [rows] = await this.pool.execute<UserRow[]>(
-      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.plain_password, u.email_verified, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.email = ? LIMIT 1',
+      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.status, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.email = ? LIMIT 1',
       [email.trim().toLowerCase()],
     );
     const row = rows[0];
     if (!row) return undefined;
-    return {
-      id: String(row.user_id),
-      email: row.email,
-      fullName: row.full_name,
-      phone: row.phone,
-      address: row.address,
-      avatarUrl: row.avatar_url,
-      passwordHash: row.password_hash,
-      plainPassword: row.plain_password ?? null,
-      role: this.userRole(row.role_name),
-      emailVerified: Boolean(row.email_verified),
-      specialization: row.specialization ?? null,
-      createdAt: new Date(row.created_at).toISOString(),
-    };
+    return this.mapUserRow(row);
   }
 
   async findUserById(userId: string | number): Promise<AuthUser | undefined> {
     const [rows] = await this.pool.execute<UserRow[]>(
-      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.plain_password, u.email_verified, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.user_id = ? LIMIT 1',
+      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.status, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.user_id = ? LIMIT 1',
       [Number(userId)],
     );
     const row = rows[0];
     if (!row) return undefined;
+    return this.mapUserRow(row);
+  }
+
+  private mapUserRow(row: UserRow): AuthUser {
     return {
       id: String(row.user_id),
       email: row.email,
@@ -160,9 +173,9 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       address: row.address,
       avatarUrl: row.avatar_url,
       passwordHash: row.password_hash,
-      plainPassword: row.plain_password ?? null,
       role: this.userRole(row.role_name),
       emailVerified: Boolean(row.email_verified),
+      status: row.status ?? 'active',
       specialization: row.specialization ?? null,
       createdAt: new Date(row.created_at).toISOString(),
     };
@@ -200,16 +213,16 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
     return this.findUserById(userId);
   }
 
-  async updateUserPassword(userId: string | number, passwordHash: string, plainPassword?: string): Promise<void> {
+  async updateUserPassword(userId: string | number, passwordHash: string): Promise<void> {
     await this.pool.execute(
-      'UPDATE `user` SET password_hash = ?, plain_password = COALESCE(?, plain_password) WHERE user_id = ?',
-      [passwordHash, plainPassword ?? null, Number(userId)],
+      'UPDATE `user` SET password_hash = ? WHERE user_id = ?',
+      [passwordHash, Number(userId)],
     );
   }
 
   async findPending(email: string): Promise<PendingRegistration | undefined> {
     const [rows] = await this.pool.execute<PendingRow[]>(
-      'SELECT otp_id, email, password_hash, plain_password, otp_code, expires_at, created_at FROM otp_verification WHERE email = ? AND purpose = ? AND is_used = FALSE ORDER BY created_at DESC LIMIT 1',
+      'SELECT otp_id, email, password_hash, otp_code, expires_at, created_at FROM otp_verification WHERE email = ? AND purpose = ? AND is_used = FALSE ORDER BY created_at DESC LIMIT 1',
       [email.trim().toLowerCase(), 'register'],
     );
     const row = rows[0];
@@ -218,7 +231,6 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       otpId: row.otp_id,
       email: row.email,
       passwordHash: row.password_hash,
-      plainPassword: row.plain_password ?? null,
       otp: row.otp_code,
       expiresAt: new Date(row.expires_at).getTime(),
       createdAt: new Date(row.created_at).toISOString(),
@@ -231,8 +243,8 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       [registration.email, 'register'],
     );
     await this.pool.execute(
-      'INSERT INTO otp_verification (email, password_hash, plain_password, otp_code, purpose, is_used, expires_at) VALUES (?, ?, ?, ?, ?, FALSE, ?)',
-      [registration.email, registration.passwordHash, registration.plainPassword ?? null, registration.otp, 'register', new Date(registration.expiresAt)],
+      'INSERT INTO otp_verification (email, password_hash, otp_code, purpose, is_used, expires_at) VALUES (?, ?, ?, ?, FALSE, ?)',
+      [registration.email, registration.passwordHash, registration.otp, 'register', new Date(registration.expiresAt)],
     );
   }
 
@@ -248,6 +260,53 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       'UPDATE otp_verification SET is_used = TRUE, user_id = ? WHERE email = ? AND purpose = ? AND is_used = FALSE',
       [userId, email.trim().toLowerCase(), 'register'],
     );
+  }
+
+  async savePasswordResetOtp(
+    email: string,
+    userId: number,
+    otp: string,
+    expiresAt: number,
+  ): Promise<void> {
+    const normalized = email.trim().toLowerCase();
+    await this.pool.execute(
+      'UPDATE otp_verification SET is_used = TRUE WHERE email = ? AND purpose = ? AND is_used = FALSE',
+      [normalized, 'reset_password'],
+    );
+    await this.pool.execute(
+      'INSERT INTO otp_verification (email, user_id, password_hash, otp_code, purpose, is_used, expires_at) VALUES (?, ?, ?, ?, ?, FALSE, ?)',
+      [normalized, userId, '', otp, 'reset_password', new Date(expiresAt)],
+    );
+  }
+
+  async findPasswordResetOtp(email: string): Promise<
+    | { otpId: number; email: string; userId: number | null; otp: string; expiresAt: number }
+    | undefined
+  > {
+    const [rows] = await this.pool.execute<PendingRow[]>(
+      'SELECT otp_id, email, user_id, otp_code, expires_at FROM otp_verification WHERE email = ? AND purpose = ? AND is_used = FALSE ORDER BY created_at DESC LIMIT 1',
+      [email.trim().toLowerCase(), 'reset_password'],
+    );
+    const row = rows[0];
+    if (!row) return undefined;
+    return {
+      otpId: row.otp_id,
+      email: row.email,
+      userId: row.user_id ?? null,
+      otp: row.otp_code,
+      expiresAt: new Date(row.expires_at).getTime(),
+    };
+  }
+
+  async completePasswordResetOtp(email: string): Promise<void> {
+    await this.pool.execute(
+      'UPDATE otp_verification SET is_used = TRUE WHERE email = ? AND purpose = ? AND is_used = FALSE',
+      [email.trim().toLowerCase(), 'reset_password'],
+    );
+  }
+
+  async deletePasswordResetOtp(email: string): Promise<void> {
+    await this.completePasswordResetOtp(email);
   }
 
   async findOrCreateGoogleUser(info: {
@@ -271,16 +330,15 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       ['Customer'],
     );
     const roleId = roleRows[0]?.role_id ?? 6;
-    const dummyPasswordHash = await bcrypt.hash(`google-oauth-${info.googleId}-${Date.now()}`, 10);
+    const dummyPasswordHash = await bcrypt.hash(`google-oauth-${info.googleId}-${Date.now()}`, 12);
 
     const [result] = await this.pool.execute(
-      'INSERT INTO `user` (role_id, full_name, email, password_hash, plain_password, account_origin, auth_provider, google_id, avatar_url, email_verified, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO `user` (role_id, full_name, email, password_hash, account_origin, auth_provider, google_id, avatar_url, email_verified, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         roleId,
         info.name || email.split('@')[0],
         email,
         dummyPasswordHash,
-        'Google OAuth (Không dùng mật khẩu)',
         'self_registered',
         'google',
         info.googleId,

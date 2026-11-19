@@ -1,5 +1,7 @@
-import { BadRequestException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { MYSQL_POOL } from '../../common/database/database.module';
+import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import {
   AvailableStaff,
   ShipmentStaffAssignment,
@@ -11,6 +13,10 @@ import {
 } from './fleet.types';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { StaffAssignmentItemDto } from './dto/assign-staff.dto';
+import {
+  computeBackupPoolSlaDueAt,
+  computeDriverPrimarySlaDueAt,
+} from '../orders/sla-timeline.policy';
 
 interface VehicleRow extends RowDataPacket {
   vehicle_id: number;
@@ -42,6 +48,8 @@ interface ShipmentStaffRow extends RowDataPacket {
   is_confirmed: boolean | number;
   confirmed_at: Date | null;
   confirmation_notes: string | null;
+  is_backup_pool?: boolean | number | null;
+  sla_due_at?: Date | null;
   full_name: string;
   email: string;
   phone: string | null;
@@ -60,15 +68,23 @@ interface UserStaffRow extends RowDataPacket {
 export class FleetStore implements OnModuleInit, OnModuleDestroy {
   private pool!: Pool;
 
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
+  }
+
   async onModuleInit(): Promise<void> {
-    this.pool = createPool({
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system',
-      user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '',
-      connectionLimit: 10,
-    });
+    if (!this.pool) {
+      this.pool = createPool({
+        host: process.env.DB_HOST ?? 'localhost',
+        port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system',
+        user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '',
+        connectionLimit: 10,
+      });
+    }
 
     try {
       const [cols] = await this.pool.query<any[]>(
@@ -106,7 +122,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.pool) {
+    if (this.pool && !this.injectedPool) {
       await this.pool.end();
     }
   }
@@ -194,6 +210,121 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     return (result as { insertId: number }).insertId;
   }
 
+  async updateVehicle(vehicleId: number, dto: UpdateVehicleDto): Promise<void> {
+    const sets: string[] = [];
+    const params: (string | number)[] = [];
+    if (dto.vehicleType !== undefined) {
+      sets.push('vehicle_type = ?');
+      params.push(dto.vehicleType);
+    }
+    if (dto.plateOrCode !== undefined) {
+      sets.push('plate_or_code = ?');
+      params.push(dto.plateOrCode.trim());
+    }
+    if (dto.capacity !== undefined) {
+      sets.push('capacity = ?');
+      params.push(dto.capacity);
+    }
+    if (dto.status !== undefined) {
+      sets.push('status = ?');
+      params.push(dto.status);
+    }
+    if (dto.currentLocation !== undefined) {
+      sets.push('current_location = ?');
+      params.push(dto.currentLocation.trim() || 'Fleet Operations Depot');
+    }
+    if (sets.length === 0) return;
+    params.push(vehicleId);
+    await this.pool.execute(`UPDATE vehicle SET ${sets.join(', ')} WHERE vehicle_id = ?`, params);
+  }
+
+  async deleteVehicle(vehicleId: number): Promise<void> {
+    const [activeTrips] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS cnt
+       FROM route_leg rl
+       JOIN route r ON r.route_id = rl.route_id
+       JOIN shipment s ON s.shipment_id = r.shipment_id
+       WHERE rl.vehicle_id = ? AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')`,
+      [vehicleId],
+    );
+    if (Number(activeTrips[0]?.cnt ?? 0) > 0) {
+      throw new BadRequestException('Phương tiện đang gắn vào lộ trình chuyến đi hoạt động, không thể xóa.');
+    }
+    await this.pool.execute('DELETE FROM vehicle WHERE vehicle_id = ?', [vehicleId]);
+  }
+
+  async findRoleNameById(roleId: number): Promise<string | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT role_name FROM `role` WHERE role_id = ? LIMIT 1',
+      [roleId],
+    );
+    return rows[0]?.role_name ?? null;
+  }
+
+  async validateStaffEligibilityAndSchedule(shipmentId: number, userIds: number[]): Promise<void> {
+    const uniqueIds = [...new Set(userIds.filter((id) => Number.isFinite(id)))];
+    if (uniqueIds.length === 0) return;
+
+    const placeholders = uniqueIds.map(() => '?').join(',');
+    const [users] = await this.pool.query<RowDataPacket[]>(
+      `SELECT u.user_id, u.full_name, u.status, r.role_name
+       FROM \`user\` u
+       JOIN \`role\` r ON r.role_id = u.role_id
+       WHERE u.user_id IN (${placeholders})`,
+      uniqueIds,
+    );
+
+    if (users.length !== uniqueIds.length) {
+      throw new BadRequestException('Một hoặc nhiều nhân sự được chọn không tồn tại.');
+    }
+
+    for (const u of users) {
+      if (u.status && u.status !== 'active') {
+        throw new BadRequestException(`Nhân sự "${u.full_name}" hiện không ở trạng thái hoạt động.`);
+      }
+      if (String(u.role_name).toLowerCase() === 'customer') {
+        throw new BadRequestException(`Tài khoản "${u.full_name}" là Khách hàng, không thể phân công vận hành chuyến.`);
+      }
+    }
+
+    // Check time overlap against other active non-sibling shipments that have scheduled legs
+    const [targetLegs] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT rl.road_trip_id, rl.planned_departure, rl.planned_arrival
+       FROM route_leg rl
+       JOIN route r ON r.route_id = rl.route_id
+       WHERE r.shipment_id = ? AND rl.planned_departure IS NOT NULL AND rl.planned_arrival IS NOT NULL`,
+      [shipmentId],
+    );
+
+    if (targetLegs.length === 0) return;
+    const siblingIds = new Set(await this.findSiblingShipmentsOnSameRoadTrip(shipmentId));
+
+    for (const leg of targetLegs) {
+      for (const u of users) {
+        const [conflicts] = await this.pool.execute<RowDataPacket[]>(
+          `SELECT DISTINCT s.shipment_id
+           FROM shipment_assignment sa
+           JOIN shipment s ON s.shipment_id = sa.shipment_id
+           JOIN route r ON r.shipment_id = s.shipment_id
+           JOIN route_leg ol ON ol.route_id = r.route_id
+           WHERE sa.user_id = ?
+             AND s.shipment_id <> ?
+             AND s.status IN ('planning', 'ready_to_depart', 'in_transit')
+             AND (sa.confirmation_notes IS NULL OR sa.confirmation_notes NOT LIKE 'TỪ CHỐI%')
+             AND ol.planned_departure IS NOT NULL AND ol.planned_arrival IS NOT NULL
+             AND ol.planned_departure < ? AND ol.planned_arrival > ?`,
+          [u.user_id, shipmentId, leg.planned_arrival, leg.planned_departure],
+        );
+        const realConflict = conflicts.find((c) => !siblingIds.has(Number(c.shipment_id)));
+        if (realConflict) {
+          throw new BadRequestException(
+            `Nhân sự "${u.full_name}" đã có lịch trùng thời gian trên chuyến REQ-${String(realConflict.shipment_id).padStart(3, '0')}. Vui lòng chọn nhân sự khác.`,
+          );
+        }
+      }
+    }
+  }
+
   async updateVehicleStatus(vehicleId: number, status: VehicleStatus): Promise<void> {
     await this.pool.execute('UPDATE vehicle SET status = ? WHERE vehicle_id = ?', [status, vehicleId]);
   }
@@ -245,7 +376,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT * FROM vehicle WHERE vehicle_id IN (${ids.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, ids);
       if (vehicles.length !== ids.length || vehicles.some(v => v.status === 'maintenance') || vehicles.reduce((sum, v) => sum + Number(v.capacity), 0) < Number(orders[0].requested_horse_count)) throw new BadRequestException('Phương tiện không hoạt động hoặc không đủ sức chứa');
       const [conflicts] = await db.execute<RowDataPacket[]>(`SELECT sv.shipment_id FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id
-        WHERE sv.vehicle_id IN (${ids.map(() => '?').join(',')}) AND sv.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','rejected')`, [...ids, shipmentId]);
+        WHERE sv.vehicle_id IN (${ids.map(() => '?').join(',')}) AND sv.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected')`, [...ids, shipmentId]);
       if (conflicts.length) throw new BadRequestException('Xe đã có phân công. Hãy chọn chuyến đường bộ trong màn hình lập tuyến để ghép chỗ và kiểm tra lịch');
     }
     const [planned] = await db.execute<RowDataPacket[]>('SELECT l.leg_id FROM route_leg l JOIN route r ON r.route_id = l.route_id WHERE r.shipment_id = ? AND l.vehicle_id IS NOT NULL', [shipmentId]);
@@ -266,6 +397,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     const [rows] = await this.pool.execute<ShipmentStaffRow[]>(
       `SELECT sa.assignment_id, sa.shipment_id, sa.user_id, sa.role_in_shipment, sa.assigned_date,
               sa.is_confirmed, sa.confirmed_at, sa.confirmation_notes,
+              sa.is_backup_pool, sa.sla_due_at,
               u.full_name, u.email, u.phone, r.role_name
        FROM shipment_assignment sa
        JOIN \`user\` u ON sa.user_id = u.user_id
@@ -284,6 +416,8 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       isConfirmed: Boolean(r.is_confirmed),
       confirmedAt: r.confirmed_at ? new Date(r.confirmed_at).toISOString() : null,
       confirmationNotes: r.confirmation_notes,
+      isBackupPool: Boolean(r.is_backup_pool),
+      slaDueAt: r.sla_due_at ? new Date(r.sla_due_at).toISOString() : null,
       user: {
         id: r.user_id,
         fullName: r.full_name,
@@ -295,9 +429,8 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async assignStaff(shipmentId: number, assignments: StaffAssignmentItemDto[]): Promise<void> {
-    // 1. Lấy danh sách phân công hiện tại để bảo toàn trạng thái xác nhận của nhân sự không thay đổi
     const [existing] = await this.pool.execute<any[]>(
-      'SELECT user_id, role_in_shipment, is_confirmed, confirmed_at, confirmation_notes FROM shipment_assignment WHERE shipment_id = ?',
+      'SELECT user_id, role_in_shipment, assigned_date, is_confirmed, confirmed_at, confirmation_notes, is_backup_pool, sla_due_at FROM shipment_assignment WHERE shipment_id = ?',
       [shipmentId],
     );
     const existingMap = new Map<string, any>();
@@ -306,19 +439,30 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.pool.execute('DELETE FROM shipment_assignment WHERE shipment_id = ?', [shipmentId]);
+    const now = new Date();
 
     for (const item of assignments) {
       const prev = existingMap.get(`${item.userId}_${item.roleInShipment}`);
-      // Nếu nhân sự này đã từng được phân công và ĐÃ XÁC NHẬN (chấp nhận), giữ nguyên trạng thái xác nhận!
-      // Nếu trước đó họ từ chối và Manager vẫn phân công lại họ, hoặc là người mới, thì reset về chờ xác nhận
       const shouldPreserve = prev && Boolean(prev.is_confirmed) === true;
       const isConfirmed = shouldPreserve ? true : false;
       const confirmedAt = shouldPreserve ? prev.confirmed_at : null;
       const confirmationNotes = shouldPreserve ? prev.confirmation_notes : null;
+      const isBackupPool = Boolean(item.isBackupPool ?? prev?.is_backup_pool);
+      const needsDriverSla = ['driver', 'escort'].includes(item.roleInShipment);
+      const slaDueAt = shouldPreserve
+        ? (prev.sla_due_at ?? null)
+        : needsDriverSla
+          ? isBackupPool
+            ? computeBackupPoolSlaDueAt(now)
+            : computeDriverPrimarySlaDueAt(now)
+          : null;
+      const assignedDate = shouldPreserve && prev.assigned_date ? prev.assigned_date : now;
 
       await this.pool.execute(
-        'INSERT INTO shipment_assignment (shipment_id, user_id, role_in_shipment, assigned_date, is_confirmed, confirmed_at, confirmation_notes) VALUES (?, ?, ?, NOW(), ?, ?, ?)',
-        [shipmentId, item.userId, item.roleInShipment, isConfirmed, confirmedAt, confirmationNotes],
+        `INSERT INTO shipment_assignment (
+          shipment_id, user_id, role_in_shipment, assigned_date, is_confirmed, confirmed_at, confirmation_notes, is_backup_pool, sla_due_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [shipmentId, item.userId, item.roleInShipment, assignedDate, isConfirmed, confirmedAt, confirmationNotes, isBackupPool ? 1 : 0, slaDueAt],
       );
     }
   }
@@ -332,20 +476,20 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       JOIN route r2 ON r2.route_id = l2.route_id
       JOIN shipment s2 ON s2.shipment_id = r2.shipment_id
       WHERE r1.shipment_id = ? AND l1.road_trip_id IS NOT NULL
-        AND s2.status NOT IN ('completed', 'cancelled', 'rejected')
+        AND s2.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')
     `, [shipmentId]);
     return rows.map((r) => Number(r.shipment_id));
   }
 
   async findAvailableStaff(): Promise<AvailableStaff[]> {
     const [rows] = await this.pool.execute<any[]>(
-      `SELECT u.user_id, u.full_name, u.email, u.phone, u.status, u.specialization, r.role_id, r.role_name,
+      `SELECT u.user_id, u.full_name, u.email, u.phone, u.status, u.specialization, u.current_shift, u.duty_status, r.role_id, r.role_name,
               (
                 SELECT COUNT(*)
                 FROM shipment_assignment sa
                 JOIN shipment s ON sa.shipment_id = s.shipment_id
                 WHERE sa.user_id = u.user_id
-                  AND s.status NOT IN ('completed', 'cancelled')
+                  AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')
                   AND (sa.confirmation_notes IS NULL OR sa.confirmation_notes NOT LIKE 'TỪ CHỐI%')
               ) AS active_trips_count
        FROM \`user\` u
@@ -364,7 +508,17 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       specialization: r.specialization || (r.role_id === 5 ? (r.email?.includes('escort') ? 'escort' : 'driver') : null),
       activeTrips: Number(r.active_trips_count || 0),
       status: r.status,
+      currentShift: r.current_shift ?? 'Ca Hành Chính (08:00 - 17:00)',
+      dutyStatus: r.duty_status ?? 'ON_DUTY',
     }));
+  }
+
+  async updateStaffShift(userId: number, currentShift: string, dutyStatus: string): Promise<boolean> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      'UPDATE `user` SET current_shift = ?, duty_status = ? WHERE user_id = ?',
+      [currentShift.trim(), dutyStatus, userId],
+    );
+    return result.affectedRows > 0;
   }
 
   async findUserByEmail(email: string): Promise<any | null> {

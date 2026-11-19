@@ -1,6 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayNotEmpty, IsArray, IsEnum, IsInt, ValidateNested } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsBoolean, IsEnum, IsInt, IsOptional, ValidateNested } from 'class-validator';
 import { ShipmentStaffRole } from '../fleet.types';
 
 export class StaffAssignmentItemDto {
@@ -15,6 +15,11 @@ export class StaffAssignmentItemDto {
   })
   @IsEnum(ShipmentStaffRole)
   roleInShipment!: ShipmentStaffRole;
+
+  @ApiPropertyOptional({ description: 'Đánh dấu nhân sự thuộc Backup Pool (SLA rút gọn 4h đồng hồ)' })
+  @IsOptional()
+  @IsBoolean()
+  isBackupPool?: boolean;
 }
 
 export class AssignStaffDto {

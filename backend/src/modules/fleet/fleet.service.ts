@@ -3,9 +3,11 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import { FleetStore } from './fleet.store';
 import { OrdersStore } from '../orders/orders.store';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -19,14 +21,18 @@ import {
   VehicleType,
 } from './fleet.types';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
+import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { AssignVehiclesDto } from './dto/assign-vehicles.dto';
 import { AssignStaffDto } from './dto/assign-staff.dto';
 import { CreateStaffDto } from './dto/create-staff.dto';
+import { UpdateStaffShiftDto } from './dto/update-staff-shift.dto';
 import { ShipmentStatus } from '../orders/orders.types';
 import { UserRole } from '../auth/auth.types';
 
 @Injectable()
 export class FleetService {
+  private readonly logger = new Logger(FleetService.name);
+
   constructor(
     private readonly fleetStore: FleetStore,
     private readonly ordersStore: OrdersStore,
@@ -58,20 +64,77 @@ export class FleetService {
     return (await this.fleetStore.findVehicleById(id))!;
   }
 
+  async updateVehicle(id: number, dto: UpdateVehicleDto): Promise<VehicleEntity> {
+    const current = await this.fleetStore.findVehicleById(id);
+    if (!current) {
+      throw new NotFoundException(`Không tìm thấy phương tiện #${id}`);
+    }
+
+    if (dto.plateOrCode && dto.plateOrCode.trim().toLowerCase() !== current.plateOrCode.trim().toLowerCase()) {
+      const existing = await this.fleetStore.findAllVehicles();
+      const dup = existing.some(
+        (v) => v.id !== id && v.plateOrCode.trim().toLowerCase() === dto.plateOrCode!.trim().toLowerCase(),
+      );
+      if (dup) {
+        throw new BadRequestException(`Biển số/Mã phương tiện "${dto.plateOrCode}" đã tồn tại trên hệ thống`);
+      }
+    }
+
+    await this.fleetStore.updateVehicle(id, dto);
+    return (await this.fleetStore.findVehicleById(id))!;
+  }
+
+  async deleteVehicle(id: number): Promise<{ success: boolean; message: string }> {
+    const existingList = await this.fleetStore.findAllVehicles();
+    const vehicle = existingList.find((v) => v.id === id);
+    if (!vehicle) {
+      throw new NotFoundException(`Không tìm thấy phương tiện #${id}`);
+    }
+    if (vehicle.status === VehicleStatus.IN_USE) {
+      throw new BadRequestException(`Phương tiện "${vehicle.plateOrCode}" đang được phân công trong chuyến đi, không thể xóa.`);
+    }
+
+    await this.fleetStore.deleteVehicle(id);
+    return {
+      success: true,
+      message: `Đã xóa phương tiện "${vehicle.plateOrCode}" thành công.`,
+    };
+  }
+
   async getAvailableStaff(): Promise<AvailableStaff[]> {
     return this.fleetStore.findAvailableStaff();
   }
 
-  async provisionStaff(dto: CreateStaffDto): Promise<AvailableStaff> {
+  async provisionStaff(
+    dto: CreateStaffDto,
+    actor?: AuthenticatedUser,
+  ): Promise<AvailableStaff & { temporaryPassword?: string }> {
     const existing = await this.fleetStore.findUserByEmail(dto.email);
     if (existing) {
       throw new ConflictException(`Email "${dto.email}" đã tồn tại trong hệ thống!`);
     }
 
-    const plainPassword = dto.password?.trim() || 'Password123';
-    const passwordHash = await bcrypt.hash(plainPassword, 10);
+    const targetRoleName = await this.fleetStore.findRoleNameById(dto.roleId);
+    if (!targetRoleName) {
+      throw new BadRequestException(`Vai trò ID #${dto.roleId} không tồn tại.`);
+    }
+    const normalizedTarget = targetRoleName.toLowerCase();
+    if (normalizedTarget === 'admin' || normalizedTarget === 'customer') {
+      throw new ForbiddenException('Không thể khởi tạo tài khoản Admin hoặc Customer qua cổng nhân sự vận hành.');
+    }
+    if (
+      normalizedTarget.includes('logistics manager') &&
+      actor?.role !== UserRole.ADMIN
+    ) {
+      throw new ForbiddenException('Chỉ quản trị viên hệ thống (Admin) mới có quyền khởi tạo tài khoản Logistics Manager.');
+    }
 
-    return this.fleetStore.createStaffUser({
+    const providedPassword = dto.password?.trim();
+    const generatedPassword = providedPassword ? undefined : `${randomBytes(8).toString('base64url')}1A!`;
+    const passwordToHash = providedPassword || generatedPassword!;
+    const passwordHash = await bcrypt.hash(passwordToHash, 12);
+
+    const created = await this.fleetStore.createStaffUser({
       fullName: dto.fullName,
       email: dto.email,
       phone: dto.phone,
@@ -79,6 +142,24 @@ export class FleetService {
       specialization: dto.specialization,
       passwordHash,
     });
+
+    return generatedPassword ? { ...created, temporaryPassword: generatedPassword } : created;
+  }
+
+  async updateStaffShift(
+    userId: number,
+    dto: UpdateStaffShiftDto,
+  ): Promise<{ success: boolean; userId: number; currentShift: string; dutyStatus: string }> {
+    const ok = await this.fleetStore.updateStaffShift(userId, dto.currentShift, dto.dutyStatus);
+    if (!ok) {
+      throw new NotFoundException(`Không tìm thấy nhân sự #${userId}`);
+    }
+    return {
+      success: true,
+      userId,
+      currentShift: dto.currentShift.trim(),
+      dutyStatus: dto.dutyStatus,
+    };
   }
 
   async getShipmentAssignments(shipmentId: number, user?: AuthenticatedUser): Promise<{
@@ -130,7 +211,6 @@ export class FleetService {
       throw new BadRequestException('Xe đang được sử dụng hoặc bảo trì. Ghép chuyến phải chọn chuyến đường bộ trong kế hoạch để kiểm tra chỗ');
     }
 
-    // Key rule Flow 3: A vehicle/capacity assignment cannot exceed availability or horse capacity.
     const totalCapacity = vehicles.reduce((sum, v) => sum + v.capacity, 0);
     if (totalCapacity < order.requestedHorseCount) {
       throw new BadRequestException(
@@ -138,20 +218,15 @@ export class FleetService {
       );
     }
 
-    // Lưu liên kết
     await this.fleetStore.assignVehicles(shipmentId, dto.vehicleIds);
-
-    // Cập nhật trạng thái xe thành in_use
     await this.fleetStore.updateVehiclesStatus(dto.vehicleIds, VehicleStatus.IN_USE);
 
-    // Chuyển trạng thái đơn sang planning nếu đang là approved
     if (order.status === ShipmentStatus.APPROVED) {
       await this.ordersStore.updateStatus(shipmentId, ShipmentStatus.PLANNING);
     }
 
     const assigned = await this.fleetStore.findAssignedVehicles(shipmentId);
 
-    // Gửi thông báo
     await this.notificationsService.createNotification(
       order.customerId,
       'Đã phân công phương tiện vận chuyển',
@@ -173,14 +248,39 @@ export class FleetService {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
 
-    // Kiểm tra không phân công lại nhân sự đã từ chối nhận chuyến này
+    if (['in_transit', 'completed', 'cancelled', 'cancelled_operational', 'rejected'].includes(order.status)) {
+      throw new ConflictException(
+        `Không thể thay đổi phân công nhân sự khi đơn đang ở trạng thái "${order.status}"`,
+      );
+    }
+
+    // 1. Validate staff role & schedule overlap on non-sibling active trips
+    if (typeof this.fleetStore.validateStaffEligibilityAndSchedule === 'function') {
+      await this.fleetStore.validateStaffEligibilityAndSchedule(
+        shipmentId,
+        dto.assignments.map((a) => a.userId),
+      );
+    }
+
+    // 2. Check khóa phân công sau khi đã confirmed (trừ trường hợp thay thế người từ chối / chưa xác nhận) & không phân công lại người đã từ chối
     const existingStaff = await this.fleetStore.findAssignedStaff(shipmentId);
+    if (['confirmed', 'ready_to_depart'].includes(order.status)) {
+      const hasPendingOrDeclined = existingStaff.some(
+        (s) => !s.isConfirmed || Boolean(s.confirmationNotes?.includes('TỪ CHỐI')),
+      );
+      if (!hasPendingOrDeclined) {
+        throw new ConflictException(
+          'Toàn bộ nhân sự đã xác nhận nhận chuyến; không thể phân công lại sau khi chuyến đi đã xác nhận và phát hành hóa đơn',
+        );
+      }
+    }
+
     for (const item of dto.assignments) {
       const prevDeclined = existingStaff.find(
         (s) => s.userId === item.userId && s.roleInShipment === item.roleInShipment && s.confirmationNotes?.includes('TỪ CHỐI'),
       );
       if (prevDeclined) {
-        throw new BadRequestException(
+        throw new ConflictException(
           `Nhân sự ${prevDeclined.user?.fullName || 'này'} đã từ chối chuyến này trước đó (${prevDeclined.confirmationNotes}). Vui lòng chọn nhân sự khác đang rảnh thay thế!`,
         );
       }
@@ -189,11 +289,10 @@ export class FleetService {
     await this.fleetStore.assignStaff(shipmentId, dto.assignments);
     const assigned = await this.fleetStore.findAssignedStaff(shipmentId);
 
-    // Thông báo cho nhân sự mới hoặc nhân sự cần xác nhận lại (tránh làm phiền người đã xác nhận)
     for (const item of dto.assignments) {
       const staffRecord = assigned.find((a) => a.userId === item.userId && a.roleInShipment === item.roleInShipment);
       if (staffRecord && staffRecord.isConfirmed) {
-        continue; // Đã xác nhận trước đó, không gửi lại thông báo trùng lặp
+        continue;
       }
 
       await this.notificationsService.createNotification(
@@ -205,7 +304,6 @@ export class FleetService {
       );
     }
 
-    // TỰ ĐỘNG ĐỒNG BỘ: Nếu đơn hàng này đi ghép chung chuyến đường bộ (road_trip), tự động đồng bộ nhân sự cho các đơn còn lại
     try {
       const siblingShipmentIds = await this.fleetStore.findSiblingShipmentsOnSameRoadTrip(shipmentId);
       for (const sibId of siblingShipmentIds) {
@@ -222,7 +320,7 @@ export class FleetService {
         }
       }
     } catch (syncErr) {
-      console.error('Lỗi tự động đồng bộ nhân sự cho đơn ghép:', syncErr);
+      this.logger.error('Lỗi tự động đồng bộ nhân sự cho đơn ghép', syncErr as Error);
     }
 
     return assigned;

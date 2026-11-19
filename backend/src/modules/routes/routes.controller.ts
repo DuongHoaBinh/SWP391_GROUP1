@@ -19,6 +19,7 @@ import { BuildDetailedPlanDto } from './dto/build-detailed-plan.dto';
 import { ReviewPlanDto } from './dto/review-plan.dto';
 import { ConfirmAssignmentDto } from './dto/confirm-assignment.dto';
 import { DeclineAssignmentDto } from './dto/decline-assignment.dto';
+import { ReportIncidentDto } from './dto/report-incident.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -43,6 +44,15 @@ export class RoutesController {
   @ApiOperation({ summary: 'Lấy thông tin lộ trình và danh sách điểm dừng của đơn vận chuyển' })
   getRouteByShipmentId(@CurrentUser() user: AuthenticatedUser, @Param('shipmentId', ParseIntPipe) shipmentId: number) {
     return this.routesService.getRouteByShipmentId(shipmentId, user);
+  }
+
+  @Get('shipment/:shipmentId/optional')
+  @ApiOperation({ summary: 'Lấy lộ trình của đơn hàng nếu đã lập (trả { route: null } với HTTP 200 nếu chưa có lộ trình)' })
+  findOptionalRouteByShipmentId(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('shipmentId', ParseIntPipe) shipmentId: number,
+  ) {
+    return this.routesService.findOptionalRouteByShipmentId(shipmentId, user);
   }
 
   @Get('shipment/:shipmentId/plan')
@@ -210,15 +220,28 @@ export class RoutesController {
   }
 
   @Post('shipment/:shipmentId/incident')
+  @Roles(
+    UserRole.DRIVER_ESCORT,
+    UserRole.FLEET_ROUTE_COORDINATOR,
+    UserRole.LOGISTICS_MANAGER,
+    UserRole.ADMIN,
+  )
   @ApiOperation({
     summary: 'Tài xế, Escort hoặc Coordinator báo cáo sự cố (tắc đường, sạt lở, hỏng xe...) để mở quyền hiệu chỉnh chặng',
   })
   reportIncident(
     @CurrentUser() user: AuthenticatedUser,
     @Param('shipmentId', ParseIntPipe) shipmentId: number,
-    @Body() dto: { incidentType: string; description: string; severity?: string },
+    @Body() dto: ReportIncidentDto,
   ) {
     return this.routesService.reportIncident(user, shipmentId, dto);
+  }
+
+  @Get('incidents')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Danh sách sự cố hiện trường thực tế từ bảng incident_report' })
+  getAllIncidents() {
+    return this.routesService.getAllIncidents();
   }
 
   @Post('incident/:incidentId/resolve')

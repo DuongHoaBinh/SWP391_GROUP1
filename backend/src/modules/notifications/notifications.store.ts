@@ -1,6 +1,7 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { NotificationItem, NotificationType } from './notifications.types';
+import { MYSQL_POOL } from '../../common/database/database.module';
 
 interface NotificationRow extends RowDataPacket {
   notification_id: number;
@@ -19,31 +20,27 @@ interface NotificationRow extends RowDataPacket {
 export class NotificationsStore implements OnModuleInit, OnModuleDestroy {
   private pool!: Pool;
 
-  async onModuleInit(): Promise<void> {
-    this.pool = createPool({
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system',
-      user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '',
-      connectionLimit: 10,
-    });
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
+  }
 
-    try {
-      // Auto-repair any past notifications that had mismatched shipment IDs (e.g. REQ-021 instead of REQ-010)
-      await this.pool.execute(
-        `UPDATE notification 
-         SET title = REPLACE(title, 'REQ-021', 'REQ-010'), 
-             message = REPLACE(message, 'REQ-021', 'REQ-010') 
-         WHERE title LIKE '%REQ-021%' OR message LIKE '%REQ-021%'`
-      );
-    } catch (err) {
-      console.warn('[NotificationsStore] Repair notification error:', err);
+  async onModuleInit(): Promise<void> {
+    if (!this.pool) {
+      this.pool = createPool({
+        host: process.env.DB_HOST ?? 'localhost',
+        port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system',
+        user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '',
+        connectionLimit: 10,
+      });
     }
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.pool) {
+    if (this.pool && !this.injectedPool) {
       await this.pool.end();
     }
   }
@@ -67,18 +64,21 @@ export class NotificationsStore implements OnModuleInit, OnModuleDestroy {
     const [rows] = await this.pool.execute<any[]>(
       `SELECT n.notification_id, n.user_id, n.shipment_id, n.horse_id, n.title, n.message, n.notif_type, n.is_read, n.created_at,
               COALESCE(LOWER(r.role_name), 'customer') as user_role,
-              (SELECT cu.full_name FROM shipment s JOIN \`user\` cu ON cu.user_id = s.customer_id WHERE s.shipment_id = n.shipment_id) as shipment_customer_name,
-              (SELECT cu.email FROM shipment s JOIN \`user\` cu ON cu.user_id = s.customer_id WHERE s.shipment_id = n.shipment_id) as shipment_customer_email,
-              (SELECT CONCAT('REQ-', LPAD(
+              cu.full_name as shipment_customer_name,
+              cu.email as shipment_customer_email,
+              CASE WHEN s.shipment_id IS NOT NULL THEN CONCAT('REQ-', LPAD(
                 (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
                 3, '0'
-              )) FROM shipment s WHERE s.shipment_id = n.shipment_id) as customer_code,
-              (SELECT CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) FROM shipment s WHERE s.shipment_id = n.shipment_id) as global_code
+              )) ELSE NULL END as customer_code,
+              CASE WHEN s.shipment_id IS NOT NULL THEN CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) ELSE NULL END as global_code
        FROM notification n
        JOIN \`user\` u ON u.user_id = n.user_id
        LEFT JOIN \`role\` r ON r.role_id = u.role_id
-       WHERE n.user_id = ? 
-       ORDER BY n.created_at DESC`,
+       LEFT JOIN shipment s ON s.shipment_id = n.shipment_id
+       LEFT JOIN \`user\` cu ON cu.user_id = s.customer_id
+       WHERE n.user_id = ?
+       ORDER BY n.created_at DESC
+       LIMIT 50`,
       [userId],
     );
 
@@ -160,5 +160,13 @@ export class NotificationsStore implements OnModuleInit, OnModuleDestroy {
       targetRoles,
     );
     return rows.map((row) => Number(row.user_id));
+  }
+
+  async findUserEmailById(userId: number): Promise<string | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT email FROM `user` WHERE user_id = ? LIMIT 1',
+      [userId],
+    );
+    return rows[0]?.email ?? null;
   }
 }

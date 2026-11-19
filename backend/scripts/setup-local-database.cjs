@@ -27,9 +27,9 @@ async function main() {
     const loginPassword = crypto.randomBytes(15).toString('base64url') + '1a';
     await db.query('UPDATE `user` SET password_hash = ?', [await bcrypt.hash(loginPassword, 12)]);
     fs.writeFileSync(path.join(privateDir, 'local-accounts.txt'), `Local development accounts only\nCustomer: customer@example.com\nManager: manager@example.com\nPassword: ${loginPassword}\n`, { mode: 0o600, flag: 'wx' });
-    fs.writeFileSync(envFile, `PORT=5000\nDB_HOST=127.0.0.1\nDB_PORT=3307\nDB_NAME=horse_transport_system\nDB_USER=equitransit\nDB_PASSWORD=${appPassword}\nJWT_SECRET=${crypto.randomBytes(48).toString('hex')}\nFRONTEND_ORIGIN=http://localhost:3000\nSMTP_REQUIRED=true\nAUTH_EXPOSE_DEV_OTP=false\n`, { mode: 0o600, flag: 'wx' });
+    fs.writeFileSync(envFile, `PORT=5000\nDB_HOST=127.0.0.1\nDB_PORT=3307\nDB_NAME=horse_transport_system\nDB_USER=equitransit\nDB_PASSWORD=${appPassword}\nJWT_SECRET=${crypto.randomBytes(48).toString('hex')}\nFRONTEND_ORIGIN=http://localhost:3001\nSMTP_REQUIRED=true\nAUTH_EXPOSE_DEV_OTP=false\n`, { mode: 0o600, flag: 'wx' });
     console.log('Portable local database initialized. Credentials saved locally; no existing database was replaced.');
-    console.log('Next: node database/apply-local-prerequisites.cjs, node database/apply-tracking-migration.cjs, node database/apply-sepay-migration.cjs (from the repository root).');
+    console.log('Next: node database/migrate.cjs (from the repository root) or npm run migrate:all (from backend/).');
   } finally { await db.end(); }
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

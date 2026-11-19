@@ -56,6 +56,7 @@ export interface CreateHealthLogDto {
   heartRateBpm?: number;
   notes?: string;
   attachments?: string[];
+  recordedAt?: string;
 }
 
 export interface TrackingMilestoneItem {
@@ -90,6 +91,8 @@ export interface HorseHealthLogEntity {
   conditionStatusVi?: string;
   temperatureC: number | null;
   heartRateBpm: number | null;
+  alertTier?: 'green' | 'amber_observational' | 'amber_escalatable' | 'red';
+  alertReason?: string | null;
   notes: string | null;
   attachments: string[];
   recordedAt: string;
@@ -109,6 +112,7 @@ export interface TripStatusLogEntity {
   updatedBy: number;
   updatedByName?: string;
   updatedByRole: string;
+  isBackdated?: boolean;
   createdAt: string;
 }
 
@@ -129,7 +133,14 @@ export interface TripTrackingDetails {
   assignedVehicle: string | null;
   assignedDriver: string | null;
   assignedEscort: string | null;
-  assignedHorses: Array<{ id: number; name: string; breed?: string; microchipNo?: string }>;
+  assignedHorses: Array<{
+    id: number;
+    shipmentHorseId?: number;
+    name: string;
+    breed?: string;
+    microchipNo?: string;
+    passportNo?: string;
+  }>;
   milestones: TrackingMilestoneItem[];
   healthLogs: HorseHealthLogEntity[];
   statusLogs: TripStatusLogEntity[];

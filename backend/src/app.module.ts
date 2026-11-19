@@ -9,15 +9,20 @@ import { FleetModule } from './modules/fleet/fleet.module';
 import { RoutesModule } from './modules/routes/routes.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { IncidentsModule } from './modules/incidents/incidents.module';
+import { HealthController } from './modules/health/health.controller';
 import { ShipmentLifecycleModule } from './common/shipment-lifecycle';
+import { DatabaseModule } from './common/database/database.module';
+import { getJwtExpiresIn, getJwtSecret } from './common/config/jwt.config';
 
 @Module({
   imports: [
+    DatabaseModule,
     ShipmentLifecycleModule,
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET ?? 'development-only-secret',
-      signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN ?? '24h') as any },
+      secret: getJwtSecret(),
+      signOptions: { expiresIn: getJwtExpiresIn() as any },
     }),
     AuthModule,
     OrdersModule,
@@ -28,6 +33,8 @@ import { ShipmentLifecycleModule } from './common/shipment-lifecycle';
     RoutesModule,
     TrackingModule,
     ReportsModule,
+    IncidentsModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

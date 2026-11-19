@@ -20,8 +20,12 @@ import { HorsesService } from './horses.service';
 import { CreateHorseDto } from './dto/create-horse.dto';
 import { UpdateHorseDto } from './dto/update-horse.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
+import { UserRole } from '../auth/auth.types';
+import { imageFileFilter } from '../../common/utils/upload-validation';
 
 const horsePhotoStorage = diskStorage({
   destination: (req, file, cb) => {
@@ -33,14 +37,14 @@ const horsePhotoStorage = diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = extname(file.originalname);
+    const ext = extname(file.originalname).toLowerCase();
     cb(null, `${uniqueSuffix}${ext}`);
   },
 });
 
 @ApiTags('Horses')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('horses')
 export class HorsesController {
   constructor(private readonly horsesService: HorsesService) {}
@@ -91,8 +95,9 @@ export class HorsesController {
   @Post(':id/avatar')
   @UseInterceptors(
     FileInterceptor('file', {
+      fileFilter: imageFileFilter,
       storage: horsePhotoStorage,
-      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
     }),
   )
   @ApiConsumes('multipart/form-data')
@@ -119,10 +124,12 @@ export class HorsesController {
   }
 
   @Post('upload-photo')
+  @Roles(UserRole.CUSTOMER, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('file', {
+      fileFilter: imageFileFilter,
       storage: horsePhotoStorage,
-      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
     }),
   )
   @ApiConsumes('multipart/form-data')

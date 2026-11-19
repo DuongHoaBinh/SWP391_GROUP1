@@ -37,6 +37,24 @@ export class OrdersController {
   @ApiOperation({ summary: 'Chính sách bảo hiểm và tỷ giá khai báo do server cấu hình' })
   getInsurancePolicy() { return insurancePolicy(); }
 
+  @Get('cutoff-policy')
+  @ApiOperation({ summary: 'Tính mốc đặt đơn tối thiểu (Order Cutoff) theo điểm đến, loại booking và quy định kiểm dịch Tầng A' })
+  getCutoffPolicy(
+    @Query('destinationLocation') destinationLocation?: string,
+    @Query('originLocation') originLocation?: string,
+    @Query('bookingType') bookingType?: string,
+    @Query('transportMode') transportMode?: string,
+    @Query('transportationType') transportationType?: string,
+  ) {
+    return this.ordersService.getOrderCutoffPolicy({
+      destinationLocation,
+      originLocation,
+      bookingType,
+      transportMode: transportMode || null,
+      transportationType: transportationType || null,
+    });
+  }
+
   @Post()
   @Roles(UserRole.CUSTOMER)
   @ApiOperation({ summary: 'Customer creates and submits a new transport request' })
@@ -56,10 +74,13 @@ export class OrdersController {
 
   @Get()
   @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.DRIVER_ESCORT)
-  @ApiOperation({ summary: 'Logistics Manager, Coordinator and Driver view transport requests' })
+  @ApiOperation({ summary: 'Logistics Manager, Coordinator and Driver view transport requests (Drivers only see assigned trips)' })
   @ApiQuery({ name: 'status', enum: ShipmentStatus, required: false })
-  getAllOrders(@Query('status') status?: ShipmentStatus) {
-    return this.ordersService.getAllOrders(status);
+  getAllOrders(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('status') status?: ShipmentStatus,
+  ) {
+    return this.ordersService.getAllOrders(status, user);
   }
 
   @Get(':id')
@@ -126,8 +147,8 @@ export class OrdersController {
   }
 
   @Patch(':id/cancel')
-  @Roles(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.LOGISTICS_MANAGER)
-  @ApiOperation({ summary: 'Cancel a transport request' })
+  @Roles(UserRole.CUSTOMER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Cancel a transport request before approval' })
   cancelOrder(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseIntPipe) id: number,

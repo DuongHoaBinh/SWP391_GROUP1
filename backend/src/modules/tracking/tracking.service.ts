@@ -1,18 +1,31 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  Optional,
+  UnprocessableEntityException,
 } from '@nestjs/common';
+import * as fs from 'fs';
+import { basename, join } from 'path';
 import { TrackingStore } from './tracking.store';
 import { RoutesService } from '../routes/routes.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DocumentsService } from '../documents/documents.service';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import {
   areSameLocations,
   buildConsolidatedRoadItinerary,
   ConsolidatedRoadItinerary,
 } from '../../common/road-trip-sequencing';
+import { verifyUploadedFileMagicBytes } from '../../common/utils/upload-validation';
+import {
+  DEFAULT_EQUINE_VITAL_CONFIG,
+  EquineVitalConfig,
+  evaluateEquineHealthAlert,
+} from './vitals-policy';
 import {
   CheckInLegDto,
   CheckInStopDto,
@@ -25,14 +38,143 @@ import {
 
 @Injectable()
 export class TrackingService {
+  private readonly logger = new Logger(TrackingService.name);
+
   constructor(
     private readonly trackingStore: TrackingStore,
     private readonly notificationsService: NotificationsService,
     private readonly routesService: RoutesService,
+    @Optional() private readonly documentsService?: DocumentsService,
   ) {}
 
   async getMyTrips(user: AuthenticatedUser): Promise<any[]> {
     return this.trackingStore.findMyAssignedTrips(Number(user.id), String(user.role));
+  }
+
+  private async resolveOperationalActorRole(shipmentId: number, user: AuthenticatedUser): Promise<string> {
+    const roleStr = String(user.role || '').toUpperCase();
+    if (roleStr.includes('DRIVER') || roleStr.includes('ESCORT')) {
+      if (typeof this.trackingStore?.findAssignedStaff === 'function') {
+        const assigned = await this.trackingStore.findAssignedStaff(shipmentId);
+        const match = assigned.find((s) => Number(s.user_id) === Number(user.id));
+        if (match?.role_in_shipment) return String(match.role_in_shipment);
+      }
+      if (user.specialization === 'escort' || user.email?.toLowerCase().includes('escort')) return 'escort';
+      if (user.specialization === 'driver' || user.email?.toLowerCase().includes('driver')) return 'driver';
+    }
+    return String(user.role);
+  }
+
+  private evaluateEventTimestamp(actualTime?: string, notes?: string): { eventTime: Date; isBackdated: boolean } {
+    if (!actualTime) return { eventTime: new Date(), isBackdated: false };
+    const parsed = new Date(actualTime);
+    if (!Number.isFinite(parsed.getTime())) {
+      throw new BadRequestException('Thời điểm actualTime không hợp lệ.');
+    }
+    const isBackdated = Math.abs(Date.now() - parsed.getTime()) > 30 * 60 * 1000;
+    if (isBackdated && (!notes || !notes.trim())) {
+      throw new BadRequestException(
+        'Check-in bù ngoài thời gian thực (> 30 phút) bắt buộc phải nhập ghi chú giải trình (notes).',
+      );
+    }
+    return { eventTime: parsed, isBackdated };
+  }
+
+  async getVitalConfig(): Promise<EquineVitalConfig> {
+    if (typeof this.trackingStore?.findActiveVitalConfig === 'function') {
+      return this.trackingStore.findActiveVitalConfig();
+    }
+    return DEFAULT_EQUINE_VITAL_CONFIG;
+  }
+
+  async updateVitalConfig(user: AuthenticatedUser, patch: Partial<EquineVitalConfig>): Promise<EquineVitalConfig> {
+    const current = await this.getVitalConfig();
+    const next: EquineVitalConfig = { ...current, ...patch };
+    if (
+      !(next.tempAmberLowMin < next.tempGreenMin && next.tempGreenMin <= next.tempGreenMax && next.tempGreenMax < next.tempAmberHighMax)
+    ) {
+      throw new BadRequestException('Ngưỡng thân nhiệt không hợp lệ: phải thỏa tempAmberLowMin < tempGreenMin <= tempGreenMax < tempAmberHighMax.');
+    }
+    if (
+      !(next.hrAmberLowMin < next.hrGreenMin && next.hrGreenMin <= next.hrGreenMax && next.hrGreenMax < next.hrAmberHighMax)
+    ) {
+      throw new BadRequestException('Ngưỡng nhịp tim không hợp lệ: phải thỏa hrAmberLowMin < hrGreenMin <= hrGreenMax < hrAmberHighMax.');
+    }
+    return this.trackingStore.updateVitalConfig(next, Number(user.id));
+  }
+
+  async handleUploadedHealthPhotos(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    files: Express.Multer.File[],
+  ): Promise<{ files: string[] }> {
+    const shipment = await this.trackingStore.findShipmentById(shipmentId);
+    if (!shipment) {
+      for (const f of files || []) {
+        if (f.path && fs.existsSync(f.path)) try { fs.unlinkSync(f.path); } catch {}
+      }
+      throw new NotFoundException('Không tìm thấy chuyến đi');
+    }
+    try {
+      await this.assertAssignedForDriverEscort(user, shipmentId);
+    } catch (err) {
+      for (const f of files || []) {
+        if (f.path && fs.existsSync(f.path)) try { fs.unlinkSync(f.path); } catch {}
+      }
+      throw err;
+    }
+    if (!files || files.length === 0) {
+      throw new BadRequestException('Vui lòng chọn ít nhất 1 tệp ảnh hợp lệ (JPG, PNG, WEBP).');
+    }
+    if (files.length > 5) {
+      for (const f of files) {
+        if (f.path && fs.existsSync(f.path)) try { fs.unlinkSync(f.path); } catch {}
+      }
+      throw new BadRequestException('Tối đa 5 ảnh cho mỗi lần tải lên.');
+    }
+    for (const file of files) {
+      verifyUploadedFileMagicBytes(file, 'image');
+    }
+    return {
+      files: files.map((f) => `/api/tracking/health-logs/attachments/${basename(f.filename)}`),
+    };
+  }
+
+  async getAuthorizedHealthPhotoPath(
+    user: AuthenticatedUser,
+    filename: string,
+  ): Promise<{ absolutePath: string; fileName: string }> {
+    const safeName = basename(filename);
+    const allowed = await this.trackingStore.isHealthPhotoAccessibleToUser(
+      safeName,
+      Number(user.id),
+      String(user.role),
+    );
+    if (!allowed) {
+      throw new ForbiddenException('Bạn không có quyền truy cập ảnh nhật ký sức khỏe của chuyến đi này.');
+    }
+    const absolutePath = join(process.cwd(), 'uploads', 'health-logs', safeName);
+    if (!fs.existsSync(absolutePath)) {
+      throw new NotFoundException('Không tìm thấy tệp ảnh trên máy chủ lưu trữ.');
+    }
+    return { absolutePath, fileName: safeName };
+  }
+
+  private async assertAssignedForDriverEscort(user: AuthenticatedUser, shipmentId: number): Promise<void> {
+    const roleStr = String(user.role || '').toUpperCase();
+    const isSupervisor =
+      roleStr.includes('COORDINATOR') ||
+      roleStr.includes('MANAGER') ||
+      roleStr.includes('ADMIN');
+    if (isSupervisor) return;
+
+    if (roleStr.includes('DRIVER') || roleStr.includes('ESCORT')) {
+      const assignedStaff = await this.trackingStore.findAssignedStaff(shipmentId);
+      const isAssigned = assignedStaff.some((s) => Number(s.user_id) === Number(user.id));
+      if (!isAssigned) {
+        throw new ForbiddenException('Bạn chỉ được phép xem và thao tác trên chuyến đi đã được phân công cho mình');
+      }
+    }
   }
 
   async getTrackingDetails(
@@ -48,6 +190,8 @@ export class TrackingService {
     if (String(user.role).toUpperCase() === 'CUSTOMER' && shipment.customer_id !== Number(user.id)) {
       throw new ForbiddenException('Bạn không có quyền xem thông tin chuyến đi của khách hàng khác');
     }
+
+    await this.assertAssignedForDriverEscort(user, shipmentId);
 
     const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
     const routeId = route?.route_id || shipment.route_id;
@@ -147,16 +291,18 @@ export class TrackingService {
       routePlanStatus: route?.plan_status || shipment.status,
       currentMilestone: currentMilestoneText,
       consolidatedRouteSummary,
-      eta: effectiveLegs[effectiveLegs.length - 1]?.planned_arrival ? new Date(effectiveLegs[effectiveLegs.length - 1].planned_arrival).toLocaleString('vi-VN') : null,
+      eta: effectiveLegs[effectiveLegs.length - 1]?.planned_arrival ? new Date(effectiveLegs[effectiveLegs.length - 1].planned_arrival).toISOString() : null,
       totalDistanceKm: route?.total_distance_km ? Number(route.total_distance_km) : null,
       assignedVehicle,
       assignedDriver: driverStaff ? `${driverStaff.full_name} (${driverStaff.phone || '0912 345 678'})` : null,
       assignedEscort: escortStaff ? `${escortStaff.full_name} (${escortStaff.phone || '0987 654 321'})` : null,
       assignedHorses: assignedHorses.map((h) => ({
         id: h.horse_id,
+        shipmentHorseId: h.shipment_horse_id ? Number(h.shipment_horse_id) : undefined,
         name: h.name,
         breed: h.breed,
         microchipNo: h.microchip_no,
+        passportNo: h.passport_no,
       })),
       milestones,
       healthLogs,
@@ -681,11 +827,20 @@ export class TrackingService {
   ): Promise<TripTrackingDetails> {
     const shipment = await this.trackingStore.findShipmentById(shipmentId);
     if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
+    await this.assertAssignedForDriverEscort(user, shipmentId);
 
-    // Rule: Chỉ chuyến Ready to depart / In transit mới được cập nhật mốc
-    if (shipment.status !== 'ready_to_depart' && shipment.status !== 'in_transit') {
-      throw new BadRequestException(
-        `Chuyến đi đang ở trạng thái "${shipment.status}". Chỉ chuyến "Ready to depart" hoặc "In transit" mới có thể xuất phát.`,
+    if (
+      [
+        'requested',
+        'change_requested',
+        'rejected',
+        'cancelled',
+        'cancelled_operational',
+        'completed',
+      ].includes(shipment.status)
+    ) {
+      throw new ConflictException(
+        `Chuyến đi đang ở trạng thái "${shipment.status}". Không thể xuất phát.`,
       );
     }
 
@@ -699,22 +854,37 @@ export class TrackingService {
     // Role check: driver for road, escort for flight, coordinator/manager can override
     this.assertStaffCanUpdateLeg(user, targetLeg);
 
-    if (targetLeg.sequence_no === 1 && shipment.status === 'ready_to_depart') {
+    if (targetLeg.sequence_no === 1 && shipment.status !== 'in_transit') {
       const readiness = await this.routesService.getTripPlanReadiness(user, shipmentId);
-      if (!readiness.isReadyToDepart) throw new BadRequestException(readiness.pendingConditions.join('; '));
+      if (!readiness.isReadyToDepart) {
+        throw new UnprocessableEntityException({
+          message: readiness.pendingConditions.join('; '),
+          missingRequirements: readiness.pendingConditions,
+        });
+      }
+      shipment.status = 'ready_to_depart';
+    } else if (
+      targetLeg.sequence_no > 1 &&
+      shipment.status !== 'ready_to_depart' &&
+      shipment.status !== 'in_transit'
+    ) {
+      throw new ConflictException(
+        `Chuyến đi đang ở trạng thái "${shipment.status}". Chỉ chuyến "Ready to depart" hoặc "In transit" mới có thể xuất phát chặng #${targetLeg.sequence_no}.`,
+      );
     }
 
     // Sequence check: previous leg must be completed
     if (targetLeg.sequence_no > 1) {
       const prevLeg = legs.find((l) => l.sequence_no === targetLeg.sequence_no - 1);
       if (prevLeg && prevLeg.status !== 'completed' && !prevLeg.actual_arrival) {
-        throw new BadRequestException(
+        throw new ConflictException(
           `Không thể xuất phát chặng #${targetLeg.sequence_no} khi chặng #${prevLeg.sequence_no} chưa hoàn thành!`,
         );
       }
     }
 
-    const now = dto.actualTime ? new Date(dto.actualTime) : new Date();
+    const { eventTime: now, isBackdated } = this.evaluateEventTimestamp(dto.actualTime, dto.notes);
+    const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
 
     // Update leg status to 'active'
     await this.trackingStore.updateLegStatus(legId, 'active', now, null);
@@ -769,10 +939,11 @@ export class TrackingService {
       milestoneName: `Xuất phát chặng ${targetLeg.sequence_no}: ${targetLeg.origin_location}`,
       notes: dto.notes || 'Bắt đầu di chuyển chặng',
       updatedBy: Number(user.id),
-      updatedByRole: user.role,
+      updatedByRole: actorRole,
+      isBackdated,
     });
 
-    await this.syncSiblingLegStart(user, targetLeg, now, dto.notes);
+    await this.syncSiblingLegStart(user, targetLeg, now, dto.notes, actorRole, isBackdated);
 
     return this.getTrackingDetails(user, shipmentId);
   }
@@ -785,6 +956,7 @@ export class TrackingService {
   ): Promise<TripTrackingDetails> {
     const shipment = await this.trackingStore.findShipmentById(shipmentId);
     if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
+    await this.assertAssignedForDriverEscort(user, shipmentId);
 
     const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
     if (!route) throw new NotFoundException('Chưa có lộ trình');
@@ -796,36 +968,59 @@ export class TrackingService {
     const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
     const parentLeg = legs.find((l) => l.leg_id === targetStop.leg_id) || (legs.length === 1 ? legs[0] : (legs.find((l) => l.leg_type !== 'flight') || legs[0]));
 
-    // Phân quyền: Trạm kiểm dịch / dừng chân tại nước ngoài chỉ do Escort / Coordinator báo cáo
-    const roleStr = String(user.role).toUpperCase();
-    const isManagerOrCoordinator =
-      roleStr.includes('COORDINATOR') ||
-      roleStr.includes('MANAGER') ||
-      roleStr.includes('ADMIN');
-    if (!isManagerOrCoordinator) {
-      const isDomesticStop =
-        (targetStop.country || '').toLowerCase().includes('vietnam') ||
-        (targetStop.country || '').toLowerCase().includes('việt nam') ||
-        targetStop.sequence_no === 1;
-      const isOnlyDriver =
-        (user.specialization === 'driver' || user.email.toLowerCase().includes('driver')) &&
-        !(user.specialization === 'escort' || user.email.toLowerCase().includes('escort') || roleStr.includes('ESCORT'));
-      if (!isDomesticStop && isOnlyDriver) {
-        throw new ForbiddenException('Trạm kiểm dịch / dừng chân tại nước ngoài do nhân sự áp tải / y tế (Escort) đi cùng phụ trách báo cáo!');
-      }
-    }
+    // DEC-07: Driver & Escort đều được phép check-in chéo dự phòng nếu đã được phân công chuyến; ghi rõ updated_by_role.
+    const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
 
     // Rule: Chặng phải bắt đầu rồi mới được check-in trạm dừng
     if (!parentLeg || (!parentLeg.actual_departure && parentLeg.status === 'pending')) {
-      throw new BadRequestException('Chặng vận chuyển chưa xuất phát! Vui lòng bấm "Xuất phát" chặng trước khi cập nhật trạm dừng.');
+      throw new ConflictException('Chặng vận chuyển chưa xuất phát! Vui lòng bấm "Xuất phát" chặng trước khi cập nhật trạm dừng.');
     }
 
-    // Sequence checking inside the stop
-    if (dto.action === 'departed' && targetStop.status === 'pending') {
-      throw new BadRequestException('Không thể bấm "Đã rời" khi xe chưa cập nhật "Đã tới" trạm dừng này!');
+    // Sequence & state machine checking inside the stop (strict monotonic forward transition)
+    const normalizedCurrent = targetStop.status === 'cleared' ? 'customs_cleared' : (targetStop.status || 'pending');
+    if (normalizedCurrent === 'departed') {
+      throw new ConflictException(`Trạm dừng "${targetStop.location_name}" đã hoàn tất rời trạm, không thể cập nhật lại trạng thái "${dto.action}"`);
+    }
+    if (dto.action === 'arrived' && normalizedCurrent !== 'pending') {
+      throw new ConflictException(`Trạm dừng "${targetStop.location_name}" đang ở trạng thái "${normalizedCurrent}", không thể quay lại "arrived"`);
+    }
+    if (dto.action === 'customs_cleared' && normalizedCurrent !== 'arrived') {
+      throw new ConflictException('Phải check-in "Đã tới trạm" (arrived) trước khi xác nhận thông quan / kiểm dịch (customs_cleared)');
+    }
+    if (dto.action === 'customs_cleared' && shipment.status === 'in_transit') {
+      let complianceValid = !Boolean(shipment.in_transit_compliance_alert);
+      if (
+        complianceValid &&
+        this.documentsService &&
+        typeof this.documentsService.isFlow2CompletedForPayment === 'function'
+      ) {
+        complianceValid = await this.documentsService.isFlow2CompletedForPayment(shipmentId);
+        if (!complianceValid && typeof this.documentsService.flagInTransitComplianceAlert === 'function') {
+          await this.documentsService.flagInTransitComplianceAlert(shipmentId);
+        }
+      }
+      if (!complianceValid) {
+        throw new UnprocessableEntityException({
+          message:
+            'Hồ sơ pháp lý / kiểm dịch đã hết hạn hoặc không đạt chuẩn trong quá trình vận chuyển (BR-F2-06). Thao tác customs_cleared bị chặn cho tới khi bổ sung hồ sơ gia hạn được duyệt hoặc mở sự cố biên giới (Flow 5).',
+          missingRequirements: ['valid_in_transit_compliance'],
+        });
+      }
+    }
+    if (dto.action === 'departed') {
+      if (normalizedCurrent === 'pending') {
+        throw new ConflictException('Không thể bấm "Đã rời" khi xe chưa cập nhật "Đã tới" trạm dừng này!');
+      }
+      const needsCustomsClearance = ['border_check', 'quarantine'].includes(String(targetStop.stop_type));
+      if (needsCustomsClearance && normalizedCurrent !== 'customs_cleared') {
+        throw new UnprocessableEntityException({
+          message: `Trạm "${targetStop.location_name}" thuộc loại kiểm dịch/hải quan, bắt buộc hoàn tất "customs_cleared" trước khi rời trạm`,
+          missingRequirements: ['customs_cleared'],
+        });
+      }
     }
 
-    const now = dto.actualTime ? new Date(dto.actualTime) : new Date();
+    const { eventTime: now, isBackdated } = this.evaluateEventTimestamp(dto.actualTime, dto.notes);
     const isDeparture = dto.action === 'departed';
 
     await this.trackingStore.updateStopStatus(
@@ -835,12 +1030,14 @@ export class TrackingService {
       now,
       isDeparture,
       dto.notes,
+      actorRole,
+      isBackdated,
     );
 
-    // Tuyến đa phương thức: Chỉ khi có chặng bay, việc xe tải tới sân bay / hoàn tất kiểm dịch sân bay mới tự động hoàn tất chặng đường bộ 1
+    // Tuyến đa phương thức: Chỉ khi có chặng bay, việc hoàn tất thông quan/rời trạm bàn giao sân bay mới tự động hoàn tất chặng đường bộ 1
     const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
     if (isMultiModalFlight && parentLeg && parentLeg.sequence_no === 1 && parentLeg.leg_type === 'road' &&
-        (dto.action === 'customs_cleared' || dto.action === 'departed' || dto.action === 'arrived')) {
+        (dto.action === 'customs_cleared' || dto.action === 'departed')) {
       await this.trackingStore.updateLegStatus(parentLeg.leg_id, 'completed', undefined, now);
       if (parentLeg.vehicle_id) {
         await this.trackingStore.updateVehicleStatus(parentLeg.vehicle_id, 'available');
@@ -870,13 +1067,14 @@ export class TrackingService {
       milestoneName: `${targetStop.location_name} - ${dto.action.toUpperCase()}`,
       notes: dto.notes,
       updatedBy: Number(user.id),
-      updatedByRole: user.role,
+      updatedByRole: actorRole,
+      isBackdated,
     });
 
-    await this.syncSiblingStopCheckIn(user, targetStop, parentLeg, dto, now, isDeparture);
+    await this.syncSiblingStopCheckIn(user, targetStop, parentLeg, dto, now, isDeparture, actorRole, isBackdated);
 
     if (isDeparture && targetStop.stop_type === 'transfer_hub' && parentLeg?.road_trip_id) {
-      await this.completeConsolidatedDropoffShipments(user, targetStop, stops, parentLeg, now, dto.notes);
+      await this.completeConsolidatedDropoffShipments(user, targetStop, stops, parentLeg, now, dto.notes, actorRole, isBackdated);
     }
 
     return this.getTrackingDetails(user, shipmentId);
@@ -890,6 +1088,7 @@ export class TrackingService {
   ): Promise<TripTrackingDetails> {
     const shipment = await this.trackingStore.findShipmentById(shipmentId);
     if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
+    await this.assertAssignedForDriverEscort(user, shipmentId);
 
     const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
     if (!route) throw new NotFoundException('Chưa có lộ trình');
@@ -900,7 +1099,7 @@ export class TrackingService {
 
     // Rule: Chặng phải bắt đầu rồi mới được bấm đến
     if (!targetLeg.actual_departure && targetLeg.status === 'pending') {
-      throw new BadRequestException('Không thể bấm "Đã đến" khi chặng này chưa bấm "Đã xuất phát"!');
+      throw new ConflictException('Không thể bấm "Đã đến" khi chặng này chưa bấm "Đã xuất phát"!');
     }
 
     // Rule: Tất cả các trạm dừng trong chặng phải đã hoàn thành
@@ -911,14 +1110,15 @@ export class TrackingService {
       const firstRoadLeg = legs.find((l) => l.leg_type !== 'flight') || legs[0];
       return firstRoadLeg.leg_id === Number(legId);
     });
-    const unfinishedStops = legStops.filter((s) => s.status !== 'departed' && s.status !== 'customs_cleared');
+    const unfinishedStops = legStops.filter((s) => !['departed', 'customs_cleared', 'cleared'].includes(s.status));
     if (unfinishedStops.length > 0) {
-      throw new BadRequestException(
+      throw new ConflictException(
         `Còn ${unfinishedStops.length} trạm dừng chưa hoàn tất rời trạm (${unfinishedStops.map((s) => s.location_name).join(', ')})!`,
       );
     }
 
-    const now = dto.actualTime ? new Date(dto.actualTime) : new Date();
+    const { eventTime: now, isBackdated } = this.evaluateEventTimestamp(dto.actualTime, dto.notes);
+    const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
 
     // Complete this leg
     await this.trackingStore.updateLegStatus(legId, 'completed', undefined, now);
@@ -990,10 +1190,11 @@ export class TrackingService {
       milestoneName: `Hoàn tất chặng ${targetLeg.sequence_no}: Đến ${targetLeg.destination_location}`,
       notes: dto.notes || (isFinalLeg ? 'Đã đến địa điểm bàn giao cuối cùng' : 'Đã kết thúc chặng'),
       updatedBy: Number(user.id),
-      updatedByRole: user.role,
+      updatedByRole: actorRole,
+      isBackdated,
     });
 
-    await this.syncSiblingLegArrival(user, targetLeg, now, dto.notes);
+    await this.syncSiblingLegArrival(user, targetLeg, now, dto.notes, actorRole, isBackdated);
 
     return this.getTrackingDetails(user, shipmentId);
   }
@@ -1052,11 +1253,34 @@ export class TrackingService {
     shipmentId: number,
     dto: CreateHealthLogDto,
   ): Promise<HorseHealthLogEntity> {
+    const roleStr = String(user.role || '').toUpperCase();
+    const isOpsRole =
+      roleStr.includes('DRIVER') ||
+      roleStr.includes('ESCORT') ||
+      roleStr.includes('COORDINATOR') ||
+      roleStr.includes('MANAGER') ||
+      roleStr.includes('ADMIN');
+    if (!isOpsRole) {
+      throw new ForbiddenException('Chỉ nhân sự vận hành hoặc điều phối mới có quyền ghi nhật ký sức khỏe ngựa.');
+    }
+
     const shipment = await this.trackingStore.findShipmentById(shipmentId);
     if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
 
+    const isSupervisor =
+      roleStr.includes('COORDINATOR') ||
+      roleStr.includes('MANAGER') ||
+      roleStr.includes('ADMIN');
+    if (!isSupervisor) {
+      const assigned = await this.trackingStore.findAssignedStaff(shipmentId);
+      const isAssigned = assigned.some((s) => Number(s.user_id) === Number(user.id));
+      if (!isAssigned) {
+        throw new ForbiddenException('Bạn chỉ có thể ghi nhật ký sức khỏe cho chuyến đi được phân công cho mình.');
+      }
+    }
+
     if (shipment.status === 'completed') {
-      throw new BadRequestException('Chuyến đi đã hoàn tất toàn bộ lộ trình, không thể ghi thêm nhật ký sức khỏe!');
+      throw new ConflictException('Chuyến đi đã hoàn tất toàn bộ lộ trình, không thể ghi thêm nhật ký sức khỏe!');
     }
 
     // Luôn khóa cứng nhật ký sức khỏe theo mốc hiện tại đang diễn ra, không cho phép ghi nhận cho mốc quá khứ
@@ -1072,52 +1296,168 @@ export class TrackingService {
       }
     }
 
+    const rawAttachments = Array.isArray(dto.attachments) ? dto.attachments : [];
+    if (rawAttachments.length > 5) {
+      throw new BadRequestException('Tối đa 5 ảnh đính kèm cho mỗi bản ghi sức khỏe ngựa.');
+    }
+    for (const att of rawAttachments) {
+      if (typeof att === 'string' && att.trim().startsWith('data:') && att.length > 4096) {
+        throw new BadRequestException(
+          'Vui lòng tải ảnh qua multipart /tracking/shipments/:id/health-logs/upload thay vì gửi chuỗi Base64 dung lượng lớn.',
+        );
+      }
+    }
+
+    const recordedAtDate = dto.recordedAt ? new Date(dto.recordedAt) : new Date();
+    if (!Number.isFinite(recordedAtDate.getTime())) {
+      throw new BadRequestException('Thời điểm recordedAt không hợp lệ.');
+    }
+
+    const vitalCfg = await this.getVitalConfig();
+    const prevLog =
+      typeof this.trackingStore?.findLatestHealthLogForHorse === 'function'
+        ? await this.trackingStore.findLatestHealthLogForHorse(shipmentId, dto.horseId, dto.horseName)
+        : null;
+    const evaluation = evaluateEquineHealthAlert(
+      {
+        conditionStatus: dto.conditionStatus,
+        temperatureC: dto.temperatureC,
+        heartRateBpm: dto.heartRateBpm,
+        recordedAt: recordedAtDate,
+      },
+      prevLog,
+      vitalCfg,
+    );
+    const recordedByRole = await this.resolveOperationalActorRole(shipmentId, user);
+
     const logId = await this.trackingStore.createHorseHealthLog({
       shipmentId,
       horseId: dto.horseId,
       horseName: dto.horseName,
       legName: finalLegName || null,
       recordedBy: Number(user.id),
+      recordedByRole,
       conditionStatus: dto.conditionStatus,
       temperatureC: dto.temperatureC,
       heartRateBpm: dto.heartRateBpm,
+      alertTier: evaluation.alertTier,
+      alertReason: evaluation.alertReason,
       notes: dto.notes,
-      attachmentsJson: dto.attachments ? JSON.stringify(dto.attachments) : null,
+      attachmentsJson: rawAttachments.length ? JSON.stringify(rawAttachments) : null,
+      recordedAt: recordedAtDate,
     });
 
-    // Step 3 Rule: Nếu tình trạng là Bỏ ăn hoặc Căng thẳng -> Kích hoạt cảnh báo cho Coordinator & Manager
-    if (dto.conditionStatus === 'not_eating' || dto.conditionStatus === 'stressed') {
-      const assigned = await this.trackingStore.findAssignedStaff(shipmentId);
-      const conditionText = dto.conditionStatus === 'not_eating' ? 'BỎ ĂN' : 'CĂNG THẲNG';
+    if (evaluation.alertTier === 'red') {
+      const assigned =
+        typeof this.trackingStore?.findAssignedStaff === 'function'
+          ? await this.trackingStore.findAssignedStaff(shipmentId)
+          : [];
+      const reqCode = shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`;
+      const redMsg = `${evaluation.alertReason || 'Chỉ số sinh hiệu vượt ngưỡng ĐỎ'} - Ngựa ${dto.horseName} (Đơn ${reqCode}). ${dto.notes || ''}`.trim();
 
-      // Send notification to customer & assigned staff
-      await this.notificationsService.createNotification(
-        shipment.customer_id,
-        `Cảnh báo sức khỏe ngựa: ${dto.horseName}`,
-        `Chuyên viên y tế ghi nhận ngựa ${dto.horseName} có biểu hiện ${conditionText} trong chuyến đi #${shipment.request_code}. Đang được chăm sóc tích cực.`,
-        'incident',
-        shipmentId,
-      );
+      await Promise.allSettled([
+        this.notificationsService.createNotification(
+          shipment.customer_id,
+          `🚨 CẢNH BÁO ĐỎ THÚ Y: ${dto.horseName}`,
+          redMsg,
+          'incident',
+          shipmentId,
+        ),
+        this.notificationsService.notifyRole(
+          'Logistics Manager',
+          `🚨 RED ALERT THÚ Y: ${dto.horseName} (${reqCode})`,
+          redMsg,
+          'incident',
+          shipmentId,
+        ),
+        this.notificationsService.notifyRole(
+          'Fleet & Route Coordinator',
+          `🚨 RED ALERT THÚ Y: ${dto.horseName} (${reqCode})`,
+          redMsg,
+          'incident',
+          shipmentId,
+        ),
+      ]);
 
       for (const staff of assigned) {
         await this.notificationsService.createNotification(
           staff.user_id,
-          `⚠️ Cảnh báo thú y: Ngựa ${dto.horseName} (${conditionText})`,
-          `Ghi nhận tại chuyến #${shipment.request_code}: ${dto.notes || 'Cần kiểm tra điện giải và giảm rung lắc thùng xe'}. Vui lòng theo dõi sát hoặc báo sự cố nếu cần.`,
+          `⚠️ Cảnh báo ĐỎ thú y: Ngựa ${dto.horseName}`,
+          redMsg,
           'incident',
           shipmentId,
         );
       }
+    } else if (evaluation.alertTier === 'amber_escalatable') {
+      const reqCode = shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`;
+      const amberMsg = `${evaluation.alertReason || 'Theo dõi Vàng (leo thang)'} - Ngựa ${dto.horseName} (Đơn ${reqCode}).`.trim();
+      await Promise.allSettled([
+        this.notificationsService.notifyRole(
+          'Fleet & Route Coordinator',
+          `⚠️ Cảnh báo VÀNG (Leo thang): ${dto.horseName} (${reqCode})`,
+          amberMsg,
+          'incident',
+          shipmentId,
+        ),
+        this.notificationsService.notifyRole(
+          'Transport Specialist',
+          `⚠️ Cảnh báo VÀNG (Leo thang): ${dto.horseName} (${reqCode})`,
+          amberMsg,
+          'incident',
+          shipmentId,
+        ),
+      ]);
+    } else if (evaluation.alertTier === 'amber_observational') {
+      const reqCode = shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`;
+      await this.notificationsService.notifyRole(
+        'Fleet & Route Coordinator',
+        `Theo dõi môi trường Vàng: ${dto.horseName} (${reqCode})`,
+        evaluation.alertReason || `Ghi nhận quan sát môi trường cho ngựa ${dto.horseName}.`,
+        'status_update',
+        shipmentId,
+      );
     }
 
     const logs = await this.trackingStore.findHorseHealthLogs(shipmentId);
     const created = logs.find((l) => l.id === logId);
-    if (!created) throw new NotFoundException('Không tìm thấy nhật ký vừa tạo');
+    if (!created) {
+      return {
+        id: logId,
+        shipmentId,
+        horseId: dto.horseId ?? null,
+        horseName: dto.horseName,
+        legName: finalLegName || null,
+        recordedBy: Number(user.id),
+        recordedByRole,
+        conditionStatus: dto.conditionStatus,
+        temperatureC: dto.temperatureC ?? null,
+        heartRateBpm: dto.heartRateBpm ?? null,
+        alertTier: evaluation.alertTier,
+        alertReason: evaluation.alertReason,
+        notes: dto.notes ?? null,
+        attachments: rawAttachments,
+        recordedAt: recordedAtDate.toISOString(),
+      };
+    }
     return created;
   }
 
   // Step 7: Coordinator marks trip Completed
   async completeShipment(user: AuthenticatedUser, shipmentId: number): Promise<void> {
+    const shipment = await this.trackingStore.findShipmentById(shipmentId);
+    if (!shipment) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+    await this.assertAssignedForDriverEscort(user, shipmentId);
+    if (shipment.status === 'completed') {
+      return;
+    }
+    if (shipment.status !== 'in_transit') {
+      throw new ConflictException(
+        `Chỉ chuyến đi đang ở trạng thái "in_transit" mới có thể đánh dấu hoàn thành. Trạng thái hiện tại: "${shipment.status}"`,
+      );
+    }
+
     const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
     await this.trackingStore.updateShipmentStatus(shipmentId, 'completed');
     if (route) {
@@ -1127,7 +1467,7 @@ export class TrackingService {
     await this.trackingStore.recordTripStatusLog({
       shipmentId,
       routeId: route?.route_id || 0,
-      previousStatus: 'arrived',
+      previousStatus: shipment.status,
       newStatus: 'completed',
       milestoneType: 'trip_status_change',
       milestoneName: 'Chuyến đi hoàn tất',
@@ -1189,7 +1529,12 @@ export class TrackingService {
 
     if (isManagerOrCoordinator) return;
 
-    if (leg.leg_type === 'road') {
+    const isFieldStaffRole = roleStr.includes('DRIVER') || roleStr.includes('ESCORT');
+    if (!isFieldStaffRole) {
+      throw new ForbiddenException('Tài khoản của bạn không có quyền cập nhật mốc hành trình chuyến đi.');
+    }
+
+    if (leg.leg_type === 'road' || leg.leg_type === 'flight') {
       const isDriverOrEscort =
         user.specialization === 'driver' ||
         user.specialization === 'escort' ||
@@ -1198,25 +1543,7 @@ export class TrackingService {
         user.email.toLowerCase().includes('driver') ||
         user.email.toLowerCase().includes('escort');
       if (!isDriverOrEscort) {
-        throw new ForbiddenException('Chỉ Tài xế lái xe hoặc Bác sĩ thú y áp tải (Escort) mới được cập nhật chặng đường bộ!');
-      }
-
-      // Đối với chặng đường bộ ở nước ngoài (sequence_no > 1 trong chuyến bay quốc tế): Chỉ Escort đi cùng mới báo cáo
-      if (leg.sequence_no > 1) {
-        const isOnlyDriver =
-          (user.specialization === 'driver' || user.email.toLowerCase().includes('driver')) &&
-          !(user.specialization === 'escort' || user.email.toLowerCase().includes('escort') || roleStr.includes('ESCORT'));
-        if (isOnlyDriver) {
-          throw new ForbiddenException('Chặng tại nước ngoài do nhân sự áp tải / y tế (Escort) đi cùng phụ trách báo cáo!');
-        }
-      }
-    } else if (leg.leg_type === 'flight') {
-      const isEscort =
-        user.specialization === 'escort' ||
-        roleStr.includes('ESCORT') ||
-        user.email.toLowerCase().includes('escort');
-      if (!isEscort) {
-        throw new ForbiddenException('Chỉ Chuyên viên y tế/hộ tống (Escort/Vet) mới được cập nhật mốc chặng bay!');
+        throw new ForbiddenException('Chỉ Tài xế lái xe hoặc Bác sĩ thú y áp tải (Escort) mới được cập nhật chặng hành trình!');
       }
     }
   }
@@ -1254,6 +1581,8 @@ export class TrackingService {
     targetLeg: any,
     now: Date,
     notes?: string,
+    actorRole?: string,
+    isBackdated: boolean = false,
   ): Promise<void> {
     if (!targetLeg?.road_trip_id) return;
     try {
@@ -1301,11 +1630,12 @@ export class TrackingService {
           milestoneName: `Xuất phát chặng ${sib.sequence_no}: ${sib.origin_location}`,
           notes: notes || `Đồng bộ xuất phát chuyến ghép #${targetLeg.road_trip_id}`,
           updatedBy: Number(user.id),
-          updatedByRole: user.role,
+          updatedByRole: actorRole || user.role,
+          isBackdated,
         });
       }
     } catch (err) {
-      console.error('Lỗi đồng bộ xuất phát chuyến ghép:', err);
+      this.logger.error('Lỗi đồng bộ xuất phát chuyến ghép', err as Error);
     }
   }
 
@@ -1317,6 +1647,8 @@ export class TrackingService {
     dto: CheckInStopDto,
     now: Date,
     isDeparture: boolean,
+    actorRole?: string,
+    isBackdated: boolean = false,
   ): Promise<void> {
     if (!parentLeg?.road_trip_id) return;
     const rank: Record<string, number> = { pending: 0, arrived: 1, customs_cleared: 2, departed: 3 };
@@ -1343,6 +1675,8 @@ export class TrackingService {
           now,
           isDeparture,
           dto.notes,
+          actorRole,
+          isBackdated,
         );
         if (dto.action === 'customs_cleared') {
           await this.notificationsService.createNotification(
@@ -1369,11 +1703,12 @@ export class TrackingService {
           milestoneName: `${sibStop.location_name} - ${dto.action.toUpperCase()}`,
           notes: dto.notes || `Đồng bộ trạm dừng chuyến ghép #${parentLeg.road_trip_id}`,
           updatedBy: Number(user.id),
-          updatedByRole: user.role,
+          updatedByRole: actorRole || user.role,
+          isBackdated,
         });
       }
     } catch (err) {
-      console.error('Lỗi đồng bộ trạm dừng chuyến ghép:', err);
+      this.logger.error('Lỗi đồng bộ trạm dừng chuyến ghép', err as Error);
     }
   }
 
@@ -1385,6 +1720,8 @@ export class TrackingService {
     parentLeg: any,
     now: Date,
     notes?: string,
+    actorRole?: string,
+    isBackdated: boolean = false,
   ): Promise<void> {
     if (typeof this.trackingStore.findShipmentsByRoadTripId !== 'function') return;
     try {
@@ -1449,11 +1786,12 @@ export class TrackingService {
           milestoneName: `Hoàn tất bàn giao tại điểm trả: ${s.destination_location}`,
           notes: notes || `Hoàn tất trả hàng tại ${targetStop.location_name}`,
           updatedBy: Number(user.id),
-          updatedByRole: user.role,
+          updatedByRole: actorRole || user.role,
+          isBackdated,
         });
       }
     } catch (err) {
-      console.error('Lỗi hoàn tất đơn tại điểm trả ghép chuyến:', err);
+      this.logger.error('Lỗi hoàn tất đơn tại điểm trả ghép chuyến', err as Error);
     }
   }
 
@@ -1463,6 +1801,8 @@ export class TrackingService {
     targetLeg: any,
     now: Date,
     notes?: string,
+    actorRole?: string,
+    isBackdated: boolean = false,
   ): Promise<void> {
     if (!targetLeg?.road_trip_id) return;
     try {
@@ -1512,11 +1852,12 @@ export class TrackingService {
           milestoneName: `Hoàn tất chặng ${sib.sequence_no}: Đến ${sibDest}`,
           notes: notes || `Đồng bộ hoàn tất chuyến ghép #${targetLeg.road_trip_id}`,
           updatedBy: Number(user.id),
-          updatedByRole: user.role,
+          updatedByRole: actorRole || user.role,
+          isBackdated,
         });
       }
     } catch (err) {
-      console.error('Lỗi đồng bộ đến đích chuyến ghép:', err);
+      this.logger.error('Lỗi đồng bộ đến đích chuyến ghép', err as Error);
     }
   }
 }

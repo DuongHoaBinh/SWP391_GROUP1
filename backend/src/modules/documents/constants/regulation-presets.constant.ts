@@ -11,21 +11,41 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
     items: [
       {
         documentType: 'horse_passport',
+        docTier: 'A',
+        leadTimeDays: 5,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Hộ chiếu ngựa quốc tế FEI (Equine Passport) có sơ đồ nhận dạng đồ họa và vi mạch chuẩn ISO 11784/11785.',
       },
       {
         documentType: 'health_certificate',
+        docTier: 'B',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Giấy chứng nhận kiểm dịch động vật xuất khẩu quốc tế (Official International Veterinary Health Certificate) cấp trong vòng 48-72h trước khởi hành.',
       },
       {
         documentType: 'vaccination_certificate',
+        docTier: 'A',
+        leadTimeDays: 5,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Chứng nhận tiêm phòng Cúm ngựa (Equine Influenza) mũi chính và mũi nhắc lại trong vòng 6 tháng gần nhất.',
       },
       {
         documentType: 'customs_declaration',
+        docTier: 'A',
+        leadTimeDays: 7,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Tờ khai hải quan xuất nhập cảnh động vật sống & Giấy phép vận chuyển xuyên biên giới.',
       },
@@ -41,21 +61,41 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
     items: [
       {
         documentType: 'horse_passport',
+        docTier: 'A',
+        leadTimeDays: 5,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Hộ chiếu ngựa quốc tế do FEI hoặc Liên đoàn Đua ngựa Quốc gia cấp, có chứng thực vi mạch microchip và lịch sử thi đấu.',
       },
       {
         documentType: 'health_certificate',
+        docTier: 'B',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Giấy chứng nhận kiểm dịch động vật xuất khẩu song phương (song ngữ Anh - Việt/Malay/Thai) do Cục Thú y Trung ương cấp trước 72 giờ.',
       },
       {
         documentType: 'vaccination_certificate',
+        docTier: 'A',
+        leadTimeDays: 5,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Chứng nhận tiêm phòng cúm ngựa (Equine Influenza) và viêm não Nhật Bản (Japanese Encephalitis) hợp lệ.',
       },
       {
         documentType: 'import_permit',
+        docTier: 'A',
+        leadTimeDays: 14,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Giấy phép nhập khẩu động vật sống do Cơ quan Thú y nước nhập cảnh cấp (AVS Singapore, DVS Malaysia, DLD Thái Lan).',
       },
@@ -166,16 +206,31 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
     items: [
       {
         documentType: 'health_certificate',
+        docTier: 'B',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 24,
+        transportMode: 'road',
         description:
           'Giấy chứng nhận kiểm dịch động vật vận chuyển nội tỉnh / liên tỉnh do Chi cục Thú y cấp (Mẫu 15b-TY).',
       },
       {
         documentType: 'vaccination_certificate',
+        docTier: 'A',
+        leadTimeDays: 5,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 24,
+        transportMode: 'both',
         description:
           'Sổ theo dõi tiêm phòng định kỳ và kết quả xét nghiệm âm tính các bệnh dịch tễ truyền nhiễm theo mùa.',
       },
       {
         documentType: 'horse_passport',
+        docTier: 'A',
+        leadTimeDays: 5,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 24,
+        transportMode: 'both',
         description:
           'Hồ sơ lý lịch giống, thẻ định danh vi mạch microchip và giấy xác nhận quyền sở hữu ngựa đua.',
       },

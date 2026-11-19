@@ -16,23 +16,23 @@ if ((Test-Path -LiteralPath $mysqlExe) -and -not (Get-NetTCPConnection -LocalPor
     Start-Sleep -Seconds 2
 }
 
-$healthUrl = 'http://127.0.0.1:5000/api/payments/sepay/webhook'
+$healthUrl = 'http://127.0.0.1:5000/api/health'
 $ready = $false
-try { $ready = (Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2).mode -eq 'integrated' } catch {}
+try { $ready = (Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2).status -eq 'ok' } catch {}
 if (-not $ready) {
     Start-Process -FilePath $node -ArgumentList @('dist/main.js') -WorkingDirectory $backendRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $runtimeDir 'backend.log') -RedirectStandardError (Join-Path $runtimeDir 'backend-error.log') | Out-Null
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         Start-Sleep -Milliseconds 500
-        try { $ready = (Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2).mode -eq 'integrated' } catch {}
+        try { $ready = (Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2).status -eq 'ok' } catch {}
         if ($ready) { break }
     }
     if (-not $ready) { throw 'Backend is not ready. Inspect backend/.local/sepay/backend-error.log.' }
 }
 
 $frontendRoot = Join-Path $projectRoot 'frontend'
-if (-not (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue)) {
+if (-not (Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue)) {
     $nextMode = if (Test-Path -LiteralPath (Join-Path $frontendRoot '.next\BUILD_ID')) { 'start' } else { 'dev' }
-    Start-Process -FilePath $node -ArgumentList @('node_modules/next/dist/bin/next', $nextMode, '-p', '3000') -WorkingDirectory $frontendRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $runtimeDir 'frontend.log') -RedirectStandardError (Join-Path $runtimeDir 'frontend-error.log') | Out-Null
+    Start-Process -FilePath $node -ArgumentList @('node_modules/next/dist/bin/next', $nextMode, '-p', '3001') -WorkingDirectory $frontendRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $runtimeDir 'frontend.log') -RedirectStandardError (Join-Path $runtimeDir 'frontend-error.log') | Out-Null
 }
 & (Join-Path $PSScriptRoot 'start-sepay-local.ps1')
-Write-Output 'Frontend: http://localhost:3000'
+Write-Output 'Frontend: http://localhost:3001'

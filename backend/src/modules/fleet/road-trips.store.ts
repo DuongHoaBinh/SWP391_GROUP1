@@ -1,22 +1,32 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { CreateRoadTripDto } from './dto/create-road-trip.dto';
 import { RouteLegDto } from '../routes/dto/build-detailed-plan.dto';
 import { assertRoadCapacity } from './capacity-policy';
+import { MYSQL_POOL } from '../../common/database/database.module';
 
 @Injectable()
 export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
   private pool!: Pool;
-  onModuleInit() {
-    this.pool = createPool({ host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system', user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '', connectionLimit: 5 });
+
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
   }
-  async onModuleDestroy() { await this.pool?.end(); }
+
+  onModuleInit() {
+    if (!this.pool) {
+      this.pool = createPool({ host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system', user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '', connectionLimit: 5 });
+    }
+  }
+  async onModuleDestroy() { if (this.pool && !this.injectedPool) await this.pool.end(); }
 
   async list() {
     const [rows] = await this.pool.execute<RowDataPacket[]>(`SELECT t.*, v.plate_or_code, v.capacity,
-      COALESCE(SUM(CASE WHEN s.status NOT IN ('cancelled','rejected') THEN l.stalls_booked ELSE 0 END), 0) AS booked_stalls
+      COALESCE(SUM(CASE WHEN s.status NOT IN ('cancelled','cancelled_operational','rejected') THEN l.stalls_booked ELSE 0 END), 0) AS booked_stalls
       FROM road_trip t JOIN vehicle v ON v.vehicle_id = t.vehicle_id
       LEFT JOIN route_leg l ON l.road_trip_id = t.road_trip_id
       LEFT JOIN route r ON r.route_id = l.route_id LEFT JOIN shipment s ON s.shipment_id = r.shipment_id
@@ -50,7 +60,7 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
     for (const leg of prepared) {
       if (leg.roadTripId && leg.legType !== 'road') throw new BadRequestException('Chuyến ghép đường bộ không áp dụng cho chặng bay');
       if (!leg.roadTripId) continue;
-      const [rows] = await db.execute<RowDataPacket[]>('SELECT * FROM road_trip WHERE road_trip_id = ? FOR SHARE', [leg.roadTripId]);
+      const [rows] = await db.execute<RowDataPacket[]>('SELECT * FROM road_trip WHERE road_trip_id = ?', [leg.roadTripId]);
       const trip = rows[0];
       if (!trip) throw new NotFoundException('Không tìm thấy chuyến đường bộ');
       if (trip.booking_type !== order.booking_type) throw new BadRequestException('Hình thức chuyến không khớp lựa chọn của khách');
@@ -62,13 +72,30 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
       const a = roadLegs[i], b = roadLegs[j];
       if (a.vehicleId && a.vehicleId === b.vehicleId && a.plannedDeparture && a.plannedArrival && b.plannedDeparture && b.plannedArrival &&
         new Date(a.plannedDeparture) < new Date(b.plannedArrival) && new Date(a.plannedArrival) > new Date(b.plannedDeparture)) {
-        throw new BadRequestException('Các chặng của cùng xe không được trùng thời gian');
+        throw new ConflictException('Các chặng của cùng xe không được trùng thời gian');
       }
     }
     const ids = [...new Set([...oldVehicleIds, ...roadLegs.filter(l => l.vehicleId).map(l => l.vehicleId!)])].sort((a, b) => a - b);
     if (!ids.length) return prepared;
     const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT * FROM vehicle WHERE vehicle_id IN (${ids.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, ids);
     assertRoadCapacity(Number(order.requested_horse_count), roadLegs.filter(l => l.vehicleId).map(l => l.vehicleId!), vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })));
+    const roadTripIds = [...new Set(roadLegs.filter(l => l.roadTripId).map(l => Number(l.roadTripId)))].sort((a, b) => a - b);
+    if (roadTripIds.length) {
+      const [lockedTripRows] = await db.execute<RowDataPacket[]>(
+        `SELECT * FROM road_trip WHERE road_trip_id IN (${roadTripIds.map(() => '?').join(',')}) ORDER BY road_trip_id FOR UPDATE`,
+        roadTripIds,
+      );
+      const lockedTrips = new Map<number, RowDataPacket>(lockedTripRows.map(r => [Number(r.road_trip_id), r]));
+      for (const leg of roadLegs) {
+        if (!leg.roadTripId) continue;
+        const trip = lockedTrips.get(Number(leg.roadTripId));
+        if (!trip) throw new NotFoundException('Không tìm thấy chuyến đường bộ');
+        if (trip.booking_type !== order.booking_type) throw new BadRequestException('Hình thức chuyến không khớp lựa chọn của khách');
+        if (Number(trip.vehicle_id) !== Number(leg.vehicleId)) {
+          throw new ConflictException('Chuyến đường bộ không khớp phương tiện đã giữ chỗ');
+        }
+      }
+    }
     const usedTrips = new Set<number>();
     for (const leg of roadLegs) {
       if (!leg.vehicleId) continue; // Draft legs may remain incomplete; confirmation rejects incomplete legs.
@@ -80,7 +107,7 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
       if (leg.roadTripId && usedTrips.has(leg.roadTripId)) throw new BadRequestException('Một đơn chỉ được có một phân bổ trên cùng chuyến đường bộ');
       const [conflicts] = await db.execute<RowDataPacket[]>(`SELECT l.road_trip_id, l.stalls_booked, s.booking_type, s.requested_horse_count
         FROM route_leg l JOIN route r ON r.route_id = l.route_id JOIN shipment s ON s.shipment_id = r.shipment_id
-        WHERE l.vehicle_id = ? AND s.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','rejected')
+        WHERE l.vehicle_id = ? AND s.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected')
         AND (
           (l.planned_departure IS NOT NULL AND l.planned_arrival IS NOT NULL AND l.planned_departure < ? AND l.planned_arrival > ?)
           OR
@@ -88,15 +115,15 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
         )`,
         [leg.vehicleId, order.shipment_id, end, start, start, end]);
       const [unscheduled] = await db.execute<RowDataPacket[]>(`SELECT sv.shipment_id FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id
-        WHERE sv.vehicle_id = ? AND s.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','rejected')
+        WHERE sv.vehicle_id = ? AND s.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected')
         AND NOT EXISTS (SELECT 1 FROM route_leg l JOIN route r ON r.route_id = l.route_id WHERE r.shipment_id = s.shipment_id AND l.vehicle_id = sv.vehicle_id)`, [leg.vehicleId, order.shipment_id]);
-      if (unscheduled.length) throw new BadRequestException('Xe đã phân công cho đơn khác chưa có lịch; cần điều phối lại trước khi giữ chỗ');
+      if (unscheduled.length) throw new ConflictException('Xe đã phân công cho đơn khác chưa có lịch; cần điều phối lại trước khi giữ chỗ');
       if (conflicts.some(c => !leg.roadTripId || Number(c.road_trip_id) !== leg.roadTripId ||
         c.booking_type === 'dedicated_charter' || order.booking_type === 'dedicated_charter')) {
-        throw new BadRequestException('Xe đã có chuyến khác trùng thời gian hoặc đang được bao riêng');
+        throw new ConflictException('Xe đã có chuyến khác trùng thời gian hoặc đang được bao riêng');
       }
       const booked = conflicts.reduce((n, c) => n + Number(c.stalls_booked || c.requested_horse_count), 0);
-      if (booked + Number(order.requested_horse_count) > Number(vehicle.capacity)) throw new BadRequestException('Chuyến đường bộ không còn đủ ô chuồng');
+      if (booked + Number(order.requested_horse_count) > Number(vehicle.capacity)) throw new ConflictException('Chuyến đường bộ không còn đủ ô chuồng');
       if (!leg.roadTripId) {
         const [created] = await db.execute<any>(`INSERT INTO road_trip (vehicle_id, booking_type, origin_location, destination_location, planned_departure, planned_arrival, created_by)
           VALUES (?, ?, ?, ?, ?, ?, ?)`, [leg.vehicleId, order.booking_type, leg.originLocation, leg.destinationLocation, start, end, actorId]);

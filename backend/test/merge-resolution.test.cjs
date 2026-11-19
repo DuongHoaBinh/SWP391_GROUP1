@@ -59,7 +59,7 @@ function paymentFixture(confirmed) {
 
 test('planning order cannot reserve a QR before all route staff confirm and an invoice exists', async () => {
   const { store, writes } = paymentFixture(false);
-  await assert.rejects(store.reserve(42, 7, {}), error => error.getStatus() === 400 && /lịch trình được xác nhận/.test(error.message));
+  await assert.rejects(store.reserve(42, 7, {}), error => error.getStatus() === 422 && /lịch trình được xác nhận/.test(error.message));
   assert.deepEqual(writes, ['rollback']);
 });
 

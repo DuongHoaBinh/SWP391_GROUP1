@@ -21,7 +21,7 @@ export class MomoPaymentService {
     const secret = process.env.MOMO_SECRET_KEY;
     if (endpoint !== 'https://test-payment.momo.vn/v2/gateway/api/create' || !partnerCode || !accessKey || !secret) throw new ServiceUnavailableException('Cấu hình MoMo sandbox chưa đầy đủ hoặc endpoint không hợp lệ');
     try {
-      const origin = new URL(process.env.MOMO_REDIRECT_ORIGIN ?? process.env.FRONTEND_ORIGIN ?? 'http://localhost:3000');
+      const origin = new URL(process.env.MOMO_REDIRECT_ORIGIN ?? process.env.FRONTEND_ORIGIN ?? 'http://localhost:3001');
       const ipn = new URL(process.env.MOMO_IPN_URL ?? 'http://localhost:5000/api/orders/payments/momo/ipn');
       for (const url of [origin, ipn]) if (url.username || url.password || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error();
       return { endpoint, partnerCode, accessKey, secret, redirectOrigin: origin.origin, ipnUrl: ipn.toString() };

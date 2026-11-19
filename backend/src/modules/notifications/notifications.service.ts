@@ -1,10 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { NotificationsStore } from './notifications.store';
 import { NotificationItem, NotificationType } from './notifications.types';
+import { MailService } from '../auth/mail.service';
+
+const CRITICAL_EMAIL_TYPES = new Set<NotificationType>([
+  'incident',
+  'handover_complete',
+  'document_missing',
+]);
 
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly notificationsStore: NotificationsStore) {}
+  constructor(
+    private readonly notificationsStore: NotificationsStore,
+    @Optional() private readonly mailService?: MailService,
+  ) {}
 
   async createNotification(
     userId: number,
@@ -14,7 +24,7 @@ export class NotificationsService {
     shipmentId: number | null = null,
     horseId: number | null = null,
   ): Promise<number> {
-    return this.notificationsStore.create(
+    const id = await this.notificationsStore.create(
       userId,
       title,
       message,
@@ -22,6 +32,23 @@ export class NotificationsService {
       shipmentId,
       horseId,
     );
+
+    if (
+      CRITICAL_EMAIL_TYPES.has(notifType) &&
+      this.mailService &&
+      typeof this.notificationsStore.findUserEmailById === 'function'
+    ) {
+      try {
+        const email = await this.notificationsStore.findUserEmailById(userId);
+        if (email) {
+          await this.mailService.sendOperationalEmail(email, title, message);
+        }
+      } catch {
+        // Non-blocking SMTP channel
+      }
+    }
+
+    return id;
   }
 
   async getMyNotifications(userId: number): Promise<NotificationItem[]> {

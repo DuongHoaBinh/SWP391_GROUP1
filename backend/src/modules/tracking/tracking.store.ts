@@ -1,24 +1,39 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import {
   HorseConditionStatus,
   HorseHealthLogEntity,
   TripStatusLogEntity,
 } from './tracking.types';
+import { MYSQL_POOL } from '../../common/database/database.module';
+import {
+  DEFAULT_EQUINE_VITAL_CONFIG,
+  EquineVitalConfig,
+  HealthAlertTier,
+} from './vitals-policy';
 
 @Injectable()
 export class TrackingStore implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(TrackingStore.name);
   private pool!: Pool;
 
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
+  }
+
   async onModuleInit(): Promise<void> {
-    this.pool = createPool({
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system',
-      user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '',
-      connectionLimit: 10,
-    });
+    if (!this.pool) {
+      this.pool = createPool({
+        host: process.env.DB_HOST ?? 'localhost',
+        port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system',
+        user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '',
+        connectionLimit: 10,
+      });
+    }
 
     try {
       // 1. Check & add columns to route_leg
@@ -50,8 +65,15 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       }
       if (!stopColNames.includes('status')) {
         await this.pool.execute(
-          "ALTER TABLE `route_stop` ADD COLUMN `status` ENUM('pending', 'arrived', 'departed', 'customs_cleared') NOT NULL DEFAULT 'pending'",
+          "ALTER TABLE `route_stop` ADD COLUMN `status` ENUM('pending', 'arrived', 'cleared', 'customs_cleared', 'departed') NOT NULL DEFAULT 'pending'",
         );
+      } else {
+        const statusCol = stopCols.find((c) => c.Field === 'status');
+        if (statusCol && typeof statusCol.Type === 'string' && !statusCol.Type.includes('customs_cleared')) {
+          await this.pool.execute(
+            "ALTER TABLE `route_stop` MODIFY COLUMN `status` ENUM('pending', 'arrived', 'cleared', 'customs_cleared', 'departed') NOT NULL DEFAULT 'pending'",
+          );
+        }
       }
 
       // 3. Create trip_status_log
@@ -99,15 +121,17 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         await this.pool.execute('ALTER TABLE `horse_health_log` ADD COLUMN `leg_name` VARCHAR(255) NULL AFTER `horse_name`');
       }
 
-      // 5. Seed test data for Flow 4 (1 domestic, 1 international in ready_to_depart)
-      await this.seedFlow4TestData();
+      // 5. Seed test data for Flow 4 only when explicitly enabled
+      if (process.env.SEED_DEMO_DATA === 'true') {
+        await this.seedFlow4TestData();
+      }
     } catch (e: any) {
-      console.warn('TrackingStore onModuleInit migration notice:', e?.message || e);
+      this.logger.warn(`TrackingStore onModuleInit migration notice: ${e?.message || e}`);
     }
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.pool) {
+    if (this.pool && !this.injectedPool) {
       await this.pool.end();
     }
   }
@@ -251,9 +275,9 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         (?, ?, 'escort', NOW(), 1, NOW(), 'Sẵn sàng hộ tống thú y suốt chặng bay quốc tế')
       `, [intlShipmentId, driverId, intlShipmentId, escortId]);
 
-      console.log('Seeded Flow 4 test trips: REQ-F4-DOMESTIC (id:', domShipmentId, ') and REQ-F4-INTL (id:', intlShipmentId, ')');
+      this.logger.log(`Seeded Flow 4 test trips: REQ-F4-DOMESTIC (id: ${domShipmentId}) and REQ-F4-INTL (id: ${intlShipmentId})`);
     } catch (e: any) {
-      console.warn('Seed Flow 4 notice:', e?.message || e);
+      this.logger.warn(`Seed Flow 4 notice: ${e?.message || e}`);
     }
   }
 
@@ -344,7 +368,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
 
   async findAssignedHorses(shipmentId: number): Promise<any[]> {
     const [rows] = await this.pool.execute<any[]>(
-      `SELECT h.horse_id, h.name, h.breed, h.gender, h.age, h.microchip_no, h.passport_no
+      `SELECT sh.shipment_horse_id, h.horse_id, h.name, h.breed, h.gender, h.age, h.microchip_no, h.passport_no
        FROM shipment_horse sh
        JOIN horse h ON sh.horse_id = h.horse_id
        WHERE sh.shipment_id = ?`,
@@ -495,7 +519,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
              JOIN shipment s ON s.shipment_id = r.shipment_id
              WHERE rl.vehicle_id = v.vehicle_id
                AND rl.status <> 'completed'
-               AND s.status NOT IN ('completed', 'cancelled', 'rejected')
+               AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')
            )`,
         [vehicleId],
       );
@@ -543,7 +567,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
        JOIN route r ON r.route_id = rl.route_id
        JOIN shipment s ON s.shipment_id = r.shipment_id
        WHERE rl.road_trip_id = ?
-         AND s.status NOT IN ('cancelled', 'rejected')
+         AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected')
        ORDER BY rl.leg_id ASC`,
       [roadTripId],
     );
@@ -557,6 +581,8 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     actualTime: Date,
     isDeparture: boolean,
     notes?: string,
+    updatedByRole?: string,
+    isBackdated: boolean = false,
   ): Promise<void> {
     const timeCol = isDeparture
       ? 'actual_departure = ?, actual_arrival = COALESCE(actual_arrival, ?)'
@@ -570,6 +596,24 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
        WHERE route_stop_id = ?`,
       params,
     );
+
+    if (['departed', 'arrived', 'customs_cleared', 'delivered'].includes(status)) {
+      await this.pool.execute(
+        `INSERT INTO route_stop_update (
+          route_stop_id, updated_by, updated_by_role, actual_arrival, actual_departure, status, notes, is_backdated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          stopId,
+          updatedBy,
+          updatedByRole ?? null,
+          isDeparture ? null : actualTime,
+          isDeparture ? actualTime : null,
+          status,
+          notes || null,
+          isBackdated ? 1 : 0,
+        ],
+      );
+    }
   }
 
   async updateShipmentStatus(shipmentId: number, status: string): Promise<void> {
@@ -580,7 +624,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       );
       await this.pool.execute(
         `UPDATE horse
-         SET status = 'delivered'
+         SET status = 'active'
          WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
            AND status NOT IN ('retired', 'deceased')`,
         [shipmentId],
@@ -602,7 +646,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
              WHERE rl2.vehicle_id = v.vehicle_id
                AND s2.shipment_id <> ?
                AND rl2.status <> 'completed'
-               AND s2.status NOT IN ('completed', 'cancelled', 'rejected')
+               AND s2.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')
            )`,
         [shipmentId, shipmentId],
       );
@@ -634,10 +678,11 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     notes?: string | null;
     updatedBy: number;
     updatedByRole: string;
+    isBackdated?: boolean;
   }): Promise<void> {
     await this.pool.execute(
-      `INSERT INTO trip_status_log (shipment_id, route_id, leg_id, route_stop_id, previous_status, new_status, milestone_type, milestone_name, notes, updated_by, updated_by_role, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO trip_status_log (shipment_id, route_id, leg_id, route_stop_id, previous_status, new_status, milestone_type, milestone_name, notes, updated_by, updated_by_role, is_backdated, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         log.shipmentId,
         log.routeId,
@@ -650,6 +695,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         log.notes || null,
         log.updatedBy,
         log.updatedByRole,
+        log.isBackdated ? 1 : 0,
       ],
     );
   }
@@ -678,6 +724,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       updatedBy: r.updated_by,
       updatedByName: r.updated_by_name,
       updatedByRole: r.updated_by_role,
+      isBackdated: Boolean(r.is_backdated),
       createdAt: new Date(r.created_at).toISOString(),
     }));
   }
@@ -688,34 +735,200 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     horseName: string;
     legName?: string | null;
     recordedBy: number;
+    recordedByRole?: string | null;
     conditionStatus: HorseConditionStatus;
     temperatureC?: number | null;
     heartRateBpm?: number | null;
+    alertTier?: HealthAlertTier;
+    alertReason?: string | null;
     notes?: string | null;
     attachmentsJson?: string | null;
+    recordedAt?: Date | null;
   }): Promise<number> {
+    const recordedAt = log.recordedAt ?? new Date();
     const [res] = await this.pool.execute<any>(
-      `INSERT INTO horse_health_log (shipment_id, horse_id, horse_name, leg_name, recorded_by, condition_status, temperature_c, heart_rate_bpm, notes, attachments_json, recorded_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO horse_health_log (
+        shipment_id, horse_id, horse_name, leg_name, recorded_by, recorded_by_role,
+        condition_status, temperature_c, heart_rate_bpm, alert_tier, alert_reason,
+        notes, attachments_json, recorded_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         log.shipmentId,
         log.horseId || null,
         log.horseName,
         log.legName || null,
         log.recordedBy,
+        log.recordedByRole || null,
         log.conditionStatus,
         log.temperatureC ?? null,
         log.heartRateBpm ?? null,
+        log.alertTier || 'green',
+        log.alertReason || null,
         log.notes || null,
         log.attachmentsJson || null,
+        recordedAt,
       ],
     );
     return res.insertId;
   }
 
+  async findLatestHealthLogForHorse(
+    shipmentId: number,
+    horseId?: number | null,
+    horseName?: string | null,
+  ): Promise<{ id: number; alertTier: HealthAlertTier; recordedAt: string } | null> {
+    const sql = horseId
+      ? `SELECT log_id, alert_tier, recorded_at FROM horse_health_log
+         WHERE shipment_id = ? AND horse_id = ?
+         ORDER BY recorded_at DESC, log_id DESC LIMIT 1`
+      : `SELECT log_id, alert_tier, recorded_at FROM horse_health_log
+         WHERE shipment_id = ? AND LOWER(horse_name) = LOWER(?)
+         ORDER BY recorded_at DESC, log_id DESC LIMIT 1`;
+    const param = horseId ? Number(horseId) : String(horseName || '');
+    const [rows] = await this.pool.execute<any[]>(sql, [shipmentId, param]);
+    if (!rows[0]) return null;
+    return {
+      id: Number(rows[0].log_id),
+      alertTier: (rows[0].alert_tier as HealthAlertTier) || 'green',
+      recordedAt: new Date(rows[0].recorded_at).toISOString(),
+    };
+  }
+
+  async findActiveVitalConfig(): Promise<EquineVitalConfig> {
+    try {
+      const [rows] = await this.pool.execute<any[]>(
+        'SELECT * FROM equine_vital_config WHERE is_active = TRUE ORDER BY config_id DESC LIMIT 1',
+      );
+      const r = rows[0];
+      if (!r) return DEFAULT_EQUINE_VITAL_CONFIG;
+      return {
+        configId: Number(r.config_id),
+        configName: r.config_name,
+        tempGreenMin: Number(r.temp_green_min),
+        tempGreenMax: Number(r.temp_green_max),
+        tempAmberLowMin: Number(r.temp_amber_low_min),
+        tempAmberHighMax: Number(r.temp_amber_high_max),
+        hrGreenMin: Number(r.hr_green_min),
+        hrGreenMax: Number(r.hr_green_max),
+        hrAmberLowMin: Number(r.hr_amber_low_min),
+        hrAmberHighMax: Number(r.hr_amber_high_max),
+        consecutiveAlertWindowHours: Number(r.consecutive_alert_window_hours),
+        escalatableConditions:
+          typeof r.escalatable_conditions === 'string'
+            ? JSON.parse(r.escalatable_conditions)
+            : (r.escalatable_conditions || DEFAULT_EQUINE_VITAL_CONFIG.escalatableConditions),
+        observationalConditions:
+          typeof r.observational_conditions === 'string'
+            ? JSON.parse(r.observational_conditions)
+            : (r.observational_conditions || DEFAULT_EQUINE_VITAL_CONFIG.observationalConditions),
+        calibratedBy: r.calibrated_by ?? null,
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+      };
+    } catch {
+      return DEFAULT_EQUINE_VITAL_CONFIG;
+    }
+  }
+
+  async updateVitalConfig(patch: Partial<EquineVitalConfig>, updatedBy: number): Promise<EquineVitalConfig> {
+    const current = await this.findActiveVitalConfig();
+    const merged: EquineVitalConfig = {
+      ...current,
+      ...patch,
+      escalatableConditions: patch.escalatableConditions ?? current.escalatableConditions,
+      observationalConditions: patch.observationalConditions ?? current.observationalConditions,
+    };
+
+    if (current.configId) {
+      await this.pool.execute(
+        `UPDATE equine_vital_config
+         SET config_name = ?, temp_green_min = ?, temp_green_max = ?,
+             temp_amber_low_min = ?, temp_amber_high_max = ?,
+             hr_green_min = ?, hr_green_max = ?,
+             hr_amber_low_min = ?, hr_amber_high_max = ?,
+             consecutive_alert_window_hours = ?,
+             escalatable_conditions = ?, observational_conditions = ?,
+             calibrated_by = ?, updated_by = ?
+         WHERE config_id = ?`,
+        [
+          merged.configName,
+          merged.tempGreenMin,
+          merged.tempGreenMax,
+          merged.tempAmberLowMin,
+          merged.tempAmberHighMax,
+          merged.hrGreenMin,
+          merged.hrGreenMax,
+          merged.hrAmberLowMin,
+          merged.hrAmberHighMax,
+          merged.consecutiveAlertWindowHours,
+          JSON.stringify(merged.escalatableConditions),
+          JSON.stringify(merged.observationalConditions),
+          merged.calibratedBy ?? null,
+          updatedBy,
+          current.configId,
+        ],
+      );
+    } else {
+      await this.pool.execute(
+        `INSERT INTO equine_vital_config (
+          config_name, is_active, temp_green_min, temp_green_max,
+          temp_amber_low_min, temp_amber_high_max, hr_green_min, hr_green_max,
+          hr_amber_low_min, hr_amber_high_max, consecutive_alert_window_hours,
+          escalatable_conditions, observational_conditions, calibrated_by, updated_by
+        ) VALUES (?, TRUE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          merged.configName,
+          merged.tempGreenMin,
+          merged.tempGreenMax,
+          merged.tempAmberLowMin,
+          merged.tempAmberHighMax,
+          merged.hrGreenMin,
+          merged.hrGreenMax,
+          merged.hrAmberLowMin,
+          merged.hrAmberHighMax,
+          merged.consecutiveAlertWindowHours,
+          JSON.stringify(merged.escalatableConditions),
+          JSON.stringify(merged.observationalConditions),
+          merged.calibratedBy ?? null,
+          updatedBy,
+        ],
+      );
+    }
+    return this.findActiveVitalConfig();
+  }
+
+  async isHealthPhotoAccessibleToUser(filename: string, userId: number, role: string): Promise<boolean> {
+    const upper = String(role || '').toUpperCase();
+    if (
+      upper.includes('MANAGER') ||
+      upper.includes('COORDINATOR') ||
+      upper.includes('SPECIALIST') ||
+      upper.includes('ADMIN')
+    ) {
+      return true;
+    }
+    const pattern = `%${filename}%`;
+    if (upper === 'CUSTOMER') {
+      const [rows] = await this.pool.execute<any[]>(
+        `SELECT 1 FROM horse_health_log hhl
+         JOIN shipment s ON s.shipment_id = hhl.shipment_id
+         WHERE s.customer_id = ? AND hhl.attachments_json LIKE ? LIMIT 1`,
+        [userId, pattern],
+      );
+      return rows.length > 0;
+    }
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT 1 FROM horse_health_log hhl
+       JOIN shipment_assignment sa ON sa.shipment_id = hhl.shipment_id
+       WHERE sa.user_id = ? AND hhl.attachments_json LIKE ? LIMIT 1`,
+      [userId, pattern],
+    );
+    return rows.length > 0;
+  }
+
   async findHorseHealthLogs(shipmentId: number): Promise<HorseHealthLogEntity[]> {
     const [rows] = await this.pool.execute<any[]>(
-      `SELECT hhl.*, u.full_name as recorded_by_name, r.role_name as recorded_by_role
+      `SELECT hhl.*, u.full_name as recorded_by_name, r.role_name as user_role_name,
+              COALESCE(hhl.recorded_by_role, r.role_name) as effective_recorded_by_role
        FROM horse_health_log hhl
        JOIN \`user\` u ON hhl.recorded_by = u.user_id
        JOIN \`role\` r ON u.role_id = r.role_id
@@ -746,11 +959,13 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         legName: r.leg_name || 'Chặng vận chuyển thực địa',
         recordedBy: r.recorded_by,
         recordedByName: r.recorded_by_name,
-        recordedByRole: r.recorded_by_role,
+        recordedByRole: r.effective_recorded_by_role || r.recorded_by_role || r.user_role_name,
         conditionStatus: r.condition_status,
         conditionStatusVi: conditionMapVi[r.condition_status] || r.condition_status,
         temperatureC: r.temperature_c !== null ? Number(r.temperature_c) : null,
         heartRateBpm: r.heart_rate_bpm !== null ? Number(r.heart_rate_bpm) : null,
+        alertTier: (r.alert_tier as HealthAlertTier) || 'green',
+        alertReason: r.alert_reason ?? null,
         notes: r.notes,
         attachments,
         recordedAt: new Date(r.recorded_at).toISOString(),
@@ -768,7 +983,8 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
 
   async findHorseHealthLogsByHorseId(horseId: number): Promise<any[]> {
     const [rows] = await this.pool.execute<any[]>(
-      `SELECT hhl.*, u.full_name as recorded_by_name, r.role_name as recorded_by_role,
+      `SELECT hhl.*, u.full_name as recorded_by_name, r.role_name as user_role_name,
+              COALESCE(hhl.recorded_by_role, r.role_name) as effective_recorded_by_role,
               s.origin_location, s.destination_location
        FROM horse_health_log hhl
        JOIN \`user\` u ON hhl.recorded_by = u.user_id
@@ -801,11 +1017,13 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         legName: r.leg_name || 'Chặng vận chuyển thực địa',
         recordedBy: r.recorded_by,
         recordedByName: r.recorded_by_name,
-        recordedByRole: r.recorded_by_role,
+        recordedByRole: r.effective_recorded_by_role || r.recorded_by_role || r.user_role_name,
         conditionStatus: r.condition_status,
         conditionStatusVi: conditionMapVi[r.condition_status] || r.condition_status,
         temperatureC: r.temperature_c !== null ? Number(r.temperature_c) : null,
         heartRateBpm: r.heart_rate_bpm !== null ? Number(r.heart_rate_bpm) : null,
+        alertTier: (r.alert_tier as HealthAlertTier) || 'green',
+        alertReason: r.alert_reason ?? null,
         notes: r.notes,
         attachments,
         recordedAt: new Date(r.recorded_at).toISOString(),

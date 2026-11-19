@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import {
   AuthorityApprovalStatus,
@@ -8,14 +8,22 @@ import {
   TransportDocument,
 } from './documents.types';
 import { CreateRegulationDto } from './dto/create-regulation.dto';
+import { UpdateRegulationDto } from './dto/update-regulation.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { RecordAuthorityApprovalDto } from './dto/record-authority-approval.dto';
+import { MYSQL_POOL } from '../../common/database/database.module';
 
 import { REGULATION_PRESET_TEMPLATES } from './constants/regulation-presets.constant';
 
 interface RegulationRow extends RowDataPacket {
   regulation_id: number;
   country: string;
+  border_gate?: string | null;
+  transport_mode?: 'road' | 'air' | 'both' | null;
+  doc_tier?: 'A' | 'B' | null;
+  lead_time_days?: number | null;
+  requires_authority_approval?: number | boolean | null;
+  min_validity_buffer_hours?: number | null;
   document_type: string;
   description: string | null;
   effective_date: Date | null;
@@ -36,6 +44,9 @@ interface DocumentRow extends RowDataPacket {
   reviewer_notes: string | null;
   created_at: Date;
   horse_name?: string;
+  horse_owner_id?: number;
+  is_archived?: number | boolean;
+  superseded_by_document_id?: number | null;
   country?: string;
   regulation_title?: string;
   regulation_doc_type?: string;
@@ -71,6 +82,14 @@ interface OrderDestinationRow extends RowDataPacket {
   destination_location: string;
   origin_location: string;
   status: string;
+  booking_type?: string | null;
+  transport_mode?: string | null;
+  transportation_type?: string | null;
+  in_transit_compliance_alert?: number | boolean | null;
+  route_expected_arrival?: Date | string | null;
+  stop_expected_arrival?: Date | string | null;
+  arrival_airport_codes?: string | null;
+  border_stop_names?: string | null;
   requested_date: Date | null;
   departure_date: Date | null;
   expected_arrival_date: Date | null;
@@ -79,47 +98,117 @@ interface OrderDestinationRow extends RowDataPacket {
 
 @Injectable()
 export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(DocumentsStore.name);
   private pool!: Pool;
 
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
+  }
+
   async onModuleInit(): Promise<void> {
-    this.pool = createPool({
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system',
-      user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '',
-      connectionLimit: 10,
-    });
+    if (!this.pool) {
+      this.pool = createPool({
+        host: process.env.DB_HOST ?? 'localhost',
+        port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system',
+        user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '',
+        connectionLimit: 10,
+      });
+    }
     await this.seedInitialRegulations();
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.pool) {
+    if (this.pool && !this.injectedPool) {
       await this.pool.end();
     }
   }
 
-  // --- Regulations ---
-  async findRegulations(countryFilter?: string): Promise<Regulation[]> {
-    let query = 'SELECT * FROM regulation';
-    const params: string[] = [];
-
-    if (countryFilter) {
-      query += ' WHERE LOWER(country) LIKE LOWER(?)';
-      params.push(`%${countryFilter}%`);
+  private formatMysqlDateOnly(val: Date | string | null | undefined): string | null {
+    if (!val) return null;
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+      const parsed = new Date(trimmed);
+      if (!Number.isFinite(parsed.getTime())) return null;
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
     }
+    if (!(val instanceof Date) || !Number.isFinite(val.getTime())) return null;
+    return `${val.getFullYear()}-${String(val.getMonth() + 1).padStart(2, '0')}-${String(val.getDate()).padStart(2, '0')}`;
+  }
 
-    query += ' ORDER BY country ASC, document_type ASC';
+  private toMysqlDateParam(val: string | null | undefined): string | null {
+    if (!val) return null;
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) return trimmed.slice(0, 10);
+    const parsed = new Date(trimmed);
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : null;
+  }
 
-    const [rows] = await this.pool.execute<RegulationRow[]>(query, params);
-    return rows.map((r) => ({
+  private mapRegulationRow(r: RegulationRow): Regulation {
+    return {
       id: r.regulation_id,
       country: r.country,
+      borderGate: r.border_gate ?? null,
+      transportMode: (r.transport_mode as 'road' | 'air' | 'both') || 'both',
+      docTier: (r.doc_tier as 'A' | 'B') || 'A',
+      leadTimeDays: r.lead_time_days !== undefined && r.lead_time_days !== null ? Number(r.lead_time_days) : 5,
+      requiresAuthorityApproval: Boolean(r.requires_authority_approval),
+      minValidityBufferHours:
+        r.min_validity_buffer_hours !== undefined && r.min_validity_buffer_hours !== null
+          ? Number(r.min_validity_buffer_hours)
+          : 24,
       documentType: r.document_type,
       description: r.description,
-      effectiveDate: r.effective_date ? new Date(r.effective_date).toISOString().split('T')[0] : null,
+      effectiveDate: this.formatMysqlDateOnly(r.effective_date),
       createdAt: new Date(r.created_at).toISOString(),
-    }));
+    };
+  }
+
+  // --- Regulations ---
+  async findRegulations(
+    countryOrFilter?:
+      | string
+      | { country?: string; borderGate?: string; transportMode?: string; docTier?: string },
+  ): Promise<Regulation[]> {
+    const filter =
+      typeof countryOrFilter === 'string'
+        ? { country: countryOrFilter }
+        : (countryOrFilter ?? {});
+
+    let query = 'SELECT * FROM regulation';
+    const conditions: string[] = [];
+    const params: string[] = [];
+
+    if (filter.country) {
+      conditions.push('LOWER(country) LIKE LOWER(?)');
+      params.push(`%${filter.country}%`);
+    }
+    if (filter.borderGate) {
+      conditions.push('(border_gate IS NULL OR TRIM(border_gate) = "" OR LOWER(border_gate) LIKE LOWER(?))');
+      params.push(`%${filter.borderGate.trim()}%`);
+    }
+    if (filter.transportMode && filter.transportMode !== 'both') {
+      conditions.push('(transport_mode = "both" OR transport_mode = ?)');
+      params.push(filter.transportMode.toLowerCase().trim());
+    }
+    if (filter.docTier) {
+      conditions.push('doc_tier = ?');
+      params.push(filter.docTier.toUpperCase().trim());
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    query += ' ORDER BY country ASC, doc_tier ASC, document_type ASC';
+
+    const [rows] = await this.pool.execute<RegulationRow[]>(query, params);
+    return rows.map((r) => this.mapRegulationRow(r));
   }
 
   async findRegulationById(id: number): Promise<Regulation | undefined> {
@@ -128,22 +217,36 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       [id],
     );
     const r = rows[0];
-    if (!r) return undefined;
-    return {
-      id: r.regulation_id,
-      country: r.country,
-      documentType: r.document_type,
-      description: r.description,
-      effectiveDate: r.effective_date ? new Date(r.effective_date).toISOString().split('T')[0] : null,
-      createdAt: new Date(r.created_at).toISOString(),
-    };
+    return r ? this.mapRegulationRow(r) : undefined;
   }
 
   async createRegulation(dto: CreateRegulationDto): Promise<number> {
-    const effectiveDate = dto.effectiveDate ? new Date(dto.effectiveDate) : null;
+    const effectiveDate = this.toMysqlDateParam(dto.effectiveDate);
+    const isDomesticVn = dto.country.trim().toLowerCase() === 'vietnam';
+    const docTier = dto.docTier ?? (dto.documentType === 'health_certificate' ? 'B' : 'A');
+    const leadTimeDays = dto.leadTimeDays ?? (docTier === 'B' ? 1 : 5);
+    const requiresAuth =
+      dto.requiresAuthorityApproval ??
+      (!isDomesticVn && ['import_permit', 'export_permit', 'quarantine_certificate', 'health_certificate'].includes(dto.documentType));
+    const bufferHours = dto.minValidityBufferHours ?? (isDomesticVn ? 24 : 48);
+
     const [result] = await this.pool.execute(
-      'INSERT INTO regulation (country, document_type, description, effective_date) VALUES (?, ?, ?, ?)',
-      [dto.country, dto.documentType, dto.description ?? null, effectiveDate],
+      `INSERT INTO regulation (
+        country, border_gate, transport_mode, doc_tier, lead_time_days,
+        requires_authority_approval, min_validity_buffer_hours, document_type, description, effective_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        dto.country.trim(),
+        dto.borderGate?.trim() || null,
+        dto.transportMode ?? 'both',
+        docTier,
+        leadTimeDays,
+        requiresAuth ? 1 : 0,
+        bufferHours,
+        dto.documentType.trim(),
+        dto.description ?? null,
+        effectiveDate,
+      ],
     );
     return (result as { insertId: number }).insertId;
   }
@@ -153,23 +256,72 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     documentType: string,
     description: string,
     effectiveDate?: string | null,
+    meta?: {
+      borderGate?: string | null;
+      transportMode?: 'road' | 'air' | 'both';
+      docTier?: 'A' | 'B';
+      leadTimeDays?: number;
+      requiresAuthorityApproval?: boolean;
+      minValidityBufferHours?: number;
+      preserveExisting?: boolean;
+    },
   ): Promise<number> {
+    const cleanBorderGate = meta?.borderGate?.trim() || null;
     const [existing] = await this.pool.execute<RegulationRow[]>(
-      'SELECT regulation_id FROM regulation WHERE LOWER(country) = LOWER(?) AND LOWER(document_type) = LOWER(?) LIMIT 1',
-      [country, documentType],
+      `SELECT regulation_id FROM regulation
+       WHERE LOWER(country) = LOWER(?)
+         AND LOWER(document_type) = LOWER(?)
+         AND COALESCE(LOWER(border_gate), '') = COALESCE(LOWER(?), '')
+       LIMIT 1`,
+      [country, documentType, cleanBorderGate],
     );
-    const effDate = effectiveDate ? new Date(effectiveDate) : new Date();
+    const effDate = this.toMysqlDateParam(effectiveDate) ?? this.formatMysqlDateOnly(new Date());
+    const isDomesticVn = country.trim().toLowerCase() === 'vietnam';
+    const docTier = meta?.docTier ?? (documentType === 'health_certificate' ? 'B' : 'A');
+    const leadTimeDays = meta?.leadTimeDays ?? (docTier === 'B' ? 1 : 5);
+    const requiresAuth = meta?.requiresAuthorityApproval ?? (!isDomesticVn && ['import_permit', 'export_permit', 'quarantine_certificate'].includes(documentType));
+    const bufferHours = meta?.minValidityBufferHours ?? (isDomesticVn ? 24 : 48);
+    const transportMode = meta?.transportMode ?? 'both';
+
     if (existing.length > 0) {
       const regId = existing[0].regulation_id;
+      if (meta?.preserveExisting) return regId;
       await this.pool.execute(
-        'UPDATE regulation SET description = ?, effective_date = ? WHERE regulation_id = ?',
-        [description, effDate, regId],
+        `UPDATE regulation
+         SET description = ?, effective_date = ?, border_gate = ?, transport_mode = ?,
+             doc_tier = ?, lead_time_days = ?, requires_authority_approval = ?, min_validity_buffer_hours = ?
+         WHERE regulation_id = ?`,
+        [
+          description,
+          effDate,
+          cleanBorderGate,
+          transportMode,
+          docTier,
+          leadTimeDays,
+          requiresAuth ? 1 : 0,
+          bufferHours,
+          regId,
+        ],
       );
       return regId;
     } else {
       const [result] = await this.pool.execute(
-        'INSERT INTO regulation (country, document_type, description, effective_date) VALUES (?, ?, ?, ?)',
-        [country, documentType, description, effDate],
+        `INSERT INTO regulation (
+          country, border_gate, transport_mode, doc_tier, lead_time_days,
+          requires_authority_approval, min_validity_buffer_hours, document_type, description, effective_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          country,
+          cleanBorderGate,
+          transportMode,
+          docTier,
+          leadTimeDays,
+          requiresAuth ? 1 : 0,
+          bufferHours,
+          documentType,
+          description,
+          effDate,
+        ],
       );
       return (result as { insertId: number }).insertId;
     }
@@ -191,6 +343,67 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
+  async updateRegulation(regulationId: number, dto: UpdateRegulationDto): Promise<boolean> {
+    const sets: string[] = [];
+    const params: (string | Date | null | number)[] = [];
+    if (dto.country !== undefined) {
+      sets.push('country = ?');
+      params.push(dto.country.trim());
+    }
+    if (dto.borderGate !== undefined) {
+      sets.push('border_gate = ?');
+      params.push(dto.borderGate ? dto.borderGate.trim() || null : null);
+    }
+    if (dto.transportMode !== undefined) {
+      sets.push('transport_mode = ?');
+      params.push(dto.transportMode);
+    }
+    if (dto.docTier !== undefined) {
+      sets.push('doc_tier = ?');
+      params.push(dto.docTier);
+    }
+    if (dto.leadTimeDays !== undefined) {
+      sets.push('lead_time_days = ?');
+      params.push(Number(dto.leadTimeDays));
+    }
+    if (dto.requiresAuthorityApproval !== undefined) {
+      sets.push('requires_authority_approval = ?');
+      params.push(dto.requiresAuthorityApproval ? 1 : 0);
+    }
+    if (dto.minValidityBufferHours !== undefined) {
+      sets.push('min_validity_buffer_hours = ?');
+      params.push(Number(dto.minValidityBufferHours));
+    }
+    if (dto.documentType !== undefined) {
+      sets.push('document_type = ?');
+      params.push(dto.documentType.trim());
+    }
+    if (dto.description !== undefined) {
+      sets.push('description = ?');
+      params.push(dto.description.trim() || null);
+    }
+    if (dto.effectiveDate !== undefined) {
+      sets.push('effective_date = ?');
+      params.push(this.toMysqlDateParam(dto.effectiveDate));
+    }
+    if (sets.length === 0) return true;
+    params.push(regulationId);
+    const [result] = await this.pool.execute(
+      `UPDATE regulation SET ${sets.join(', ')} WHERE regulation_id = ?`,
+      params,
+    );
+    return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async isHorseOwnedByUser(horseId: number, userId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT owner_id FROM horse WHERE horse_id = ? LIMIT 1',
+      [horseId],
+    );
+    if (!rows[0]) return false;
+    return Number(rows[0].owner_id) === Number(userId);
+  }
+
   async seedInitialRegulations(): Promise<void> {
     try {
       for (const preset of REGULATION_PRESET_TEMPLATES) {
@@ -201,20 +414,29 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
               item.documentType,
               item.description,
               '2026-01-01',
+              {
+                borderGate: item.borderGate ?? null,
+                transportMode: item.transportMode ?? 'both',
+                docTier: item.docTier,
+                leadTimeDays: item.leadTimeDays,
+                requiresAuthorityApproval: item.requiresAuthorityApproval,
+                minValidityBufferHours: item.minValidityBufferHours,
+                preserveExisting: true,
+              },
             );
           }
         }
       }
     } catch (err) {
       // Non-blocking log if DB schema is not ready yet
-      console.warn('[DocumentsStore] Warning while seeding initial regulations:', err);
+      this.logger.warn('Warning while seeding initial regulations', err as Error);
     }
   }
 
   // --- Transport Documents ---
   async createDocument(uploadedBy: number, dto: UploadDocumentDto): Promise<number> {
-    const issueDate = dto.issueDate ? new Date(dto.issueDate) : null;
-    const expiryDate = dto.expiryDate ? new Date(dto.expiryDate) : null;
+    const issueDate = this.toMysqlDateParam(dto.issueDate);
+    const expiryDate = this.toMysqlDateParam(dto.expiryDate);
 
     const [result] = await this.pool.execute(
       `INSERT INTO transport_document (
@@ -236,7 +458,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
 
   async findDocumentById(id: number): Promise<TransportDocument | undefined> {
     const [rows] = await this.pool.execute<DocumentRow[]>(
-      `SELECT d.*, h.name as horse_name, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
+      `SELECT d.*, h.name as horse_name, h.owner_id as horse_owner_id, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
         (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id
        FROM transport_document d
        JOIN horse h ON h.horse_id = d.horse_id
@@ -254,6 +476,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     return {
       id: r.document_id,
       horseId: r.horse_id,
+      ownerId: r.horse_owner_id !== undefined ? Number(r.horse_owner_id) : undefined,
       horseName: r.horse_name,
       requestCode: r.shipment_id ? `REQ-${String(r.shipment_id).padStart(3, '0')}` : undefined,
       regulationId: r.regulation_id,
@@ -266,24 +489,27 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       docType: r.doc_type,
       docNumber: r.doc_number,
       fileUrl: r.file_url,
-      issueDate: r.issue_date ? new Date(r.issue_date).toISOString().split('T')[0] : null,
-      expiryDate: r.expiry_date ? new Date(r.expiry_date).toISOString().split('T')[0] : null,
+      issueDate: this.formatMysqlDateOnly(r.issue_date),
+      expiryDate: this.formatMysqlDateOnly(r.expiry_date),
       status: r.status,
       reviewerNotes: r.reviewer_notes,
       createdAt: new Date(r.created_at).toISOString(),
+      isArchived: Boolean(r.is_archived),
+      supersededByDocumentId: r.superseded_by_document_id ?? null,
       approvals,
     };
   }
 
   async findDocumentsByHorseId(horseId: number): Promise<TransportDocument[]> {
     const [rows] = await this.pool.execute<DocumentRow[]>(
-      `SELECT d.*, h.name as horse_name, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
+      `SELECT d.*, h.name as horse_name, h.owner_id as horse_owner_id, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
         (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id
        FROM transport_document d
        JOIN horse h ON h.horse_id = d.horse_id
        JOIN regulation r ON r.regulation_id = d.regulation_id
        JOIN \`user\` u ON u.user_id = d.uploaded_by
        WHERE d.horse_id = ?
+         AND COALESCE(d.is_archived, 0) = 0
        ORDER BY d.created_at DESC`,
       [horseId],
     );
@@ -292,6 +518,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       rows.map(async (r) => ({
         id: r.document_id,
         horseId: r.horse_id,
+        ownerId: r.horse_owner_id !== undefined ? Number(r.horse_owner_id) : undefined,
         horseName: r.horse_name,
         requestCode: r.shipment_id ? `REQ-${String(r.shipment_id).padStart(3, '0')}` : undefined,
         regulationId: r.regulation_id,
@@ -304,11 +531,13 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
         docType: r.doc_type,
         docNumber: r.doc_number,
         fileUrl: r.file_url,
-        issueDate: r.issue_date ? new Date(r.issue_date).toISOString().split('T')[0] : null,
-        expiryDate: r.expiry_date ? new Date(r.expiry_date).toISOString().split('T')[0] : null,
+        issueDate: this.formatMysqlDateOnly(r.issue_date),
+        expiryDate: this.formatMysqlDateOnly(r.expiry_date),
         status: r.status,
         reviewerNotes: r.reviewer_notes,
         createdAt: new Date(r.created_at).toISOString(),
+        isArchived: Boolean(r.is_archived),
+        supersededByDocumentId: r.superseded_by_document_id ?? null,
         approvals: await this.findApprovalsByDocumentId(r.document_id),
       })),
     );
@@ -316,11 +545,12 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
 
   async findDocuments(filter: {
     uploadedBy?: number;
+    ownerId?: number;
     status?: string;
     horseId?: number;
   }): Promise<TransportDocument[]> {
     let query = `
-      SELECT d.*, h.name as horse_name, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
+      SELECT d.*, h.name as horse_name, h.owner_id as horse_owner_id, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
         (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id,
         (SELECT CONCAT('REQ-', LPAD(
           (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
@@ -331,12 +561,16 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       JOIN regulation r ON r.regulation_id = d.regulation_id
       JOIN \`user\` u ON u.user_id = d.uploaded_by
     `;
-    const conditions: string[] = [];
+    const conditions: string[] = ['COALESCE(d.is_archived, 0) = 0'];
     const params: any[] = [];
 
     if (filter.uploadedBy !== undefined) {
       conditions.push('d.uploaded_by = ?');
       params.push(filter.uploadedBy);
+    }
+    if (filter.ownerId !== undefined) {
+      conditions.push('h.owner_id = ?');
+      params.push(filter.ownerId);
     }
     if (filter.status) {
       conditions.push('d.status = ?');
@@ -358,8 +592,9 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       rows.map(async (r) => ({
         id: r.document_id,
         horseId: r.horse_id,
+        ownerId: r.horse_owner_id !== undefined ? Number(r.horse_owner_id) : undefined,
         horseName: r.horse_name,
-        requestCode: filter.uploadedBy !== undefined && r.customer_request_code
+        requestCode: (filter.uploadedBy !== undefined || filter.ownerId !== undefined) && r.customer_request_code
           ? r.customer_request_code
           : r.shipment_id
             ? `REQ-${String(r.shipment_id).padStart(3, '0')}`
@@ -374,11 +609,13 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
         docType: r.doc_type,
         docNumber: r.doc_number,
         fileUrl: r.file_url,
-        issueDate: r.issue_date ? new Date(r.issue_date).toISOString().split('T')[0] : null,
-        expiryDate: r.expiry_date ? new Date(r.expiry_date).toISOString().split('T')[0] : null,
+        issueDate: this.formatMysqlDateOnly(r.issue_date),
+        expiryDate: this.formatMysqlDateOnly(r.expiry_date),
         status: r.status,
         reviewerNotes: r.reviewer_notes,
         createdAt: new Date(r.created_at).toISOString(),
+        isArchived: Boolean(r.is_archived),
+        supersededByDocumentId: r.superseded_by_document_id ?? null,
         approvals: await this.findApprovalsByDocumentId(r.document_id),
       })),
     );
@@ -391,7 +628,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     expiryDate?: string,
     docNumber?: string,
   ): Promise<boolean> {
-    const newExpiryDate = expiryDate ? new Date(expiryDate) : null;
+    const newExpiryDate = this.toMysqlDateParam(expiryDate);
     const cleanDocNumber = docNumber && docNumber.trim().length > 0 ? docNumber.trim() : null;
     const [result] = await this.pool.execute(
       `UPDATE transport_document
@@ -406,14 +643,78 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async deleteDocument(documentId: number, userId: number, isAdminOrSpecialist: boolean): Promise<boolean> {
-    await this.pool.execute('DELETE FROM document_approval WHERE document_id = ?', [documentId]);
     const [result] = await this.pool.execute(
       isAdminOrSpecialist
-        ? 'DELETE FROM transport_document WHERE document_id = ?'
-        : 'DELETE FROM transport_document WHERE document_id = ? AND uploaded_by = ?',
-      isAdminOrSpecialist ? [documentId] : [documentId, userId],
+        ? 'UPDATE transport_document SET is_archived = TRUE WHERE document_id = ? AND COALESCE(is_archived, 0) = 0'
+        : `UPDATE transport_document d
+           JOIN horse h ON h.horse_id = d.horse_id
+           SET d.is_archived = TRUE
+           WHERE d.document_id = ?
+             AND COALESCE(d.is_archived, 0) = 0
+             AND d.status <> 'approved'
+             AND (h.owner_id = ? OR d.uploaded_by = ?)`,
+      isAdminOrSpecialist ? [documentId] : [documentId, userId, userId],
     );
     return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async supersedeDocument(
+    oldDocumentId: number,
+    uploadedBy: number,
+    fileUrl: string,
+    docNumber?: string | null,
+    notes?: string | null,
+  ): Promise<number> {
+    const db = await this.pool.getConnection();
+    try {
+      await db.beginTransaction();
+      const [rows] = await db.execute<RowDataPacket[]>(
+        `SELECT horse_id, regulation_id, doc_type, doc_number, issue_date, expiry_date
+         FROM transport_document
+         WHERE document_id = ?
+         FOR UPDATE`,
+        [oldDocumentId],
+      );
+      const oldDoc = rows[0];
+      if (!oldDoc) {
+        throw new Error(`Document #${oldDocumentId} not found for supersession`);
+      }
+
+      const [insertRes] = await db.execute(
+        `INSERT INTO transport_document (
+          horse_id, regulation_id, uploaded_by, doc_type, doc_number, file_url,
+          issue_date, expiry_date, status, reviewer_notes, is_archived, superseded_by_document_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, FALSE, NULL)`,
+        [
+          oldDoc.horse_id,
+          oldDoc.regulation_id,
+          uploadedBy,
+          oldDoc.doc_type,
+          docNumber && docNumber.trim().length > 0 ? docNumber.trim() : oldDoc.doc_number,
+          fileUrl,
+          oldDoc.issue_date ?? null,
+          oldDoc.expiry_date ?? null,
+          notes ?? null,
+        ],
+      );
+      const newId = (insertRes as { insertId: number }).insertId;
+
+      await db.execute(
+        `UPDATE transport_document
+         SET is_archived = TRUE,
+             superseded_by_document_id = ?
+         WHERE document_id = ?`,
+        [newId, oldDocumentId],
+      );
+
+      await db.commit();
+      return newId;
+    } catch (error) {
+      await db.rollback();
+      throw error;
+    } finally {
+      db.release();
+    }
   }
 
   // --- Authority Approvals ---
@@ -446,7 +747,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
        FROM document_approval a
        LEFT JOIN \`user\` u ON u.user_id = a.approved_by
        WHERE a.document_id = ?
-       ORDER BY a.approval_date DESC`,
+       ORDER BY a.approval_date DESC, a.approval_id DESC`,
       [documentId],
     );
 
@@ -466,6 +767,20 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
   async findOrderDetails(orderId: number): Promise<OrderDestinationRow | undefined> {
     const [rows] = await this.pool.execute<OrderDestinationRow[]>(
       `SELECT s.shipment_id, s.customer_id, s.destination_location, s.origin_location, s.status,
+              s.booking_type, s.transport_mode, s.transportation_type,
+              COALESCE(s.in_transit_compliance_alert, 0) AS in_transit_compliance_alert,
+              (SELECT MAX(rl.planned_arrival)
+               FROM route r JOIN route_leg rl ON rl.route_id = r.route_id
+               WHERE r.shipment_id = s.shipment_id) AS route_expected_arrival,
+              (SELECT MAX(rs.planned_arrival)
+               FROM route r JOIN route_stop rs ON rs.route_id = r.route_id
+               WHERE r.shipment_id = s.shipment_id) AS stop_expected_arrival,
+              (SELECT GROUP_CONCAT(DISTINCT NULLIF(TRIM(COALESCE(rl.arrival_airport_code, '')), '') SEPARATOR ',')
+               FROM route r JOIN route_leg rl ON rl.route_id = r.route_id
+               WHERE r.shipment_id = s.shipment_id) AS arrival_airport_codes,
+              (SELECT GROUP_CONCAT(DISTINCT rs.location_name SEPARATOR ',')
+               FROM route r JOIN route_stop rs ON rs.route_id = r.route_id
+               WHERE r.shipment_id = s.shipment_id AND rs.stop_type IN ('border_check', 'quarantine')) AS border_stop_names,
               s.requested_date, s.departure_date, s.expected_arrival_date,
               CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code
        FROM shipment s WHERE s.shipment_id = ? LIMIT 1`,
@@ -474,12 +789,19 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     return rows[0];
   }
 
+  async setInTransitComplianceAlert(shipmentId: number, alert: boolean): Promise<void> {
+    await this.pool.execute(
+      'UPDATE shipment SET in_transit_compliance_alert = ? WHERE shipment_id = ?',
+      [alert ? 1 : 0, shipmentId],
+    );
+  }
+
   async findActiveShipmentIdsByHorseId(horseId: number): Promise<number[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT sh.shipment_id
        FROM shipment_horse sh
        JOIN shipment s ON s.shipment_id = sh.shipment_id
-       WHERE sh.horse_id = ? AND s.status NOT IN ('cancelled', 'rejected', 'completed')
+       WHERE sh.horse_id = ? AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'completed')
        ORDER BY sh.shipment_id DESC`,
       [horseId],
     );

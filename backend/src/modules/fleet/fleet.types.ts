@@ -46,6 +46,8 @@ export interface ShipmentStaffAssignment {
   isConfirmed: boolean;
   confirmedAt: string | null;
   confirmationNotes: string | null;
+  isBackupPool?: boolean;
+  slaDueAt?: string | null;
   user: {
     id: number;
     fullName: string;
@@ -65,4 +67,6 @@ export interface AvailableStaff {
   specialization?: string | null;
   activeTrips?: number;
   status?: string;
+  currentShift?: string | null;
+  dutyStatus?: string | null;
 }

@@ -8,17 +8,20 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import * as fs from 'fs';
 import { DocumentsService } from './documents.service';
 import { CreateRegulationDto } from './dto/create-regulation.dto';
+import { UpdateRegulationDto } from './dto/update-regulation.dto';
 import { ApplyRegulationTemplateDto } from './dto/apply-regulation-template.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
@@ -30,6 +33,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
+import { documentFileFilter } from '../../common/utils/upload-validation';
 
 @ApiTags('Documents')
 @ApiBearerAuth()
@@ -40,10 +44,18 @@ export class DocumentsController {
 
   // --- Regulations ---
   @Get('regulations')
-  @ApiOperation({ summary: 'Lấy danh sách các quy định/loại tài liệu bắt buộc theo quốc gia' })
+  @ApiOperation({ summary: 'Lấy danh sách các quy định/loại tài liệu bắt buộc theo quốc gia, cửa khẩu và phương thức' })
   @ApiQuery({ name: 'country', required: false, description: 'Lọc theo tên quốc gia (VD: Singapore, Vietnam)' })
-  getRegulations(@Query('country') country?: string) {
-    return this.documentsService.getRegulations(country);
+  @ApiQuery({ name: 'borderGate', required: false, description: 'Lọc theo cửa khẩu / sân bay (VD: SIN, Mộc Bài)' })
+  @ApiQuery({ name: 'transportMode', required: false, description: 'Lọc theo phương thức (road, air, both)' })
+  @ApiQuery({ name: 'docTier', required: false, description: 'Lọc theo tầng hồ sơ (A, B)' })
+  getRegulations(
+    @Query('country') country?: string,
+    @Query('borderGate') borderGate?: string,
+    @Query('transportMode') transportMode?: string,
+    @Query('docTier') docTier?: string,
+  ) {
+    return this.documentsService.getRegulations({ country, borderGate, transportMode, docTier });
   }
 
   @Get('regulations/templates')
@@ -82,11 +94,23 @@ export class DocumentsController {
     return this.documentsService.deleteRegulation(user, id);
   }
 
+  @Patch('regulations/:id')
+  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Cập nhật nội dung hoặc ngày hiệu lực quy định kiểm dịch' })
+  updateRegulation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateRegulationDto,
+  ) {
+    return this.documentsService.updateRegulation(user, id, dto);
+  }
+
   // --- Documents Upload & Viewing ---
   @Post('upload')
   @Roles(UserRole.CUSTOMER, UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('file', {
+      fileFilter: documentFileFilter,
       storage: diskStorage({
         destination: (req, file, cb) => {
           const uploadPath = './uploads/documents';
@@ -97,11 +121,11 @@ export class DocumentsController {
         },
         filename: (req, file, cb) => {
           const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-          const ext = extname(file.originalname);
+          const ext = extname(file.originalname).toLowerCase();
           cb(null, `${uniqueSuffix}${ext}`);
         },
       }),
-      limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
     }),
   )
   @ApiConsumes('multipart/form-data')
@@ -140,6 +164,7 @@ export class DocumentsController {
   @Roles(UserRole.CUSTOMER, UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('file', {
+      fileFilter: documentFileFilter,
       storage: diskStorage({
         destination: (req, file, cb) => {
           const uploadPath = './uploads/documents';
@@ -150,11 +175,11 @@ export class DocumentsController {
         },
         filename: (req, file, cb) => {
           const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-          const ext = extname(file.originalname);
+          const ext = extname(file.originalname).toLowerCase();
           cb(null, `${uniqueSuffix}${ext}`);
         },
       }),
-      limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
     }),
   )
   @ApiConsumes('multipart/form-data')
@@ -194,6 +219,27 @@ export class DocumentsController {
   })
   getOrdersAwaitingCompliance(@CurrentUser() user: AuthenticatedUser) {
     return this.documentsService.getOrdersAwaitingCompliance(user);
+  }
+
+  @Get(':id/file')
+  @ApiOperation({ summary: 'Tải hoặc xem tệp chứng từ đã xác thực quyền truy cập' })
+  async downloadDocumentFile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
+    const info = await this.documentsService.getAuthorizedDocumentFilePath(user, id);
+    if (info.externalUrl) {
+      return res.redirect(info.externalUrl);
+    }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(info.fileName)}"`,
+    );
+    return res.sendFile(info.absolutePath);
   }
 
   @Get(':id')

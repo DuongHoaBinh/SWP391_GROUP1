@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import { MYSQL_POOL } from '../../common/database/database.module';
 import {
   AirlineEntity,
   AirportEntity,
@@ -20,11 +21,13 @@ import { RecordStopProgressDto } from './dto/record-stop-progress.dto';
 import { SetStrategicFrameworkDto } from './dto/set-strategic-framework.dto';
 import { BuildDetailedPlanDto, RouteLegDto } from './dto/build-detailed-plan.dto';
 import { paymentGate } from '../orders/payment-gate';
+import { computePaymentDueAt } from '../orders/sla-timeline.policy';
 import { assertRoadCapacity } from '../fleet/capacity-policy';
 import { RoadTripsStore } from '../fleet/road-trips.store';
 import {
   areSameLocations,
   buildConsolidatedRoadItinerary,
+  computeLifoStallAssignments,
   CorridorStopInput,
 } from '../../common/road-trip-sequencing';
 
@@ -142,22 +145,32 @@ interface MasterStopRow extends RowDataPacket {
 
 @Injectable()
 export class RoutesStore implements OnModuleInit, OnModuleDestroy {
-  constructor(private readonly roadTrips: RoadTripsStore) {}
   private pool!: Pool;
 
+  constructor(
+    private readonly roadTrips: RoadTripsStore,
+    @Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool,
+  ) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
+  }
+
   async onModuleInit(): Promise<void> {
-    this.pool = createPool({
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system',
-      user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '',
-      connectionLimit: 10,
-    });
+    if (!this.pool) {
+      this.pool = createPool({
+        host: process.env.DB_HOST ?? 'localhost',
+        port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system',
+        user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '',
+        connectionLimit: 10,
+      });
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.pool) {
+    if (this.pool && !this.injectedPool) {
       await this.pool.end();
     }
   }
@@ -291,6 +304,36 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
        WHERE incident_id = ?`,
       [incidentId],
     );
+  }
+
+  async findAllIncidents(): Promise<any[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT ir.incident_id, ir.shipment_id, ir.reported_by, ir.incident_type, ir.description,
+              ir.severity, ir.status, ir.reported_at, ir.resolved_at,
+              s.origin_location, s.destination_location, s.status AS shipment_status,
+              u.full_name AS reporter_name, u.email AS reporter_email
+       FROM incident_report ir
+       JOIN shipment s ON s.shipment_id = ir.shipment_id
+       LEFT JOIN \`user\` u ON u.user_id = ir.reported_by
+       ORDER BY ir.incident_id DESC
+       LIMIT 100`,
+    );
+    return rows.map((r) => ({
+      id: Number(r.incident_id),
+      shipmentId: Number(r.shipment_id),
+      tripCode: `REQ-${String(r.shipment_id).padStart(3, '0')}`,
+      reportedBy: Number(r.reported_by),
+      reporterName: r.reporter_name || r.reporter_email || 'Nhân sự vận hành',
+      incidentType: r.incident_type,
+      description: r.description,
+      severity: r.severity,
+      status: r.status,
+      originLocation: r.origin_location,
+      destinationLocation: r.destination_location,
+      shipmentStatus: r.shipment_status,
+      reportedAt: new Date(r.reported_at).toISOString(),
+      resolvedAt: r.resolved_at ? new Date(r.resolved_at).toISOString() : null,
+    }));
   }
 
   async findRouteByShipmentId(shipmentId: number): Promise<RouteEntity | undefined> {
@@ -469,13 +512,15 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     try {
       const [references] = await db.execute<RowDataPacket[]>('SELECT shipment_id FROM route WHERE route_id = ?', [routeId]);
       if (!references[0]) throw new NotFoundException('Không tìm thấy lộ trình');
+      await db.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
       await db.beginTransaction();
       const shipmentId = Number(references[0].shipment_id);
       const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
       const [routes] = await db.execute<RowDataPacket[]>('SELECT plan_status FROM route WHERE route_id = ? FOR UPDATE', [routeId]);
       if (!orders[0] || !['approved', 'planning', 'in_transit'].includes(orders[0].status) ||
-        !['draft', 'pending_approval', 'in_transit'].includes(routes[0]?.plan_status)) throw new BadRequestException('Kế hoạch đã chốt hoặc đơn không còn được lập tuyến');
-      const [oldLegs] = await db.execute<RowDataPacket[]>('SELECT vehicle_id, road_trip_id FROM route_leg WHERE route_id = ? FOR UPDATE', [routeId]);
+        !['draft', 'pending_approval', 'in_transit'].includes(routes[0]?.plan_status)) throw new ConflictException('Kế hoạch đã chốt hoặc đơn không còn được lập tuyến');
+      const isInTransitReroute = routes[0]?.plan_status === 'in_transit';
+      const [oldLegs] = await db.execute<RowDataPacket[]>('SELECT leg_id, sequence_no, status, vehicle_id, road_trip_id FROM route_leg WHERE route_id = ? ORDER BY sequence_no', [routeId]);
       const legs = await this.roadTrips.prepareLegs(db, orders[0], dto.legs, actorId, oldLegs.filter(l => l.vehicle_id).map(l => Number(l.vehicle_id)));
       let stopsToSave = dto.stops;
       if (stopsToSave.length === 0) {
@@ -484,10 +529,125 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           stopsToSave = await this.findStopsTemplateByRoadTripId(sharedRoadTripId, routeId, db);
         }
       }
-      await db.execute('UPDATE route SET route_name = ?, total_distance_km = ? WHERE route_id = ?', [dto.routeName, dto.totalDistanceKm ?? null, routeId]);
-      await this.replaceRouteStops(routeId, [], db);
-      await this.replaceRouteLegs(routeId, legs, db);
-      await this.replaceRouteStops(routeId, stopsToSave, db);
+      await db.execute(
+        "UPDATE route SET route_name = ?, total_distance_km = ?, strategic_notes = COALESCE(NULLIF(?, ''), strategic_notes) WHERE route_id = ?",
+        [dto.routeName, dto.totalDistanceKm ?? null, dto.notes ?? null, routeId],
+      );
+      if (isInTransitReroute) {
+        const [existingStops] = await db.execute<RowDataPacket[]>(
+          `SELECT rs.route_stop_id, rs.leg_id, rs.sequence_no, rs.location_name, rs.status,
+                  EXISTS (SELECT 1 FROM route_stop_update rsu WHERE rsu.route_stop_id = rs.route_stop_id) AS has_updates
+           FROM route_stop rs
+           WHERE rs.route_id = ?
+           ORDER BY rs.sequence_no ASC`,
+          [routeId],
+        );
+        const preservedStops = existingStops.filter((s) => s.status !== 'pending' || Number(s.has_updates) > 0);
+        const preservedStopIds = new Set(preservedStops.map((s) => Number(s.route_stop_id)));
+        const preservedLegIds = new Set(preservedStops.filter((s) => s.leg_id).map((s) => Number(s.leg_id)));
+
+        for (const s of existingStops) {
+          if (!preservedStopIds.has(Number(s.route_stop_id))) {
+            await db.execute('DELETE FROM route_stop WHERE route_stop_id = ?', [Number(s.route_stop_id)]);
+          }
+        }
+
+        const keptLegs = oldLegs.filter((l) => l.status !== 'pending' || preservedLegIds.has(Number(l.leg_id)));
+        const keptLegSeqs = new Set(keptLegs.map((l) => Number(l.sequence_no)));
+        for (const l of oldLegs) {
+          if (l.status === 'pending' && !preservedLegIds.has(Number(l.leg_id))) {
+            await db.execute('DELETE FROM route_leg WHERE leg_id = ?', [Number(l.leg_id)]);
+          }
+        }
+
+        for (const leg of legs) {
+          if (keptLegSeqs.has(Number(leg.sequenceNo))) {
+            const matchedLeg = keptLegs.find((l) => Number(l.sequence_no) === Number(leg.sequenceNo));
+            if (matchedLeg) {
+              await db.execute(
+                `UPDATE route_leg
+                 SET destination_location = COALESCE(?, destination_location),
+                     distance_km = COALESCE(?, distance_km),
+                     duration_hours = COALESCE(?, duration_hours),
+                     planned_arrival = COALESCE(?, planned_arrival)
+                 WHERE leg_id = ?`,
+                [
+                  leg.destinationLocation ?? null,
+                  leg.distanceKm ?? null,
+                  leg.durationHours ?? null,
+                  leg.plannedArrival ? new Date(leg.plannedArrival) : null,
+                  Number(matchedLeg.leg_id),
+                ],
+              );
+            }
+            continue;
+          }
+          await db.execute(
+            `INSERT INTO route_leg (
+              route_id, sequence_no, leg_type, origin_location, destination_location,
+              distance_km, duration_hours, planned_departure, planned_arrival,
+              vehicle_id, airline_id, airline_name, flight_number,
+              departure_airport_id, departure_airport_code, arrival_airport_id, arrival_airport_code,
+              booking_reference, stalls_booked, road_trip_id, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+            [
+              routeId,
+              leg.sequenceNo,
+              leg.legType,
+              leg.originLocation,
+              leg.destinationLocation,
+              leg.distanceKm ?? null,
+              leg.durationHours ?? null,
+              leg.plannedDeparture ? new Date(leg.plannedDeparture) : null,
+              leg.plannedArrival ? new Date(leg.plannedArrival) : null,
+              leg.vehicleId ?? null,
+              leg.airlineId ?? null,
+              leg.airlineName ?? null,
+              leg.flightNumber ?? null,
+              leg.departureAirportId ?? null,
+              leg.departureAirportCode ?? null,
+              leg.arrivalAirportId ?? null,
+              leg.arrivalAirportCode ?? null,
+              leg.bookingReference ?? null,
+              leg.stallsBooked ?? 0,
+              leg.roadTripId ?? null,
+            ],
+          );
+        }
+
+        const maxPreservedSeq = preservedStops.reduce((m, s) => Math.max(m, Number(s.sequence_no || 0)), 0);
+        let nextSeq = maxPreservedSeq + 1;
+        const [activeRouteLegs] = await db.execute<RowDataPacket[]>(
+          'SELECT leg_id, sequence_no FROM route_leg WHERE route_id = ? ORDER BY sequence_no ASC',
+          [routeId],
+        );
+        const fallbackLegId = activeRouteLegs[activeRouteLegs.length - 1]?.leg_id ?? null;
+        for (const s of stopsToSave) {
+          const isPreserved = preservedStops.some(
+            (p) => Number(p.sequence_no) === Number(s.sequenceNo) && areSameLocations(p.location_name, s.locationName),
+          );
+          if (isPreserved) continue;
+          await db.execute(
+            `INSERT INTO route_stop (route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              routeId,
+              fallbackLegId,
+              nextSeq++,
+              s.stopType,
+              s.locationName,
+              s.country ?? null,
+              s.plannedArrival ? new Date(s.plannedArrival) : null,
+              s.plannedDeparture ? new Date(s.plannedDeparture) : null,
+              RouteStopStatus.PENDING,
+            ],
+          );
+        }
+      } else {
+        await this.replaceRouteStops(routeId, [], db);
+        await this.replaceRouteLegs(routeId, legs, db);
+        await this.replaceRouteStops(routeId, stopsToSave, db);
+      }
       const affectedRoadTripIds = new Set<number>();
       for (const l of oldLegs) {
         if (l.road_trip_id) affectedRoadTripIds.add(Number(l.road_trip_id));
@@ -495,7 +655,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       for (const l of legs) {
         if (l.roadTripId) affectedRoadTripIds.add(Number(l.roadTripId));
       }
-      for (const roadTripId of affectedRoadTripIds) {
+      for (const roadTripId of [...affectedRoadTripIds].sort((a, b) => a - b)) {
         await this.consolidateSharedRoadTripWaypoints(roadTripId, db, routeId);
       }
       await db.execute('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [shipmentId]);
@@ -505,7 +665,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       }
       for (const id of new Set(oldLegs.filter(l => l.vehicle_id).map(l => Number(l.vehicle_id)))) {
         await db.execute(`UPDATE vehicle v SET status = 'available' WHERE v.vehicle_id = ? AND v.status = 'in_use'
-          AND NOT EXISTS (SELECT 1 FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id WHERE sv.vehicle_id = v.vehicle_id AND s.status NOT IN ('completed','cancelled','rejected'))`, [id]);
+          AND NOT EXISTS (SELECT 1 FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id WHERE sv.vehicle_id = v.vehicle_id AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected'))`, [id]);
       }
       await db.commit();
     } catch (error) { await db.rollback(); throw error; }
@@ -620,7 +780,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
        JOIN route r ON r.route_id = rl.route_id
        JOIN shipment s ON s.shipment_id = r.shipment_id
        WHERE rl.road_trip_id = ?
-         AND s.status NOT IN ('cancelled', 'rejected')
+         AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected')
        ORDER BY rl.leg_id ASC`,
       [roadTripId],
     );
@@ -768,6 +928,35 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
         await db.execute('DELETE FROM route_stop WHERE route_stop_id = ?', [staleId]);
       }
     }
+
+    if (legRows.length >= 2) {
+      const consolidatedShipmentIds = [...new Set(legRows.map((l) => Number(l.shipment_id)))];
+      const shPlaceholders = consolidatedShipmentIds.map(() => '?').join(',');
+      const [horseRows] = await db.execute<RowDataPacket[]>(
+        `SELECT shipment_horse_id, shipment_id, quantity, stall_number
+         FROM shipment_horse
+         WHERE shipment_id IN (${shPlaceholders})
+         ORDER BY shipment_horse_id ASC`,
+        consolidatedShipmentIds,
+      );
+      const lifoUpdates = computeLifoStallAssignments(
+        itinerary.orderedDestinations,
+        horseRows.map((hr) => ({
+          shipmentHorseId: Number(hr.shipment_horse_id),
+          shipmentId: Number(hr.shipment_id),
+          quantity: Number(hr.quantity || 1),
+          stallNumber: hr.stall_number ?? null,
+        })),
+      );
+      for (const u of lifoUpdates) {
+        await db.execute(
+          `UPDATE shipment_horse
+           SET stall_number = ?
+           WHERE shipment_horse_id = ? AND (stall_number IS NULL OR stall_number = '')`,
+          [u.stallNumber, u.shipmentHorseId],
+        );
+      }
+    }
   }
 
   async replaceRouteStops(routeId: number, stops: RouteStopItemDto[], db: Pool | PoolConnection = this.pool): Promise<void> {
@@ -788,6 +977,78 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           RouteStopStatus.PENDING,
         ],
       );
+    }
+  }
+
+  async updateStopScheduleWithHistory(
+    stopId: number,
+    plannedArrival?: string,
+    plannedDeparture?: string,
+    reason?: string,
+    changedBy?: number,
+  ): Promise<void> {
+    const db = await this.pool.getConnection();
+    try {
+      await db.beginTransaction();
+      const [rows] = await db.execute<RowDataPacket[]>(
+        'SELECT route_id, planned_arrival, planned_departure FROM route_stop WHERE route_stop_id = ? FOR UPDATE',
+        [stopId],
+      );
+      const current = rows[0];
+      if (!current) {
+        throw new NotFoundException(`Không tìm thấy trạm dừng #${stopId}`);
+      }
+
+      const nextArrival = plannedArrival ? new Date(plannedArrival) : current.planned_arrival;
+      const nextDeparture = plannedDeparture ? new Date(plannedDeparture) : current.planned_departure;
+
+      await db.execute(
+        `UPDATE route_stop
+         SET planned_arrival = COALESCE(?, planned_arrival),
+             planned_departure = COALESCE(?, planned_departure)
+         WHERE route_stop_id = ?`,
+        [
+          plannedArrival ? new Date(plannedArrival) : null,
+          plannedDeparture ? new Date(plannedDeparture) : null,
+          stopId,
+        ],
+      );
+
+      await db.execute(
+        `INSERT INTO route_schedule_history (
+          route_stop_id, old_planned_arrival, old_planned_departure,
+          new_planned_arrival, new_planned_departure, reason, changed_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          stopId,
+          current.planned_arrival ?? null,
+          current.planned_departure ?? null,
+          nextArrival ?? null,
+          nextDeparture ?? null,
+          reason || 'Điều chỉnh lịch trình vận chuyển',
+          changedBy ?? 0,
+        ],
+      );
+
+      if (nextArrival) {
+        await db.execute(
+          `UPDATE shipment s
+           JOIN route r ON r.shipment_id = s.shipment_id
+           SET s.expected_arrival_date = CASE
+             WHEN s.expected_arrival_date IS NULL OR s.expected_arrival_date < ? THEN ?
+             ELSE s.expected_arrival_date
+           END
+           WHERE r.route_id = ?`,
+          [nextArrival, nextArrival, current.route_id],
+        );
+      }
+
+      await db.commit();
+    } catch (error) {
+      await db.rollback();
+      throw error;
+    } finally {
+      db.release();
     }
   }
 
@@ -838,11 +1099,11 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     if (dto.status === RouteStopUpdateStatus.ARRIVED) {
       stopStatus = RouteStopStatus.ARRIVED;
     } else if (dto.status === RouteStopUpdateStatus.CUSTOMS_CLEARED) {
-      stopStatus = RouteStopStatus.CLEARED;
+      stopStatus = RouteStopStatus.CUSTOMS_CLEARED;
     } else if (dto.status === RouteStopUpdateStatus.DEPARTED) {
       stopStatus = RouteStopStatus.DEPARTED;
     } else if (dto.status === RouteStopUpdateStatus.DELIVERED) {
-      stopStatus = RouteStopStatus.CLEARED;
+      stopStatus = RouteStopStatus.CUSTOMS_CLEARED;
     }
     await this.updateStopStatus(stopId, stopStatus);
 
@@ -874,20 +1135,21 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
   async confirmAndInvoice(shipmentId: number, userId: number, notes?: string): Promise<boolean> {
     const db = await this.pool.getConnection();
     try {
+      await db.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
       await db.beginTransaction();
       // The same shipment -> route lock order is used by payment and readiness commands.
       const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
       const order = orders[0];
       if (!order) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
-      if (!['approved', 'planning', 'confirmed', 'ready_to_depart'].includes(order.status)) throw new BadRequestException('Đơn hàng không còn ở giai đoạn xác nhận lịch trình');
+      if (!['approved', 'planning', 'confirmed', 'ready_to_depart'].includes(order.status)) throw new ConflictException('Đơn hàng không còn ở giai đoạn xác nhận lịch trình');
       const [routes] = await db.execute<RowDataPacket[]>('SELECT * FROM route WHERE shipment_id = ? ORDER BY route_id DESC LIMIT 1 FOR UPDATE', [shipmentId]);
       const route = routes[0];
-      if (!route || !['approved', 'confirmed', 'ready_to_depart'].includes(route.plan_status)) throw new BadRequestException('Kế hoạch chi tiết phải được Manager phê duyệt trước khi nhận chuyến');
+      if (!route || !['approved', 'confirmed', 'ready_to_depart'].includes(route.plan_status)) throw new ConflictException('Kế hoạch chi tiết phải được Manager phê duyệt trước khi nhận chuyến');
       const [assignments] = await db.execute<RowDataPacket[]>("SELECT * FROM shipment_assignment WHERE shipment_id = ? AND role_in_shipment IN ('driver', 'escort') FOR UPDATE", [shipmentId]);
-      if (!assignments.some(a => Number(a.user_id) === userId)) throw new BadRequestException('Bạn không được phân công tài xế hoặc áp tải cho chuyến này');
+      if (!assignments.some(a => Number(a.user_id) === userId)) throw new ForbiddenException('Bạn không được phân công tài xế hoặc áp tải cho chuyến này');
       const amount = Number(order.total_cost);
       if (!Number.isSafeInteger(amount) || amount <= 0) throw new BadRequestException('Cần báo giá VND hợp lệ trước khi xác nhận lịch trình và phát hành hóa đơn');
-      const [legs] = await db.execute<RowDataPacket[]>('SELECT * FROM route_leg WHERE route_id = ? ORDER BY sequence_no FOR UPDATE', [route.route_id]);
+      const [legs] = await db.execute<RowDataPacket[]>('SELECT * FROM route_leg WHERE route_id = ? ORDER BY sequence_no', [route.route_id]);
       const vehicleIds = [...new Set(legs.filter(l => l.leg_type === 'road' && l.vehicle_id).map(l => Number(l.vehicle_id)))];
       if (vehicleIds.length) {
         const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT vehicle_id, capacity FROM vehicle WHERE vehicle_id IN (${vehicleIds.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, vehicleIds);
@@ -913,7 +1175,10 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
         confirmation_notes = COALESCE(?, confirmation_notes) WHERE shipment_id = ? AND user_id = ? AND role_in_shipment IN ('driver', 'escort')`, [notes ?? null, shipmentId, userId]);
       const fullyConfirmed = assignments.every(a => Boolean(a.is_confirmed) || Number(a.user_id) === userId);
       if (fullyConfirmed) {
-        const [invoices] = await db.execute<RowDataPacket[]>('SELECT invoice_id, amount FROM shipment_invoice WHERE route_id = ?', [route.route_id]);
+        const [invoices] = await db.execute<RowDataPacket[]>(
+          "SELECT invoice_id, amount FROM shipment_invoice WHERE route_id = ? AND COALESCE(invoice_type, 'primary') = 'primary' AND COALESCE(status, 'active') <> 'void'",
+          [route.route_id],
+        );
         if (invoices.length && Number(invoices[0].amount) !== amount) throw new BadRequestException('Báo giá khác hóa đơn đã phát hành. Cần đối soát trước khi xác nhận lại');
         if (!invoices.length) {
           const [insuredHorses] = await db.execute<RowDataPacket[]>('SELECT sh.*, h.name FROM shipment_horse sh JOIN horse h ON h.horse_id = sh.horse_id WHERE sh.shipment_id = ?', [shipmentId]);
@@ -927,8 +1192,11 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
               declaredValue: Number(h.declared_value), declaredCurrency: h.declared_currency, exchangeRate: Number(h.exchange_rate),
               declaredValueVnd: Number(h.declared_value_vnd), insurancePackage: h.insurance_package, insuranceFee: Number(h.insurance_fee),
               maxCompensation: Number(h.max_compensation), emergencyVetCovered: Boolean(h.emergency_vet_covered) })) };
-          await db.execute('INSERT INTO shipment_invoice (shipment_id, route_id, customer_id, amount, snapshot) VALUES (?, ?, ?, ?, ?)',
-            [shipmentId, route.route_id, order.customer_id, amount, JSON.stringify(snapshot)]);
+          const paymentDueAt = computePaymentDueAt(new Date(), order.departure_date || order.requested_date);
+          await db.execute(
+            "INSERT INTO shipment_invoice (shipment_id, route_id, customer_id, invoice_type, status, amount, snapshot, payment_due_at) VALUES (?, ?, ?, 'primary', 'active', ?, ?, ?)",
+            [shipmentId, route.route_id, order.customer_id, amount, JSON.stringify(snapshot), paymentDueAt],
+          );
           await db.execute(`INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
             VALUES (?, ?, 'Kế hoạch vận chuyển đã hoàn tất', ?, 'status_update', FALSE)`, [order.customer_id, shipmentId,
             `Kế hoạch vận chuyển mã ${snapshot.requestCode} đã hoàn tất. Quý khách vui lòng tiến hành thanh toán để đoàn xe sẵn sàng khởi hành.`]);
@@ -952,11 +1220,23 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       const [routes] = await db.execute<RowDataPacket[]>('SELECT * FROM route WHERE shipment_id = ? ORDER BY route_id DESC LIMIT 1 FOR UPDATE', [shipmentId]);
       const route = routes[0];
       const gate = await paymentGate(db, shipmentId);
-      const [payments] = await db.execute<RowDataPacket[]>('SELECT status, amount FROM shipment_sepay_payment WHERE shipment_id = ?', [shipmentId]);
-      const isPaymentSucceeded = payments[0]?.status === 'succeeded' && Number(payments[0].amount) === Number(order.total_cost) && Number(order.total_cost) > 0;
+      const [payments] = await db.execute<RowDataPacket[]>(
+        "SELECT status, amount FROM shipment_sepay_payment WHERE shipment_id = ? AND status = 'succeeded'",
+        [shipmentId],
+      );
+      const paidAmount = payments
+        .filter((p) => p.status === 'succeeded')
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const isPaymentSucceeded = paidAmount >= Number(order.total_cost) && Number(order.total_cost) > 0;
       const isPlanConfirmed = gate.paymentUnlocked;
       const isReadyToDepart = isPlanConfirmed && isPaymentSucceeded && isLegalCompliant && ['confirmed', 'ready_to_depart'].includes(order.status);
-      if (isReadyToDepart && route.plan_status === 'confirmed') {
+      if (order.status === 'in_transit') {
+        // BR-F2-06 / AC-F2-03: Never rollback an in_transit shipment; flag compliance alert only.
+        await db.execute('UPDATE shipment SET in_transit_compliance_alert = ? WHERE shipment_id = ?', [
+          isLegalCompliant ? 0 : 1,
+          shipmentId,
+        ]);
+      } else if (isReadyToDepart && route?.plan_status === 'confirmed') {
         await db.execute("UPDATE route SET plan_status = 'ready_to_depart' WHERE route_id = ?", [route.route_id]);
         await db.execute("UPDATE shipment SET status = 'ready_to_depart' WHERE shipment_id = ?", [shipmentId]);
         await db.execute(`INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
@@ -967,6 +1247,21 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
         if (route?.plan_status === 'ready_to_depart') await db.execute("UPDATE route SET plan_status = 'confirmed' WHERE route_id = ?", [route.route_id]);
         order.status = 'confirmed';
         if (route?.plan_status === 'ready_to_depart') route.plan_status = 'confirmed';
+        const downgradeReason = !isLegalCompliant
+          ? 'Hồ sơ kiểm dịch / giấy phép hết hạn hoặc chưa đủ biên an toàn cho lịch đến mới.'
+          : 'Điều kiện xuất phát Gate 2 không còn đáp ứng.';
+        await db.execute(
+          `INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
+           VALUES (?, ?, 'Chuyến đi tạm hoãn xuất phát (Gate 2)', ?, 'document_missing', FALSE)`,
+          [order.customer_id, shipmentId, downgradeReason],
+        );
+        if (route?.assigned_coordinator_id) {
+          await db.execute(
+            `INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
+             VALUES (?, ?, 'Cảnh báo Gate 2: Tạm hạ trạng thái chờ xuất phát', ?, 'document_missing', FALSE)`,
+            [route.assigned_coordinator_id, shipmentId, downgradeReason],
+          );
+        }
       }
       await db.commit();
       return { isPlanConfirmed, isLegalCompliant, isPaymentSucceeded, isReadyToDepart, currentShipmentStatus: order.status, currentPlanStatus: route?.plan_status ?? 'draft' };

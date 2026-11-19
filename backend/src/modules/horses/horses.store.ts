@@ -1,8 +1,9 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { HorseEntity, HorseGender, HorseStatus } from './horses.types';
 import { CreateHorseDto } from './dto/create-horse.dto';
 import { UpdateHorseDto } from './dto/update-horse.dto';
+import { MYSQL_POOL } from '../../common/database/database.module';
 
 interface HorseRow extends RowDataPacket {
   horse_id: number;
@@ -28,33 +29,46 @@ interface HorseRow extends RowDataPacket {
 export class HorsesStore implements OnModuleInit, OnModuleDestroy {
   private pool!: Pool;
 
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
+  }
+
   async onModuleInit(): Promise<void> {
-    this.pool = createPool({
-      host: process.env.DB_HOST ?? 'localhost',
-      port: Number(process.env.DB_PORT ?? 3306),
-      database: process.env.DB_NAME ?? 'horse_transport_system',
-      user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '',
-      connectionLimit: 10,
-    });
+    if (!this.pool) {
+      this.pool = createPool({
+        host: process.env.DB_HOST ?? 'localhost',
+        port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system',
+        user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '',
+        connectionLimit: 10,
+      });
+    }
     await this.syncCompletedShipmentHorses();
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.pool) {
+    if (this.pool && !this.injectedPool) {
       await this.pool.end();
     }
   }
 
   async syncCompletedShipmentHorses(): Promise<void> {
     try {
+      // Unstick any horses left in 'delivered' from legacy runs once no active shipment holds them.
       await this.pool.execute(
         `UPDATE horse h
-         JOIN shipment_horse sh ON sh.horse_id = h.horse_id
-         JOIN shipment s ON s.shipment_id = sh.shipment_id
-         SET h.status = 'delivered'
-         WHERE s.status = 'completed'
-           AND h.status NOT IN ('delivered', 'retired', 'deceased')`,
+         SET h.status = 'active'
+         WHERE h.status = 'delivered'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM shipment_horse sh
+             JOIN shipment s ON s.shipment_id = sh.shipment_id
+             WHERE sh.horse_id = h.horse_id
+               AND s.status IN ('requested', 'change_requested', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit')
+           )`,
       );
     } catch {
       // Ignore sync errors

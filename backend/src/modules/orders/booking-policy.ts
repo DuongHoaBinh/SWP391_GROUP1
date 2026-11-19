@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 
 export type BookingType = 'shared_stall' | 'dedicated_charter';
 export interface BookingQuote {
@@ -20,7 +20,7 @@ export function calculateBookingQuote(booking: BookingType, horseCount: number, 
   if (!Number.isSafeInteger(horseCount) || horseCount < 1) throw new BadRequestException('Số lượng ngựa không hợp lệ');
   if ((quote.bookingType !== undefined && quote.bookingType !== booking) ||
       (quote.quotedHorseCount !== undefined && quote.quotedHorseCount !== horseCount)) {
-    throw new BadRequestException('Hình thức đặt chỗ hoặc số ngựa đã thay đổi. Vui lòng tải lại báo giá');
+    throw new ConflictException('Hình thức đặt chỗ hoặc số ngựa đã thay đổi. Vui lòng tải lại báo giá');
   }
   let stallUnitPrice: number | null = null;
   let transportCost: number;

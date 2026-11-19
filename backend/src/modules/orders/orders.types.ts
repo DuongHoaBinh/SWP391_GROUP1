@@ -11,6 +11,7 @@ export enum ShipmentStatus {
   IN_TRANSIT = 'in_transit',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
+  CANCELLED_OPERATIONAL = 'cancelled_operational',
 }
 
 export interface ShipmentAttachment {
@@ -70,6 +71,12 @@ export interface TransportOrder {
   paymentStatus?: 'unpaid' | 'pending' | 'review' | 'succeeded';
   paymentCode?: string | null;
   paidAt?: string | null;
+  cancellationCategory?: string | null;
+  cancellationReason?: string | null;
+  cancelledAt?: string | null;
+  paymentOverdue?: boolean;
+  slaEscalationStatus?: string | null;
+  slaFallbackOption?: string | null;
   createdAt: string;
   updatedAt: string;
   attachments?: ShipmentAttachment[];

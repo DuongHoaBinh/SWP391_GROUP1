@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
 import { createPool, Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { createHash, randomInt } from 'node:crypto';
 import { PAYABLE_SHIPMENT_STATUSES, SepayConfig, SepayPayment, SepayTransaction } from './sepay-payment.types';
@@ -10,7 +10,7 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     this.pool = createPool({ host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 3306),
       database: process.env.DB_NAME ?? 'horse_transport_system', user: process.env.DB_USER ?? 'root',
-      password: process.env.DB_PASSWORD ?? '', connectionLimit: 5, supportBigNumbers: true, bigNumberStrings: true });
+      password: process.env.DB_PASSWORD ?? '', connectionLimit: 3, supportBigNumbers: true, bigNumberStrings: true });
   }
   async onModuleDestroy() { await this.pool?.end(); }
 
@@ -26,8 +26,12 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
     if (!orders.length) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (customerId !== null && Number(orders[0].customer_id) !== customerId) throw new ForbiddenException('Đơn hàng không thuộc tài khoản của bạn');
     const [rows] = await this.pool.execute<SepayPayment[]>(`SELECT p.*, s.status AS shipment_status,
-      s.total_cost AS current_amount, s.customer_id AS shipment_customer_id
-      FROM shipment_sepay_payment p JOIN shipment s ON s.shipment_id = p.shipment_id WHERE p.shipment_id = ?`, [shipmentId]);
+      COALESCE(inv.amount, s.total_cost) AS current_amount, s.customer_id AS shipment_customer_id
+      FROM shipment_sepay_payment p
+      JOIN shipment s ON s.shipment_id = p.shipment_id
+      LEFT JOIN shipment_invoice inv ON inv.invoice_id = p.invoice_id
+      WHERE p.shipment_id = ? AND p.status <> 'cancelled'
+      ORDER BY p.payment_id DESC LIMIT 1`, [shipmentId]);
     if (!rows[0]) return null;
     const gate = await paymentGate(this.pool, shipmentId);
     return { ...rows[0], payment_unlocked: gate.paymentUnlocked, gate_blocked_reason: gate.blockedReason };
@@ -43,16 +47,32 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
       if (!orders.length) throw new NotFoundException('Không tìm thấy đơn hàng');
       const order = orders[0];
       if (Number(order.customer_id) !== customerId) throw new ForbiddenException('Đơn hàng không thuộc tài khoản của bạn');
-      const [existing] = await db.execute<SepayPayment[]>('SELECT * FROM shipment_sepay_payment WHERE shipment_id = ?', [shipmentId]);
-      if (existing[0]?.status === 'succeeded') return existing[0];
+      const [existing] = await db.execute<SepayPayment[]>(
+        "SELECT * FROM shipment_sepay_payment WHERE shipment_id = ? AND status <> 'cancelled' ORDER BY payment_id DESC",
+        [shipmentId],
+      );
       const gate = await paymentGate(db, shipmentId);
-      if (!gate.paymentUnlocked) throw new BadRequestException(gate.blockedReason!);
-      if (!PAYABLE_SHIPMENT_STATUSES.includes(order.status)) throw new BadRequestException('Đơn hàng phải được duyệt trước khi thanh toán');
-      const amount = Number(order.total_cost);
-      if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 9999999999999) throw new BadRequestException('Báo giá phải là số nguyên VND lớn hơn 0');
-      if (existing.length) {
-        const previous = existing[0];
-        if (Number(previous.amount) !== amount || previous.account_number !== config.accountNumber || previous.bank_code !== config.bankCode ||
+      const supp = (gate as any).supplementalInvoice;
+      const targetSuppPayment = supp ? existing.find((p) => Number(p.invoice_id) === Number(supp.id)) : undefined;
+
+      if (!supp && existing[0]?.status === 'succeeded') return existing[0];
+      if (supp && targetSuppPayment?.status === 'succeeded') return targetSuppPayment;
+
+      if (!gate.paymentUnlocked) throw new UnprocessableEntityException(gate.blockedReason!);
+      if (!PAYABLE_SHIPMENT_STATUSES.includes(order.status)) throw new UnprocessableEntityException('Đơn hàng phải được duyệt trước khi thanh toán');
+      const totalOrderAmount = Number(order.total_cost);
+      if (!Number.isSafeInteger(totalOrderAmount) || totalOrderAmount <= 0 || totalOrderAmount > 9999999999999) {
+        throw new BadRequestException('Báo giá phải là số nguyên VND lớn hơn 0');
+      }
+
+      const creatingSupp = Boolean(supp && existing.some((p) => p.status === 'succeeded'));
+      const payableAmount = creatingSupp ? Number(supp.amount) : totalOrderAmount;
+      const targetInvoiceId = creatingSupp ? Number(supp.id) : (gate.invoice?.id ?? null);
+      const relevantExisting = creatingSupp ? targetSuppPayment : existing[0];
+
+      if (relevantExisting) {
+        const previous = relevantExisting;
+        if (Number(previous.amount) !== payableAmount || previous.account_number !== config.accountNumber || previous.bank_code !== config.bankCode ||
             !new RegExp(`^${config.prefix}[0-9]{${config.suffixLength}}$`).test(previous.payment_code)) {
           throw new ConflictException('Báo giá hoặc tài khoản nhận đã thay đổi. Vui lòng liên hệ bộ phận vận chuyển để đối soát trước khi thanh toán.');
         }
@@ -61,9 +81,14 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
       for (let attempt = 0; attempt < 5; attempt++) {
         const code = config.prefix + String(randomInt(10 ** config.suffixLength)).padStart(config.suffixLength, '0');
         try {
-          const [result] = await db.execute<ResultSetHeader>(`INSERT INTO shipment_sepay_payment
-            (shipment_id, customer_id, payment_code, amount, bank_code, account_number, account_name) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [shipmentId, customerId, code, amount, config.bankCode, config.accountNumber, config.accountName]);
+          const [result] = await db.execute<ResultSetHeader>(
+            `INSERT INTO shipment_sepay_payment
+            (shipment_id, customer_id, payment_code, amount, bank_code, account_number, account_name${targetInvoiceId ? ', invoice_id' : ''})
+            VALUES (?, ?, ?, ?, ?, ?, ?${targetInvoiceId ? ', ?' : ''})`,
+            targetInvoiceId
+              ? [shipmentId, customerId, code, payableAmount, config.bankCode, config.accountNumber, config.accountName, targetInvoiceId]
+              : [shipmentId, customerId, code, payableAmount, config.bankCode, config.accountNumber, config.accountName],
+          );
           const [rows] = await db.execute<SepayPayment[]>('SELECT * FROM shipment_sepay_payment WHERE payment_id = ?', [result.insertId]);
           return rows[0];
         } catch (error) { if ((error as { code?: string }).code !== 'ER_DUP_ENTRY') throw error; }
@@ -93,15 +118,22 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
         const [locked] = await db.execute<SepayPayment[]>('SELECT * FROM shipment_sepay_payment WHERE payment_id = ? FOR UPDATE', [payment.payment_id]);
         payment = locked[0];
       }
+      let linkedInvoice: RowDataPacket | undefined;
+      if (payment?.invoice_id) {
+        const [invRows] = await db.execute<RowDataPacket[]>('SELECT invoice_id, amount, status FROM shipment_invoice WHERE invoice_id = ? LIMIT 1', [payment.invoice_id]);
+        linkedInvoice = invRows[0];
+      }
+      const expectedPayAmount = linkedInvoice ? Number(linkedInvoice.amount) : Number(order?.total_cost ?? 0);
       let outcome = 'unmatched';
       if (payload.transferType !== 'in' || payload.accountNumber !== config.accountNumber ||
           payload.gateway.replace(/[^A-Z0-9]/gi, '').toUpperCase() !== config.bankCode.replace(/[^A-Z0-9]/gi, '').toUpperCase()) outcome = 'ignored';
       else if (payment) {
         if (payment.status === 'succeeded') outcome = 'already_paid';
+        else if (payment.status === 'cancelled') outcome = 'order_unavailable';
         else if (payment.status === 'review') outcome = 'review_required';
         else if (payment.account_number !== payload.accountNumber || payment.bank_code !== config.bankCode) outcome = 'account_mismatch';
         else if (!order || !PAYABLE_SHIPMENT_STATUSES.includes(order.status) || Number(order.customer_id) !== Number(payment.customer_id) || !(await paymentGate(db, payment.shipment_id)).paymentUnlocked) outcome = 'order_unavailable';
-        else if (Number(order.total_cost) !== Number(payment.amount)) outcome = 'quote_changed';
+        else if ((linkedInvoice && linkedInvoice.status === 'void') || expectedPayAmount !== Number(payment.amount)) outcome = 'quote_changed';
         else if (Number(payment.amount) !== payload.transferAmount) outcome = 'amount_mismatch';
         else outcome = 'paid';
       }
@@ -110,6 +142,12 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
         [payload.id, payment?.payment_id ?? null, hash, outcome, JSON.stringify(payload)]);
       if (payment && outcome === 'paid') {
         await db.execute(`UPDATE shipment_sepay_payment SET status = 'succeeded', transaction_id = ?, paid_at = CURRENT_TIMESTAMP(3) WHERE payment_id = ?`, [payload.id, payment.payment_id]);
+        if (payment.invoice_id) {
+          await db.execute("UPDATE shipment_invoice SET status = 'paid' WHERE invoice_id = ? AND status <> 'void'", [payment.invoice_id]);
+        } else {
+          await db.execute("UPDATE shipment_invoice SET status = 'paid' WHERE shipment_id = ? AND COALESCE(invoice_type, 'primary') = 'primary' AND status <> 'void'", [payment.shipment_id]);
+        }
+        await db.execute('UPDATE shipment SET payment_overdue = FALSE WHERE shipment_id = ?', [payment.shipment_id]);
         await db.execute(`INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
           VALUES (?, ?, ?, ?, 'status_update', FALSE)`, [payment.customer_id, payment.shipment_id, 'Đã nhận thanh toán',
           `Đã nhận ${payload.transferAmount.toLocaleString('vi-VN')} VND qua SePay, mã ${payment.payment_code}.`]);
