@@ -8,24 +8,11 @@ import {
   NotificationItem,
   TransportRequest,
 } from './types';
-import {
-  mockHorses as initialHorses,
-  mockTransportRequests as initialRequests,
-  mockNotifications as initialNotifications,
-  mockDocuments as initialDocuments,
-  mockMetrics as initialMetrics,
-} from './mock-data';
-
-import { apiClient } from './api-client';
+import { apiClient, resolveAssetUrl } from './api-client';
 
 import { getCurrentUser } from './auth';
 
-export const getFullPhotoUrl = (url?: string | null): string | undefined => {
-  if (!url) return undefined;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) return url;
-  const baseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000/api').replace(/\/api\/?$/, '');
-  return `${baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
-};
+export const getFullPhotoUrl = (url?: string | null): string | undefined => resolveAssetUrl(url);
 
 interface CustomerStoreContextType {
   requests: TransportRequest[];
@@ -67,10 +54,10 @@ const getStorageKey = (key: string) => {
 };
 
 export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [requests, setRequests] = useState<TransportRequest[]>(initialRequests);
+  const [requests, setRequests] = useState<TransportRequest[]>([]);
   const [horses, setHorses] = useState<Horse[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [documents, setDocuments] = useState<DocumentItem[]>(initialDocuments);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Load from localStorage on client mount (user-scoped)
@@ -127,8 +114,6 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
           availabilityStatus:
             item.status === 'in_transit'
               ? 'In Transit'
-              : item.status === 'delivered'
-              ? 'Delivered'
               : item.status === 'active'
               ? 'Available'
               : 'Not Cleared',
@@ -170,7 +155,7 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
   const pendingApproval = requests.filter((r) => r.status === 'IN_REVIEW' || r.status === 'SUBMITTED').length;
   const inTransit = requests.filter((r) => r.status === 'IN_TRANSIT').length;
   const pendingDocuments = requests.reduce((acc, r) => acc + (r.pendingDocumentsCount || 0), 0);
-  const completedTrips = requests.filter((r) => r.status === 'COMPLETED').length + 11; // base offset
+  const completedTrips = requests.filter((r) => r.status === 'COMPLETED').length;
 
   const metrics: DashboardMetrics = {
     activeRequests,

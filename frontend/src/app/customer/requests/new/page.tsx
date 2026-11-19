@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -18,12 +18,16 @@ import {
   Navigation,
   Clock,
 } from 'lucide-react';
-import { useCustomerStore } from '@/lib/customer-store';
+import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
+const HORSE_PLACEHOLDER_SVG =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='40' fill='%23F0EEE8'/%3E%3Ctext x='40' y='47' text-anchor='middle' font-family='serif' font-weight='700' font-size='22' fill='%23A67C2E'%3EEQ%3C/text%3E%3C/svg%3E";
 import { Horse } from '@/lib/types';
 import { AddHorseModal } from '@/components/horses/AddHorseModal';
 import { apiClient } from '@/lib/api-client';
 import { getCurrentUser } from '@/lib/auth';
 import dynamic from 'next/dynamic';
+import toast from 'react-hot-toast';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 import useSWR from 'swr';
 import { InsuranceSelection } from '@/features/orders/components/InsuranceSelection';
 import { CostSummary } from '@/features/orders/components/InsuranceSummary';
@@ -32,84 +36,116 @@ import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { type BookingType } from '@/features/orders/booking-policy';
 import { defaultInsurance, insuranceNames, previewInsurance, vnd, type InsuranceInput, type InsurancePolicy } from '@/features/orders/insurance-policy';
 
+const MapLoadingFallback = () => {
+  const { language } = useLanguage();
+  return (
+    <div
+      style={{
+        height: '360px',
+        backgroundColor: '#F0EEE8',
+        borderRadius: '16px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#64748b',
+        fontSize: '13px',
+        fontWeight: 600,
+      }}
+    >
+      {language === 'en' ? 'Loading route map & checkpoints...' : 'Đang tải bản đồ lộ trình & cửa khẩu...'}
+    </div>
+  );
+};
 const RoutePlanningMap = dynamic(
   () => import('@/components/maps/RoutePlanningMap'),
   {
     ssr: false,
-    loading: () => (
-      <div
-        style={{
-          height: '360px',
-          backgroundColor: '#f1f5f9',
-          borderRadius: '16px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#64748b',
-          fontSize: '13px',
-          fontWeight: 600,
-        }}
-      >
-        Đang tải bản đồ lộ trình & cửa khẩu...
-      </div>
-    ),
+    loading: () => <MapLoadingFallback />,
   }
 );
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 
-const getTodayString = () => new Date().toISOString().split('T')[0];
-const getTomorrowString = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
+const getDateOffsetString = (days: number) => {
+  const now = new Date();
+  const utc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) + days * 86_400_000;
+  return new Date(utc).toISOString().split('T')[0];
+};
+const getTodayString = () => getDateOffsetString(0);
+
+const parseLocalDate = (val: string) => {
+  const parts = val.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return new Date(val);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
 };
 
-const formSchema = z
-  .object({
-    title: z.string().min(1, 'Request title is required'),
-    transportType: z.enum(['International', 'Domestic']),
-    origin: z.string().min(1, 'Origin is required'),
-    destination: z.string().min(1, 'Destination is required'),
-    departureDate: z
-      .string()
-      .min(1, 'Departure date is required')
-      .refine((val) => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const dep = new Date(val);
-        dep.setHours(0, 0, 0, 0);
-        return dep >= today;
-      }, 'Ngày khởi hành không được chọn ngày trong quá khứ'),
-    arrivalDate: z.string().optional(),
-    horseCount: z.coerce.number().min(1),
-    specialReqs: z.string().optional(),
-  })
-  .refine(
-    (data) => {
-      if (data.arrivalDate && data.departureDate) {
-        const dep = new Date(data.departureDate);
-        const arr = new Date(data.arrivalDate);
-        dep.setHours(0, 0, 0, 0);
-        arr.setHours(0, 0, 0, 0);
-        return arr >= dep;
+const getFormSchema = (lang: string) =>
+  z
+    .object({
+      title: z.string().min(1, lang === 'en' ? 'Request title is required' : 'Vui lòng nhập tiêu đề yêu cầu'),
+      transportType: z.enum(['International', 'Domestic']),
+      origin: z.string().min(1, lang === 'en' ? 'Origin is required' : 'Vui lòng chọn điểm khởi hành'),
+      destination: z.string().min(1, lang === 'en' ? 'Destination is required' : 'Vui lòng chọn điểm đến'),
+      departureDate: z
+        .string()
+        .min(1, lang === 'en' ? 'Departure date is required' : 'Vui lòng chọn ngày khởi hành')
+        .refine((val) => {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const dep = parseLocalDate(val);
+          dep.setHours(0, 0, 0, 0);
+          return dep >= today;
+        }, lang === 'en' ? 'Departure date cannot be in the past' : 'Ngày khởi hành không được chọn ngày trong quá khứ'),
+      arrivalDate: z.string().optional(),
+      horseCount: z.coerce.number().min(1),
+      specialReqs: z.string().optional(),
+    })
+    .refine(
+      (data) => {
+        if (data.arrivalDate && data.departureDate) {
+          const dep = parseLocalDate(data.departureDate);
+          const arr = parseLocalDate(data.arrivalDate);
+          dep.setHours(0, 0, 0, 0);
+          arr.setHours(0, 0, 0, 0);
+          return arr >= dep;
+        }
+        return true;
+      },
+      {
+        message: lang === 'en' ? 'Estimated arrival date must be on or after departure date' : 'Ngày đến dự kiến phải từ ngày khởi hành trở đi',
+        path: ['arrivalDate'],
       }
-      return true;
-    },
-    {
-      message: 'Ngày đến dự kiến phải từ ngày khởi hành trở đi',
-      path: ['arrivalDate'],
-    }
-  );
-type FormData = z.infer<typeof formSchema>;
+    );
+
+type FormData = z.infer<ReturnType<typeof getFormSchema>>;
 
 function CreateTransportRequestForm() {
   const router = useRouter();
+  const { t, language, translateBreed, translateGender, translateCountry } = useLanguage();
   const searchParams = useSearchParams();
   const preselectedHorseId = searchParams.get('horseId');
 
-  const { horses, refreshHorses } = useCustomerStore();
+  const { horses, requests, refreshHorses } = useCustomerStore();
+
+  useEffect(() => {
+    refreshHorses();
+  }, []);
+
+  // Helper to find any active (in-progress) transport order for this horse
+  const getHorseActiveOrder = (horse: Horse) => {
+    return requests.find((r) => {
+      const match =
+        String(r.horseId) === String(horse.id) ||
+        String(r.horse?.id) === String(horse.id) ||
+        (horse.backendId && String(r.horseId) === String(horse.backendId)) ||
+        (r.horses && r.horses.some((h: any) => String(h.horse?.id) === String(horse.id) || String(h.id) === String(horse.id))) ||
+        (r.horse?.name && horse.name && r.horse.name.toLowerCase().trim() === horse.name.toLowerCase().trim());
+
+      const isFinished = r.status === 'COMPLETED' || r.status === 'CANCELLED' || r.status === 'REJECTED';
+      return match && !isFinished;
+    });
+  };
 
   // Step state (1 to 3)
   const [currentStep, setCurrentStep] = useState(1);
@@ -117,9 +153,11 @@ function CreateTransportRequestForm() {
   const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
 
   const todayStr = getTodayString();
-  const tomorrowStr = getTomorrowString();
+  const defaultDepartureStr = getDateOffsetString(18);
+  const defaultArrivalStr = getDateOffsetString(19);
 
   // Form states using react-hook-form
+  const currentFormSchema = useMemo(() => getFormSchema(language), [language]);
   const {
     register,
     handleSubmit,
@@ -128,14 +166,14 @@ function CreateTransportRequestForm() {
     trigger,
     formState: { errors },
   } = useForm<FormData>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(currentFormSchema),
     defaultValues: {
       title: '',
       transportType: 'International',
       origin: 'Ho Chi Minh City, Vietnam',
       destination: 'Singapore Turf Club',
-      departureDate: todayStr,
-      arrivalDate: tomorrowStr,
+      departureDate: defaultDepartureStr,
+      arrivalDate: defaultArrivalStr,
       horseCount: 1,
       specialReqs: '',
     },
@@ -153,6 +191,27 @@ function CreateTransportRequestForm() {
   const [insuranceError, setInsuranceError] = useState('');
   const { data: policy, error: policyError, mutate: reloadPolicy } = useSWR<InsurancePolicy>('/orders/insurance-policy', url => apiClient<InsurancePolicy>(url), { shouldRetryOnError: false });
 
+  const cutoffQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (formValues.destination) params.set('destinationLocation', formValues.destination);
+    if (formValues.origin) params.set('originLocation', formValues.origin);
+    if (bookingType) params.set('bookingType', bookingType);
+    if (formValues.transportType) params.set('transportationType', formValues.transportType);
+    return `/orders/cutoff-policy?${params.toString()}`;
+  }, [formValues.destination, formValues.origin, bookingType, formValues.transportType]);
+
+  const { data: cutoffPolicy } = useSWR<{
+    minLeadDays: number;
+    baseCutoffDays: number;
+    maxTierALead: number;
+    isInternational: boolean;
+    destinationCountry: string;
+    earliestDepartureDate: string;
+  }>(cutoffQuery, (url) => apiClient(url), { shouldRetryOnError: false });
+
+  const minLeadDays = cutoffPolicy?.minLeadDays ?? (bookingType === 'dedicated_charter' ? 4 : 7);
+  const earliestDepartureDate = cutoffPolicy?.earliestDepartureDate ?? getDateOffsetString(minLeadDays);
+
   const refreshedStep = useRef<number | null>(null);
   const initializedSelection = useRef<string | null>(null);
   useEffect(() => {
@@ -165,21 +224,44 @@ function CreateTransportRequestForm() {
     const selectionKey = preselectedHorseId ?? 'default';
     if (initializedSelection.current === selectionKey) return;
     if (preselectedHorseId) {
-      const target = horses.find((item) => item.id === preselectedHorseId);
-      if (target && (target.status === 'active' || target.availabilityStatus === 'Available')) {
-        setHorseQuantities({ [preselectedHorseId]: 1 });
-        initializedSelection.current = selectionKey;
-      }
+      const target = horses.find((item) => String(item.id) === String(preselectedHorseId));
+      if (target) {
+        const order = getHorseActiveOrder(target);
+        const unavailable =
+          Boolean(order) ||
+          target.status === 'in_transit' ||
+          target.availabilityStatus === 'In Transit' ||
+          target.status === 'retired' ||
+          target.status === 'deceased';
+        if (!unavailable) {
+          setHorseQuantities({ [preselectedHorseId]: 1 });
+          initializedSelection.current = selectionKey;
+        } else {
+          toast.error(
+            order
+              ? (language === 'en' ? `Horse "${target.name}" is already assigned to shipment ${order.requestCode}.` : `Chiến mã "${target.name}" đã được phân bổ trong đơn ${order.requestCode}.`)
+              : (language === 'en' ? `Horse "${target.name}" is not ready for transit.` : `Chiến mã "${target.name}" hiện không sẵn sàng vận chuyển.`)
+          );
+          initializedSelection.current = selectionKey;
+        }      }
     } else if (horses.length > 0 && Object.keys(horseQuantities).length === 0) {
-      const firstAvailable = horses.find(
-        (h) => h.status === 'active' || h.availabilityStatus === 'Available'
-      );
+      const firstAvailable = horses.find((h) => {
+        const order = getHorseActiveOrder(h);
+        return (
+          !order &&
+          h.status !== 'in_transit' &&
+          h.availabilityStatus !== 'In Transit' &&
+          h.status !== 'retired' &&
+          h.status !== 'deceased' &&
+          (h.status === 'active' || h.availabilityStatus === 'Available')
+        );
+      });
       if (firstAvailable) {
         setHorseQuantities({ [firstAvailable.id]: 1 });
         initializedSelection.current = selectionKey;
       }
     }
-  }, [preselectedHorseId, horses]);
+  }, [preselectedHorseId, horses, requests]);
 
   const selectedHorseIds = Object.keys(horseQuantities).filter((id) => (horseQuantities[id] || 0) > 0);
   const totalSelectedHorses = Object.values(horseQuantities).reduce((sum, q) => sum + (q || 0), 0);
@@ -198,27 +280,43 @@ function CreateTransportRequestForm() {
   const estimatedInsuranceFee = selectedHorses.reduce((sum, h) => sum + previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null).fee * h.quantity, 0);
   const validateInsurance = () => {
     const invalid = selectedHorses.map(h => ({ name: h.name, ...previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null) })).find(p => p.error);
-    const message = invalid ? `${invalid.name}: ${invalid.error}` : estimatedInsuranceFee > 9999999999999 ? 'Tổng phí bảo hiểm vượt giới hạn đơn hàng.' : '';
+    const message = invalid
+      ? `${invalid.name}: ${invalid.error}`
+      : estimatedInsuranceFee > 9999999999999
+      ? (language === 'en' ? 'Total insurance fee exceeds order limit.' : 'Tổng phí bảo hiểm vượt giới hạn đơn hàng.')
+      : '';
     setInsuranceError(message);
     return !message;
   };
 
-  const breedBreakdown = selectedHorses.reduce((acc, h) => {
+  const breedBreakdown = selectedHorses.reduce<Record<string, number>>((acc, h) => {
     const breed = h.breed || 'Other Breed';
     acc[breed] = (acc[breed] || 0) + h.quantity;
     return acc;
   }, {} as Record<string, number>);
 
   const toggleHorseSelection = (id: string) => {
-    const target = horses.find((h) => h.id === id);
+    const target = horses.find((h) => String(h.id) === String(id));
     if (!target) return;
-    const isUnavailable =
-      target.status === 'in_transit' ||
-      target.availabilityStatus === 'In Transit' ||
-      target.status === 'delivered' ||
-      target.availabilityStatus === 'Delivered' ||
-      target.status === 'retired';
-    if (isUnavailable) return;
+    const activeOrder = getHorseActiveOrder(target);
+    const isInTransit =
+      (target.availabilityStatus || '').toLowerCase().includes('transit') ||
+      activeOrder?.status === 'IN_TRANSIT' ||
+      activeOrder?.status === 'in_transit';
+    const isScheduled = !isInTransit && Boolean(activeOrder);
+    const isRetired = target.status === 'retired' || target.status === 'deceased';
+    const isUnavailable = isInTransit || isScheduled || isRetired;
+
+    if (isUnavailable) {
+      if (isInTransit) {
+        toast.error(language === 'en' ? `Horse "${target.name}" is en route (${activeOrder?.requestCode || 'in transit'}), cannot select.` : `Chiến mã "${target.name}" đang trên hành trình (${activeOrder?.requestCode || 'đang vận chuyển'}), không thể chọn.`);
+      } else if (isScheduled) {
+        toast.error(language === 'en' ? `Horse "${target.name}" is already scheduled in order ${activeOrder?.requestCode}, cannot select.` : `Chiến mã "${target.name}" đã được lên lịch trong đơn ${activeOrder?.requestCode}, không thể chọn.`);
+      } else {
+        toast.error(language === 'en' ? `Horse "${target.name}" is currently not available for transport.` : `Chiến mã "${target.name}" hiện không sẵn sàng vận chuyển.`);
+      }
+      return;
+    }
 
     setHorseQuantities((prev) => {
       const next = { ...prev };
@@ -231,27 +329,46 @@ function CreateTransportRequestForm() {
     });
   };
 
+  const isDepartureBeforeCutoff = (depDate?: string) =>
+    Boolean(depDate && earliestDepartureDate && depDate < earliestDepartureDate);
+
+  const cutoffViolationMessage = () =>
+    language === 'en'
+      ? `Order Cutoff: route requires booking at least ${minLeadDays} day(s) ahead (earliest departure: ${earliestDepartureDate}).`
+      : `Sát hạn đặt đơn (Order Cutoff): tuyến này yêu cầu đặt trước tối thiểu ${minLeadDays} ngày (ngày khởi hành sớm nhất: ${earliestDepartureDate}).`;
+
   const handleContinue = async () => {
     if (currentStep === 1) {
-      const isValid = await trigger(['title', 'origin', 'destination', 'departureDate']);
+      const isValid = await trigger(['title', 'origin', 'destination', 'departureDate', 'arrivalDate']);
       if (!isValid) return;
+      if (isDepartureBeforeCutoff(formValues.departureDate)) {
+        toast.error(cutoffViolationMessage());
+        return;
+      }
     }
     if (currentStep === 2) {
       if (!validateInsurance()) return;
       if (totalSelectedHorses === 0) {
-        alert('Vui lòng chọn ít nhất một con ngựa sẵn sàng vận chuyển.');
+        toast.error(language === 'en' ? 'Please select at least one horse available for transit.' : 'Vui lòng chọn ít nhất một con ngựa sẵn sàng vận chuyển.');
         return;
       }
-      const invalidSelected = selectedHorses.find(
-        (h) =>
+      const invalidSelected = selectedHorses.find((h) => {
+        const activeOrder = getHorseActiveOrder(h);
+        return (
+          Boolean(activeOrder) ||
+          (h.availabilityStatus || '').toLowerCase().includes('transit') ||
           h.status === 'in_transit' ||
-          h.availabilityStatus === 'In Transit' ||
-          h.status === 'delivered' ||
-          h.availabilityStatus === 'Delivered' ||
+          h.status === 'retired' ||
           (Boolean(h.status) && h.status !== 'active')
-      );
+        );
+      });
       if (invalidSelected) {
-        alert(`Ngựa "${invalidSelected.name}" đang vận chuyển hoặc đã bàn giao, không thể chọn.`);
+        const activeOrder = getHorseActiveOrder(invalidSelected);
+        toast.error(
+          activeOrder
+            ? (language === 'en' ? `Horse "${invalidSelected.name}" is in order ${activeOrder.requestCode}, cannot create new request.` : `Chiến mã "${invalidSelected.name}" đang trong đơn ${activeOrder.requestCode}, không thể tạo đơn mới.`)
+            : (language === 'en' ? `Horse "${invalidSelected.name}" is not available for transit.` : `Chiến mã "${invalidSelected.name}" không khả dụng để vận chuyển.`)
+        );
         return;
       }
     }
@@ -268,6 +385,10 @@ function CreateTransportRequestForm() {
 
   const onSubmitForm = async (data: FormData) => {
     if (isSubmitting || !validateInsurance()) return;
+    if (isDepartureBeforeCutoff(data.departureDate)) {
+      toast.error(cutoffViolationMessage());
+      return;
+    }
     setIsSubmitting(true);
     try {
       const selectedHorsesData: Array<{
@@ -282,11 +403,18 @@ function CreateTransportRequestForm() {
       for (const h of selectedHorses) {
         const qty = h.quantity || 1;
         const numericHorseId = h.backendId || (Number(h.id) > 0 ? Number(h.id) : undefined);
+        const g = String(h.gender || '').toLowerCase();
+        const normalizedGender: 'male' | 'female' | 'gelding' =
+          g.includes('male') || g.includes('stallion')
+            ? 'male'
+            : g.includes('female') || g.includes('mare')
+            ? 'female'
+            : 'gelding';
         selectedHorsesData.push({
           horseId: numericHorseId,
           name: h.name,
           breed: h.breed,
-          gender: h.gender === 'Stallion' ? 'male' : h.gender === 'Mare' ? 'female' : 'gelding',
+          gender: normalizedGender,
           age: h.age,
           quantity: qty,
           declaredValue: Number((insuranceValues[h.id] ?? defaultInsurance).declaredValue || 0),
@@ -299,7 +427,7 @@ function CreateTransportRequestForm() {
       const routeNote = routeData
         ? `[Lộ trình: ${routeData.mode === 'air' ? 'Đường Hàng Không' : 'Đường Bộ Liên Vận'}, ${routeData.distanceKm} km, ~${routeData.durationHours}h]`
         : '';
-      const typeNote = `[Hình thức: ${data.transportType === 'International' ? 'Quốc tế (International)' : 'Nội địa (Domestic)'}]`;
+      const typeNote = `[Hình thức: ${data.transportType === 'International' ? 'Quốc tế' : 'Nội địa'}]`;
       const titleNote = data.title ? `[Tiêu đề: ${data.title.trim()}]` : '';
       const combinedReqs = [titleNote, typeNote, data.specialReqs, routeNote].filter(Boolean).join(' | ');
 
@@ -333,10 +461,11 @@ function CreateTransportRequestForm() {
         await refreshHorses();
       } catch {}
 
+      toast.success(t('requests.createSuccess', 'Yêu cầu vận chuyển đã được tạo thành công!'));
       router.push(`/customer/requests/${newReq.id}`);
     } catch (error: any) {
       console.error('Failed to create request:', error);
-      alert(error?.message || 'Failed to submit request. Please try again.');
+      toast.error(error?.message || t('requests.createFailed', 'Gửi yêu cầu vận chuyển thất bại. Vui lòng thử lại.'));
       setIsSubmitting(false);
     }
   };
@@ -344,23 +473,23 @@ function CreateTransportRequestForm() {
   const progressPercent = ((currentStep - 1) / 2) * 100;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '90px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Top Breadcrumb */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
           <Link href="/customer" style={{ color: 'var(--text-muted)' }}>
-            Dashboard
+            {language === 'en' ? 'Dashboard' : 'Bảng điều khiển'}
           </Link>
-          <ChevronRight size={12} />
+          <ChevronRight size={12} aria-hidden="true" />
           <Link href="/customer/requests" style={{ color: 'var(--text-muted)' }}>
-            Transport Requests
+            {t('customer.requestsTitle', 'Yêu cầu vận chuyển')}
           </Link>
-          <ChevronRight size={12} />
-          <span style={{ color: 'var(--text-heading)', fontWeight: 600 }}>Create Transport Request</span>
+          <ChevronRight size={12} aria-hidden="true" />
+          <span style={{ color: 'var(--text-heading)', fontWeight: 600 }}>{t('customer.createRequestTitle', 'Tạo yêu cầu vận chuyển')}</span>
         </div>
-        <h2 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-          Create Transport Request
-        </h2>
+        <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
+          {t('customer.createRequestTitle', 'Tạo Yêu Cầu Vận Chuyển')}
+        </h1>
       </div>
 
       {/* PROGRESS INDICATOR */}
@@ -374,66 +503,62 @@ function CreateTransportRequestForm() {
         }}
       >
         <div style={{ maxWidth: '750px', margin: '0 auto', position: 'relative' }}>
-          {/* Background Line */}
+          {/* Track bounded to center of first and last step */}
           <div
             style={{
               position: 'absolute',
               top: '16px',
-              left: '40px',
-              right: '40px',
+              left: '16.666%',
+              right: '16.666%',
               height: '3px',
-              backgroundColor: '#f1f5f9',
+              backgroundColor: '#F0EEE8',
               zIndex: 0,
             }}
-          />
-          {/* Active progress Line */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '16px',
-              left: '40px',
-              width: `calc(${progressPercent}% * 0.88)`,
-              height: '3px',
-              backgroundColor: 'var(--primary)',
-              transition: 'width 0.3s ease',
-              zIndex: 0,
-            }}
-          />
+          >
+            <div
+              style={{
+                width: `${progressPercent}%`,
+                height: '100%',
+                backgroundColor: 'var(--primary)',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
+          <div className="grid grid-cols-3 relative z-[1]">
             {[
-              { num: 1, label: 'Thông tin lộ trình' },
-              { num: 2, label: 'Chọn ngựa vận chuyển' },
-              { num: 3, label: 'Rà soát & Gửi đơn' },
+              { num: 1, label: t('customer.newRequest.step1', 'Thông tin lộ trình') },
+              { num: 2, label: t('customer.newRequest.step2', 'Chọn ngựa vận chuyển') },
+              { num: 3, label: t('customer.newRequest.step3', 'Rà soát & Gửi đơn') },
             ].map((step) => {
               const isPast = step.num < currentStep;
               const isActive = step.num === currentStep;
 
               return (
-                <div key={step.num} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                <div key={step.num} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', textAlign: 'center' }}>
                   <div
                     style={{
                       width: '34px',
                       height: '34px',
                       borderRadius: '50%',
-                      backgroundColor: isPast ? '#16a34a' : isActive ? 'var(--primary)' : '#ffffff',
-                      color: isPast || isActive ? '#ffffff' : '#94a3b8',
-                      border: isPast || isActive ? '2px solid transparent' : '2px solid #cbd5e1',
+                      backgroundColor: isPast ? '#2D5A3F' : isActive ? 'var(--primary)' : '#ffffff',
+                      color: isPast || isActive ? '#ffffff' : '#5F6977',
+                      border: isPast || isActive ? '2px solid transparent' : '2px solid #D8CEBE',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       fontSize: '13px',
                       fontWeight: 700,
-                      boxShadow: isActive ? '0 0 0 3px rgba(37, 99, 235, 0.2)' : 'none',
+                      boxShadow: isActive ? '0 0 0 4px rgba(166, 124, 46, 0.2)' : 'none',
                     }}
                   >
-                    {isPast ? <Check size={16} strokeWidth={3} /> : `0${step.num}`}
+                    {isPast ? <Check size={16} strokeWidth={3} aria-hidden="true" /> : `0${step.num}`}
                   </div>
                   <span
                     style={{
                       fontSize: '12px',
                       fontWeight: isActive ? 700 : 500,
-                      color: isActive ? 'var(--text-heading)' : '#94a3b8',
+                      color: isActive ? 'var(--text-heading)' : '#5F6977',
                     }}
                   >
                     {step.label}
@@ -458,109 +583,88 @@ function CreateTransportRequestForm() {
               boxShadow: 'var(--shadow-sm)',
             }}
           >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-                Transport Information
-              </h3>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#F0EEE8' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
+                {language === 'en' ? 'Transport Information' : 'Thông tin vận chuyển'}
+              </h2>
               <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                Please provide the route and schedule details for your request.
+                {language === 'en' ? 'Please provide the route and schedule details for your request.' : 'Vui lòng cung cấp chi tiết lộ trình và lịch trình dự kiến cho yêu cầu của bạn.'}
               </p>
             </div>
 
-            <div style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
+            <div className="p-5 sm:p-7 flex flex-col gap-5">
               {/* Row 1: Title & Type */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Request Title <span style={{ color: '#dc2626' }}>*</span>
+                  <label htmlFor="req-title" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                    {language === 'en' ? 'Request Title' : 'Tiêu đề yêu cầu'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
                   </label>
                   <input
+                    id="req-title"
                     type="text"
+                    aria-invalid={Boolean(errors.title)}
                     {...register('title')}
-                    placeholder="Enter request title (e.g. Championship Transport to Singapore)"
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: errors.title ? '1px solid #dc2626' : '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      backgroundColor: '#f8fafc',
-                    }}
+                    placeholder={language === 'en' ? 'Enter request title (e.g. Championship Transport to Singapore)' : 'Nhập tiêu đề yêu cầu (VD: Vận chuyển thi đấu đến Singapore)'}
+                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.title ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
                   />
                   {errors.title && (
-                    <span style={{ fontSize: '12px', color: '#dc2626', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <AlertCircle size={12} /> {errors.title.message}
+                    <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <AlertCircle size={12} aria-hidden="true" /> {errors.title.message}
                     </span>
                   )}
                 </div>
 
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Transportation Type <span style={{ color: '#dc2626' }}>*</span>
+                  <label htmlFor="req-transport-type" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                    {language === 'en' ? 'Transportation Type' : 'Hình thức vận chuyển'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
                   </label>
                   <select
+                    id="req-transport-type"
                     {...register('transportType')}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      backgroundColor: '#f8fafc',
-                    }}
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all cursor-pointer"
                   >
-                    <option value="International">International (Cross-Border Flight & Transit)</option>
-                    <option value="Domestic">Domestic Transit</option>
+                    <option value="International" className="text-[#181A17] bg-white">{language === 'en' ? 'International Cross-Border' : 'Vận chuyển quốc tế xuyên biên giới'}</option>
+                    <option value="Domestic" className="text-[#181A17] bg-white">{language === 'en' ? 'Domestic Transit' : 'Vận chuyển nội địa'}</option>
                   </select>
                 </div>
               </div>
 
               {/* Row 2: Route */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Origin <span style={{ color: '#dc2626' }}>*</span>
+                  <label htmlFor="req-origin" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                    {language === 'en' ? 'Origin' : 'Điểm xuất phát'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
                   </label>
-                  <div style={{ position: 'relative' }}>
-                    <MapPin size={16} color="#94a3b8" style={{ position: 'absolute', top: '13px', left: '12px' }} />
+                  <div className="relative">
+                    <MapPin size={16} color="#5F6977" aria-hidden="true" style={{ position: 'absolute', top: '13px', left: '12px' }} />
                     <input
+                      id="req-origin"
                       type="text"
+                      aria-invalid={Boolean(errors.origin)}
                       {...register('origin')}
-                      placeholder="Search origin (e.g. Ho Chi Minh City, Vietnam)"
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px 10px 36px',
-                        borderRadius: '8px',
-                        border: errors.origin ? '1px solid #dc2626' : '1px solid #cbd5e1',
-                        fontSize: '14px',
-                        backgroundColor: '#f8fafc',
-                      }}
+                      placeholder={language === 'en' ? 'Search origin (e.g. Ho Chi Minh City, Vietnam)' : 'Tìm điểm đón ngựa (VD: TP. Hồ Chí Minh, Việt Nam)'}
+                      className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.origin ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
                     />
                   </div>
-                  {errors.origin && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.origin.message}</span>}
+                  {errors.origin && <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', display: 'block', marginTop: '4px' }}>{errors.origin.message}</span>}
                 </div>
 
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Destination <span style={{ color: '#dc2626' }}>*</span>
+                  <label htmlFor="req-destination" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                    {language === 'en' ? 'Destination' : 'Điểm đến'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
                   </label>
-                  <div style={{ position: 'relative' }}>
-                    <Flag size={16} color="#94a3b8" style={{ position: 'absolute', top: '13px', left: '12px' }} />
+                  <div className="relative">
+                    <Flag size={16} color="#5F6977" aria-hidden="true" style={{ position: 'absolute', top: '13px', left: '12px' }} />
                     <input
+                      id="req-destination"
                       type="text"
+                      aria-invalid={Boolean(errors.destination)}
                       {...register('destination')}
-                      placeholder="Search destination (e.g. Singapore Turf Club)"
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px 10px 36px',
-                        borderRadius: '8px',
-                        border: errors.destination ? '1px solid #dc2626' : '1px solid #cbd5e1',
-                        fontSize: '14px',
-                        backgroundColor: '#f8fafc',
-                      }}
+                      placeholder={language === 'en' ? 'Search destination (e.g. Singapore Turf Club)' : 'Tìm điểm đến (VD: Singapore Turf Club)'}
+                      className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.destination ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
                     />
                   </div>
-                  {errors.destination && <span style={{ fontSize: '12px', color: '#dc2626' }}>{errors.destination.message}</span>}
+                  {errors.destination && <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', display: 'block', marginTop: '4px' }}>{errors.destination.message}</span>}
                 </div>
               </div>
 
@@ -578,14 +682,16 @@ function CreateTransportRequestForm() {
               />
 
               {/* Row 3: Dates */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Departure Date <span style={{ color: '#dc2626' }}>*</span>
+                  <label htmlFor="req-departure-date" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                    {language === 'en' ? 'Departure Date' : 'Ngày xuất phát'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
                   </label>
                   <input
+                    id="req-departure-date"
                     type="date"
-                    min={todayStr}
+                    min={earliestDepartureDate}
+                    aria-invalid={Boolean(errors.departureDate) || isDepartureBeforeCutoff(formValues.departureDate)}
                     {...register('departureDate', {
                       onChange: (e) => {
                         const newDep = e.target.value;
@@ -594,55 +700,46 @@ function CreateTransportRequestForm() {
                         }
                       },
                     })}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: errors.departureDate ? '1px solid #dc2626' : '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      backgroundColor: '#f8fafc',
-                    }}
+                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.departureDate || isDepartureBeforeCutoff(formValues.departureDate) ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
                   />
                   {errors.departureDate && (
-                    <span style={{ fontSize: '12px', color: '#dc2626', display: 'block', marginTop: '4px' }}>
+                    <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', display: 'block', marginTop: '4px' }}>
                       {errors.departureDate.message}
                     </span>
                   )}
-                  {formValues.departureDate && (() => {
-                    const diffDays = Math.ceil((new Date(formValues.departureDate).getTime() - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
-                    if (diffDays >= 0 && diffDays < 7) {
-                      return (
-                        <span style={{ fontSize: '12px', color: '#92400e', backgroundColor: '#fef3c7', padding: '6px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', border: '1px solid #fde68a' }}>
-                          <Clock size={13} style={{ flexShrink: 0, color: '#b45309' }} />
-                          <span>
-                            Lịch đi cách {diffDays} ngày. Nếu chọn <strong>Ghép chuồng</strong>, khuyến nghị đặt trước ≥ 7 ngày để kịp gom đơn và xin giấy kiểm dịch thú y.
-                          </span>
-                        </span>
-                      );
-                    }
-                    return null;
-                  })()}
+                  {isDepartureBeforeCutoff(formValues.departureDate) ? (
+                    <span role="alert" style={{ fontSize: '12px', color: '#991B1B', backgroundColor: '#FEF2F2', padding: '7px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', border: '1px solid #FECACA' }}>
+                      <AlertCircle size={13} aria-hidden="true" style={{ flexShrink: 0, color: '#B33E3E' }} />
+                      <span>{cutoffViolationMessage()}</span>
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '12px', color: '#8C6621', backgroundColor: '#F5EFE2', padding: '7px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', border: '1px solid #DFCA9A' }}>
+                      <Clock size={13} aria-hidden="true" style={{ flexShrink: 0, color: '#A67C2E' }} />
+                      <span>
+                        {language === 'en' ? (
+                          <>Route <strong>Order Cutoff</strong>: requires booking at least <strong>{minLeadDays} days</strong> ahead (earliest: <strong>{earliestDepartureDate}</strong>).</>
+                        ) : (
+                          <>Hạn đặt đơn (<strong>Order Cutoff</strong>): tuyến yêu cầu đặt trước tối thiểu <strong>{minLeadDays} ngày</strong> (sớm nhất: <strong>{earliestDepartureDate}</strong>).</>
+                        )}
+                      </span>
+                    </span>
+                  )}
                 </div>
 
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    Expected Arrival
+                  <label htmlFor="req-arrival-date" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                    {language === 'en' ? 'Expected Arrival' : 'Dự kiến đến nơi'}
                   </label>
                   <input
+                    id="req-arrival-date"
                     type="date"
                     min={formValues.departureDate || todayStr}
+                    aria-invalid={Boolean(errors.arrivalDate)}
                     {...register('arrivalDate')}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: errors.arrivalDate ? '1px solid #dc2626' : '1px solid #cbd5e1',
-                      fontSize: '14px',
-                      backgroundColor: '#f8fafc',
-                    }}
+                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.arrivalDate ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
                   />
                   {errors.arrivalDate && (
-                    <span style={{ fontSize: '12px', color: '#dc2626', display: 'block', marginTop: '4px' }}>
+                    <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', display: 'block', marginTop: '4px' }}>
                       {errors.arrivalDate.message}
                     </span>
                   )}
@@ -651,22 +748,16 @@ function CreateTransportRequestForm() {
 
               {/* Row 4: Special Requirements */}
               <div>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span>Special Requirements</span>
-                  <span style={{ color: '#94a3b8', fontWeight: 400 }}>Optional</span>
+                <label htmlFor="req-special-reqs" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span>{language === 'en' ? 'Special Requirements' : 'Yêu cầu đặc biệt'}</span>
+                  <span style={{ color: '#5F6977', fontWeight: 400 }}>{language === 'en' ? 'Optional' : 'Tùy chọn'}</span>
                 </label>
                 <textarea
+                  id="req-special-reqs"
                   rows={3}
                   {...register('specialReqs')}
-                  placeholder="Enter any special transportation requirements (e.g. Temperature-controlled vehicle required, specific hydration schedule)..."
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '14px',
-                    backgroundColor: '#f8fafc',
-                  }}
+                  placeholder={language === 'en' ? 'Enter any special transportation requirements (e.g. Temperature-controlled vehicle required, specific hydration schedule)...' : 'Nhập các yêu cầu vận chuyển đặc biệt (VD: Yêu cầu xe điều hòa nhiệt độ, lịch bù nước cụ thể)...'}
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-medium text-sm placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all"
                 />
               </div>
             </div>
@@ -684,18 +775,19 @@ function CreateTransportRequestForm() {
               boxShadow: 'var(--shadow-sm)',
             }}
           >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#F0EEE8',
+                      color: '#181A17', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
               <div>
-                <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-                  Horse Information
-                </h3>
+                <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
+                  {t('customer.newRequest.horseInfoTitle', 'Horse Information')}
+                </h2>
                 <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                  Tích chọn các con ngựa cần vận chuyển từ đàn của bạn (Đã chọn: {totalSelectedHorses} con).
+                  {t('customer.newRequest.selectHorsesDesc', 'Tích chọn các con ngựa cần vận chuyển từ đàn của bạn (Đã chọn: {count} con).').replace('{count}', String(totalSelectedHorses))}
                 </p>
                 {selectedHorses.length > 0 && (
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', alignItems: 'center' }}>
                     <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-heading)' }}>
-                      Breed Breakdown:
+                      {t('customer.newRequest.breedBreakdown', 'Breed Breakdown:')}
                     </span>
                     {Object.entries(breedBreakdown).map(([breed, count]) => (
                       <span
@@ -704,144 +796,252 @@ function CreateTransportRequestForm() {
                           fontSize: '11.5px',
                           padding: '3px 10px',
                           borderRadius: '20px',
-                          backgroundColor: '#e0f2fe',
-                          color: '#0284c7',
+                          backgroundColor: '#F5EFE2',
+                          color: '#8C6621',
                           fontWeight: 600,
-                          border: '1px solid #bae6fd',
+                          border: '1px solid #DFCA9A',
                         }}
                       >
-                        {breed}: <strong>{count}</strong>
+                        {translateBreed(breed)}: <strong>{count}</strong>
                       </span>
                     ))}
                   </div>
                 )}
               </div>
               <button
+                type="button"
                 onClick={() => setIsAddHorseModalOpen(true)}
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E]"
                 style={{
                   padding: '8px 16px',
                   borderRadius: '8px',
-                  backgroundColor: '#eff6ff',
+                  backgroundColor: '#FAF8F4',
                   color: 'var(--primary)',
                   fontSize: '13px',
                   fontWeight: 600,
-                  border: 'none',
+                  border: '1px solid #D4C5A3',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
                   cursor: 'pointer',
                 }}
               >
-                <Plus size={14} /> Add New Horse
+                <Plus size={14} aria-hidden="true" /> {t('customer.newRequest.addNewHorseBtn', 'Add New Horse')}
               </button>
             </div>
 
-            <div style={{ padding: '24px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <div className="p-4 sm:p-6 space-y-5">
+              <div className="overflow-x-auto w-full">
+                <table style={{ width: '100%', minWidth: '650px', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-                    <th style={{ padding: '12px 16px', width: '40px' }} />
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Horse</th>
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Breed</th>
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Age / Gender</th>
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Medical Status</th>
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'right' }}>Profile</th>
+                  <tr style={{ borderBottom: '1px solid #D8CEBE', backgroundColor: '#F0EEE8' }}>
+                    <th style={{ padding: '12px 16px', width: '44px' }} />
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977' }}>{t('customer.newRequest.horse', 'Horse')}</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977' }}>{t('customer.table.breed', 'Breed')}</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977' }}>{t('customer.newRequest.ageGender', 'Age / Gender')}</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977' }}>{t('customer.newRequest.medicalStatus', 'Medical Status')}</th>
+                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977', textAlign: 'right' }}>{t('customer.newRequest.profile', 'Profile')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {horses.map((h) => {
-                    const isInTransit = h.status === 'in_transit' || h.availabilityStatus === 'In Transit';
-                    const isDelivered = h.status === 'delivered' || h.availabilityStatus === 'Delivered';
+                  {horses.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '40px 20px', textAlign: 'center', color: '#5F6977' }}>
+                        <p style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600 }}>
+                          {language === 'en' ? 'No horses in your stable yet.' : 'Chưa có ngựa nào trong chuồng của bạn.'}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddHorseModalOpen(true)}
+                          style={{
+                            padding: '8px 16px',
+                            borderRadius: '8px',
+                            backgroundColor: '#181A17',
+                            color: '#FAF8F4',
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <Plus size={14} aria-hidden="true" /> {t('customer.newRequest.addNewHorseBtn', 'Thêm ngựa mới')}
+                        </button>
+                      </td>
+                    </tr>
+                  ) : horses.map((h) => {
+                    const activeOrder = getHorseActiveOrder(h);
+                    const isInTransit =
+                      (h.availabilityStatus || '').toLowerCase().includes('transit') ||
+                      activeOrder?.status === 'IN_TRANSIT' ||
+                      activeOrder?.status === 'in_transit';
+                    const isScheduled = !isInTransit && Boolean(activeOrder);
                     const isRetired = h.status === 'retired' || h.status === 'deceased';
-                    const isUnavailable = isInTransit || isDelivered || isRetired;
+                    const isUnavailable = isInTransit || isScheduled || isRetired;
                     const isSelected = (horseQuantities[h.id] || 0) > 0;
+                    const orderCode = activeOrder?.requestCode;
+
                     return (
                       <tr
                         key={h.id}
                         style={{
                           borderBottom: '1px solid var(--border-light)',
-                          backgroundColor: isSelected ? '#eff6ff' : isUnavailable ? '#f8fafc' : 'transparent',
-                          opacity: isUnavailable ? 0.7 : 1,
+                          backgroundColor: isSelected ? '#FAF8F4' : isUnavailable ? '#F0EEE8' : 'transparent',
+                          opacity: isUnavailable ? 0.72 : 1,
                         }}
                       >
-                        <td style={{ padding: '16px', textAlign: 'center' }}>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            disabled={isUnavailable}
-                            onChange={() => !isUnavailable && toggleHorseSelection(h.id)}
-                            style={{ width: '16px', height: '16px', cursor: isUnavailable ? 'not-allowed' : 'pointer' }}
-                          />
+                        <td style={{ padding: '8px 16px', textAlign: 'center' }}>
+                          <label
+                            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center cursor-pointer select-none"
+                            style={{ cursor: isUnavailable ? 'not-allowed' : 'pointer' }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              disabled={isUnavailable}
+                              aria-label={`${language === 'en' ? 'Select horse' : 'Chọn chiến mã'} ${h.name}`}
+                              onChange={() => !isUnavailable && toggleHorseSelection(h.id)}
+                              title={
+                                isInTransit
+                                  ? t('customer.newRequest.inTransitTooltip', 'Horse is currently in transit ({code})').replace('{code}', orderCode || 'REQ')
+                                  : isScheduled
+                                  ? t('customer.newRequest.scheduledTooltip', 'Horse is scheduled in order {code}').replace('{code}', orderCode || '')
+                                  : t('customer.newRequest.selectTooltip', 'Select for transport')
+                              }
+                              style={{
+                                width: '18px',
+                                height: '18px',
+                                cursor: isUnavailable ? 'not-allowed' : 'pointer',
+                                accentColor: '#A67C2E',
+                              }}
+                            />
+                          </label>
                         </td>
                         <td style={{ padding: '16px', fontWeight: 700, color: 'var(--text-heading)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <div
                               style={{
-                                width: '36px',
-                                height: '36px',
+                                width: '42px',
+                                height: '42px',
                                 borderRadius: '50%',
                                 overflow: 'hidden',
-                                backgroundColor: '#eff6ff',
-                                border: '1px solid #e2e8f0',
+                                backgroundColor: '#F0EEE8',
+                                border: '2px solid #ffffff',
+                                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.08)',
                                 flexShrink: 0,
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                               }}
                             >
-                              {h.photoUrl ? (
-                                <img src={h.photoUrl} alt={h.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                              ) : (
-                                <span style={{ fontSize: '14px', fontWeight: 700, color: '#2563eb' }}>{h.name.charAt(0)}</span>
-                              )}
+                              <img
+                                src={getFullPhotoUrl(h.photoUrl) || HORSE_PLACEHOLDER_SVG}
+                                alt={h.name}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                onError={(e) => {
+                                  const img = e.currentTarget as HTMLImageElement;
+                                  if (img.src !== HORSE_PLACEHOLDER_SVG) img.src = HORSE_PLACEHOLDER_SVG;
+                                }}
+                              />
                             </div>
                             <div>
                               <div>{h.name}</div>
                               {isSelected && Number(h.quantity ?? 1) > 1 && <label className="mt-2 flex items-center gap-2 text-xs font-medium">
-                                Số ngựa
+                                {language === 'en' ? 'Horses' : 'Số ngựa'}
                                 <input type="number" min={1} max={h.quantity} step={1} value={horseQuantities[h.id]}
-                                  aria-label={`Số ngựa từ hồ sơ ${h.name}`}
+                                  aria-label={language === 'en' ? `Horse count for ${h.name}` : `Số ngựa từ hồ sơ ${h.name}`}
                                   onChange={e => {
                                     const quantity = Number(e.target.value);
                                     if (Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= Number(h.quantity)) {
                                       setHorseQuantities(previous => ({ ...previous, [h.id]: quantity }));
                                     }
-                                  }} className="w-20 rounded border border-slate-300 p-2" />
+                                  }} className="w-20 rounded border border-[#D8CEBE] p-2" />
                                 / {h.quantity}
                               </label>}
                               {isInTransit ? (
-                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#e0e7ff', color: '#4338ca', fontSize: '11px', fontWeight: 700 }}>
-                                  <Truck size={12} /> Đang vận chuyển
+                                <div
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    marginTop: '3px',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    backgroundColor: '#F5EFE2',
+                                    color: '#8C6621',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  <Truck size={12} aria-hidden="true" />
+                                  <span>{t('customer.newRequest.inTransitStatus', 'In Transit ({code})').replace('{code}', orderCode || 'REQ-001')}</span>
                                 </div>
-                              ) : isDelivered ? (
-                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '3px', padding: '2px 7px', borderRadius: '4px', backgroundColor: '#ecfdf5', color: '#047857', fontSize: '11px', fontWeight: 700 }}>
-                                  <Check size={12} /> Đã hoàn tất vận chuyển (Không thể chọn lại)
+                              ) : isScheduled ? (
+                                <div
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    marginTop: '3px',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    backgroundColor: '#D8CEBE',
+                                    color: '#242722',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  <Clock size={12} aria-hidden="true" />
+                                  <span>{t('customer.newRequest.scheduledStatus', 'Scheduled ({code})').replace('{code}', orderCode || 'REQ-002')}</span>
                                 </div>
                               ) : (
-                                <div style={{ fontSize: '11px', fontWeight: 600, color: '#16a34a', marginTop: '2px' }}>
-                                  ● Sẵn sàng vận chuyển
+                                <div
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    color: '#287653',
+                                    marginTop: '2px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                  }}
+                                >
+                                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#287653', display: 'inline-block' }} />
+                                  {t('customer.newRequest.readyStatus', 'Ready for transit')}
                                 </div>
                               )}
                             </div>
                           </div>
                         </td>
-                        <td style={{ padding: '16px', color: 'var(--text-body)' }}>{h.breed}</td>
+                        <td style={{ padding: '16px', color: 'var(--text-body)' }}>{translateBreed(h.breed)}</td>
                         <td style={{ padding: '16px', color: 'var(--text-body)' }}>
-                          {h.age} yrs •{' '}
-                          {h.gender === 'Mare' || String(h.gender).toLowerCase() === 'female'
-                            ? 'Female (Mare)'
-                            : h.gender === 'Gelding' || String(h.gender).toLowerCase() === 'gelding'
-                            ? 'Gelding'
-                            : 'Male (Stallion)'}
+                          {h.age} {t('horses.yearsOld', 'years old')} • {translateGender(h.gender)}
                         </td>
                         <td style={{ padding: '16px' }}>
-                          <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#dcfce7', color: '#15803d' }}>
-                            {h.medicalStatus || 'Healthy'}
+                          <span
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              backgroundColor: isUnavailable ? '#F0EEE8' : '#E8F2EB',
+                              color: isUnavailable ? '#5F6977' : '#287653',
+                            }}
+                          >
+                            {isUnavailable
+                              ? (isInTransit
+                                  ? t('customer.newRequest.inTransitBadge', 'In Transit')
+                                  : isScheduled
+                                  ? t('customer.newRequest.scheduledBadge', 'Scheduled')
+                                  : t('customer.newRequest.unavailableBadge', 'Unavailable'))
+                              : (h.medicalStatus || (language === 'en' ? 'Healthy' : 'Khỏe mạnh'))}
                           </span>
                         </td>
                         <td style={{ padding: '16px', textAlign: 'right' }}>
                           <Link href={`/customer/horses/${h.id}`} target="_blank" style={{ fontSize: '12.5px', color: 'var(--primary)', fontWeight: 600 }}>
-                            View Profile ↗
+                            {t('customer.newRequest.viewProfile', 'View Profile ↗')}
                           </Link>
                         </td>
                       </tr>
@@ -849,10 +1049,11 @@ function CreateTransportRequestForm() {
                   })}
                 </tbody>
               </table>
+              </div>
               <BookingChoice value={bookingType} onChange={setBookingType} horseCount={totalSelectedHorses} />
               {selectedHorses.length > 0 && <InsuranceSelection horses={selectedHorses} values={insuranceValues}
                 onChange={(id, value) => { setInsuranceValues(previous => ({ ...previous, [id]: value })); setInsuranceError(''); }}
-                policy={policy ?? null} error={policyError ? 'Chưa tải được chính sách bảo hiểm.' : insuranceError} onRetry={() => void reloadPolicy()} />}
+                policy={policy ?? null} error={policyError ? (language === 'en' ? 'Unable to load insurance policy.' : 'Chưa tải được chính sách bảo hiểm.') : insuranceError} onRetry={() => void reloadPolicy()} />}
             </div>
           </div>
         )}
@@ -868,29 +1069,37 @@ function CreateTransportRequestForm() {
               boxShadow: 'var(--shadow-sm)',
             }}
           >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-                Review & Submit Request
-              </h3>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#F0EEE8' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
+                {t('customer.newRequest.reviewTitle', 'Review & Submit Request')}
+              </h2>
               <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                Please review your shipment parameters carefully before submitting to the operations team.
+                {t('customer.newRequest.reviewDesc', 'Please review your shipment parameters carefully before submitting to the operations team.')}
               </p>
             </div>
 
-            <div style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-                <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Request Title</span>
-                  <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-heading)', marginTop: '2px' }}>{formValues.title || 'Untitled Request'}</div>
-                </div>
-                <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Route</span>
-                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>
-                    {formValues.origin} → {formValues.destination}
+            <div className="p-5 sm:p-7 flex flex-col gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div style={{ backgroundColor: '#F0EEE8', color: '#181A17', padding: '14px', borderRadius: '10px' }}>
+                  <span style={{ fontSize: '11px', color: '#5F6977', textTransform: 'uppercase', fontWeight: 700 }}>
+                    {t('customer.newRequest.summaryTitle', 'Request Title')}
+                  </span>
+                  <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-heading)', marginTop: '2px' }}>
+                    {formValues.title || (language === 'en' ? 'Untitled Request' : 'Yêu cầu vận chuyển')}
                   </div>
                 </div>
-                <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '10px' }}>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700 }}>Departure Date</span>
+                <div style={{ backgroundColor: '#F0EEE8', color: '#181A17', padding: '14px', borderRadius: '10px' }}>
+                  <span style={{ fontSize: '11px', color: '#5F6977', textTransform: 'uppercase', fontWeight: 700 }}>
+                    {t('customer.newRequest.summaryRoute', 'Route')}
+                  </span>
+                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>
+                    {translateCountry(formValues.origin)} → {translateCountry(formValues.destination)}
+                  </div>
+                </div>
+                <div style={{ backgroundColor: '#F0EEE8', color: '#181A17', padding: '14px', borderRadius: '10px' }}>
+                  <span style={{ fontSize: '11px', color: '#5F6977', textTransform: 'uppercase', fontWeight: 700 }}>
+                    {t('customer.newRequest.summaryDepartureDate', 'Departure Date')}
+                  </span>
                   <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>{formValues.departureDate}</div>
                 </div>
               </div>
@@ -899,10 +1108,10 @@ function CreateTransportRequestForm() {
               {routeData && (
                 <div
                   style={{
-                    backgroundColor: '#eff6ff',
+                    backgroundColor: '#FAF8F4',
                     padding: '16px 20px',
                     borderRadius: '12px',
-                    border: '1px solid #dbeafe',
+                    border: '1px solid #D8CEBE',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
@@ -916,21 +1125,21 @@ function CreateTransportRequestForm() {
                         width: '36px',
                         height: '36px',
                         borderRadius: '8px',
-                        backgroundColor: '#dbeafe',
-                        color: '#1d4ed8',
+                        backgroundColor: '#D8CEBE',
+                        color: '#242722',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                       }}
                     >
-                      <Navigation size={18} />
+                      <Navigation size={18} aria-hidden="true" />
                     </div>
                     <div>
-                      <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#1e40af' }}>
-                        Lộ trình: {routeData.mode === 'air' ? 'Đường Hàng Không (Air Freight Corridor)' : 'Đường Bộ Liên Vận (Overland Road)'}
+                      <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#181A17' }}>
+                        {t('customer.newRequest.routePrefix', 'Route:')} {routeData.mode === 'air' ? t('customer.newRequest.routeAir', 'Air Freight Corridor') : t('customer.newRequest.routeRoad', 'Overland Road Transit')}
                       </div>
-                      <div style={{ fontSize: '12.5px', color: '#475569' }}>
-                        Quãng đường: <strong style={{ color: '#0f172a' }}>{routeData.distanceKm.toLocaleString()} km</strong> • Thời gian ước tính: <strong style={{ color: '#0f172a' }}>~{routeData.durationHours} giờ</strong>
+                      <div style={{ fontSize: '12.5px', color: '#5F6977' }}>
+                        {t('customer.newRequest.distance', 'Distance:')} <strong style={{ color: '#181A17' }}>{routeData.distanceKm.toLocaleString()} km</strong> • {t('customer.newRequest.estimatedTime', 'Estimated Duration:')} <strong style={{ color: '#181A17' }}>~{routeData.durationHours} {t('customer.newRequest.hours', 'hours')}</strong>
                       </div>
                     </div>
                   </div>
@@ -940,12 +1149,12 @@ function CreateTransportRequestForm() {
                       fontWeight: 700,
                       padding: '4px 10px',
                       borderRadius: '20px',
-                      backgroundColor: '#dcfce7',
-                      color: '#15803d',
-                      border: '1px solid #bbf7d0',
+                      backgroundColor: '#E8F2EB',
+                      color: '#287653',
+                      border: '1px solid #B7DBC4',
                     }}
                   >
-                    ✓ Đã tối ưu kiểm dịch & trạm thú y
+                    {t('customer.newRequest.quarantineOptimized', '✓ Quarantine & Vet Stations Optimized')}
                   </span>
                 </div>
               )}
@@ -953,7 +1162,7 @@ function CreateTransportRequestForm() {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                   <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)' }}>
-                    Selected Horses ({totalSelectedHorses} horses)
+                    {t('customer.newRequest.selectedHorsesCount', 'Selected Horses ({count} horses)').replace('{count}', String(totalSelectedHorses))}
                   </span>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                     {Object.entries(breedBreakdown).map(([breed, count]) => (
@@ -963,13 +1172,13 @@ function CreateTransportRequestForm() {
                           fontSize: '11px',
                           padding: '2px 8px',
                           borderRadius: '12px',
-                          backgroundColor: '#e0f2fe',
-                          color: '#0284c7',
+                          backgroundColor: '#F5EFE2',
+                          color: '#8C6621',
                           fontWeight: 600,
-                          border: '1px solid #bae6fd',
+                          border: '1px solid #DFCA9A',
                         }}
                       >
-                        {breed}: {count}
+                        {translateBreed(breed)}: {count}
                       </span>
                     ))}
                   </div>
@@ -981,18 +1190,18 @@ function CreateTransportRequestForm() {
                       style={{
                         padding: '6px 14px',
                         borderRadius: '8px',
-                        backgroundColor: '#eff6ff',
+                        backgroundColor: '#FAF8F4',
                         color: 'var(--primary)',
                         fontSize: '13px',
                         fontWeight: 600,
-                        border: '1px solid #dbeafe',
+                        border: '1px solid #D8CEBE',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '8px',
                       }}
                     >
                       <span>{h.name}</span>
-                      <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 500 }}>• {h.breed}</span>
+                      <span style={{ color: '#5F6977', fontSize: '12px', fontWeight: 500 }}>• {translateBreed(h.breed)}</span>
                     </span>
                   ))}
                 </div>
@@ -1002,56 +1211,70 @@ function CreateTransportRequestForm() {
         )}
       </div>
 
-      {currentStep === 3 && <section aria-label="Xác nhận bảo hiểm" className="mx-auto w-full max-w-[850px] space-y-4 rounded-xl border border-slate-200 bg-white p-5">
-        <h3 className="font-semibold">Bảo hiểm & chi phí dự kiến</h3>
-        <ul className="space-y-2 text-sm">{selectedHorses.map(h => {
-          const value = insuranceValues[h.id] ?? defaultInsurance;
-          return <li key={h.id}><strong>{h.name}</strong> · {Number(value.declaredValue || 0).toLocaleString('vi-VN')} {value.declaredCurrency}/ngựa · Gói {insuranceNames[value.insurancePackage]} · {vnd(previewInsurance(value, policy ?? null).fee * h.quantity)}</li>;
-        })}</ul>
-        <BookingSummary bookingType={bookingType} horseCount={totalSelectedHorses} />
-        <CostSummary transportCost={null} insuranceFee={estimatedInsuranceFee} />
-        <p className="text-xs text-slate-500">Phí bảo hiểm làm tròn đến VNĐ trên mỗi ngựa. Backend xác nhận lại phí khi lưu yêu cầu. Tổng tiền sẽ gồm cước cơ bản và phí bảo hiểm; chưa yêu cầu thanh toán ở bước này.</p>
-        {insuranceError && <p role="alert" className="text-sm text-red-700">{insuranceError}</p>}
-      </section>}
+      {currentStep === 3 && (
+        <section
+          aria-label={language === 'en' ? 'Insurance confirmation' : 'Xác nhận bảo hiểm'}
+          className="mx-auto w-full max-w-[850px] space-y-4 rounded-2xl border border-[#D8CEBE] bg-white p-5 sm:p-6"
+        >
+          <h3 className="font-bold text-[#181A17]">
+            {language === 'en' ? 'Insurance & Estimated Cost' : 'Bảo hiểm & chi phí dự kiến'}
+          </h3>
+          <ul className="space-y-2 text-sm text-[#181A17]">
+            {selectedHorses.map((h) => {
+              const value = insuranceValues[h.id] ?? defaultInsurance;
+              return (
+                <li key={h.id}>
+                  <strong>{h.name}</strong> · {Number(value.declaredValue || 0).toLocaleString('vi-VN')} {value.declaredCurrency}/
+                  {language === 'en' ? 'horse' : 'ngựa'} · {language === 'en' ? 'Package' : 'Gói'} {insuranceNames[value.insurancePackage]} ·{' '}
+                  {vnd(previewInsurance(value, policy ?? null).fee * h.quantity)}
+                </li>
+              );
+            })}
+          </ul>
+          <BookingSummary bookingType={bookingType} horseCount={totalSelectedHorses} />
+          <CostSummary transportCost={null} insuranceFee={estimatedInsuranceFee} />
+          <p className="text-xs text-[#5F6977]">
+            {language === 'en'
+              ? 'Insurance fees are rounded to VND per horse and recalculated on the server when saved. The final quote includes base freight and insurance; no payment is required at submission.'
+              : 'Phí bảo hiểm làm tròn đến VNĐ trên mỗi ngựa. Backend xác nhận lại phí khi lưu yêu cầu. Tổng tiền sẽ gồm cước cơ bản và phí bảo hiểm; chưa yêu cầu thanh toán ở bước này.'}
+          </p>
+          {insuranceError && <p role="alert" className="text-sm text-[#B33E3E]">{insuranceError}</p>}
+        </section>
+      )}
 
-      {/* STICKY BOTTOM ACTION BAR */}
+      {/* STICKY BOTTOM ACTION BAR (stays clear of Sidebar) */}
       <div
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: '260px',
-          right: 0,
-          backgroundColor: '#ffffff',
-          borderTop: '1px solid var(--border-light)',
-          padding: '16px 32px',
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          boxShadow: '0 -4px 12px rgba(15, 23, 42, 0.05)',
-          zIndex: 40,
-        }}
+        className="sticky bottom-0 z-20 mx-auto w-full max-w-[850px] rounded-2xl border border-[#D8CEBE] bg-white/95 px-5 py-3.5 shadow-[0_-6px_20px_rgba(24,26,23,0.08)] backdrop-blur-sm flex items-center justify-between gap-3 flex-wrap"
+        style={{ paddingBottom: 'max(14px, env(safe-area-inset-bottom, 14px))' }}
       >
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <span className="text-xs font-semibold text-[#5F6977]">
+          {language === 'en' ? `Step ${currentStep} of 3` : `Bước ${currentStep} / 3`}
+        </span>
+        <div className="flex items-center gap-3 ml-auto">
           {currentStep > 1 && (
             <button
+              type="button"
               onClick={handleBack}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E] cursor-pointer"
               style={{
                 padding: '9px 20px',
                 borderRadius: '8px',
-                border: '1px solid #cbd5e1',
+                border: '1px solid #D8CEBE',
                 backgroundColor: '#ffffff',
                 fontSize: '13.5px',
                 fontWeight: 600,
                 color: 'var(--text-body)',
               }}
             >
-              Back
+              {t('common.back', 'Back')}
             </button>
           )}
 
           {currentStep < 3 ? (
             <button
+              type="button"
               onClick={handleContinue}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E] cursor-pointer"
               style={{
                 padding: '9px 24px',
                 borderRadius: '8px',
@@ -1063,19 +1286,24 @@ function CreateTransportRequestForm() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.3)',
+                boxShadow: '0 4px 12px rgba(166, 124, 46, 0.25)',
               }}
             >
-              Continue <ArrowRight size={15} />
+              {t('customer.newRequest.continueBtn', 'Continue')} <ArrowRight size={15} aria-hidden="true" />
             </button>
           ) : (
             <button
-              onClick={handleSubmit(onSubmitForm)}
+              type="button"
+              onClick={() => {
+                if (isSubmitting) return;
+                handleSubmit(onSubmitForm)();
+              }}
               disabled={isSubmitting}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287653]"
               style={{
                 padding: '9px 26px',
                 borderRadius: '8px',
-                backgroundColor: isSubmitting ? '#94a3b8' : '#16a34a',
+                backgroundColor: isSubmitting ? '#8892A0' : '#287653',
                 color: '#ffffff',
                 fontSize: '13.5px',
                 fontWeight: 600,
@@ -1083,17 +1311,17 @@ function CreateTransportRequestForm() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: isSubmitting ? 'none' : '0 2px 8px rgba(22, 163, 74, 0.3)',
+                boxShadow: isSubmitting ? 'none' : '0 4px 12px rgba(40, 118, 83, 0.25)',
                 cursor: isSubmitting ? 'not-allowed' : 'pointer',
               }}
             >
               {isSubmitting ? (
                 <>
-                  Submitting... <Loader2 size={16} className="animate-spin" />
+                  {t('customer.newRequest.submitting', 'Submitting...')} <Loader2 size={16} className="animate-spin" aria-hidden="true" />
                 </>
               ) : (
                 <>
-                  Submit Request <Check size={16} strokeWidth={2.5} />
+                  {t('customer.newRequest.submitBtn', 'Submit Request')} <Check size={16} strokeWidth={2.5} aria-hidden="true" />
                 </>
               )}
             </button>
@@ -1113,8 +1341,9 @@ function CreateTransportRequestForm() {
 }
 
 export default function CreateTransportRequestPage() {
+  const { language } = useLanguage();
   return (
-    <React.Suspense fallback={<div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>Loading transport wizard...</div>}>
+    <React.Suspense fallback={<div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>{language === 'en' ? 'Loading transport wizard...' : 'Đang tải trình tạo đơn vận chuyển...'}</div>}>
       <CreateTransportRequestForm />
     </React.Suspense>
   );

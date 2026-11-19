@@ -76,8 +76,8 @@ export interface Horse {
   color?: string;
   weight?: string;
   location?: string;
-  availabilityStatus?: 'In Transit' | 'Scheduled' | 'Available' | 'Not Cleared' | 'Delivered' | 'Retired';
-  status?: 'active' | 'in_transit' | 'delivered' | 'retired' | 'deceased' | string;
+  availabilityStatus?: 'In Transit' | 'Scheduled' | 'Available' | 'Not Cleared' | 'Retired';
+  status?: 'active' | 'in_transit' | 'retired' | 'deceased' | string;
   medicalStatus?: 'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention' | 'Treatment';
   documentStatus?: 'Valid' | 'Expiring Soon' | 'Missing';
   vaccinationStatus?: string;

@@ -21,7 +21,8 @@
     "migrate:wave0": "node ../database/apply-wave0-migration.cjs",
     "migrate:wave1": "node ../database/apply-wave1-migration.cjs",
     "migrate:wave2": "node ../database/apply-wave2-migration.cjs",
-    "migrate:wave3": "node ../database/apply-wave3-migration.cjs"
+    "migrate:wave3": "node ../database/apply-wave3-migration.cjs",
+    "test:schema-parity": "node test/qa-spec/compare-schemas.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

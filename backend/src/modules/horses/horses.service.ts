@@ -81,9 +81,9 @@ export class HorsesService {
       throw new ForbiddenException('You can only edit horses belonging to your account');
     }
 
-    // Không cho phép khách hàng tự ý đổi trạng thái ngựa đang vận chuyển hoặc đã hoàn tất về lại 'active'
+    // Không cho phép khách hàng tự ý đổi trạng thái ngựa đang được giữ/vận chuyển về lại 'active'
     if (
-      (horse.status === HorseStatus.IN_TRANSIT || horse.status === HorseStatus.DELIVERED) &&
+      horse.status === HorseStatus.IN_TRANSIT &&
       dto.status === HorseStatus.ACTIVE
     ) {
       dto.status = horse.status;

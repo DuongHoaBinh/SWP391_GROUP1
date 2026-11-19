@@ -7,7 +7,6 @@ export enum HorseGender {
 export enum HorseStatus {
   ACTIVE = 'active',
   IN_TRANSIT = 'in_transit',
-  DELIVERED = 'delivered',
   RETIRED = 'retired',
   DECEASED = 'deceased',
 }

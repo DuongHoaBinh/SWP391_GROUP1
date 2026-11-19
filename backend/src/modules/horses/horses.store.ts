@@ -46,7 +46,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
         connectionLimit: 10,
       });
     }
-    await this.syncCompletedShipmentHorses();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -55,28 +54,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async syncCompletedShipmentHorses(): Promise<void> {
-    try {
-      // Unstick any horses left in 'delivered' from legacy runs once no active shipment holds them.
-      await this.pool.execute(
-        `UPDATE horse h
-         SET h.status = 'active'
-         WHERE h.status = 'delivered'
-           AND NOT EXISTS (
-             SELECT 1
-             FROM shipment_horse sh
-             JOIN shipment s ON s.shipment_id = sh.shipment_id
-             WHERE sh.horse_id = h.horse_id
-               AND s.status IN ('requested', 'change_requested', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit')
-           )`,
-      );
-    } catch {
-      // Ignore sync errors
-    }
-  }
-
   async findByOwnerId(ownerId: number): Promise<HorseEntity[]> {
-    await this.syncCompletedShipmentHorses();
     const [rows] = await this.pool.execute<HorseRow[]>(
       `SELECT horse_id, owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse
@@ -89,7 +67,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async findById(horseId: number): Promise<HorseEntity | undefined> {
-    await this.syncCompletedShipmentHorses();
     const [rows] = await this.pool.execute<HorseRow[]>(
       `SELECT horse_id, owner_id, name, breed, gender, date_of_birth, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse

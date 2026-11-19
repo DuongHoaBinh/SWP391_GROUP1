@@ -53,18 +53,29 @@ The authentication API is backend-only on this feature branch. Customer registra
 2. Install dependencies separately in `frontend/` and `backend/`.
 3. Read `docs/requirements.md` and `docs/actors-and-roles.md` before implementing a flow.
 4. Keep each flow's business rules in its owning backend module and update the matching file under `docs/flows/`.
-5. Review and run `database/schema.mysql.sql` against a local MySQL 8.0+ instance when database integration is enabled.
+5. Initialize a fresh local MySQL 8.0+ database using `database/schema.mysql.sql` (canonical 40-table schema, single source of truth for fresh installs) and optional development accounts/regulations in `database/seed.sql`.
 
 ### Enable persistent customer registration
 
 1. Create `backend/.env` from the root `.env.example` and set `DB_PASSWORD` to the local MySQL `root` password.
 2. Configure Gmail SMTP with a 16-character Google App Password in `SMTP_PASSWORD`; do not use or commit the normal Gmail password.
-3. Ensure the schema and `database/migrations/001_add_otp_password_hash.sql` have been executed.
+3. Ensure `database/schema.mysql.sql` has been executed cleanly.
 4. Start the backend with `npm run start:dev` from `backend/`.
 
 With this configuration, `POST /api/auth/register` stores the pending OTP and password hash in MySQL and sends the OTP by email. `POST /api/auth/verify-otp` creates the `Customer` row in `user`, and `POST /api/auth/login` reads the account from MySQL.
 
 For local development, start the backend on port `5000` and the Next.js frontend on port `3001` (for example, `next dev -p 3001`).
+
+### Schema source of truth, parity check & health check
+
+- **Fresh installs:** Use `database/schema.mysql.sql` as the single canonical schema source (includes all 40 tables, `shipment.status` with `'cancelled_operational'`, `horse.status` without legacy `'delivered'`, and active generated unique indexes). Files under `database/migrations/` are historical upgrade scripts for older existing databases; do **not** run `migrate:all` on top of a fresh `schema.mysql.sql` install (or use targeted Wave scripts only on pre-wave DBs).
+- **Schema parity test:** From `backend/`, run `npm run test:schema-parity` to verify in an isolated DB (`horse_transport_test` vs `horse_transport_schema_only_check`) that `schema.mysql.sql` and the test harness produce 100% identical tables, columns, ENUMs, and indexes.
+- **Health endpoint:** `GET http://localhost:5000/api/health` verifies database connectivity (`SELECT 1`).
+
+### Quality checks & tests
+
+- **Backend** (`backend/`): run `npx tsc --noEmit && npm run build && npm test` (builds NestJS and runs unit/policy test suites).
+- **Frontend** (`frontend/`): run `npx tsc --noEmit && npm run lint && npm run build`, plus focused regression suites `npm run test:auth`, `npm run test:booking`, `npm run test:insurance`, `npm run test:sepay`, and `npm run test:controlled`.
 
 ### Login troubleshooting
 

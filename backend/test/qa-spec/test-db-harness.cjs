@@ -30,8 +30,6 @@ const SEPAY_CODE_LENGTH = 8;
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const BACKEND_ROOT = path.resolve(__dirname, '../..');
 
-const IGNORABLE_MIGRATION_ERRNOS = new Set([1050, 1060, 1061, 1062, 1091, 1826]);
-
 async function openRootConnection(database = undefined) {
   return mysql.createConnection({
     ...DB_CONN_BASE,
@@ -65,37 +63,11 @@ async function resetTestDatabase() {
     const isolatedSchema = rawSchema.replace(/horse_transport_system/gi, TEST_DB_NAME);
     await db.query(isolatedSchema);
 
-    // Apply structural migrations missing from base schema (010 creates route_leg, airline, airport, master_stop)
-    const migrationsDir = path.join(REPO_ROOT, 'database', 'migrations');
-    const migrationFiles = fs
-      .readdirSync(migrationsDir)
-      .filter((f) => f.endsWith('.sql') && !/^(00[1-5]|007|009|022|023)_/.test(f))
-      .sort();
-
-    for (const file of migrationFiles) {
-      const rawSql = fs.readFileSync(path.join(migrationsDir, file), 'utf8').trim();
-      if (!rawSql) continue;
-      const isolatedSql = rawSql.replace(/horse_transport_system/gi, TEST_DB_NAME);
-      try {
-        await db.query(isolatedSql);
-      } catch (err) {
-        if (!IGNORABLE_MIGRATION_ERRNOS.has(err?.errno)) {
-          throw new Error(`Migration ${file} failed on ${TEST_DB_NAME}: ${err.message}`);
-        }
-      }
-    }
-
-    // 010 modifies shipment.status ENUM without 'cancelled_operational', and 026's ALTER fails with 1060
-    // on top of schema.mysql.sql because cancellation_category already exists in base schema.
-    await db.query(
-      "ALTER TABLE shipment MODIFY COLUMN status ENUM('requested','change_requested','approved','rejected','planning','confirmed','ready_to_depart','in_transit','completed','cancelled','cancelled_operational') NOT NULL DEFAULT 'requested'",
-    );
-
     // Verify we are strictly in horse_transport_test
     const [[dbCheck]] = await db.query('SELECT DATABASE() AS dbName');
     assert.equal(dbCheck.dbName, TEST_DB_NAME);
 
-    // Clear migration-seeded non-role rows if any to guarantee clean deterministic baseline
+    // Guarantee clean deterministic non-catalog baseline
     await db.query('SET FOREIGN_KEY_CHECKS = 0');
     for (const tbl of ['regulation', 'horse', 'vehicle', 'shipment', '`user`']) {
       await db.query(`DELETE FROM ${tbl}`);
