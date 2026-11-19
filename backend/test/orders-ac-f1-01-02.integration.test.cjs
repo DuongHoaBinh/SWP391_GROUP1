@@ -45,8 +45,11 @@ describe('Orders Supertest Integration: AC-F1-01 & AC-F1-02 (Isolated DB: horse_
   let db = null;
   let seed = null;
   let custToken = null;
+  let customerAId = null;
   let managerToken = null;
   let managerId = null;
+  let managerBToken = null;
+  let managerBId = null;
   let acF101OrderId = null;
 
   before(async () => {
@@ -68,6 +71,7 @@ describe('Orders Supertest Integration: AC-F1-01 & AC-F1-02 (Isolated DB: horse_
       .send({ email: 'cust.a@test.local', password: 'Password123' });
     assert.ok([200, 201].includes(custLogin.status), `Customer login failed: ${custLogin.status} ${custLogin.text}`);
     custToken = custLogin.body.accessToken;
+    customerAId = Number(seed.users['cust.a@test.local'].id);
 
     const mgrLogin = await request(httpServer)
       .post('/api/auth/login')
@@ -75,6 +79,13 @@ describe('Orders Supertest Integration: AC-F1-01 & AC-F1-02 (Isolated DB: horse_
     assert.ok([200, 201].includes(mgrLogin.status), `Manager login failed: ${mgrLogin.status} ${mgrLogin.text}`);
     managerToken = mgrLogin.body.accessToken;
     managerId = Number(seed.users['manager.a@test.local'].id);
+
+    const mgrBLogin = await request(httpServer)
+      .post('/api/auth/login')
+      .send({ email: 'manager.b@test.local', password: 'Password123' });
+    assert.ok([200, 201].includes(mgrBLogin.status), `Manager B login failed: ${mgrBLogin.status} ${mgrBLogin.text}`);
+    managerBToken = mgrBLogin.body.accessToken;
+    managerBId = Number(seed.users['manager.b@test.local'].id);
   });
 
   after(async () => {
@@ -198,33 +209,82 @@ describe('Orders Supertest Integration: AC-F1-01 & AC-F1-02 (Isolated DB: horse_
     assert.equal(sepayBlockedRes.status, 422);
   });
 
-  test('AC-F1-01 (Quotation PDF Check): Server provides Quotation PDF field, attachment, or /api/orders/:id/quotation endpoint', async () => {
+  test('AC-F1-01 (Quotation Payload Check): GET /api/orders/:id returns full VND quotation payload & per-horse insurance snapshot for client-side printable PDF', async () => {
     assert.ok(acF101OrderId, 'Prerequisite AC-F1-01 order must exist');
 
-    const orderRes = await request(httpServer)
-      .get(`/api/orders/${acF101OrderId}`)
-      .set('Authorization', `Bearer ${custToken}`);
-    assert.equal(orderRes.status, 200);
+    const [custOrderRes, mgrOrderRes] = await Promise.all([
+      request(httpServer)
+        .get(`/api/orders/${acF101OrderId}`)
+        .set('Authorization', `Bearer ${custToken}`),
+      request(httpServer)
+        .get(`/api/orders/${acF101OrderId}`)
+        .set('Authorization', `Bearer ${managerToken}`),
+    ]);
+    assert.equal(custOrderRes.status, 200);
+    assert.equal(mgrOrderRes.status, 200);
 
-    const hasServerPdfField = Boolean(orderRes.body?.quotationPdfUrl || orderRes.body?.quotationUrl);
-    const hasPdfAttachment = Array.isArray(orderRes.body?.attachments)
-      && orderRes.body.attachments.some((att) =>
-        String(att?.fileUrl || '').toLowerCase().includes('.pdf')
-        || String(att?.fileUrl || '').toLowerCase().includes('quotation'));
+    const q = custOrderRes.body;
+    // Order-level quotation fields used by client-side printable quotation (exportQuotation)
+    assert.equal(Number(q.id), acF101OrderId);
+    assert.ok(typeof q.requestCode === 'string' && q.requestCode.length > 0, `Missing requestCode: ${q.requestCode}`);
+    assert.equal(q.status, 'approved');
+    assert.equal(Number(q.approvedBy), managerId);
+    assert.equal(q.bookingType, 'shared_stall');
+    assert.equal(q.transportMode, 'road');
+    assert.equal(q.transportationType, 'Domestic');
+    assert.equal(Number(q.requestedHorseCount), 2);
+    assert.equal(Number(q.stallUnitPrice), 2_000_000);
+    assert.equal(Number(q.transportCost), 4_000_000);
+    assert.equal(Number(q.insuranceFee), 3_000_000);
+    assert.equal(Number(q.totalCost), 7_000_000);
+    assert.equal(Number(q.transportCost) + Number(q.insuranceFee), Number(q.totalCost));
+    assert.equal(q.paymentStatus, 'unpaid');
+    assert.equal(q.originLocation, 'Củ Chi, TP.HCM, Vietnam');
+    assert.equal(q.destinationLocation, 'Đà Nẵng, Vietnam');
+    assert.equal(q.contactName, 'Customer A Integration');
+    assert.equal(q.contactPhone, '0900000001');
+    assert.equal(q.contactEmail, 'cust.a@test.local');
 
-    const quotationRes = await request(httpServer)
-      .get(`/api/orders/${acF101OrderId}/quotation`)
-      .set('Authorization', `Bearer ${custToken}`);
-    const hasQuotationEndpoint =
-      quotationRes.status === 200
-      && String(quotationRes.headers['content-type'] || '').toLowerCase().includes('application/pdf');
+    // Customer and Manager views expose identical quotation pricing
+    assert.equal(Number(mgrOrderRes.body.stallUnitPrice), Number(q.stallUnitPrice));
+    assert.equal(Number(mgrOrderRes.body.transportCost), Number(q.transportCost));
+    assert.equal(Number(mgrOrderRes.body.insuranceFee), Number(q.insuranceFee));
+    assert.equal(Number(mgrOrderRes.body.totalCost), Number(q.totalCost));
+    assert.equal(mgrOrderRes.body.bookingType, q.bookingType);
+    assert.equal(mgrOrderRes.body.transportMode, q.transportMode);
 
-    assert.ok(
-      hasServerPdfField || hasPdfAttachment || hasQuotationEndpoint,
-      `Expected server-side Quotation PDF (field, attachment, or GET /api/orders/${acF101OrderId}/quotation returning application/pdf); ` +
-        `got orderKeys=${JSON.stringify(Object.keys(orderRes.body || {}))}, attachments=${JSON.stringify(orderRes.body?.attachments || [])}, ` +
-        `GET /quotation status=${quotationRes.status} body=${quotationRes.text}`,
+    // Per-horse insurance & identity breakdown for quotation table
+    assert.ok(Array.isArray(q.horses) && q.horses.length === 2, `Expected 2 horses in quotation payload, got ${q.horses?.length}`);
+    const horseNames = q.horses.map((h) => h.name).sort();
+    assert.deepEqual(horseNames, ['IT-ACF101_1', 'IT-ACF101_2']);
+
+    let sumHorseInsurance = 0;
+    for (const h of q.horses) {
+      assert.ok(Number(h.horseId) > 0);
+      assert.equal(Number(h.quantity ?? 1), 1);
+      assert.equal(Number(h.declaredValue), 100_000_000);
+      assert.equal(h.declaredCurrency, 'VND');
+      assert.equal(Number(h.exchangeRate), 1);
+      assert.equal(Number(h.declaredValueVnd), 100_000_000);
+      assert.equal(h.insurancePackage, 'standard');
+      assert.equal(Number(h.insuranceFee), 1_500_000);
+      assert.equal(Number(h.maxCompensation), 80_000_000);
+      assert.equal(h.emergencyVetCovered, false);
+      assert.ok(typeof h.insurancePolicyVersion === 'string' && h.insurancePolicyVersion.length > 0);
+      sumHorseInsurance += Number(h.insuranceFee) * Number(h.quantity ?? 1);
+    }
+    assert.equal(sumHorseInsurance, Number(q.insuranceFee));
+
+    // Held horse status consistency per Decision 3 (in_transit while shipment is non-terminal)
+    const horseIds = q.horses.map((h) => Number(h.horseId));
+    const [horseRows] = await db.execute(
+      `SELECT horse_id, status FROM horse WHERE horse_id IN (${horseIds.map(() => '?').join(',')})`,
+      horseIds,
     );
+    assert.equal(horseRows.length, 2);
+    for (const row of horseRows) {
+      assert.equal(row.status, 'in_transit');
+    }
   });
 
   test('AC-F1-02: 50 parallel Customer Cancel vs Manager Approve races — strictly 1 winner + 1 HTTP 409, clean DB invariants', async () => {
@@ -347,5 +407,120 @@ describe('Orders Supertest Integration: AC-F1-01 & AC-F1-02 (Isolated DB: horse_
 
     assert.equal(approveWins + cancelWins, 50);
     console.log(`[AC-F1-02] Race summary over 50 iterations: approveWins=${approveWins}, cancelWins=${cancelWins}`);
+  });
+
+  test('AC-F1-02b: hai Manager duyệt song song (50 vòng) — đúng 1 thắng 200, 1 nhận 409, khớp approved_by/total_cost và đúng 1 thông báo Customer', async () => {
+    let managerAWins = 0;
+    let managerBWins = 0;
+
+    for (let i = 0; i < 50; i++) {
+      const horseId = await createActiveHorse(`MGR_RACE_${i}`);
+      const createRes = await request(httpServer)
+        .post('/api/orders')
+        .set('Authorization', `Bearer ${custToken}`)
+        .send({
+          bookingType: 'shared_stall',
+          contactName: 'Customer A Dual Manager Race',
+          contactAddress: 'TP.HCM',
+          contactPhone: '0900000001',
+          contactEmail: 'cust.a@test.local',
+          requestedHorseCount: 1,
+          originLocation: 'Củ Chi, TP.HCM, Vietnam',
+          destinationLocation: 'Đà Nẵng, Vietnam',
+          requestedDate: futureIso(25),
+          transportationType: 'Domestic',
+          horses: [
+            {
+              horseId,
+              name: `IT-MGR_RACE_${i}`,
+              declaredValue: 50_000_000,
+              declaredCurrency: 'VND',
+              insurancePackage: 'basic',
+            },
+          ],
+        });
+      assert.equal(createRes.status, 201, `Iter ${i} createOrder failed: ${createRes.status} ${createRes.text}`);
+      const orderId = Number(createRes.body.id);
+
+      const sendA = () =>
+        request(httpServer)
+          .patch(`/api/orders/${orderId}/approve`)
+          .set('Authorization', `Bearer ${managerToken}`)
+          .send({
+            bookingType: 'shared_stall',
+            quotedHorseCount: 1,
+            stallUnitPrice: 2_000_000,
+            transportMode: 'road',
+          });
+
+      const sendB = () =>
+        request(httpServer)
+          .patch(`/api/orders/${orderId}/approve`)
+          .set('Authorization', `Bearer ${managerBToken}`)
+          .send({
+            bookingType: 'shared_stall',
+            quotedHorseCount: 1,
+            stallUnitPrice: 3_000_000,
+            transportMode: 'road',
+          });
+
+      let resA;
+      let resB;
+      if (i % 2 === 0) {
+        [resA, resB] = await Promise.all([sendA(), sendB()]);
+      } else {
+        [resB, resA] = await Promise.all([sendB(), sendA()]);
+      }
+
+      // (a) Strictly one 200 and one 409
+      const statuses = [resA.status, resB.status].sort((a, b) => a - b);
+      assert.deepEqual(
+        statuses,
+        [200, 409],
+        `Iter ${i}: expected [200, 409], got managerA=${resA.status}, managerB=${resB.status}`,
+      );
+
+      // (b) DB approved_by & total_cost must match ONLY the winning Manager
+      const [[sRow]] = await db.execute(
+        'SELECT status, approved_by, stall_unit_price, transport_cost, total_cost FROM shipment WHERE shipment_id = ?',
+        [orderId],
+      );
+      assert.equal(sRow.status, 'approved', `Iter ${i}: expected status='approved', got ${sRow.status}`);
+
+      if (resA.status === 200) {
+        managerAWins++;
+        assert.equal(resB.status, 409);
+        assert.equal(Number(sRow.approved_by), managerId, `Iter ${i}: expected approved_by=${managerId} (A), got ${sRow.approved_by}`);
+        assert.equal(Number(sRow.stall_unit_price), 2_000_000);
+        assert.equal(Number(sRow.transport_cost), 2_000_000);
+        assert.equal(Number(sRow.total_cost), 2_000_000, `Iter ${i}: expected total_cost=2000000 (A), got ${sRow.total_cost}`);
+      } else {
+        managerBWins++;
+        assert.equal(resA.status, 409);
+        assert.equal(resB.status, 200);
+        assert.equal(Number(sRow.approved_by), managerBId, `Iter ${i}: expected approved_by=${managerBId} (B), got ${sRow.approved_by}`);
+        assert.equal(Number(sRow.stall_unit_price), 3_000_000);
+        assert.equal(Number(sRow.transport_cost), 3_000_000);
+        assert.equal(Number(sRow.total_cost), 3_000_000, `Iter ${i}: expected total_cost=3000000 (B), got ${sRow.total_cost}`);
+      }
+
+      // (c) Strictly 1 approval notification sent to Customer (zero duplicate notifications)
+      const [[notifRow]] = await db.execute(
+        "SELECT COUNT(*) AS cnt, GROUP_CONCAT(title SEPARATOR ' | ') AS titles FROM notification WHERE shipment_id = ? AND user_id = ?",
+        [orderId, customerAId],
+      );
+      assert.equal(
+        Number(notifRow.cnt),
+        1,
+        `Iter ${i}: expected strictly 1 customer notification, got ${notifRow.cnt} (${notifRow.titles})`,
+      );
+      assert.ok(
+        String(notifRow.titles || '').includes('đã được phê duyệt'),
+        `Iter ${i}: unexpected customer notification title: ${notifRow.titles}`,
+      );
+    }
+
+    assert.equal(managerAWins + managerBWins, 50);
+    console.log(`[AC-F1-02b] Race summary over 50 iterations: managerAWins=${managerAWins}, managerBWins=${managerBWins}`);
   });
 });
