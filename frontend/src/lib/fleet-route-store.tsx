@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { getAuthToken, getCurrentUser } from '@/lib/auth';
 
 export interface AvailableStaff {
   id: number;
@@ -13,6 +14,9 @@ export interface AvailableStaff {
 }
 
 export type VehicleEquipmentType =
+  | 'truck'
+  | 'aircraft_stall'
+  | 'container'
   | 'Xe thùng chuyên dụng điều hòa 18°C'
   | 'Xe van chuyên dụng 2-4 Stall'
   | 'Xe tải hạng nặng điều hòa 6-8 Stall'
@@ -147,8 +151,8 @@ interface FleetRouteStoreContextType {
   updateTripStatus: (tripIdOrCode: string, status: TripSchedule['status']) => void;
   // Vehicle CRUD
   addVehicle: (data: Omit<Vehicle, 'id'>) => Promise<Vehicle> | Vehicle;
-  updateVehicle: (id: string, data: Partial<Vehicle>) => void;
-  deleteVehicle: (id: string) => void;
+  updateVehicle: (id: string, data: Partial<Vehicle>) => Promise<void> | void;
+  deleteVehicle: (id: string) => Promise<void> | void;
   // Route CRUD
   addRoute: (data: Omit<RouteItem, 'id'>) => RouteItem;
   updateRoute: (id: string, data: Partial<RouteItem>) => void;
@@ -167,322 +171,31 @@ interface FleetRouteStoreContextType {
   resetToDefaults: () => void;
 }
 
-const INITIAL_VEHICLES: Vehicle[] = [
-  { id: 'v-1', code: 'TRK-VN-089', type: 'Xe thùng chuyên dụng điều hòa 18°C', capacity: 4, status: 'available', lastInspection: '2026-09-20', location: 'HCMC Depot' },
-  { id: 'v-2', code: 'TRK-VN-102', type: 'Xe tải hạng nặng điều hòa 6-8 Stall', capacity: 6, status: 'in_use', lastInspection: '2026-09-25', location: 'Transit: Moc Bai Border', assignedTripCode: 'TR-2026-002' },
-  { id: 'v-3', code: 'AIR-SG-330', type: 'Chuồng bay chuyên dụng máy bay (Air Cargo Stall)', capacity: 2, status: 'available', lastInspection: '2026-09-18', location: 'Tan Son Nhat Airport' },
-  { id: 'v-4', code: 'TRK-TH-501', type: 'Xe van chuyên dụng 2-4 Stall', capacity: 4, status: 'maintenance', lastInspection: '2026-09-10', location: 'Bangkok Service Yard' },
-  { id: 'v-5', code: 'CNT-FEI-09', type: 'Thùng container chuyên dụng cho ngựa', capacity: 3, status: 'available', lastInspection: '2026-09-28', location: 'Changi Logistics Hub' },
-  { id: 'v-6', code: 'TRK-VN-115', type: 'Xe thùng chuyên dụng điều hòa 18°C', capacity: 4, status: 'available', lastInspection: '2026-09-22', location: 'Hanoi Depot' },
-];
+const INITIAL_VEHICLES: Vehicle[] = [];
 
-const INITIAL_ROUTES: RouteItem[] = [
-  {
-    id: 'rt-101',
-    name: 'Saigon to Singapore Turf Club (Express Air-Land)',
-    orderCode: 'TR-2026-001',
-    origin: 'Cu Chi Horse Farm, HCMC',
-    destination: 'Singapore Turf Club, Kranji',
-    distanceKm: 1450,
-    status: 'active',
-    stops: [
-      { seq: 1, name: 'Tan Son Nhat Airport Hub', type: 'Rest', country: 'Vietnam' },
-      { seq: 2, name: 'Tan Son Nhat Cargo Quarantine', type: 'Quarantine', country: 'Vietnam' },
-      { seq: 3, name: 'Changi Airport Air Cargo Gate', type: 'Border Gate', country: 'Singapore' },
-      { seq: 4, name: 'Kranji Post-Arrival Isolation', type: 'Quarantine', country: 'Singapore' },
-    ],
-  },
-  {
-    id: 'rt-102',
-    name: 'Hanoi to Bangkok Overland Transit via Laos',
-    orderCode: 'TR-2026-002',
-    origin: 'Soc Son Equestrian Center, Hanoi',
-    destination: 'Bangkok Royal Stables, Thailand',
-    distanceKm: 980,
-    status: 'active',
-    stops: [
-      { seq: 1, name: 'Cau Treo International Border', type: 'Border Gate', country: 'Vietnam - Laos' },
-      { seq: 2, name: 'Vientiane Resting Station', type: 'Rest', country: 'Laos' },
-      { seq: 3, name: 'Nong Khai Quarantine Gate', type: 'Border Gate', country: 'Thailand' },
-    ],
-  },
-  {
-    id: 'rt-103',
-    name: 'Saigon to Kuala Lumpur Equine Center',
-    orderCode: 'TR-2026-003',
-    origin: 'HCMC Logistics Hub',
-    destination: 'Kuala Lumpur Turf Club',
-    distanceKm: 1200,
-    status: 'planned',
-    stops: [
-      { seq: 1, name: 'Moc Bai Border Gate', type: 'Border Gate', country: 'Vietnam - Cambodia' },
-      { seq: 2, name: 'Phnom Penh Staging Depot', type: 'Rest', country: 'Cambodia' },
-      { seq: 3, name: 'Hat Yai Border Checkpoint', type: 'Border Gate', country: 'Thailand - Malaysia' },
-    ],
-  },
-];
+const INITIAL_ROUTES: RouteItem[] = [];
 
-const INITIAL_SCHEDULES: TripSchedule[] = [
-  {
-    id: 'sch-1',
-    orderCode: 'TR-2026-001',
-    horseName: 'Thunder',
-    horseCount: 2,
-    departureTime: '2026-10-15 08:00 AM',
-    estimatedArrival: '2026-10-16 02:00 PM',
-    vehicleCode: 'TRK-VN-089',
-    driverName: 'John Smith',
-    escortName: 'Dr. Sarah (FEI Vet)',
-    routeTitle: 'Saigon to Singapore Turf Club (Express Air-Land)',
-    origin: 'Ho Chi Minh City, VN',
-    destination: 'Singapore, SG',
-    status: 'Scheduled',
-    notes: 'Temperature-controlled chamber set to 18°C. VIP racehorse Thunder onboard.',
-    publishedAt: '2026-10-01T09:00:00Z',
-  },
-  {
-    id: 'sch-2',
-    orderCode: 'TR-2026-002',
-    horseName: 'Silver Star',
-    horseCount: 3,
-    departureTime: '2026-10-16 06:30 AM',
-    estimatedArrival: '2026-10-18 10:00 AM',
-    vehicleCode: 'TRK-VN-102',
-    driverName: 'Michael Brown',
-    escortName: 'David Lee (Equine Handler)',
-    routeTitle: 'Hanoi to Bangkok Overland Transit via Laos',
-    origin: 'Hanoi, VN',
-    destination: 'Bangkok, TH',
-    status: 'In Transit',
-    notes: 'Rest every 4 hours mandatory. Hydration monitoring logs required at Ha Tinh stop.',
-    publishedAt: '2026-10-02T14:30:00Z',
-  },
-  {
-    id: 'sch-3',
-    orderCode: 'TR-2026-003',
-    horseName: 'Golden Mile',
-    horseCount: 1,
-    departureTime: '2026-10-18 01:00 PM',
-    estimatedArrival: '2026-10-19 06:00 PM',
-    vehicleCode: 'AIR-SG-330',
-    driverName: 'Capt. Robert Chen',
-    escortName: 'Dr. Elena (FEI Vet)',
-    routeTitle: 'Saigon to Kuala Lumpur Equine Center',
-    origin: 'Ho Chi Minh City, VN',
-    destination: 'Kuala Lumpur, MY',
-    status: 'Scheduled',
-    notes: 'Air cargo charter stall confirmed with Changi ground handling crew.',
-    publishedAt: '2026-10-03T11:15:00Z',
-  },
-];
+const INITIAL_SCHEDULES: TripSchedule[] = [];
 
-const INITIAL_ALERTS: OperationalAlert[] = [
-  {
-    id: 'alt-1',
-    tripCode: 'TR-2026-002',
-    type: 'Border Congestion',
-    severity: 'CRITICAL',
-    location: 'Moc Bai Border Gate',
-    message: 'Customs queue backed up 3+ hours due to scanner maintenance. Recommendation: Divert to secondary quarantine lane.',
-    timeAgo: '20m ago',
-    isAcknowledged: false,
-  },
-  {
-    id: 'alt-2',
-    tripCode: 'TR-2026-001',
-    type: 'Severe Weather',
-    severity: 'WARNING',
-    location: 'Singapore Strait Flight Corridor',
-    message: 'Tropical thunderstorm warning between 15:00 - 18:00. Pre-flight check recommended.',
-    timeAgo: '1h ago',
-    isAcknowledged: false,
-  },
-  {
-    id: 'alt-3',
-    tripCode: 'TR-2026-005',
-    type: 'Traffic Delay',
-    severity: 'INFO',
-    location: 'Highway 1A - Phan Thiet Bypass',
-    message: 'Heavy road construction. Slow transit expected; +25 mins delay.',
-    timeAgo: '3h ago',
-    isAcknowledged: true,
-  },
-];
+const INITIAL_ALERTS: OperationalAlert[] = [];
 
-const INITIAL_MILESTONES: TripMilestone[] = [
-  // TR-2026-002: Hanoi to Bangkok Overland Transit via Laos (In Transit)
-  {
-    id: 'm-201',
-    tripCode: 'TR-2026-002',
-    seq: 1,
-    title: 'Departed Soc Son Equestrian Center',
-    location: 'Soc Son, Hanoi',
-    timestamp: 'Today at 06:30 AM',
-    status: 'COMPLETED',
-    notes: 'Vehicle departure inspection passed. 3 horses loaded in good condition.',
-    author: 'Michael Brown',
-  },
-  {
-    id: 'm-202',
-    tripCode: 'TR-2026-002',
-    seq: 2,
-    title: 'Rest & Hydration Stop #1',
-    location: 'Ninh Binh Transit Depot',
-    timestamp: 'Today at 09:15 AM',
-    status: 'COMPLETED',
-    notes: 'Horses watered; 30-minute rest observed. Timothy hay replenished.',
-    author: 'Michael Brown',
-  },
-  {
-    id: 'm-203',
-    tripCode: 'TR-2026-002',
-    seq: 3,
-    title: 'Cau Treo International Border Gate Inspection',
-    location: 'Ha Tinh - Laos Border',
-    timestamp: 'Expected: 02:00 PM',
-    status: 'CURRENT',
-    notes: 'Awaiting veterinary quarantine inspection lane 2.',
-    author: 'Michael Brown',
-    isCustomsBorder: true,
-  },
-  {
-    id: 'm-204',
-    tripCode: 'TR-2026-002',
-    seq: 4,
-    title: 'Vientiane Equine Resting Facility',
-    location: 'Vientiane, Laos',
-    timestamp: 'Expected: 07:30 PM',
-    status: 'UPCOMING',
-  },
-  {
-    id: 'm-205',
-    tripCode: 'TR-2026-002',
-    seq: 5,
-    title: 'Nong Khai Quarantine Gate (Thailand)',
-    location: 'Nong Khai Border',
-    timestamp: 'Expected: Tomorrow 04:00 AM',
-    status: 'UPCOMING',
-    isCustomsBorder: true,
-  },
-  {
-    id: 'm-206',
-    tripCode: 'TR-2026-002',
-    seq: 6,
-    title: 'Final Handover at Bangkok Royal Stables',
-    location: 'Bangkok, Thailand',
-    timestamp: 'Tomorrow at 10:00 AM',
-    status: 'UPCOMING',
-  },
+const INITIAL_MILESTONES: TripMilestone[] = [];
 
-  // TR-2026-001: Saigon to Singapore Turf Club (Scheduled)
-  {
-    id: 'm-101',
-    tripCode: 'TR-2026-001',
-    seq: 1,
-    title: 'Departure Preparation at Cu Chi Farm',
-    location: 'Cu Chi Stables, HCMC',
-    timestamp: 'Scheduled: Oct 15 at 08:00 AM',
-    status: 'CURRENT',
-    notes: 'Pre-trip veterinary physical examination confirmed.',
-  },
-  {
-    id: 'm-102',
-    tripCode: 'TR-2026-001',
-    seq: 2,
-    title: 'Tan Son Nhat Air Cargo Gate',
-    location: 'Tan Son Nhat Airport',
-    timestamp: 'Scheduled: Oct 15 at 11:30 AM',
-    status: 'UPCOMING',
-    isCustomsBorder: true,
-  },
-  {
-    id: 'm-103',
-    tripCode: 'TR-2026-001',
-    seq: 3,
-    title: 'Changi Airport Quarantine Clearance',
-    location: 'Changi Airport, Singapore',
-    timestamp: 'Scheduled: Oct 15 at 06:00 PM',
-    status: 'UPCOMING',
-    isCustomsBorder: true,
-  },
-  {
-    id: 'm-104',
-    tripCode: 'TR-2026-001',
-    seq: 4,
-    title: 'Arrival at Singapore Turf Club, Kranji',
-    location: 'Kranji, Singapore',
-    timestamp: 'Scheduled: Oct 16 at 02:00 PM',
-    status: 'UPCOMING',
-  },
-];
+const INITIAL_HEALTH_LOGS: HorseHealthLog[] = [];
 
-const INITIAL_HEALTH_LOGS: HorseHealthLog[] = [
-  {
-    id: 'hl-1',
-    tripCode: 'TR-2026-002',
-    horseName: 'Silver Star',
-    tempC: 37.8,
-    heartRateBpm: 38,
-    condition: 'Stable',
-    notes: 'Calm, responsive, and well hydrated. Consumed standard timothy hay ration.',
-    loggedAt: 'Today at 09:30 AM',
-    loggedBy: 'David Lee (Equine Handler)',
-  },
-  {
-    id: 'hl-2',
-    tripCode: 'TR-2026-002',
-    horseName: 'Royal Stallion',
-    tempC: 38.4,
-    heartRateBpm: 46,
-    condition: 'Stressed',
-    notes: 'Slightly elevated pulse from mountain incline vibrations. Administered electrolyte solution; acoustic soothing active.',
-    loggedAt: 'Today at 11:15 AM',
-    loggedBy: 'David Lee (Equine Handler)',
-  },
-  {
-    id: 'hl-3',
-    tripCode: 'TR-2026-002',
-    horseName: 'Thunderbolt',
-    tempC: 37.6,
-    heartRateBpm: 36,
-    condition: 'Stable',
-    notes: 'Optimal physiological status. Normal hydration skin pinch test.',
-    loggedAt: 'Today at 09:35 AM',
-    loggedBy: 'David Lee (Equine Handler)',
-  },
-];
+const INITIAL_TELEMETRIES: Record<string, TripTelemetry> = {};
 
-const INITIAL_TELEMETRIES: Record<string, TripTelemetry> = {
-  'TR-2026-002': {
-    tripCode: 'TR-2026-002',
-    currentLocation: 'Highway 8A, approaching Cau Treo Border Gate (Ha Tinh)',
-    speedKmH: 68,
-    cabinTempC: 21.2,
-    humidityPct: 56,
-    airQuality: 'Optimal (HEPA filtration active)',
-    quarantineSealStatus: 'Certified',
-    lastUpdated: 'Just now',
-  },
-  'TR-2026-001': {
-    tripCode: 'TR-2026-001',
-    currentLocation: 'Cu Chi Stables Staging Hub, HCMC',
-    speedKmH: 0,
-    cabinTempC: 19.5,
-    humidityPct: 52,
-    airQuality: 'Pre-cooling active',
-    quarantineSealStatus: 'Pending',
-    lastUpdated: '5m ago',
-  },
-};
-
-const STORAGE_KEYS = {
-  VEHICLES: 'equitransit_fleet_vehicles_v1',
-  ROUTES: 'equitransit_fleet_routes_v1',
-  SCHEDULES: 'equitransit_fleet_schedules_v1',
-  ALERTS: 'equitransit_fleet_alerts_v1',
-  MILESTONES: 'equitransit_fleet_milestones_v1',
-  HEALTH_LOGS: 'equitransit_fleet_health_v1',
-  TELEMETRIES: 'equitransit_fleet_telemetry_v1',
+const getFleetStorageKeys = () => {
+  const userId = getCurrentUser()?.id || 'anon';
+  return {
+    VEHICLES: `equitransit_fleet_u${userId}_vehicles_v1`,
+    ROUTES: `equitransit_fleet_u${userId}_routes_v1`,
+    SCHEDULES: `equitransit_fleet_u${userId}_schedules_v1`,
+    ALERTS: `equitransit_fleet_u${userId}_alerts_v1`,
+    MILESTONES: `equitransit_fleet_u${userId}_milestones_v1`,
+    HEALTH_LOGS: `equitransit_fleet_u${userId}_health_v1`,
+    TELEMETRIES: `equitransit_fleet_u${userId}_telemetry_v1`,
+  };
 };
 
 const FleetRouteStoreContext = createContext<FleetRouteStoreContextType | null>(null);
@@ -498,10 +211,25 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
   const [availableStaff, setAvailableStaff] = useState<AvailableStaff[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
+  const mapVehicleTypeToBackend = (rawType?: string): 'truck' | 'aircraft_stall' | 'container' => {
+    const val = String(rawType || '').toLowerCase();
+    if (val === 'aircraft_stall' || val.includes('air cargo') || val.includes('chuồng bay') || val.includes('máy bay')) {
+      return 'aircraft_stall';
+    }
+    if (val === 'container' || val.includes('container')) {
+      return 'container';
+    }
+    return 'truck';
+  };
+
   const refreshVehicles = useCallback(async () => {
+    const token = getAuthToken();
+    const role = String(getCurrentUser()?.role || '').toUpperCase();
+    if (!token || role === 'CUSTOMER') return;
+
     try {
       const backendVehicles = await apiClient<any[]>('/fleet/vehicles');
-      if (Array.isArray(backendVehicles) && backendVehicles.length > 0) {
+      if (Array.isArray(backendVehicles)) {
         const resolveDisplayType = (bType: string, cap: number): Vehicle['type'] => {
           if (bType === 'aircraft_stall') return 'Chuồng bay chuyên dụng máy bay (Air Cargo Stall)';
           if (bType === 'container') return 'Thùng container chuyên dụng cho ngựa';
@@ -526,77 +254,86 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
         });
         setVehicles(mapped);
         try {
-          localStorage.setItem(STORAGE_KEYS.VEHICLES, JSON.stringify(mapped));
+          localStorage.setItem(getFleetStorageKeys().VEHICLES, JSON.stringify(mapped));
         } catch {}
       }
-    } catch (err) {
-      console.warn('Backend /fleet/vehicles call unreached, using local cache:', err);
+    } catch {
+      // Backend unreachable or unprivileged role
     }
   }, []);
 
   const refreshStaff = useCallback(async () => {
+    const token = getAuthToken();
+    const role = String(getCurrentUser()?.role || '').toUpperCase();
+    if (!token || !['FLEET_ROUTE_COORDINATOR', 'COORDINATOR', 'LOGISTICS_MANAGER', 'ADMIN'].includes(role)) {
+      return;
+    }
+
     try {
       const staffList = await apiClient<AvailableStaff[]>('/fleet/staff');
-      if (Array.isArray(staffList) && staffList.length > 0) {
+      if (Array.isArray(staffList)) {
         setAvailableStaff(staffList);
       }
-    } catch (err) {
-      console.warn('Backend /fleet/staff call unreached:', err);
+    } catch {
+      // Unprivileged role or unreachable
     }
   }, []);
 
-  // Load from LocalStorage & Backend
+  // Load from user-scoped LocalStorage & Backend
   useEffect(() => {
-    try {
-      const savedVehicles = localStorage.getItem(STORAGE_KEYS.VEHICLES);
-      const savedRoutes = localStorage.getItem(STORAGE_KEYS.ROUTES);
-      const savedSchedules = localStorage.getItem(STORAGE_KEYS.SCHEDULES);
-      const savedAlerts = localStorage.getItem(STORAGE_KEYS.ALERTS);
-      const savedMilestones = localStorage.getItem(STORAGE_KEYS.MILESTONES);
-      const savedHealth = localStorage.getItem(STORAGE_KEYS.HEALTH_LOGS);
-      const savedTele = localStorage.getItem(STORAGE_KEYS.TELEMETRIES);
+    const STORAGE_KEYS = getFleetStorageKeys();
+    const token = getAuthToken();
+    if (token) {
+      try {
+        const savedVehicles = localStorage.getItem(STORAGE_KEYS.VEHICLES);
+        const savedRoutes = localStorage.getItem(STORAGE_KEYS.ROUTES);
+        const savedSchedules = localStorage.getItem(STORAGE_KEYS.SCHEDULES);
+        const savedAlerts = localStorage.getItem(STORAGE_KEYS.ALERTS);
+        const savedMilestones = localStorage.getItem(STORAGE_KEYS.MILESTONES);
+        const savedHealth = localStorage.getItem(STORAGE_KEYS.HEALTH_LOGS);
+        const savedTele = localStorage.getItem(STORAGE_KEYS.TELEMETRIES);
 
-      if (savedVehicles) setVehicles(JSON.parse(savedVehicles));
-      if (savedRoutes) setRoutes(JSON.parse(savedRoutes));
-      if (savedSchedules) setSchedules(JSON.parse(savedSchedules));
-      if (savedAlerts) setAlerts(JSON.parse(savedAlerts));
-      if (savedMilestones) setMilestones(JSON.parse(savedMilestones));
-      if (savedHealth) setHealthLogs(JSON.parse(savedHealth));
-      if (savedTele) setTelemetries(JSON.parse(savedTele));
-    } catch (e) {
-      console.error('Error loading fleet store from localStorage:', e);
+        if (savedVehicles) setVehicles(JSON.parse(savedVehicles));
+        if (savedRoutes) setRoutes(JSON.parse(savedRoutes));
+        if (savedSchedules) setSchedules(JSON.parse(savedSchedules));
+        if (savedAlerts) setAlerts(JSON.parse(savedAlerts));
+        if (savedMilestones) setMilestones(JSON.parse(savedMilestones));
+        if (savedHealth) setHealthLogs(JSON.parse(savedHealth));
+        if (savedTele) setTelemetries(JSON.parse(savedTele));
+      } catch (e) {
+        console.error('Error loading fleet store from localStorage:', e);
+      }
     }
     setIsLoaded(true);
 
-    // Cross-tab live synchronization listener
     const handleStorageChange = (e: StorageEvent) => {
       try {
         if (!e.newValue) return;
-        if (e.key === STORAGE_KEYS.ROUTES) {
+        const keys = getFleetStorageKeys();
+        if (e.key === keys.ROUTES) {
           setRoutes(JSON.parse(e.newValue));
-        } else if (e.key === STORAGE_KEYS.VEHICLES) {
+        } else if (e.key === keys.VEHICLES) {
           setVehicles(JSON.parse(e.newValue));
-        } else if (e.key === STORAGE_KEYS.SCHEDULES) {
+        } else if (e.key === keys.SCHEDULES) {
           setSchedules(JSON.parse(e.newValue));
-        } else if (e.key === STORAGE_KEYS.ALERTS) {
+        } else if (e.key === keys.ALERTS) {
           setAlerts(JSON.parse(e.newValue));
-        } else if (e.key === STORAGE_KEYS.MILESTONES) {
+        } else if (e.key === keys.MILESTONES) {
           setMilestones(JSON.parse(e.newValue));
-        } else if (e.key === STORAGE_KEYS.HEALTH_LOGS) {
+        } else if (e.key === keys.HEALTH_LOGS) {
           setHealthLogs(JSON.parse(e.newValue));
-        } else if (e.key === STORAGE_KEYS.TELEMETRIES) {
+        } else if (e.key === keys.TELEMETRIES) {
           setTelemetries(JSON.parse(e.newValue));
         }
-      } catch (err) {
-        console.warn('Cross-tab sync error:', err);
-      }
+      } catch {}
     };
 
     window.addEventListener('storage', handleStorageChange);
 
-    // Live sync with Backend
-    refreshVehicles();
-    refreshStaff();
+    if (token) {
+      refreshVehicles();
+      refreshStaff();
+    }
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
@@ -606,49 +343,49 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
   const saveVehicles = useCallback((items: Vehicle[]) => {
     setVehicles(items);
     try {
-      localStorage.setItem(STORAGE_KEYS.VEHICLES, JSON.stringify(items));
+      localStorage.setItem(getFleetStorageKeys().VEHICLES, JSON.stringify(items));
     } catch {}
   }, []);
 
   const saveRoutes = useCallback((items: RouteItem[]) => {
     setRoutes(items);
     try {
-      localStorage.setItem(STORAGE_KEYS.ROUTES, JSON.stringify(items));
+      localStorage.setItem(getFleetStorageKeys().ROUTES, JSON.stringify(items));
     } catch {}
   }, []);
 
   const saveSchedules = useCallback((items: TripSchedule[]) => {
     setSchedules(items);
     try {
-      localStorage.setItem(STORAGE_KEYS.SCHEDULES, JSON.stringify(items));
+      localStorage.setItem(getFleetStorageKeys().SCHEDULES, JSON.stringify(items));
     } catch {}
   }, []);
 
   const saveAlerts = useCallback((items: OperationalAlert[]) => {
     setAlerts(items);
     try {
-      localStorage.setItem(STORAGE_KEYS.ALERTS, JSON.stringify(items));
+      localStorage.setItem(getFleetStorageKeys().ALERTS, JSON.stringify(items));
     } catch {}
   }, []);
 
   const saveMilestones = useCallback((items: TripMilestone[]) => {
     setMilestones(items);
     try {
-      localStorage.setItem(STORAGE_KEYS.MILESTONES, JSON.stringify(items));
+      localStorage.setItem(getFleetStorageKeys().MILESTONES, JSON.stringify(items));
     } catch {}
   }, []);
 
   const saveHealthLogs = useCallback((items: HorseHealthLog[]) => {
     setHealthLogs(items);
     try {
-      localStorage.setItem(STORAGE_KEYS.HEALTH_LOGS, JSON.stringify(items));
+      localStorage.setItem(getFleetStorageKeys().HEALTH_LOGS, JSON.stringify(items));
     } catch {}
   }, []);
 
   const saveTelemetries = useCallback((items: Record<string, TripTelemetry>) => {
     setTelemetries(items);
     try {
-      localStorage.setItem(STORAGE_KEYS.TELEMETRIES, JSON.stringify(items));
+      localStorage.setItem(getFleetStorageKeys().TELEMETRIES, JSON.stringify(items));
     } catch {}
   }, []);
 
@@ -828,60 +565,61 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
   // Vehicle Management
   const addVehicle = useCallback(
     async (data: Omit<Vehicle, 'id'>) => {
-      let createdId = `v-${Date.now()}`;
-      try {
-        const typeMapping: Record<string, string> = {
-          'Xe thùng chuyên dụng điều hòa 18°C': 'truck',
-          'Xe van chuyên dụng 2-4 Stall': 'truck',
-          'Xe tải hạng nặng điều hòa 6-8 Stall': 'truck',
-          'Thùng container chuyên dụng cho ngựa': 'container',
-          'Chuồng bay chuyên dụng máy bay (Air Cargo Stall)': 'aircraft_stall',
-          'Climate-Controlled Truck': 'truck',
-          'Air Cargo Stall': 'aircraft_stall',
-          'Specialized Container': 'container',
-        };
-        const backendType = typeMapping[data.type] || 'truck';
-        const res = await apiClient<any>('/fleet/vehicles', {
-          method: 'POST',
-          body: JSON.stringify({
-            vehicleType: backendType,
-            plateOrCode: data.code,
-            capacity: Number(data.capacity) || 4,
-            status: data.status || 'available',
-            currentLocation: data.location || 'Fleet Operations Depot',
-          }),
-        });
-        if (res?.id) {
-          createdId = String(res.id);
-        }
-      } catch (err) {
-        console.warn('Backend create vehicle failed, saved locally:', err);
-      }
-
-      const newV: Vehicle = {
+      const backendType = mapVehicleTypeToBackend(data.type);
+      const res = await apiClient<any>('/fleet/vehicles', {
+        method: 'POST',
+        body: JSON.stringify({
+          vehicleType: backendType,
+          plateOrCode: data.code,
+          capacity: Number(data.capacity) || 4,
+          status: data.status || 'available',
+          currentLocation: data.location || 'Fleet Operations Depot',
+        }),
+      });
+      await refreshVehicles();
+      return {
         ...data,
-        id: createdId,
+        id: res?.id ? String(res.id) : `v-${Date.now()}`,
       };
-      saveVehicles([newV, ...vehicles]);
-      return newV;
     },
-    [vehicles, saveVehicles]
+    [refreshVehicles]
   );
 
   const updateVehicle = useCallback(
-    (id: string, data: Partial<Vehicle>) => {
+    async (id: string, data: Partial<Vehicle>) => {
+      const numericId = Number(id);
+      if (Number.isFinite(numericId) && numericId > 0) {
+        const payload: Record<string, unknown> = {};
+        if (data.type !== undefined) payload.vehicleType = mapVehicleTypeToBackend(data.type);
+        if (data.code !== undefined) payload.plateOrCode = data.code;
+        if (data.capacity !== undefined) payload.capacity = Number(data.capacity);
+        if (data.status !== undefined) payload.status = data.status;
+        if (data.location !== undefined) payload.currentLocation = data.location;
+        await apiClient(`/fleet/vehicles/${numericId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        await refreshVehicles();
+        return;
+      }
       const updated = vehicles.map((v) => (v.id === id ? { ...v, ...data } : v));
       saveVehicles(updated);
     },
-    [vehicles, saveVehicles]
+    [vehicles, saveVehicles, refreshVehicles]
   );
 
   const deleteVehicle = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      const numericId = Number(id);
+      if (Number.isFinite(numericId) && numericId > 0) {
+        await apiClient(`/fleet/vehicles/${numericId}`, { method: 'DELETE' });
+        await refreshVehicles();
+        return;
+      }
       const updated = vehicles.filter((v) => v.id !== id);
       saveVehicles(updated);
     },
-    [vehicles, saveVehicles]
+    [vehicles, saveVehicles, refreshVehicles]
   );
 
   // Route Management

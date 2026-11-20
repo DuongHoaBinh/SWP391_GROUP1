@@ -4,8 +4,10 @@ import React, { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { useCustomerStore } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
-import { Trash2, AlertTriangle, Loader2 } from 'lucide-react';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
+import { Trash2, AlertTriangle, Loader2, ShieldAlert, X } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import toast from 'react-hot-toast';
 
 interface DeleteHorseModalProps {
   isOpen: boolean;
@@ -21,28 +23,24 @@ export const DeleteHorseModal: React.FC<DeleteHorseModalProps> = ({
   onHorseDeleted,
 }) => {
   const { deleteHorse, refreshHorses } = useCustomerStore();
+  const { t, language, translateBreed } = useLanguage();
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState('');
 
   const handleDelete = async () => {
+    if (isDeleting) return;
     setIsDeleting(true);
     setError('');
 
     const targetBackendId = horse.backendId || (Number(horse.id) > 0 ? Number(horse.id) : undefined);
 
     try {
-      // 1. Call backend API if backendId exists
       if (targetBackendId) {
-        try {
-          await apiClient<any>(`/horses/${targetBackendId}`, {
-            method: 'DELETE',
-          });
-        } catch (apiErr: any) {
-          console.warn('Backend DELETE /horses/:id error:', apiErr);
-        }
+        await apiClient<any>(`/horses/${targetBackendId}`, {
+          method: 'DELETE',
+        });
       }
 
-      // 2. Remove from local store & refresh
       deleteHorse(horse.id);
       await refreshHorses();
 
@@ -53,9 +51,9 @@ export const DeleteHorseModal: React.FC<DeleteHorseModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error('Failed to delete horse:', err);
-      deleteHorse(horse.id);
-      await refreshHorses();
-      onClose();
+      const msg = err?.message || t('horses.deleteFailed', 'Không thể xóa hồ sơ chiến mã');
+      setError(msg);
+      toast.error(msg);
     } finally {
       setIsDeleting(false);
     }
@@ -64,111 +62,94 @@ export const DeleteHorseModal: React.FC<DeleteHorseModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
-      title="Xác nhận xóa con ngựa"
-      maxWidth="500px"
+      onClose={() => !isDeleting && onClose()}
+      closeDisabled={isDeleting}
+      maxWidth="max-w-md"
+      hideHeader
+      bodyClassName="p-0 overflow-hidden"
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        {/* Warning Icon & Text */}
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-          <div
-            style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '50%',
-              backgroundColor: '#fee2e2',
-              color: '#dc2626',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <AlertTriangle size={24} />
+      <div className="flex flex-col bg-surface">
+        {/* Luxury Obsidian Warning Banner */}
+        <div className="bg-gradient-to-r from-[#181A17] via-[#242722] to-[#2B1920] p-6 text-[#F7F7F4] border-b border-[#2C2F2A] relative">
+          <div className="flex items-center justify-between mb-3">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-200 border border-rose-400/35">
+              <ShieldAlert size={14} className="text-rose-300" aria-hidden="true" />
+              {t('horses.archiveConfirmBadge', language === 'en' ? 'CONFIRM PROFILE ARCHIVE' : 'XÁC NHẬN LƯU TRỮ HỒ SƠ')}
+            </span>
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={onClose}
+              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
+              aria-label={t('common.close', 'Đóng')}
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
           </div>
-          <div>
-            <h3 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: 'var(--text-heading)' }}>
-              Bạn có chắc chắn muốn xóa {horse.name}?
-            </h3>
-            <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Mã ngựa: <strong>{horse.code || horse.id}</strong> • Giống loài: <strong>{horse.breed}</strong>
-            </p>
-            <p style={{ margin: '8px 0 0 0', fontSize: '12.5px', color: '#64748b', lineHeight: 1.5 }}>
-              * Lưu ý: Nếu con ngựa này đã từng tham gia chuyến vận chuyển, hệ thống sẽ tự động chuyển trạng thái sang <strong>&quot;retired&quot;</strong> để bảo toàn lịch sử hồ sơ kiểm dịch và giấy tờ pháp lý.
-            </p>
-          </div>
+          <h3 className="text-xl font-bold text-white tracking-tight">
+            {t(
+              'horses.confirmDeleteTitle',
+              language === 'en' ? `Confirm archiving / deleting ${horse.name}?` : `Xác nhận lưu trữ / xóa ${horse.name}?`,
+              { name: horse.name }
+            )}
+          </h3>
+          <p className="text-xs text-slate-300 mt-1">
+            {t('horses.identifierCode', language === 'en' ? 'Identifier Code' : 'Mã định danh')}:{' '}
+            <span className="font-mono font-bold text-[#B49A68]">{horse.code || horse.id}</span> •{' '}
+            {t('horses.breed', language === 'en' ? 'Breed' : 'Giống Ngựa')}:{' '}
+            <strong>{translateBreed(horse.breed)}</strong>
+          </p>
         </div>
 
-        {error && (
-          <div
-            style={{
-              padding: '10px 14px',
-              borderRadius: '8px',
-              backgroundColor: '#fef2f2',
-              border: '1px solid #fecaca',
-              color: '#991b1b',
-              fontSize: '13px',
-            }}
-          >
-            {error}
+        {/* Body Content */}
+        <div className="p-6 space-y-4 bg-surface">
+          <div className="p-4 bg-warning-bg border border-warning/25 rounded-xl flex items-start gap-3">
+            <AlertTriangle size={18} className="text-warning shrink-0 mt-0.5" />
+            <div className="text-xs text-text-primary leading-relaxed">
+              <strong>
+                {t('horses.dataProtectionTitle', language === 'en' ? 'Quarantine Data Retention' : 'Bảo toàn dữ liệu kiểm dịch')}:
+              </strong>{' '}
+              {t(
+                'horses.archiveDataProtection',
+                language === 'en'
+                  ? 'If this horse has participated in any transport shipment or holds veterinary certs, the system will safely archive it (status "retired") to comply with international IATA/FEI audit regulations.'
+                  : 'Nếu chiến mã này đã từng tham gia chuyến vận tải hoặc có chứng thư thú y, hệ thống sẽ tự động lưu trữ an toàn (trạng thái "retired") để đáp ứng quy định kiểm toán quốc tế IATA/FEI.'
+              )}
+            </div>
           </div>
-        )}
 
-        {/* Action Buttons */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: '12px',
-            paddingTop: '16px',
-            borderTop: '1px solid var(--border-light)',
-          }}
-        >
+          {error && (
+            <div className="p-3 bg-danger-bg border border-danger/25 rounded-xl text-danger text-xs font-medium">
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 bg-surface-muted border-t border-border flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={onClose}
             disabled={isDeleting}
-            style={{
-              padding: '10px 18px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#ffffff',
-              color: 'var(--text-body)',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: isDeleting ? 'not-allowed' : 'pointer',
-            }}
+            className="px-4 py-2 rounded-xl border border-border bg-surface hover:bg-border/30 text-text-primary text-xs sm:text-sm font-bold transition-colors disabled:opacity-50"
           >
-            Hủy bỏ
+            {t('common.cancel', 'Hủy bỏ')}
           </button>
           <button
             type="button"
             onClick={handleDelete}
             disabled={isDeleting}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 20px',
-              borderRadius: '8px',
-              backgroundColor: '#dc2626',
-              color: '#ffffff',
-              fontSize: '14px',
-              fontWeight: 700,
-              border: 'none',
-              cursor: isDeleting ? 'not-allowed' : 'pointer',
-              boxShadow: '0 2px 8px rgba(220, 38, 38, 0.25)',
-            }}
+            className="px-5 py-2 rounded-xl bg-danger hover:opacity-90 text-white text-xs sm:text-sm font-bold transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 cursor-pointer"
           >
             {isDeleting ? (
               <>
-                <Loader2 size={16} className="animate-spin" />
-                <span>Đang xóa...</span>
+                <Loader2 size={15} className="animate-spin" />
+                <span>{t('common.deleting', 'Đang xử lý...')}</span>
               </>
             ) : (
               <>
-                <Trash2 size={16} />
-                <span>Xóa con ngựa</span>
+                <Trash2 size={15} />
+                <span>{t('horses.confirmArchiveAction', 'Xác nhận lưu trữ / Xóa')}</span>
               </>
             )}
           </button>

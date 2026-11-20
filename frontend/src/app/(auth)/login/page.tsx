@@ -9,8 +9,11 @@ import { SESSION_EXPIRED_MESSAGE, setAuthSession } from '@/lib/auth';
 import { getPostLoginRedirect } from '@/lib/auth-redirect';
 import { loginWithPassword } from '@/lib/auth-login';
 import { GoogleAuthButton } from '@/components/auth/GoogleAuthButton';
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 function LoginFormContent() {
+  const { t } = useLanguage();
   const searchParams = useSearchParams();
 
   const [email, setEmail] = useState('');
@@ -18,6 +21,7 @@ function LoginFormContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
+  // IMPORTANT: Keep this first useEffect intact for test/auth-login.test.cjs AST parsing
   useEffect(() => {
     try {
       sessionStorage.removeItem('equitransit_manual_logout');
@@ -35,9 +39,18 @@ function LoginFormContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(() =>
-    searchParams.get('reason') === 'session-expired' ? SESSION_EXPIRED_MESSAGE : null
+    searchParams.get('reason') === 'session-expired' || searchParams.get('session_expired') === '1'
+      ? SESSION_EXPIRED_MESSAGE
+      : null
   );
 
+  useEffect(() => {
+    if (searchParams.get('session_expired') === '1' || searchParams.get('reason') === 'session-expired') {
+      setError(SESSION_EXPIRED_MESSAGE);
+    }
+  }, [searchParams]);
+
+  // IMPORTANT: Keep handleLogin dependencies intact for test/auth-login.test.cjs AST parsing
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLoading || isSuccess) return;
@@ -69,10 +82,9 @@ function LoginFormContent() {
           localStorage.removeItem('equitransit_remember_me');
         }
       } catch {
-        // Remembering the email is optional; the authenticated session has already been saved.
+        // Optional preference
       }
       setIsSuccess(true);
-      // A fresh navigation makes middleware read the cookies just written by setAuthSession.
       window.location.replace(finalRoute);
     } catch (cause) {
       setIsSuccess(false);
@@ -82,14 +94,25 @@ function LoginFormContent() {
     }
   };
 
+  const displayedError =
+    error === SESSION_EXPIRED_MESSAGE
+      ? t('auth.sessionExpiredNotice', SESSION_EXPIRED_MESSAGE)
+      : error === 'Không thể đăng nhập. Vui lòng thử lại.'
+        ? t('auth.loginErrorDefault', error)
+        : error;
+
+  const passwordToggleLabel = showPassword
+    ? t('auth.hidePassword', 'Ẩn mật khẩu')
+    : t('auth.showPassword', 'Hiện mật khẩu');
+
   return (
     <div
       style={{
         display: 'flex',
-        minHeight: '100vh',
+        minHeight: '100dvh',
         width: '100%',
-        backgroundColor: '#0c0e12',
-        color: '#f8fafc',
+        backgroundColor: '#181A17',
+        color: '#F7F7F4',
         fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif",
       }}
     >
@@ -98,172 +121,195 @@ function LoginFormContent() {
 
       {/* RIGHT: Login Card Panel */}
       <div
+        className="px-4 py-6 sm:px-6 sm:py-8"
         style={{
           flex: '1 1 50%',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '40px 24px',
-          minHeight: '100vh',
-          backgroundColor: '#0d0f12',
+          minHeight: '100dvh',
+          backgroundColor: '#181A17',
           overflowY: 'auto',
         }}
       >
-        {/* Mobile Header (Shown on small screens) */}
+        {/* Top Row: Mobile/Tablet Brand + Language Switcher */}
         <div
           style={{
             width: '100%',
             maxWidth: '430px',
-            marginBottom: '20px',
             display: 'flex',
             alignItems: 'center',
-            gap: '10px',
+            justifyContent: 'space-between',
+            marginBottom: '16px',
           }}
-          className="md:hidden"
         >
-          <div
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
-              backgroundColor: '#0c1a2e',
-              flexShrink: 0,
-            }}
-          >
-            <img src="/logo.png" alt="RaceHorse Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          </div>
-          <div>
-            <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>RaceHorse</div>
-            <div style={{ fontSize: '9px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: '2px' }}>
-              LOGISTICS MANAGEMENT
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }} className="lg:hidden">
+            <div
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '10px',
+                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(180, 154, 104, 0.45)',
+                backgroundColor: '#242722',
+                flexShrink: 0,
+              }}
+            >
+              <img src="/logo.png" alt="EquiTransit" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: '17px', fontWeight: 800, color: '#F7F7F4', lineHeight: 1.1 }}>EquiTransit</div>
+              <div style={{ fontSize: '9px', fontWeight: 700, color: '#B49A68', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                EQUINE LOGISTICS
+              </div>
             </div>
           </div>
+          <div className="hidden lg:block" />
+          <LanguageSwitcher tone="dark" />
         </div>
 
         {/* Center Card */}
         <div
+          className="p-6 sm:p-9"
           style={{
             width: '100%',
             maxWidth: '430px',
             margin: 'auto 0',
-            backgroundColor: '#16171a',
-            border: '1px solid #26282d',
+            backgroundColor: '#242722',
+            border: '1px solid #353830',
             borderRadius: '24px',
-            padding: '38px',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
+            boxShadow: '0 18px 40px rgba(0, 0, 0, 0.28)',
           }}
         >
-          {/* Card Title */}
-          <h2
+          <div
             style={{
-              fontSize: '30px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '3px 10px',
+              borderRadius: '9999px',
+              backgroundColor: 'rgba(180, 154, 104, 0.14)',
+              border: '1px solid rgba(180, 154, 104, 0.35)',
+              color: '#B49A68',
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              marginBottom: '12px',
+            }}
+          >
+            {t('auth.portalAccess', 'Cổng Điều Hành & Khách Hàng')}
+          </div>
+
+          <h1
+            style={{
+              fontSize: '28px',
               fontWeight: 800,
-              color: '#ffffff',
+              color: '#F7F7F4',
               letterSpacing: '-0.02em',
               lineHeight: 1.2,
               marginBottom: '6px',
             }}
           >
-            Welcome back
-          </h2>
+            {t('auth.welcomeBack', 'Chào mừng trở lại')}
+          </h1>
           <p
             style={{
               fontSize: '13.5px',
-              color: '#94a3b8',
-              marginBottom: '28px',
+              color: '#CBD5E1',
+              marginBottom: '26px',
             }}
           >
-            Sign in to continue to RaceHorse Logistics.
+            {t('auth.loginSubtitle', 'Đăng nhập để quản lý và theo dõi hành trình ngựa đua.')}
           </p>
 
-          {/* Error Banner */}
-          {error && (
+          {displayedError && (
             <div
+              role="alert"
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
+                backgroundColor: '#F8EAEA',
+                border: '1px solid #B33E3E',
                 borderRadius: '10px',
                 padding: '12px 14px',
                 marginBottom: '20px',
-                color: '#f87171',
+                color: '#B33E3E',
                 fontSize: '13px',
+                fontWeight: 600,
               }}
             >
-              <AlertCircle size={17} style={{ flexShrink: 0 }} />
-              <span>{error}</span>
+              <AlertCircle size={17} style={{ flexShrink: 0 }} aria-hidden="true" />
+              <span>{displayedError}</span>
             </div>
           )}
 
-          {/* Success Banner */}
           {isSuccess && (
             <div
+              role="status"
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                border: '1px solid rgba(16, 185, 129, 0.35)',
+                backgroundColor: '#E8F2EB',
+                border: '1px solid #287653',
                 borderRadius: '10px',
                 padding: '12px 14px',
                 marginBottom: '20px',
-                color: '#34d399',
+                color: '#287653',
                 fontSize: '13px',
+                fontWeight: 600,
               }}
             >
-              <CheckCircle2 size={17} style={{ flexShrink: 0 }} />
-              <span>Authenticated successfully! Redirecting...</span>
+              <CheckCircle2 size={17} style={{ flexShrink: 0 }} aria-hidden="true" />
+              <span>{t('auth.loginSuccessRedirect', 'Xác thực thành công! Đang chuyển hướng...')}</span>
             </div>
           )}
 
-          {/* Login Form */}
-          <form suppressHydrationWarning onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Email Field */}
+          <form suppressHydrationWarning onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
             <div>
               <label
+                htmlFor="login-email"
                 style={{
                   display: 'block',
                   fontSize: '13px',
                   fontWeight: 600,
-                  color: '#cbd5e1',
+                  color: '#F7F7F4',
                   marginBottom: '8px',
                 }}
               >
-                Email address
+                {t('auth.email', 'Địa chỉ Email')}
               </label>
               <input
+                id="login-email"
                 suppressHydrationWarning
                 type="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 style={{
                   width: '100%',
-                  backgroundColor: '#111215',
-                  border: '1px solid #272a30',
+                  backgroundColor: '#181A17',
+                  border: '1px solid #353830',
                   borderRadius: '10px',
                   padding: '12px 14px',
-                  color: '#f8fafc',
+                  color: '#F7F7F4',
                   fontSize: '14px',
                   outline: 'none',
                   transition: 'border-color 0.2s',
                 }}
-                onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
-                onBlur={(e) => (e.target.style.borderColor = '#272a30')}
+                onFocus={(e) => (e.target.style.borderColor = '#B49A68')}
+                onBlur={(e) => (e.target.style.borderColor = '#353830')}
               />
             </div>
 
-            {/* Password Field */}
             <div>
               <div
                 style={{
@@ -273,75 +319,73 @@ function LoginFormContent() {
                   marginBottom: '8px',
                 }}
               >
-                <label
-                  style={{
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: '#cbd5e1',
-                  }}
-                >
-                  Password
+                <label htmlFor="login-password" style={{ fontSize: '13px', fontWeight: 600, color: '#F7F7F4' }}>
+                  {t('auth.password', 'Mật khẩu')}
                 </label>
                 <Link
                   href="/forgot-password"
                   style={{
                     fontSize: '12.5px',
-                    color: '#94a3b8',
+                    color: '#B49A68',
                     textDecoration: 'none',
-                    fontWeight: 500,
-                    transition: 'color 0.2s',
+                    fontWeight: 600,
                   }}
-                  onMouseEnter={(e) => ((e.target as HTMLElement).style.color = '#ffffff')}
-                  onMouseLeave={(e) => ((e.target as HTMLElement).style.color = '#94a3b8')}
                 >
-                  Forgot password?
+                  {t('auth.forgotPassword', 'Quên mật khẩu?')}
                 </Link>
               </div>
 
               <div style={{ position: 'relative' }}>
                 <input
+                  id="login-password"
                   suppressHydrationWarning
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
+                  placeholder={t('auth.passwordInputPlaceholder', 'Nhập mật khẩu của bạn')}
                   style={{
                     width: '100%',
-                    backgroundColor: '#111215',
-                    border: '1px solid #272a30',
+                    backgroundColor: '#181A17',
+                    border: '1px solid #353830',
                     borderRadius: '10px',
-                    padding: '12px 42px 12px 14px',
-                    color: '#f8fafc',
+                    padding: '12px 44px 12px 14px',
+                    color: '#F7F7F4',
                     fontSize: '14px',
                     outline: 'none',
                     transition: 'border-color 0.2s',
                   }}
-                  onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
-                  onBlur={(e) => (e.target.style.borderColor = '#272a30')}
+                  onFocus={(e) => (e.target.style.borderColor = '#B49A68')}
+                  onBlur={(e) => (e.target.style.borderColor = '#353830')}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={passwordToggleLabel}
+                  aria-pressed={showPassword}
+                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B49A68] rounded-lg"
                   style={{
                     position: 'absolute',
-                    right: '12px',
+                    right: '4px',
                     top: '50%',
                     transform: 'translateY(-50%)',
-                    color: '#64748b',
+                    width: '38px',
+                    height: '38px',
+                    color: '#94A3B8',
                     background: 'none',
                     border: 'none',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
                   }}
                 >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                 </button>
               </div>
             </div>
 
-            {/* Remember Me Checkbox */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input
                 suppressHydrationWarning
@@ -353,7 +397,7 @@ function LoginFormContent() {
                   width: '16px',
                   height: '16px',
                   borderRadius: '4px',
-                  accentColor: '#2563eb',
+                  accentColor: '#A67C2E',
                   cursor: 'pointer',
                 }}
               />
@@ -361,16 +405,15 @@ function LoginFormContent() {
                 htmlFor="rememberMe"
                 style={{
                   fontSize: '13px',
-                  color: '#94a3b8',
+                  color: '#CBD5E1',
                   cursor: 'pointer',
                   userSelect: 'none',
                 }}
               >
-                Remember me for 30 days
+                {t('auth.rememberMe', 'Ghi nhớ tài khoản đăng nhập')}
               </label>
             </div>
 
-            {/* Sign In Button */}
             <button
               type="submit"
               disabled={isLoading || isSuccess}
@@ -378,98 +421,93 @@ function LoginFormContent() {
                 width: '100%',
                 padding: '13px',
                 borderRadius: '11px',
-                background: 'linear-gradient(135deg, #172554 0%, #1e3a8a 50%, #1e40af 100%)',
-                border: '1px solid rgba(59, 130, 246, 0.35)',
-                color: '#ffffff',
+                backgroundColor: '#A67C2E',
+                border: '1px solid rgba(180, 154, 104, 0.5)',
+                color: '#FFFFFF',
                 fontSize: '14.5px',
                 fontWeight: 700,
                 cursor: isLoading || isSuccess ? 'not-allowed' : 'pointer',
+                opacity: isLoading || isSuccess ? 0.65 : 1,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '8px',
-                boxShadow: '0 4px 16px rgba(30, 58, 138, 0.45)',
+                boxShadow: '0 4px 14px rgba(166, 124, 46, 0.32)',
                 transition: 'all 0.2s',
                 marginTop: '4px',
               }}
               onMouseEnter={(e) => {
                 if (!isLoading && !isSuccess) {
-                  (e.currentTarget as HTMLElement).style.background =
-                    'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 50%, #2563eb 100%)';
+                  (e.currentTarget as HTMLElement).style.backgroundColor = '#8C6621';
                 }
               }}
               onMouseLeave={(e) => {
                 if (!isLoading && !isSuccess) {
-                  (e.currentTarget as HTMLElement).style.background =
-                    'linear-gradient(135deg, #172554 0%, #1e3a8a 50%, #1e40af 100%)';
+                  (e.currentTarget as HTMLElement).style.backgroundColor = '#A67C2E';
                 }
               }}
             >
               {isLoading ? (
                 <>
-                  <Loader2 size={17} style={{ animation: 'spin 1s linear infinite' }} />
-                  Signing In...
+                  <Loader2 size={17} className="animate-spin" aria-hidden="true" />
+                  {t('auth.signingIn', 'Đang đăng nhập...')}
                 </>
               ) : isSuccess ? (
                 <>
-                  <CheckCircle2 size={17} />
-                  Signed In
+                  <CheckCircle2 size={17} aria-hidden="true" />
+                  {t('auth.signedIn', 'Đã đăng nhập')}
                 </>
               ) : (
-                'Sign In'
+                t('auth.signInBtn', 'Đăng nhập')
               )}
             </button>
           </form>
 
-          {/* OR CONTINUE WITH Divider */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              margin: '26px 0 20px 0',
+              margin: '24px 0 18px 0',
               gap: '12px',
             }}
           >
-            <div style={{ flex: 1, height: '1px', backgroundColor: '#26282d' }} />
+            <div style={{ flex: 1, height: '1px', backgroundColor: '#353830' }} />
             <span
               style={{
                 fontSize: '11px',
                 fontWeight: 700,
                 letterSpacing: '0.08em',
-                color: '#64748b',
+                color: '#94A3B8',
                 textTransform: 'uppercase',
               }}
             >
-              Or continue with
+              {t('auth.orContinueWith', 'Hoặc tiếp tục với')}
             </span>
-            <div style={{ flex: 1, height: '1px', backgroundColor: '#26282d' }} />
+            <div style={{ flex: 1, height: '1px', backgroundColor: '#353830' }} />
           </div>
 
-          {/* Social Logins */}
           <div style={{ width: '100%' }}>
-            {/* Google */}
-            <GoogleAuthButton onError={(msg) => setError(msg)} disabled={isLoading} />
+            <GoogleAuthButton tone="dark" onError={(msg) => setError(msg)} disabled={isLoading || isSuccess} />
           </div>
 
-          {/* Switch to Register */}
           <div
             style={{
               textAlign: 'center',
-              marginTop: '26px',
+              marginTop: '24px',
               fontSize: '13.5px',
-              color: '#94a3b8',
+              color: '#CBD5E1',
             }}
           >
-            Don&apos;t have an account?{' '}
+            {t('auth.dontHaveAccount', 'Chưa có tài khoản?')}{' '}
             <Link
               href="/register"
               style={{
-                color: '#ffffff',
+                color: '#B49A68',
                 fontWeight: 700,
                 textDecoration: 'none',
               }}
             >
-              Create account
+              {t('auth.registerNow', 'Đăng ký ngay')}
             </Link>
           </div>
         </div>
@@ -480,18 +518,19 @@ function LoginFormContent() {
             width: '100%',
             maxWidth: '430px',
             display: 'flex',
+            flexWrap: 'wrap',
             justifyContent: 'space-between',
             alignItems: 'center',
+            gap: '8px',
             fontSize: '12px',
-            color: '#64748b',
+            color: '#94A3B8',
             marginTop: '24px',
           }}
         >
-          <div>© 2026 RaceHorse Logistics Ltd.</div>
+          <div>© 2026 EquiTransit Logistics Ltd.</div>
           <div style={{ display: 'flex', gap: '16px' }}>
-            <span style={{ cursor: 'pointer' }}>Privacy</span>
-            <span style={{ cursor: 'pointer' }}>Terms</span>
-            <span style={{ cursor: 'pointer' }}>Support</span>
+            <span>{t('auth.privacy', 'Bảo mật')}</span>
+            <span>{t('auth.terms', 'Điều khoản')}</span>
           </div>
         </div>
       </div>
@@ -499,24 +538,30 @@ function LoginFormContent() {
   );
 }
 
+function LoginLoadingFallback() {
+  const { t, language } = useLanguage();
+  return (
+    <div
+      style={{
+        minHeight: '100dvh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#181A17',
+        color: '#F7F7F4',
+      }}
+    >
+      {t(
+        'auth.loadingPortal',
+        language === 'en' ? 'Loading EquiTransit Logistics...' : 'Đang tải hệ thống EquiTransit Logistics...'
+      )}
+    </div>
+  );
+}
+
 export default function LoginPage() {
   return (
-    <Suspense
-      fallback={
-        <div
-          style={{
-            minHeight: '100vh',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: '#0d0f12',
-            color: '#94a3b8',
-          }}
-        >
-          Loading RaceHorse Logistics...
-        </div>
-      }
-    >
+    <Suspense fallback={<LoginLoadingFallback />}>
       <LoginFormContent />
     </Suspense>
   );

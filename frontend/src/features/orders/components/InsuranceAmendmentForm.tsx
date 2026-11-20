@@ -54,22 +54,22 @@ export function InsuranceAmendmentForm({ orderId, horses, specialRequirements, b
 
   return <form onSubmit={submit} className="space-y-5">
     <fieldset disabled={submitting} className="space-y-5 disabled:opacity-60">
-      <p className="text-sm text-slate-600">Điều chỉnh giá trị hoặc gói bảo hiểm theo yêu cầu của Manager. Cước cơ bản sẽ được báo giá lại sau khi gửi.</p>
+      <p className="text-sm text-[#5B6779]">Điều chỉnh giá trị hoặc gói bảo hiểm theo yêu cầu của Manager. Cước cơ bản sẽ được báo giá lại sau khi gửi.</p>
       <BookingChoice value={booking} onChange={setBooking} horseCount={horses.reduce((sum, h) => sum + (h.quantity ?? 1), 0)} />
       <InsuranceSelection horses={horses.map(h => ({ id: String(h.horseId), name: h.name, quantity: h.quantity }))}
         values={values} savedPolicies={savedPolicies} onChange={(id, value) => { setValues(previous => ({ ...previous, [id]: value })); setError(''); }}
         policy={policy ?? null} error={policyError ? 'Chưa tải được chính sách mới. Khai báo không thay đổi vẫn giữ quyền lợi đã lưu.' : undefined}
         onRetry={() => void mutate()} />
       <CostSummary transportCost={null} insuranceFee={fee} />
-      <label className="block text-sm font-semibold text-slate-700">Ghi chú chỉnh sửa
+      <label className="block text-sm font-semibold text-[#181A17]">Ghi chú chỉnh sửa
         <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} required
-          className="mt-2 w-full rounded-lg border border-slate-300 p-3 font-normal" placeholder="Mô tả nội dung đã cập nhật để Manager xét duyệt lại" />
+          className="mt-2 w-full rounded-lg border border-[#D8CEBE] bg-white p-3 font-normal text-[#181A17] outline-none focus:border-[#C4B38E]" placeholder="Mô tả nội dung đã cập nhật để Manager xét duyệt lại" />
       </label>
     </fieldset>
-    {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+    {error && <p role="alert" className="text-sm text-[#B33E3E]">{error}</p>}
     <div className="flex justify-end gap-3">
-      <button type="button" disabled={submitting} onClick={onCancel} className="min-h-11 rounded-lg border border-slate-300 px-4">Hủy</button>
-      <button type="submit" disabled={submitting} className="min-h-11 rounded-lg bg-blue-600 px-4 font-semibold text-white disabled:opacity-60">{submitting ? 'Đang gửi…' : 'Gửi lại yêu cầu'}</button>
+      <button type="button" disabled={submitting} onClick={onCancel} className="min-h-11 rounded-lg border border-[#D8CEBE] bg-white px-4 font-medium text-[#181A17] hover:bg-[#F0EEE8] cursor-pointer">Hủy</button>
+      <button type="submit" disabled={submitting} className="min-h-11 rounded-lg bg-[#181A17] px-4 font-semibold text-white hover:bg-[#242722] disabled:opacity-60 cursor-pointer">{submitting ? 'Đang gửi…' : 'Gửi lại yêu cầu'}</button>
     </div>
   </form>;
 }

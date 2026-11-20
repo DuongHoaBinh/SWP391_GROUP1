@@ -1,10 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Bell, Check, Clock, RefreshCw, AlertCircle, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { Bell, Check, Clock, RefreshCw, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import toast from 'react-hot-toast';
 import { apiClient } from '@/lib/api-client';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface DriverNotification {
   id: number | string;
@@ -13,145 +16,371 @@ interface DriverNotification {
   type?: string;
   isRead: boolean;
   createdAt: string;
-  relatedEntityId?: number;
+  shipmentId?: number | null;
+}
+
+function formatFallbackTimeAgo(iso: string, language: 'en' | 'vi'): string {
+  const diffMs = Math.max(0, Date.now() - new Date(iso).getTime());
+  const mins = Math.floor(diffMs / 60000);
+  const hours = Math.floor(diffMs / 3600000);
+  const days = Math.floor(diffMs / 86400000);
+
+  if (language === 'en') {
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
+  }
+  if (mins < 1) return 'Vừa xong';
+  if (mins < 60) return `${mins} phút trước`;
+  if (hours < 24) return `${hours} giờ trước`;
+  return `${days} ngày trước`;
 }
 
 export default function DriverNotificationsPage() {
+  const pathname = usePathname();
+  const { t, language, translateNotification, translateTimeAgo } = useLanguage();
   const [notifs, setNotifs] = useState<DriverNotification[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isMarkingAll, setIsMarkingAll] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const fetchNotifications = async () => {
+  const isEscort = Boolean(pathname?.startsWith('/escort'));
+  const basePath = isEscort ? '/escort' : '/driver';
+
+  const fetchNotifications = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const data = await apiClient<any[]>('/notifications');
       if (Array.isArray(data)) {
         setNotifs(
           data.map((item) => ({
             id: item.notificationId || item.id,
-            title: item.title,
-            message: item.message,
+            title: item.title || '',
+            message: item.message || '',
             type: item.type,
             isRead: Boolean(item.isRead),
             createdAt: item.createdAt,
-            relatedEntityId: item.relatedEntityId,
+            shipmentId: item.shipmentId ?? item.relatedEntityId ?? null,
           }))
         );
       }
     } catch (err: any) {
-      console.warn('Could not load real notifications:', err);
+      setLoadError(
+        err?.message ||
+          t(
+            'notifications.loadError',
+            language === 'en' ? 'Unable to load notifications. Please try again.' : 'Không thể tải danh sách thông báo. Vui lòng thử lại.'
+          )
+      );
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [language, t]);
 
   useEffect(() => {
-    fetchNotifications();
-  }, []);
+    void fetchNotifications();
+  }, [fetchNotifications]);
+
+  const unreadCount = notifs.filter((n) => !n.isRead).length;
+  const displayedNotifs = filter === 'unread' ? notifs.filter((n) => !n.isRead) : notifs;
 
   const markAll = async () => {
+    if (unreadCount === 0 || isMarkingAll) return;
+    setIsMarkingAll(true);
     try {
       await apiClient('/notifications/read-all', { method: 'PATCH' });
       setNotifs((prev) => prev.map((n) => ({ ...n, isRead: true })));
-      toast.success('Đã đánh dấu đã đọc toàn bộ thông báo.');
-    } catch {
-      toast.error('Lỗi khi đánh dấu thông báo.');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      }
+      toast.success(
+        t(
+          'notifications.markAllSuccess',
+          language === 'en' ? 'All notifications marked as read.' : 'Đã đánh dấu đã đọc toàn bộ thông báo.'
+        )
+      );
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          t(
+            'notifications.updateError',
+            language === 'en' ? 'Unable to mark notifications as read.' : 'Lỗi khi đánh dấu thông báo.'
+          )
+      );
+    } finally {
+      setIsMarkingAll(false);
     }
   };
 
-  const markSingle = async (id: number | string) => {
+  const markSingle = async (n: DriverNotification) => {
+    if (n.isRead) return;
     try {
-      await apiClient(`/notifications/${id}/read`, { method: 'PATCH' });
-      setNotifs((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
-    } catch {
-      // ignore
+      await apiClient(`/notifications/${n.id}/read`, { method: 'PATCH' });
+      setNotifs((prev) => prev.map((item) => (item.id === n.id ? { ...item, isRead: true } : item)));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      }
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          t(
+            'notifications.updateError',
+            language === 'en' ? 'Unable to update notification status.' : 'Không thể cập nhật trạng thái thông báo.'
+          )
+      );
     }
   };
 
-  const formatTime = (iso?: string) => {
-    if (!iso) return 'Vừa xong';
-    try {
-      const d = new Date(iso);
-      return d.toLocaleString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
-    } catch {
-      return iso;
+  const getActionLink = (n: DriverNotification) => {
+    const text = `${n.title} ${n.message}`.toLowerCase();
+    if (text.includes('sự cố') || text.includes('incident')) {
+      return {
+        href: `${basePath}/incidents`,
+        label: language === 'en' ? 'View incident alerts' : 'Xem báo cáo sự cố',
+      };
     }
+    if (isEscort && (text.includes('sức khỏe') || text.includes('health') || text.includes('thú y'))) {
+      return {
+        href: `${basePath}/health`,
+        label: language === 'en' ? 'Open equine health log' : 'Mở nhật ký sức khỏe ngựa',
+      };
+    }
+    if (
+      n.shipmentId &&
+      (text.includes('lộ trình') || text.includes('mốc') || text.includes('status') || text.includes('route') || text.includes('khởi hành'))
+    ) {
+      return {
+        href: `${basePath}/status?shipmentId=${n.shipmentId}`,
+        label: language === 'en' ? 'Check milestone timeline' : 'Cập nhật mốc hành trình',
+      };
+    }
+    if (n.shipmentId || text.includes('phân công') || text.includes('chuyến') || text.includes('assign') || text.includes('trip')) {
+      return {
+        href: `${basePath}/trips`,
+        label: language === 'en' ? 'View my trips' : 'Xem chuyến đi được phân công',
+      };
+    }
+    return null;
   };
 
   return (
     <div className="flex flex-col gap-6 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 m-0">Thông Báo Điều Phối &amp; Nhiệm Vụ</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Lịch phân công nhận chuyến, cập nhật lộ trình từ Logistics Manager &amp; Fleet Coordinator.
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-2xl font-bold text-[#181A17] m-0">
+              {t('driver.notifications.title', language === 'en' ? 'Dispatch & Crew Notifications' : 'Thông Báo Điều Phối & Nhiệm Vụ')}
+            </h1>
+            {unreadCount > 0 && (
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#F3EFE4] text-[#181A17] border border-[#D4C5A3]">
+                {unreadCount} {t('common.unreadNotificationsCount', language === 'en' ? 'unread' : 'thông báo mới')}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-[#57564E] mt-1 mb-0">
+            {t(
+              'driver.notifications.subtitle',
+              language === 'en'
+                ? 'Trip assignments, schedule updates, and urgent dispatch notices.'
+                : 'Lịch phân công nhận chuyến, cập nhật lộ trình từ Logistics Manager & Fleet Coordinator.'
+            )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={fetchNotifications} disabled={isLoading}>
-            <RefreshCw size={15} className={`mr-1.5 text-blue-600 ${isLoading ? 'animate-spin' : ''}`} />
-            Làm mới
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void fetchNotifications()}
+            disabled={isLoading}
+            className="min-h-[44px] px-4 rounded-xl font-bold border-[#D8CEBE]"
+          >
+            <RefreshCw size={15} className={`mr-1.5 text-[#A67C2E] ${isLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
+            {t('common.refresh', language === 'en' ? 'Refresh' : 'Làm mới')}
           </Button>
-          <Button variant="outline" size="sm" onClick={markAll}>
-            <Check size={16} className="mr-1.5" /> Đánh dấu đã đọc
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void markAll()}
+            disabled={unreadCount === 0 || isMarkingAll || isLoading}
+            className="min-h-[44px] px-4 rounded-xl font-bold border-[#D8CEBE] disabled:opacity-45 disabled:cursor-not-allowed"
+          >
+            {isMarkingAll ? (
+              <Loader2 size={15} className="mr-1.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Check size={16} className="mr-1.5" aria-hidden="true" />
+            )}
+            {t('common.markAllRead', language === 'en' ? 'Mark all read' : 'Đánh dấu đã đọc')}
           </Button>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden shadow-sm">
+      {/* Filter Tabs */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          aria-pressed={filter === 'all'}
+          onClick={() => setFilter('all')}
+          className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+            filter === 'all'
+              ? 'bg-[#181A17] text-[#F7F7F4] shadow-sm'
+              : 'bg-white border border-[#D8CEBE] text-[#57564E] hover:bg-[#FAF8F4]'
+          }`}
+        >
+          {t('common.all', language === 'en' ? 'All' : 'Tất cả')} ({notifs.length})
+        </button>
+        <button
+          type="button"
+          aria-pressed={filter === 'unread'}
+          onClick={() => setFilter('unread')}
+          className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+            filter === 'unread'
+              ? 'bg-[#181A17] text-[#F7F7F4] shadow-sm'
+              : 'bg-white border border-[#D8CEBE] text-[#57564E] hover:bg-[#FAF8F4]'
+          }`}
+        >
+          {t('common.unread', language === 'en' ? 'Unread' : 'Chưa đọc')} ({unreadCount})
+        </button>
+      </div>
+
+      {loadError && (
+        <div
+          role="alert"
+          className="p-4 rounded-xl bg-rose-50 border border-[#9E3B3B]/35 text-xs font-semibold text-[#9E3B3B] flex flex-wrap items-center justify-between gap-3"
+        >
+          <span>{loadError}</span>
+          <button
+            type="button"
+            onClick={() => void fetchNotifications()}
+            className="min-h-[40px] px-3.5 py-1.5 rounded-lg bg-[#181A17] text-[#C4B38E] font-bold cursor-pointer hover:bg-[#2C2F2A]"
+          >
+            {t('common.retry', language === 'en' ? 'Retry' : 'Thử lại')}
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-[#D8CEBE] divide-y divide-[#EAE5DA] overflow-hidden shadow-sm">
         {isLoading ? (
-          <div className="p-12 text-center text-slate-400">
-            <RefreshCw size={24} className="animate-spin mx-auto mb-2 text-blue-500" />
-            Đang tải danh sách thông báo điều phối...
+          <div className="p-12 text-center text-[#57564E] flex flex-col items-center gap-2 text-sm">
+            <RefreshCw size={24} className="animate-spin text-[#A67C2E]" aria-hidden="true" />
+            <span>
+              {t('common.loadingNotifications', language === 'en' ? 'Loading dispatch notifications...' : 'Đang tải danh sách thông báo điều phối...')}
+            </span>
           </div>
-        ) : notifs.length === 0 ? (
+        ) : displayedNotifs.length === 0 ? (
           <div className="p-12 text-center">
-            <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-              <Bell size={22} />
+            <div className="w-12 h-12 rounded-full bg-[#FAF8F4] text-[#8A8478] flex items-center justify-center mx-auto mb-3 border border-[#D8CEBE]">
+              {filter === 'unread' ? (
+                <CheckCircle2 size={22} className="text-[#2D5A3F]" aria-hidden="true" />
+              ) : (
+                <Bell size={22} aria-hidden="true" />
+              )}
             </div>
-            <h4 className="text-sm font-bold text-slate-700 m-0">Không có thông báo mới</h4>
-            <p className="text-xs text-slate-400 mt-1 m-0">
-              Khi Manager phân công chuyến đi hoặc có cảnh báo hành lang, bạn sẽ nhận được thông báo tại đây.
+            <h2 className="text-sm font-bold text-[#181A17] m-0">
+              {filter === 'unread'
+                ? t('notifications.noUnread', language === 'en' ? 'No unread notifications' : 'Không có thông báo chưa đọc')
+                : t('notifications.emptyState', language === 'en' ? 'No notifications yet' : 'Không có thông báo mới')}
+            </h2>
+            <p className="text-xs text-[#747D88] mt-1 m-0 max-w-md mx-auto leading-relaxed">
+              {t(
+                'driver.notifications.emptyDesc',
+                language === 'en'
+                  ? 'When Manager assigns a trip or route alerts occur, they will appear here.'
+                  : 'Khi Manager phân công chuyến đi hoặc có cảnh báo hành lang, bạn sẽ nhận được thông báo tại đây.'
+              )}
             </p>
+            <div className="mt-4">
+              <Link
+                href={`${basePath}/trips`}
+                className="min-h-[44px] inline-flex items-center justify-center px-4 py-2 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] hover:border-[#A67C2E] text-xs font-bold text-[#181A17] no-underline"
+              >
+                {t('driver.dashboard.viewAllTrips', language === 'en' ? 'View Assigned Trips' : 'Xem Chuyến Đi Được Giao')}
+              </Link>
+            </div>
           </div>
         ) : (
-          notifs.map((n) => (
-            <div
-              key={n.id}
-              onClick={() => markSingle(n.id)}
-              className={`p-5 flex items-start gap-4 cursor-pointer transition-colors ${
-                n.isRead ? 'bg-white hover:bg-slate-50/70' : 'bg-blue-50/40 hover:bg-blue-50/60'
-              }`}
-            >
+          displayedNotifs.map((n) => {
+            const isUnread = !n.isRead;
+            const localized = translateNotification(n.title, n.message);
+            const action = getActionLink(n);
+
+            return (
               <div
-                className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                  n.isRead ? 'bg-slate-100 text-slate-400' : 'bg-blue-600 text-white shadow-sm'
+                key={n.id}
+                role={isUnread ? 'button' : undefined}
+                tabIndex={isUnread ? 0 : undefined}
+                onClick={() => isUnread && void markSingle(n)}
+                onKeyDown={
+                  isUnread
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          void markSingle(n);
+                        }
+                      }
+                    : undefined
+                }
+                className={`p-5 flex items-start gap-4 transition-colors ${
+                  isUnread
+                    ? 'bg-[#FAF5EB] hover:bg-[#F3ECE0] border-l-4 border-l-[#A67C2E] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#A67C2E]'
+                    : 'bg-white hover:bg-[#FAF8F4]'
                 }`}
               >
-                <Bell size={18} />
-              </div>
-              <div className="flex-1">
-                <div className="flex justify-between items-center gap-2">
-                  <h4 className="text-sm font-bold text-slate-900 m-0 flex items-center gap-2">
-                    {n.title}
-                    {!n.isRead && (
-                      <span className="w-2 h-2 rounded-full bg-blue-600 inline-block shrink-0" />
-                    )}
-                  </h4>
-                  <span className="text-xs text-slate-400 flex items-center gap-1 shrink-0">
-                    <Clock size={12} />
-                    {formatTime(n.createdAt)}
-                  </span>
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                    isUnread
+                      ? 'bg-[#181A17] text-[#C4B38E] ring-4 ring-[#EAE5DA] shadow-sm'
+                      : 'bg-[#F4F1E9] text-[#747D88]'
+                  }`}
+                >
+                  <Bell size={18} aria-hidden="true" />
                 </div>
-                <p className="text-sm text-slate-600 mt-1 m-0 leading-relaxed">{n.message}</p>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap justify-between items-center gap-2">
+                    <h2 className="text-sm font-bold text-[#181A17] m-0 flex items-center gap-2 min-w-0">
+                      <span className="truncate">{localized.title || n.title}</span>
+                      {isUnread && (
+                        <span
+                          className="w-2 h-2 rounded-full bg-[#A67C2E] inline-block shrink-0"
+                          aria-label={language === 'en' ? 'Unread' : 'Chưa đọc'}
+                        />
+                      )}
+                    </h2>
+                    <span className="text-xs text-[#747D88] flex items-center gap-1 shrink-0">
+                      <Clock size={12} aria-hidden="true" />
+                      {translateTimeAgo ? translateTimeAgo(n.createdAt) : formatFallbackTimeAgo(n.createdAt, language)}
+                    </span>
+                  </div>
+
+                  <p className="text-sm text-[#57564E] mt-1 m-0 leading-relaxed break-words">
+                    {localized.message || n.message}
+                  </p>
+
+                  {action && (
+                    <div className="mt-2.5">
+                      <Link
+                        href={action.href}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isUnread) void markSingle(n);
+                        }}
+                        className="inline-flex items-center gap-1.5 min-h-[36px] text-xs font-bold text-[#A67C2E] hover:text-[#181A17] hover:underline"
+                      >
+                        <span>{action.label}</span>
+                        <ArrowRight size={13} aria-hidden="true" />
+                      </Link>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

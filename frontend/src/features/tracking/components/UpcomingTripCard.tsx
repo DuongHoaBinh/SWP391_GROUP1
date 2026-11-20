@@ -2,9 +2,10 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { CalendarCheck, Plane, ArrowRight } from 'lucide-react';
+import { CalendarCheck, Plane } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { TransportRequest } from '@/lib/types';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface UpcomingTripCardProps {
   request: TransportRequest;
@@ -15,14 +16,16 @@ export const UpcomingTripCard: React.FC<UpcomingTripCardProps> = ({
   request,
   onViewDetails,
 }) => {
+  const { t, language } = useLanguage();
+
   return (
     <div
       style={{
-        backgroundColor: '#ffffff',
-        borderRadius: '16px',
-        border: '1px solid var(--border-card)',
+        backgroundColor: '#FFFFFF',
+        borderRadius: '14px',
+        border: '1px solid #D8CEBE',
         padding: '24px',
-        boxShadow: 'var(--shadow-sm)',
+        boxShadow: '0 4px 16px rgba(24, 26, 23, 0.04)',
         display: 'flex',
         flexDirection: 'column',
         gap: '20px',
@@ -30,31 +33,21 @@ export const UpcomingTripCard: React.FC<UpcomingTripCardProps> = ({
     >
       {/* Top Header */}
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
+        className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#E8E2D8]"
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span
-            style={{
-              color: 'var(--primary)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
+          <span style={{ color: '#B49A68', display: 'flex', alignItems: 'center' }} aria-hidden="true">
             <CalendarCheck size={18} />
           </span>
           <h3
             style={{
               fontSize: '16px',
               fontWeight: 700,
-              color: 'var(--text-heading)',
+              color: '#181A17',
               margin: 0,
             }}
           >
-            Upcoming Trip
+            {t('customer.dashboard.upcomingTrip', language === 'en' ? 'Upcoming Trip' : 'Chuyến đi sắp tới')}
           </h3>
         </div>
 
@@ -64,14 +57,15 @@ export const UpcomingTripCard: React.FC<UpcomingTripCardProps> = ({
           style={{
             padding: '4px 12px',
             borderRadius: '999px',
-            backgroundColor: '#eff6ff',
-            color: 'var(--primary)',
+            backgroundColor: '#181A17',
+            color: '#F7F7F4',
             fontSize: '12px',
             fontWeight: 700,
-            border: '1px solid #dbeafe',
+            border: '1px solid #2C2F2A',
+            fontFamily: 'var(--font-mono, monospace)',
             transition: 'all 0.15s ease',
           }}
-          title="View Request Details"
+          title={t('customer.table.viewRequestDetails', 'Xem chi tiết đơn')}
         >
           {request.requestCode}
         </Link>
@@ -89,29 +83,29 @@ export const UpcomingTripCard: React.FC<UpcomingTripCardProps> = ({
       >
         {/* Horse Information Link */}
         <Link
-          href={`/customer/horses/${request.horse.id || 'hrs-001'}`}
+          href={`/customer/horses/${request.horse?.id || 'hrs-001'}`}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '14px',
             transition: 'opacity 0.15s ease',
           }}
-          title={`View Profile of ${request.horse.name}`}
+          title={request.horse?.name || ''}
         >
           <div
             style={{
               width: '52px',
               height: '52px',
-              borderRadius: '50%',
-              backgroundColor: '#f1f5f9',
+              borderRadius: '12px',
+              backgroundColor: '#F0EEE8',
+              border: '1px solid #D8CEBE',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: 'var(--primary)',
+              color: '#181A17',
               flexShrink: 0,
             }}
           >
-            {/* Horse Silhouette */}
             <svg
               width="28"
               height="28"
@@ -134,7 +128,7 @@ export const UpcomingTripCard: React.FC<UpcomingTripCardProps> = ({
               style={{
                 fontSize: '18px',
                 fontWeight: 800,
-                color: 'var(--text-heading)',
+                color: '#181A17',
                 letterSpacing: '-0.01em',
               }}
             >
@@ -143,61 +137,37 @@ export const UpcomingTripCard: React.FC<UpcomingTripCardProps> = ({
             <div
               style={{
                 fontSize: '13px',
-                color: 'var(--text-muted)',
+                color: '#5B6779',
                 marginTop: '2px',
               }}
             >
-              Departure: <strong style={{ color: 'var(--text-body)' }}>{request.departureDate}</strong>
+              {t('customer.table.departure', language === 'en' ? 'Departure' : 'Khởi hành')}:{' '}
+              <strong style={{ color: '#181A17' }}>{request.departureDate}</strong>
             </div>
           </div>
         </Link>
 
         {/* Route Progress Timeline */}
         <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            flex: '1',
-            maxWidth: '380px',
-            minWidth: '260px',
-          }}
+          className="flex items-center gap-2 flex-1 w-full max-w-[380px] min-w-0 sm:min-w-[260px]"
         >
-          {/* Origin */}
           <div style={{ textAlign: 'center', minWidth: '60px' }}>
-            <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>
-              Origin
+            <div style={{ fontSize: '11px', color: '#5B6779', fontWeight: 600, marginBottom: '4px' }}>
+              {language === 'en' ? 'Origin' : 'Xuất phát'}
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '4px' }}>
-              <div
-                style={{
-                  width: '10px',
-                  height: '10px',
-                  borderRadius: '50%',
-                  backgroundColor: '#ea580c',
-                }}
-              />
+              <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#287653' }} />
             </div>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-heading)' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#181A17' }}>
               {request.originCode}
             </div>
           </div>
 
-          {/* Line 1 */}
-          <div
-            style={{
-              flex: 1,
-              height: '3px',
-              backgroundColor: '#ea580c',
-              borderRadius: '2px',
-              position: 'relative',
-            }}
-          />
+          <div style={{ flex: 1, height: '3px', backgroundColor: '#B49A68', borderRadius: '2px' }} />
 
-          {/* Transit Point with Plane Icon */}
           <div style={{ textAlign: 'center', minWidth: '70px' }}>
-            <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>
-              Transit
+            <div style={{ fontSize: '11px', color: '#5B6779', fontWeight: 600, marginBottom: '4px' }}>
+              {language === 'en' ? 'Transit' : 'Trung chuyển'}
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '4px' }}>
               <div
@@ -205,36 +175,27 @@ export const UpcomingTripCard: React.FC<UpcomingTripCardProps> = ({
                   width: '28px',
                   height: '28px',
                   borderRadius: '50%',
-                  backgroundColor: '#fff7ed',
-                  border: '2px solid #ea580c',
+                  backgroundColor: '#F8F0DF',
+                  border: '2px solid #B49A68',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#ea580c',
+                  color: '#966516',
                 }}
               >
                 <Plane size={14} style={{ transform: 'rotate(45deg)' }} />
               </div>
             </div>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: '#ea580c' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#966516' }}>
               {request.transitPoint || 'BKK, TH'}
             </div>
           </div>
 
-          {/* Line 2 */}
-          <div
-            style={{
-              flex: 1,
-              height: '3px',
-              backgroundColor: '#e2e8f0',
-              borderRadius: '2px',
-            }}
-          />
+          <div style={{ flex: 1, height: '3px', backgroundColor: '#D8CEBE', borderRadius: '2px' }} />
 
-          {/* Destination */}
           <div style={{ textAlign: 'center', minWidth: '65px' }}>
-            <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>
-              Destination
+            <div style={{ fontSize: '11px', color: '#5B6779', fontWeight: 600, marginBottom: '4px' }}>
+              {language === 'en' ? 'Destination' : 'Đích đến'}
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '4px' }}>
               <div
@@ -242,12 +203,12 @@ export const UpcomingTripCard: React.FC<UpcomingTripCardProps> = ({
                   width: '10px',
                   height: '10px',
                   borderRadius: '50%',
-                  backgroundColor: '#cbd5e1',
-                  border: '2px solid #94a3b8',
+                  backgroundColor: '#FAF8F4',
+                  border: '2px solid #A67C2E',
                 }}
               />
             </div>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#A67C2E' }}>
               {request.destinationCode}
             </div>
           </div>
@@ -255,12 +216,8 @@ export const UpcomingTripCard: React.FC<UpcomingTripCardProps> = ({
 
         {/* View Details Button */}
         <div>
-          <Button
-            variant="outline"
-            size="md"
-            onClick={() => onViewDetails(request)}
-          >
-            View Details
+          <Button variant="outline" size="md" onClick={() => onViewDetails(request)}>
+            {t('orders.viewDetails', language === 'en' ? 'View Details' : 'Xem chi tiết')}
           </Button>
         </div>
       </div>

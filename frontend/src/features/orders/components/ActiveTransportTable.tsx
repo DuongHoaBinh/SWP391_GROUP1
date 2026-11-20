@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { TransportRequest } from '@/lib/types';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface ActiveTransportTableProps {
   requests: TransportRequest[];
@@ -14,53 +15,56 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
   requests,
   onViewTrip,
 }) => {
+  const { t, translateStatus, translateCountry } = useLanguage();
+
   return (
     <div
       style={{
-        backgroundColor: '#ffffff',
-        borderRadius: '16px',
-        border: '1px solid var(--border-card)',
+        backgroundColor: '#FFFFFF',
+        borderRadius: '14px',
+        border: '1px solid #D8CEBE',
         padding: '24px',
-        boxShadow: 'var(--shadow-sm)',
+        boxShadow: '0 4px 16px rgba(24, 26, 23, 0.04)',
       }}
     >
       {/* Table Header Row */}
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: '20px',
-        }}
+        className="flex flex-wrap items-center justify-between gap-2 mb-5"
       >
         <h3
           style={{
             fontSize: '17px',
             fontWeight: 700,
-            color: 'var(--text-heading)',
+            color: '#181A17',
             margin: 0,
           }}
         >
-          Active Transport
+          {t('customer.dashboard.activeTransports', 'Chuyến vận chuyển đang hoạt động')}
         </h3>
         <Link
           href="/customer/requests"
           style={{
             fontSize: '13.5px',
             fontWeight: 600,
-            color: 'var(--primary)',
+            color: '#A67C2E',
             transition: 'color 0.15s ease',
           }}
         >
-          View All
+          {t('common.viewAll', 'Xem tất cả')}
         </Link>
       </div>
 
       {/* Table Structure */}
+      {requests.length === 0 ? (
+        <div style={{ padding: '28px 16px', textAlign: 'center', fontSize: '13.5px', color: '#5F6977' }}>
+          {t('customer.requests.empty', 'Chưa có yêu cầu vận chuyển nào.')}
+        </div>
+      ) : (
       <div style={{ overflowX: 'auto' }}>
         <table
           style={{
             width: '100%',
+            minWidth: '680px',
             borderCollapse: 'collapse',
             textAlign: 'left',
           }}
@@ -68,7 +72,8 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
           <thead>
             <tr
               style={{
-                borderBottom: '1px solid var(--border-light)',
+                backgroundColor: '#F0EEE8',
+                borderBottom: '1px solid #D8CEBE',
               }}
             >
               <th
@@ -78,10 +83,10 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
                   fontWeight: 700,
                   letterSpacing: '0.06em',
                   textTransform: 'uppercase',
-                  color: 'var(--text-muted)',
+                  color: '#5B6779',
                 }}
               >
-                REQUEST ID
+                {t('customer.table.requestId', 'MÃ ĐƠN')}
               </th>
               <th
                 style={{
@@ -90,10 +95,10 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
                   fontWeight: 700,
                   letterSpacing: '0.06em',
                   textTransform: 'uppercase',
-                  color: 'var(--text-muted)',
+                  color: '#5B6779',
                 }}
               >
-                HORSE
+                {t('customer.table.horse', 'CHIẾN MÃ')}
               </th>
               <th
                 style={{
@@ -102,10 +107,10 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
                   fontWeight: 700,
                   letterSpacing: '0.06em',
                   textTransform: 'uppercase',
-                  color: 'var(--text-muted)',
+                  color: '#5B6779',
                 }}
               >
-                ROUTE (ORG → DST)
+                {t('customer.table.route', 'TUYẾN ĐƯỜNG')}
               </th>
               <th
                 style={{
@@ -114,10 +119,10 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
                   fontWeight: 700,
                   letterSpacing: '0.06em',
                   textTransform: 'uppercase',
-                  color: 'var(--text-muted)',
+                  color: '#5B6779',
                 }}
               >
-                DEPARTURE
+                {t('customer.table.departure', 'KHỞI HÀNH')}
               </th>
               <th
                 style={{
@@ -126,10 +131,10 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
                   fontWeight: 700,
                   letterSpacing: '0.06em',
                   textTransform: 'uppercase',
-                  color: 'var(--text-muted)',
+                  color: '#5B6779',
                 }}
               >
-                STATUS
+                {t('customer.table.status', 'TRẠNG THÁI')}
               </th>
               <th
                 style={{
@@ -138,11 +143,11 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
                   fontWeight: 700,
                   letterSpacing: '0.06em',
                   textTransform: 'uppercase',
-                  color: 'var(--text-muted)',
+                  color: '#5B6779',
                   textAlign: 'right',
                 }}
               >
-                ACTION
+                {t('customer.table.action', 'THAO TÁC')}
               </th>
             </tr>
           </thead>
@@ -151,26 +156,25 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
               <tr
                 key={req.id}
                 style={{
-                  borderBottom: '1px solid var(--border-light)',
+                  borderBottom: '1px solid #E8E2D8',
                   transition: 'background-color 0.15s ease',
                 }}
               >
-                {/* Request ID Link */}
                 <td style={{ padding: '16px 14px' }}>
                   <Link
                     href={`/customer/requests/${req.id || 'tr-001'}`}
                     style={{
                       fontSize: '13.5px',
                       fontWeight: 700,
-                      color: 'var(--primary)',
+                      color: '#A67C2E',
+                      fontFamily: 'var(--font-mono, monospace)',
                     }}
-                    title="View Request Details"
+                    title={t('customer.table.viewRequestDetails', 'Xem chi tiết đơn')}
                   >
                     {req.requestCode}
                   </Link>
                 </td>
 
-                {/* Horse Link */}
                 <td style={{ padding: '16px 14px' }}>
                   <Link
                     href={`/customer/horses/${req.horse.id || 'hrs-001'}`}
@@ -180,17 +184,11 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
                       gap: '8px',
                       fontSize: '13.5px',
                       fontWeight: 600,
-                      color: 'var(--text-heading)',
+                      color: '#181A17',
                     }}
-                    title={`View Profile of ${req.horse.name}`}
+                    title={req.horse.name}
                   >
-                    <span
-                      style={{
-                        color: '#64748b',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}
-                    >
+                    <span style={{ color: '#B49A68', display: 'flex', alignItems: 'center' }}>
                       <svg
                         width="16"
                         height="16"
@@ -209,62 +207,63 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
                   </Link>
                 </td>
 
-                {/* Route */}
                 <td
                   style={{
                     padding: '16px 14px',
                     fontSize: '13.5px',
-                    color: 'var(--text-body)',
+                    color: '#181A17',
                   }}
                 >
-                  {req.origin} → {req.destination}
+                  {translateCountry(req.origin)} → {translateCountry(req.destination)}
                 </td>
 
-                {/* Departure */}
                 <td
                   style={{
                     padding: '16px 14px',
                     fontSize: '13.5px',
-                    color: 'var(--text-body)',
+                    color: '#5F6977',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  {req.departureDate.split(',')[0]}
+                  {(req.departureDate || '').split(',')[0] || '—'}
                 </td>
 
-                {/* Status */}
-                <td style={{ padding: '16px 14px' }}>
+                <td style={{ padding: '16px 14px', whiteSpace: 'nowrap' }}>
                   <StatusBadge
-                    label={req.statusLabel}
+                    label={translateStatus(req.statusLabel || req.status)}
                     variant={
-                      req.status === 'IN_TRANSIT'
+                      req.status === 'IN_TRANSIT' || req.status === 'in_transit'
                         ? 'transit'
-                        : req.status === 'APPROVED'
+                        : req.status === 'APPROVED' || req.status === 'approved' || req.status === 'completed'
                         ? 'success'
                         : 'pending'
                     }
-                    hasDot={req.status === 'IN_TRANSIT'}
+                    hasDot={req.status === 'IN_TRANSIT' || req.status === 'in_transit'}
                   />
                 </td>
 
-                {/* Action */}
                 <td
                   style={{
                     padding: '16px 14px',
                     textAlign: 'right',
+                    whiteSpace: 'nowrap',
                   }}
                 >
                   <button
+                    type="button"
                     onClick={() => onViewTrip(req)}
+                    className="hover:bg-[#F5EFE2] cursor-pointer border border-[#D4C5A3]"
                     style={{
                       fontSize: '13.5px',
                       fontWeight: 600,
-                      color: 'var(--primary)',
-                      padding: '4px 8px',
-                      borderRadius: '6px',
-                      transition: 'background-color 0.15s ease',
+                      color: '#A67C2E',
+                      padding: '5px 10px',
+                      borderRadius: '8px',
+                      backgroundColor: '#FAF8F4',
+                      transition: 'all 0.15s ease',
                     }}
                   >
-                    View Trip
+                    {t('orders.viewTrip', 'Xem chuyến đi')}
                   </button>
                 </td>
               </tr>
@@ -272,6 +271,7 @@ export const ActiveTransportTable: React.FC<ActiveTransportTableProps> = ({
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 };

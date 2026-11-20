@@ -144,6 +144,11 @@ export const routesApi = {
     return apiClient(`/routes/shipment/${shipmentId}`);
   },
 
+  findRouteByShipmentId: async (shipmentId: number): Promise<RouteDetail | null> => {
+    const res = await apiClient<{ route: RouteDetail | null }>(`/routes/shipment/${shipmentId}/optional`);
+    return res?.route ?? null;
+  },
+
   getFullTripPlan: async (shipmentId: number): Promise<any> => {
     return apiClient(`/routes/shipment/${shipmentId}/plan`);
   },
@@ -175,6 +180,7 @@ export const routesApi = {
       totalDistanceKm?: number;
       legs: RouteLegItem[];
       stops: RouteStopItem[];
+      notes?: string;
     }
   ): Promise<RouteDetail> => {
     return apiClient(`/routes/plan/${shipmentId}/build-detail`, {

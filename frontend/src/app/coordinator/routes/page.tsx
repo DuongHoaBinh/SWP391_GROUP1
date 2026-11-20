@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { 
-  Map, Plus, Search, Filter, Edit, Trash2, MapPin, 
-  Clock, Navigation, ShieldCheck, Flag, CheckCircle2, ChevronRight, Eye, Layers,
-  Plane, Truck, ArrowRight, AlertCircle, Send, FileCheck, RefreshCw, Sparkles, Building,
-  Check, X, BookmarkPlus, Compass, ExternalLink, RotateCcw, Save
+  Map, Plus, Search, Edit, Trash2, MapPin, 
+  Clock, Navigation, ShieldCheck, CheckCircle2, Eye, Layers,
+  Plane, Truck, AlertCircle, Send, RefreshCw, Sparkles,
+  BookmarkPlus, Compass, RotateCcw
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -22,19 +23,25 @@ import {
   MasterStopItem,
   RouteDetail
 } from '@/features/routes/api/routes.api';
-import { buildEquineRoute, normalizeVietnamese } from '@/lib/geo-corridors';
+import { buildEquineRoute, isAirportLocationText, normalizeVietnamese } from '@/lib/geo-corridors';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { bookingName, type BookingType } from '@/features/orders/booking-policy';
 import { RoadTripPicker, LegScheduleFields } from '@/features/routes/components/RoadTripPicker';
+
+function MapLoadingFallback() {
+  const { language } = useLanguage();
+  return (
+    <div className="h-64 flex items-center justify-center bg-slate-50 text-slate-400 text-sm rounded-xl">
+      {language === 'en' ? 'Loading international corridor map...' : 'Đang tải bản đồ số hành lang quốc tế...'}
+    </div>
+  );
+}
 
 const RoutePlanningMap = dynamic(
   () => import('@/components/maps/RoutePlanningMap'),
   {
     ssr: false,
-    loading: () => (
-      <div className="h-64 flex items-center justify-center bg-slate-50 text-slate-400 text-sm rounded-xl">
-        Đang tải bản đồ số hành lang quốc tế...
-      </div>
-    ),
+    loading: () => <MapLoadingFallback />,
   }
 );
 
@@ -50,23 +57,26 @@ interface PlanningOrder {
   origin: string;
   destination: string;
   departureDate?: string;
+  rawRequestedDate?: string;
+  hasManagerFramework?: boolean;
   status: string;
   paymentState?: string;
   routeDetail?: RouteDetail;
 }
 
-function renderHorseNamesDisplay(horses?: Array<{ name?: string }>, horseCount?: number) {
+function renderHorseNamesDisplay(horses?: Array<{ name?: string }>, horseCount?: number, tFn?: any) {
   const names = (horses || []).map((h) => h.name?.trim()).filter(Boolean) as string[];
   const count = horseCount || (names.length > 0 ? names.length : 1);
+  const unit = tFn ? tFn('common.horsesUnit', 'ngựa') : 'ngựa';
 
   if (names.length === 0) {
-    return <span>Chiến mã ({count} con)</span>;
+    return <span>{count} {unit}</span>;
   }
   if (names.length === 1) {
     return (
       <span className="flex items-center gap-1.5">
         <span>{names[0]}</span>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">1 con</span>
+        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">1 {unit}</span>
       </span>
     );
   }
@@ -76,7 +86,7 @@ function renderHorseNamesDisplay(horses?: Array<{ name?: string }>, horseCount?:
         <span className="text-slate-900">{names[0]}</span>
         <span className="text-slate-400">&amp;</span>
         <span className="text-slate-900">{names[1]}</span>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-200">2 ngựa</span>
+        <span className="text-xs px-2 py-0.5 rounded-full bg-[#FAF8F4] text-[#181A17] font-bold border border-[#EAE5DA]">2 {unit}</span>
       </span>
     );
   }
@@ -85,29 +95,39 @@ function renderHorseNamesDisplay(horses?: Array<{ name?: string }>, horseCount?:
       <span className="text-slate-900">{names.slice(0, 2).join(', ')}</span>
       <span 
         title={names.join(', ')} 
-        className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold border border-blue-200 cursor-help"
+        className="text-xs px-2 py-0.5 rounded-full bg-[#F3EFE4] text-[#181A17] font-bold border border-[#EAE5DA] cursor-help"
       >
-        +{names.length - 2} con khác ({count} ngựa)
+        +{names.length - 2} ({count} {unit})
       </span>
     </span>
   );
 }
 
-export default function RoutePlanningPage() {
-  const { routes, addRoute, updateRoute, deleteRoute, vehicles, refreshVehicles } = useFleetRouteStore();
+function RoutePlanningContent() {
+  const { t, language, translateStatus, translateVehicleType, translateStopType, translateIncident } = useLanguage();
+  const searchParams = useSearchParams();
+  const urlSearch = searchParams.get('search');
+  const urlShipmentId = searchParams.get('shipmentId');
+  const { routes, addRoute, deleteRoute, vehicles, refreshVehicles } = useFleetRouteStore();
   const [activeTab, setActiveTab] = useState<'flow3_planning' | 'corridor_catalog'>('flow3_planning');
   
   // Search & Map
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(urlSearch || '');
   const [activeMapRoute, setActiveMapRoute] = useState<RouteItem | null>(null);
   const [showMap, setShowMap] = useState<boolean>(true);
 
   // Flow 3: Orders awaiting planning & Master Data
   const [planningOrders, setPlanningOrders] = useState<PlanningOrder[]>([]);
-  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [airlines, setAirlines] = useState<AirlineItem[]>([]);
   const [airports, setAirports] = useState<AirportItem[]>([]);
   const [masterStops, setMasterStops] = useState<MasterStopItem[]>([]);
+  const langRef = useRef(language);
+  langRef.current = language;
+  const refreshVehiclesRef = useRef(refreshVehicles);
+  refreshVehiclesRef.current = refreshVehicles;
+  const openedShipmentRef = useRef<string | null>(null);
 
   // Detailed Plan Modal (Bước 1b)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -143,9 +163,9 @@ export default function RoutePlanningPage() {
   // Open Save Template Modal
   const handleOpenSaveTemplateModal = (fromCurrentSearch = true) => {
     if (fromCurrentSearch) {
-      const origClean = searchOrigin.split(',')[0].trim();
-      const destClean = searchDestination.split(',')[0].trim();
-      setSaveTemplateName(`Hành lang: ${origClean} ➔ ${destClean} (${searchMode === 'air' ? 'Hàng không' : 'Đường bộ'})`);
+      const origClean = (searchOrigin || '').split(',')[0].trim();
+      const destClean = (searchDestination || '').split(',')[0].trim();
+      setSaveTemplateName(language === 'en' ? `Corridor: ${origClean} ➔ ${destClean} (${searchMode === 'air' ? 'Air' : 'Road'})` : `Hành lang: ${origClean} ➔ ${destClean} (${searchMode === 'air' ? 'Hàng không' : 'Đường bộ'})`);
       setSaveTemplateOrigin(searchOrigin);
       setSaveTemplateDestination(searchDestination);
       setSaveTemplateDistance(simulatedKm || 1000);
@@ -156,7 +176,7 @@ export default function RoutePlanningPage() {
           seq: i + 1,
           name: w.name,
           type: (w.type === 'checkpoint' ? 'Border Gate' : w.type === 'rest' ? 'Rest' : 'Quarantine') as RouteStop['type'],
-          country: w.country || 'Việt Nam',
+          country: w.country || (language === 'en' ? 'Vietnam' : 'Việt Nam'),
         }));
         setSaveTemplateStops(stopsList);
       } catch {
@@ -175,11 +195,11 @@ export default function RoutePlanningPage() {
   // Submit Save Route Template
   const handleSaveTemplateSubmit = () => {
     if (!saveTemplateName.trim()) {
-      toast.error('Vui lòng nhập tên tuyến đường mẫu!');
+      toast.error(language === 'en' ? 'Please enter a template route name!' : 'Vui lòng nhập tên tuyến đường mẫu!');
       return;
     }
     if (!saveTemplateOrigin.trim() || !saveTemplateDestination.trim()) {
-      toast.error('Vui lòng nhập điểm xuất phát và điểm đến!');
+      toast.error(language === 'en' ? 'Please enter origin and destination!' : 'Vui lòng nhập điểm xuất phát và điểm đến!');
       return;
     }
 
@@ -193,7 +213,7 @@ export default function RoutePlanningPage() {
       status: 'active',
     });
 
-    toast.success('Đã lưu tuyến đường mẫu mới vào Thư viện thành công!');
+    toast.success(language === 'en' ? 'Saved new template route to Library successfully!' : 'Đã lưu tuyến đường mẫu mới vào Thư viện thành công!');
     setIsSaveModalOpen(false);
 
     // Apply to map immediately
@@ -204,9 +224,11 @@ export default function RoutePlanningPage() {
   };
 
   // Load Master Data & Orders
-  const loadMasterDataAndOrders = async () => {
+  const loadMasterDataAndOrders = useCallback(async () => {
+    const lang = langRef.current;
     setIsLoadingOrders(true);
-    refreshVehicles();
+    setLoadError(null);
+    void refreshVehiclesRef.current();
     try {
       // 1. Master Data
       const mData = await routesApi.getMasterData();
@@ -216,78 +238,107 @@ export default function RoutePlanningPage() {
         setMasterStops(mData.masterStops || []);
       }
 
-      // 2. Orders from backend
+      // 2. Orders from backend with chunk batching (5 items/batch) to avoid N+1 waterfall
       const rawOrders = await apiClient<any[]>('/orders');
-      let paymentOverviewList: any[] = [];
-      try {
-        paymentOverviewList = await apiClient<any[]>('/orders/payments/overview');
-      } catch {}
-      const paymentMap: Record<number, string> = {};
-      if (Array.isArray(paymentOverviewList)) {
-        for (const p of paymentOverviewList) {
-          paymentMap[Number(p.shipmentId)] = p.paymentState || 'WAITING_FLOW2';
-        }
-      }
       if (Array.isArray(rawOrders)) {
-        const enriched: PlanningOrder[] = [];
-        for (const o of rawOrders) {
-          // Chỉ xét các đơn đã được duyệt hoặc đang lên kế hoạch
+        const eligibleOrders = rawOrders.filter((o) => {
           const s = String(o.status || '').toLowerCase();
-          if (s === 'requested' || s === 'under_review' || s === 'rejected' || s === 'cancelled') {
-            continue;
-          }
+          return s !== 'requested' && s !== 'under_review' && s !== 'rejected' && s !== 'cancelled';
+        });
 
-          // Fetch route detail for each order
-          let routeDetail: RouteDetail | undefined;
-          try {
-            routeDetail = await routesApi.getRouteByShipmentId(o.id);
-          } catch {}
+        const enriched: PlanningOrder[] = [];
+        const chunkSize = 5;
+        for (let i = 0; i < eligibleOrders.length; i += chunkSize) {
+          const chunk = eligibleOrders.slice(i, i + chunkSize);
+          const chunkResults = await Promise.all(
+            chunk.map(async (o) => {
+              let routeDetail: RouteDetail | undefined;
+              try {
+                routeDetail = (await routesApi.findRouteByShipmentId(o.id)) ?? undefined;
+              } catch {}
 
-          // Ẩn những đơn mà Manager chưa thiết lập kế hoạch định hướng (Framework)
-          const hasManagerFramework = Boolean(
-            routeDetail?.managerVehicleType ||
-            routeDetail?.assignedCoordinatorId ||
-            routeDetail?.managerAirlineId ||
-            s === 'planning' ||
-            s === 'confirmed' ||
-            s === 'ready_to_depart'
+              const s = String(o.status || '').toLowerCase();
+              const hasManagerFramework = Boolean(
+                routeDetail?.managerVehicleType ||
+                routeDetail?.assignedCoordinatorId ||
+                routeDetail?.managerAirlineId ||
+                s === 'planning' ||
+                s === 'confirmed' ||
+                s === 'ready_to_depart' ||
+                s === 'in_transit' ||
+                s === 'completed'
+              );
+
+              return {
+                id: o.id,
+                requestCode: o.requestCode || `REQ-${String(o.id).padStart(3, '0')}`,
+                customerName: o.customer?.fullName || o.customerName || (lang === 'en' ? 'Customer' : 'Khách hàng'),
+                horseName: o.horses?.[0]?.name || 'Racehorse',
+                horseCount: Number(o.requestedHorseCount || o.horses?.length || 1),
+                horses: o.horses || [],
+                origin: o.originLocation || 'Cu Chi Stables, HCMC',
+                destination: o.destinationLocation || 'Singapore Turf Club',
+                departureDate: o.requestedDate
+                  ? new Date(o.requestedDate).toLocaleDateString(lang === 'en' ? 'en-US' : 'vi-VN')
+                  : '—',
+                rawRequestedDate: o.requestedDate || undefined,
+                hasManagerFramework,
+                status: o.status,
+                transportMode: o.transportMode ?? null,
+                bookingType: o.bookingType ?? 'shared_stall',
+                paymentState:
+                  o.paymentStatus === 'succeeded'
+                    ? 'PAID'
+                    : o.paymentStatus === 'pending'
+                    ? 'PENDING'
+                    : o.paymentStatus === 'review'
+                    ? 'NEEDS_REVIEW'
+                    : 'UNPAID',
+                routeDetail,
+              } as PlanningOrder;
+            })
           );
-
-          if (!hasManagerFramework) {
-            continue;
+          for (const item of chunkResults) {
+            if (item) enriched.push(item);
           }
-
-          enriched.push({
-            transportMode: o.transportMode ?? null,
-            bookingType: o.bookingType ?? 'shared_stall',
-            id: o.id,
-            requestCode: o.requestCode || `REQ-${String(o.id).padStart(3, '0')}`,
-            customerName: o.customer?.fullName || o.customerName || 'Khách hàng',
-            horseName: o.horses?.[0]?.name || 'Racehorse',
-            horseCount: Number(o.requestedHorseCount || o.horses?.length || 1),
-            horses: o.horses || [],
-            origin: o.originLocation || 'Cu Chi Stables, HCMC',
-            destination: o.destinationLocation || 'Singapore Turf Club',
-            departureDate: o.requestedDate
-              ? new Date(o.requestedDate).toLocaleDateString('vi-VN')
-              : 'Oct 20, 2026',
-            status: o.status,
-            paymentState: o.paymentStatus === 'succeeded' ? 'PAID' : o.paymentStatus === 'pending' ? 'PENDING' : o.paymentStatus === 'review' ? 'NEEDS_REVIEW' : 'UNPAID',
-            routeDetail,
-          });
         }
         setPlanningOrders(enriched);
       }
-    } catch (err) {
-      console.warn('Failed to load planning data from backend, fallback:', err);
+    } catch (err: any) {
+      console.warn('Failed to load planning data from backend:', err);
+      setLoadError(
+        err?.message ||
+          (lang === 'en'
+            ? 'Unable to load route planning orders from server.'
+            : 'Không thể tải dữ liệu lập kế hoạch tuyến từ máy chủ.')
+      );
     } finally {
       setIsLoadingOrders(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadMasterDataAndOrders();
-  }, []);
+    void loadMasterDataAndOrders();
+  }, [loadMasterDataAndOrders]);
+
+  useEffect(() => {
+    if (urlSearch !== null) {
+      setSearchTerm(urlSearch);
+    }
+  }, [urlSearch]);
+
+  const handleSearchChange = (val: string) => {
+    setSearchTerm(val);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (val.trim()) {
+        url.searchParams.set('search', val.trim());
+      } else {
+        url.searchParams.delete('search');
+      }
+      window.history.replaceState(null, '', url.toString());
+    }
+  };
 
   // Helper to extract city/province key for robust matching
   const extractCityKey = (str: string): string => {
@@ -318,16 +369,23 @@ export default function RoutePlanningPage() {
     return keyRo === keyOo && keyRd === keyOd;
   };
 
-  // Helper: Đồng bộ hóa thông minh tên sân bay cất cánh & hạ cánh từ Manager Plan, Trạm kiểm dịch & Danh mục sân bay
+  // Helper: Đồng bộ hóa thông minh tên sân bay cất cánh & hạ cánh gần nhất từ Manager Plan, Geo Engine & Danh mục sân bay
+  const extractIataCode = (label?: string | null): string => {
+    const match = String(label || '').match(/\(([A-Z]{3})\b/);
+    return match?.[1]?.toUpperCase() || '';
+  };
+
   const resolveAirLegLocations = (
     order?: PlanningOrder | null,
     templateStops?: RouteStop[] | RouteStopItem[]
   ) => {
     const routeDetail = order?.routeDetail;
+    const geoPreview =
+      order?.origin && order?.destination ? buildEquineRoute(order.origin, order.destination, 'air') : null;
 
-    // 1. Sân bay cất cánh (Origin)
-    let depName = 'Sân bay Quốc tế Tân Sơn Nhất (SGN)';
-    let depCargoName = 'Sân bay Quốc tế Tân Sơn Nhất (SGN Cargo Terminal)';
+    // 1. Sân bay cất cánh gần điểm xuất phát nhất (ưu tiên lựa chọn của Manager nếu đã chỉ định)
+    let depName = language === 'en' ? 'Tan Son Nhat International Airport (SGN)' : 'Sân bay Quốc tế Tân Sơn Nhất (SGN)';
+    let depCargoName = language === 'en' ? 'Tan Son Nhat International Airport (SGN Cargo Terminal)' : 'Sân bay Quốc tế Tân Sơn Nhất (SGN Cargo Terminal)';
     const depId = routeDetail?.managerDepartureAirportId;
     const depCode = routeDetail?.managerDepartureAirportCode;
     const depAp = airports.find(
@@ -336,18 +394,22 @@ export default function RoutePlanningPage() {
     if (depAp) {
       depName = `${depAp.name} (${depAp.iataCode})`;
       depCargoName = `${depAp.name} (${depAp.iataCode} Cargo Terminal)`;
-    } else {
-      const oLower = (order?.origin || '').toLowerCase();
-      if (oLower.includes('hà nội') || oLower.includes('ha noi')) {
-        depName = 'Sân bay Quốc tế Nội Bài (HAN)';
-        depCargoName = 'Sân bay Quốc tế Nội Bài (HAN North Cargo Hub)';
-      } else if (oLower.includes('đà nẵng') || oLower.includes('da nang')) {
-        depName = 'Sân bay Quốc tế Đà Nẵng (DAD)';
-        depCargoName = 'Sân bay Quốc tế Đà Nẵng (DAD Central Cargo Terminal)';
+    } else if (geoPreview?.origin?.nearestAirport) {
+      const nearestDep = geoPreview.origin.nearestAirport;
+      const hintCode = extractIataCode(nearestDep.name);
+      const matchedDepAp = hintCode
+        ? airports.find((a) => a.iataCode.toUpperCase() === hintCode)
+        : undefined;
+      if (matchedDepAp) {
+        depName = `${matchedDepAp.name} (${matchedDepAp.iataCode})`;
+        depCargoName = `${matchedDepAp.name} (${matchedDepAp.iataCode} Cargo Terminal)`;
+      } else {
+        depName = nearestDep.name;
+        depCargoName = nearestDep.name;
       }
     }
 
-    // 2. Sân bay hạ cánh (Destination) - ƯU TIÊN 1: Lấy trực tiếp từ Manager đã thiết lập khung kế hoạch
+    // 2. Sân bay hạ cánh gần điểm đến nhất - ƯU TIÊN 1: Manager Plan -> ƯU TIÊN 2: Trạm kiểm dịch sân bay -> ƯU TIÊN 3: Nearest Airport từ Geo Engine
     let arrName = '';
     const arrId = routeDetail?.managerArrivalAirportId;
     const arrCode = routeDetail?.managerArrivalAirportCode;
@@ -358,7 +420,6 @@ export default function RoutePlanningPage() {
       arrName = `${arrAp.name} (${arrAp.iataCode})`;
     }
 
-    // ƯU TIÊN 2: Lấy từ danh sách Trạm kiểm dịch (Stops) phía dưới nếu có trạm sân bay đích
     if (!arrName && templateStops && templateStops.length > 0) {
       const stopList = templateStops as Array<{ name?: string; locationName?: string; country?: string }>;
       const airportStop =
@@ -375,30 +436,17 @@ export default function RoutePlanningPage() {
       }
     }
 
-    // ƯU TIÊN 3: Tự động nhận diện từ địa danh đích của khách hàng (Kalimantan, Jakarta, Singapore, v.v.)
-    if (!arrName && order?.destination) {
-      const dLower = order.destination.toLowerCase();
-      if (dLower.includes('kalimantan') || dLower.includes('borneo')) {
-        const bdj = airports.find((a) => a.iataCode === 'BDJ');
-        arrName = bdj ? `${bdj.name} (${bdj.iataCode})` : 'Sân bay Quốc tế Syamsudin Noor (BDJ Cargo), Kalimantan';
-      } else if (dLower.includes('jakarta') || dLower.includes('indonesia')) {
-        const cgk = airports.find((a) => a.iataCode === 'CGK');
-        arrName = cgk ? `${cgk.name} (${cgk.iataCode})` : 'Sân bay Quốc tế Soekarno-Hatta (CGK Cargo), Jakarta';
-      } else if (dLower.includes('singapore')) {
-        arrName = 'Sân bay Quốc tế Changi (SIN Live Animal Cargo Hub)';
-      } else if (dLower.includes('kuala lumpur') || dLower.includes('malaysia')) {
-        arrName = 'Sân bay Quốc tế Kuala Lumpur (KUL KLIA Cargo)';
-      } else if (dLower.includes('bangkok') || dLower.includes('thailand') || dLower.includes('thái')) {
-        arrName = 'Sân bay Quốc tế Suvarnabhumi (BKK Free Zone Cargo)';
-      } else if (dLower.includes('campuchia') || dLower.includes('phnom penh')) {
-        arrName = 'Sân bay Quốc tế Phnom Penh (PNH Live Animal Cargo)';
-      } else if (dLower.includes('úc') || dLower.includes('australia') || dLower.includes('melbourne')) {
-        arrName = 'Sân bay Quốc tế Melbourne (MEL Victoria Cargo Hub)';
-      }
+    if (!arrName && geoPreview?.destination?.nearestAirport) {
+      const nearestArr = geoPreview.destination.nearestAirport;
+      const hintCode = extractIataCode(nearestArr.name);
+      const matchedArrAp = hintCode
+        ? airports.find((a) => a.iataCode.toUpperCase() === hintCode)
+        : undefined;
+      arrName = matchedArrAp ? `${matchedArrAp.name} (${matchedArrAp.iataCode})` : nearestArr.name;
     }
 
     if (!arrName) {
-      arrName = 'Sân bay Quốc tế đích đến';
+      arrName = language === 'en' ? 'Nearest Arrival International Airport' : 'Sân bay Quốc tế gần điểm đến';
     }
 
     const airlineName =
@@ -409,66 +457,273 @@ export default function RoutePlanningPage() {
     return { depName, depCargoName, arrName, airlineName };
   };
 
+  // Chọn xe đường bộ nội bộ phù hợp nhất theo sức chứa (capacity >= horseCount) và loại xe Manager định hướng
+  const pickDefaultRoadVehicle = (order?: PlanningOrder | null): { vehiclePlate: string; vehicleId: number | null } => {
+    const requiredHorses = Math.max(1, Number(order?.horseCount || 1));
+    const managerType = String(order?.routeDetail?.managerVehicleType || '').toLowerCase();
+    const roadFleet = vehicles.filter((v) => !v.type?.toLowerCase().includes('air') && v.status !== 'maintenance');
+
+    const isUsableForOrder = (v: typeof vehicles[number]) =>
+      v.status === 'available' || !v.assignedTripCode || v.assignedTripCode === order?.requestCode;
+
+    const chosen =
+      roadFleet.find(
+        (v) =>
+          isUsableForOrder(v) &&
+          Number(v.capacity || 0) >= requiredHorses &&
+          managerType &&
+          String(v.type || '').toLowerCase() === managerType
+      ) ||
+      roadFleet.find((v) => isUsableForOrder(v) && Number(v.capacity || 0) >= requiredHorses) ||
+      roadFleet.find((v) => Number(v.capacity || 0) >= requiredHorses) ||
+      roadFleet.find((v) => isUsableForOrder(v)) ||
+      roadFleet[0];
+
+    if (!chosen) {
+      return { vehiclePlate: 'TRK-VN-089', vehicleId: null };
+    }
+    const parsedId = Number(String(chosen.id).replace(/\D/g, ''));
+    return {
+      vehiclePlate: chosen.code,
+      vehicleId: Number.isSafeInteger(parsedId) && parsedId > 0 ? parsedId : null,
+    };
+  };
+
+  // Ánh xạ thông tin Hãng hàng không -> airlineId & airlineName
+  const resolveAirlineMeta = (nameOrCode?: string | null, order?: PlanningOrder | null) => {
+    const norm = String(nameOrCode || '').trim().toLowerCase();
+    const matched =
+      (norm
+        ? airlines.find(
+            (a) =>
+              a.name.toLowerCase() === norm ||
+              norm.includes(a.name.toLowerCase()) ||
+              a.name.toLowerCase().includes(norm) ||
+              norm.includes(`(${a.code.toLowerCase()})`)
+          )
+        : undefined) ||
+      (order?.routeDetail?.managerAirlineId
+        ? airlines.find((a) => a.id === Number(order.routeDetail?.managerAirlineId))
+        : undefined) ||
+      airlines[0];
+
+    return {
+      airlineId: matched?.id ?? order?.routeDetail?.managerAirlineId ?? null,
+      airlineName: nameOrCode || matched?.name || order?.routeDetail?.managerAirlineName || 'Singapore Airlines Cargo',
+    };
+  };
+
+  // Ánh xạ tên sân bay -> departureAirportId / arrivalAirportId & mã IATA
+  const resolveAirportMeta = (
+    locationText?: string | null,
+    fallbackId?: number | null,
+    fallbackCode?: string | null,
+    isDeparture = true
+  ) => {
+    const iataHint = extractIataCode(locationText) || (fallbackCode ? fallbackCode.toUpperCase() : '');
+    const normText = String(locationText || '').trim().toLowerCase();
+    const matched =
+      (iataHint ? airports.find((ap) => ap.iataCode.toUpperCase() === iataHint) : undefined) ||
+      (fallbackId ? airports.find((ap) => ap.id === Number(fallbackId)) : undefined) ||
+      (normText
+        ? airports.find(
+            (ap) =>
+              normText.includes(ap.name.toLowerCase()) ||
+              normText.includes(ap.city.toLowerCase()) ||
+              normText.includes(ap.country.toLowerCase())
+          )
+        : undefined) ||
+      (isDeparture
+        ? airports.find((ap) => ap.country.toLowerCase().includes('viet'))
+        : airports.find((ap) => !ap.country.toLowerCase().includes('viet'))) ||
+      airports[0];
+
+    return {
+      airportId: matched?.id ?? fallbackId ?? null,
+      iataCode: matched?.iataCode ?? (iataHint || fallbackCode || (isDeparture ? 'SGN' : 'SIN')),
+    };
+  };
+
+  // Tự động điền khung giờ khởi hành / đến dự kiến nối tiếp nhau theo ngày vận chuyển của đơn hàng
+  const applyDefaultScheduleToLegs = (rawLegs: RouteLegItem[], order?: PlanningOrder | null): RouteLegItem[] => {
+    const now = Date.now();
+    let baseTimeMs = now + 24 * 3600_000;
+    if (order?.rawRequestedDate) {
+      const parsed = new Date(order.rawRequestedDate);
+      if (Number.isFinite(parsed.getTime())) {
+        const candidate = new Date(parsed);
+        candidate.setHours(6, 0, 0, 0);
+        baseTimeMs = candidate.getTime() > now ? candidate.getTime() : now + 12 * 3600_000;
+      }
+    } else {
+      const tomorrowMorning = new Date(now + 24 * 3600_000);
+      tomorrowMorning.setHours(6, 0, 0, 0);
+      baseTimeMs = tomorrowMorning.getTime();
+    }
+
+    let cursorMs = baseTimeMs;
+    return rawLegs.map((leg, idx) => {
+      const durationHours = Math.max(0.5, Number(leg.durationHours || (leg.legType === 'flight' ? 2.5 : 2)));
+      const existingDepMs = leg.plannedDeparture ? new Date(leg.plannedDeparture).getTime() : NaN;
+      const existingArrMs = leg.plannedArrival ? new Date(leg.plannedArrival).getTime() : NaN;
+
+      if (Number.isFinite(existingDepMs) && Number.isFinite(existingArrMs) && existingArrMs > existingDepMs) {
+        cursorMs = existingArrMs + 60 * 60_000;
+        return leg;
+      }
+
+      // Thêm 1.5h thời gian thủ tục soi chiếu / bàn giao kho Cargo giữa các chặng
+      const depMs = idx === 0 ? cursorMs : cursorMs + 90 * 60_000;
+      const arrMs = depMs + Math.round(durationHours * 3600_000);
+      cursorMs = arrMs;
+
+      return {
+        ...leg,
+        plannedDeparture: new Date(depMs).toISOString(),
+        plannedArrival: new Date(arrMs).toISOString(),
+      };
+    });
+  };
+
+  const sumLegsDistanceKm = (nextLegs: RouteLegItem[], fallbackKm = 500): number => {
+    const total = nextLegs.reduce((acc, l) => acc + Math.max(0, Number(l.distanceKm || 0)), 0);
+    return total > 0 ? Math.round(total) : fallbackKm;
+  };
+
+  const buildMultimodalAirLegs = (
+    originText: string,
+    destText: string,
+    horseCount: number,
+    order?: PlanningOrder | null,
+    templateStops?: RouteStop[] | RouteStopItem[],
+    flightHoursOverride?: number
+  ): RouteLegItem[] => {
+    const { depName, depCargoName, arrName, airlineName } = resolveAirLegLocations(order, templateStops);
+    const geoRoute = originText && destText ? buildEquineRoute(originText, destText, 'air') : null;
+    const previewLegs = geoRoute?.legs ?? [];
+    const pickupPreview = previewLegs.length > 0 && previewLegs[0].type === 'road' ? previewLegs[0] : null;
+    const flightPreview = previewLegs.find((l) => l.type === 'air');
+    const lastPreview = previewLegs.length > 0 ? previewLegs[previewLegs.length - 1] : null;
+    const deliveryPreview = lastPreview && lastPreview !== pickupPreview && lastPreview.type === 'road' ? lastPreview : null;
+
+    const result: RouteLegItem[] = [];
+    let seq = 1;
+    const defaultVehicle = pickDefaultRoadVehicle(order);
+    const airlineMeta = resolveAirlineMeta(airlineName, order);
+    const depAirportMeta = resolveAirportMeta(
+      depName,
+      order?.routeDetail?.managerDepartureAirportId,
+      order?.routeDetail?.managerDepartureAirportCode,
+      true
+    );
+    const arrAirportMeta = resolveAirportMeta(
+      arrName,
+      order?.routeDetail?.managerArrivalAirportId,
+      order?.routeDetail?.managerArrivalAirportCode,
+      false
+    );
+
+    if (!isAirportLocationText(originText)) {
+      result.push({
+        sequenceNo: seq++,
+        legType: 'road',
+        originLocation: originText,
+        destinationLocation: depCargoName,
+        distanceKm: pickupPreview?.distanceKm ?? 45,
+        durationHours: pickupPreview?.durationHours ?? 2,
+        vehiclePlate: defaultVehicle.vehiclePlate,
+        vehicleId: defaultVehicle.vehicleId,
+      });
+    }
+
+    const flightDistanceKm =
+      flightPreview?.distanceKm ??
+      Math.max(500, (geoRoute?.distanceKm || 1200) - (pickupPreview?.distanceKm ?? 45) - (deliveryPreview?.distanceKm ?? 35));
+
+    result.push({
+      sequenceNo: seq++,
+      legType: 'flight',
+      originLocation: depName,
+      destinationLocation: arrName,
+      airlineId: airlineMeta.airlineId,
+      airlineName: airlineMeta.airlineName,
+      departureAirportId: depAirportMeta.airportId,
+      departureAirportCode: depAirportMeta.iataCode,
+      arrivalAirportId: arrAirportMeta.airportId,
+      arrivalAirportCode: arrAirportMeta.iataCode,
+      flightNumber: `${depAirportMeta.iataCode}-${arrAirportMeta.iataCode}-CARGO`,
+      bookingReference: `AWB-${order?.requestCode || 'AIR'}-${arrAirportMeta.iataCode}`,
+      stallsBooked: horseCount || 1,
+      distanceKm: flightDistanceKm,
+      durationHours: flightHoursOverride ?? flightPreview?.durationHours ?? 2.5,
+    });
+
+    if (!isAirportLocationText(destText)) {
+      const destClean = destText.split(',')[0].trim();
+      result.push({
+        sequenceNo: seq++,
+        legType: 'road',
+        originLocation: arrName,
+        destinationLocation: destText,
+        distanceKm: deliveryPreview?.distanceKm ?? 35,
+        durationHours: deliveryPreview?.durationHours ?? 1.5,
+        vehicleId: null,
+        roadTripId: null,
+        vehiclePlate:
+          language === 'en'
+            ? `Vehicle from ${destClean} - Consignee pickup`
+            : `Xe từ ${destClean} đến đón (Bên nhận tự rước)`,
+      });
+    }
+
+    return applyDefaultScheduleToLegs(result, order);
+  };
+
   // Synchronize from Route Template while keeping every field 100% editable by Coordinator
   const handleApplyTemplate = (template: RouteItem) => {
     setPlanRouteName(template.name);
-    setPlanTotalDistanceKm(template.distanceKm);
 
-    // Determine if Road or Flight
+    const effectiveOrigin = selectedPlanningOrder?.origin || template.origin;
+    const effectiveDest = selectedPlanningOrder?.destination || template.destination;
+    const geoCheck = buildEquineRoute(
+      effectiveOrigin,
+      effectiveDest,
+      selectedPlanningOrder?.transportMode === 'road' ? 'road' : 'air'
+    );
     const normName = normalizeVietnamese(template.name);
-    const isFlight = normName.includes('hang khong') || normName.includes('air') || normName.includes('bay');
+    const isFlight =
+      selectedPlanningOrder?.transportMode === 'air' ||
+      (selectedPlanningOrder?.transportMode !== 'road' &&
+        (normName.includes('hang khong') ||
+          normName.includes('air') ||
+          normName.includes('bay') ||
+          geoCheck.mode === 'air'));
 
     if (!isFlight) {
-      // Overland Road: 1 single direct road leg!
+      const defaultVehicle = pickDefaultRoadVehicle(selectedPlanningOrder);
       const singleRoadLeg: RouteLegItem = {
         sequenceNo: 1,
         legType: 'road',
-        originLocation: selectedPlanningOrder?.origin || template.origin,
-        destinationLocation: selectedPlanningOrder?.destination || template.destination,
+        originLocation: effectiveOrigin,
+        destinationLocation: effectiveDest,
         distanceKm: template.distanceKm,
         durationHours: Math.max(1, Math.round(template.distanceKm / 60)),
-        vehiclePlate: vehicles.find((v) => v.status === 'available')?.code || '60C-555.33',
+        vehiclePlate: defaultVehicle.vehiclePlate,
+        vehicleId: defaultVehicle.vehicleId,
       };
-      setLegs([singleRoadLeg]);
+      const scheduled = applyDefaultScheduleToLegs([singleRoadLeg], selectedPlanningOrder);
+      setLegs(scheduled);
+      setPlanTotalDistanceKm(sumLegsDistanceKm(scheduled, template.distanceKm));
     } else {
-      // Air Flight: 3 legs (Road to airport -> Flight -> Road to destination)
-      const { depName, depCargoName, arrName, airlineName } = resolveAirLegLocations(
+      const built = buildMultimodalAirLegs(
+        effectiveOrigin,
+        effectiveDest,
+        selectedPlanningOrder?.horseCount || 1,
         selectedPlanningOrder,
         template.stops
       );
-
-      const airLegs: RouteLegItem[] = [
-        {
-          sequenceNo: 1,
-          legType: 'road',
-          originLocation: selectedPlanningOrder?.origin || template.origin,
-          destinationLocation: depCargoName,
-          distanceKm: 45,
-          durationHours: 2,
-          vehiclePlate: vehicles.find((v) => v.status === 'available')?.code || 'TRK-VN-089',
-        },
-        {
-          sequenceNo: 2,
-          legType: 'flight',
-          originLocation: depName,
-          destinationLocation: arrName,
-          airlineName: airlineName,
-          flightNumber: '',
-          bookingReference: '',
-          stallsBooked: selectedPlanningOrder?.horseCount || 1,
-          durationHours: 2.5,
-        },
-        {
-          sequenceNo: 3,
-          legType: 'road',
-          originLocation: arrName,
-          destinationLocation: selectedPlanningOrder?.destination || template.destination,
-          distanceKm: 35,
-          durationHours: 1.5,
-          vehiclePlate: `Xe từ ${(selectedPlanningOrder?.destination || template.destination).split(',')[0].trim()} đến đón (Bên nhận tự rước)`,
-        },
-      ];
-      setLegs(airLegs);
+      setLegs(built);
+      setPlanTotalDistanceKm(sumLegsDistanceKm(built, template.distanceKm));
     }
 
     // Sync all stops from template (clears stops if template has 0 stops)
@@ -484,7 +739,7 @@ export default function RoutePlanningPage() {
       setStops([]);
     }
 
-    toast.success(`Đã đồng bộ tuyến "${template.name}"! Bạn có thể chỉnh sửa biển số xe và mọi thông tin bên dưới.`);
+    toast.success(language === 'en' ? `Synced route "${template.name}"! You can edit vehicle plate and details below.` : `Đã đồng bộ tuyến "${template.name}"! Bạn có thể chỉnh sửa biển số xe và mọi thông tin bên dưới.`);
   };
 
   // Open Step 1b Detail Plan Builder (with smart template matching when origin & destination match)
@@ -492,17 +747,23 @@ export default function RoutePlanningPage() {
     setSelectedPlanningOrder(order);
     const existingRoute = order.routeDetail;
 
-    setNotes(existingRoute?.strategicNotes || 'Nhiệt độ khoang xe 18°C. Cung cấp nước điện giải sau mỗi 3 giờ.');
+    setNotes(existingRoute?.strategicNotes || (language === 'en' ? 'Compartment temperature 18°C. Provide electrolyte water every 3 hours.' : 'Nhiệt độ khoang xe 18°C. Cung cấp nước điện giải sau mỗi 3 giờ.'));
 
     // If order already has saved legs in DB, preserve them but sanitize any generic airport placeholder
     if (existingRoute?.legs && existingRoute.legs.length > 0) {
       setPlanRouteName(
         existingRoute.routeName ||
-          `Hành lang vận chuyển: ${order.origin.split(',')[0]} → ${order.destination.split(',')[0]}`
+          `Hành lang vận chuyển: ${(order.origin || '').split(',')[0]} → ${(order.destination || '').split(',')[0]}`
       );
-      setPlanTotalDistanceKm(existingRoute.totalDistanceKm || 500);
 
-      const { arrName, depName } = resolveAirLegLocations(order, existingRoute.stops);
+      const { arrName, depName, airlineName } = resolveAirLegLocations(order, existingRoute.stops);
+      const geoRoute = buildEquineRoute(
+        order.origin,
+        order.destination,
+        order.transportMode === 'road' ? 'road' : 'air'
+      );
+      const flightPreview = geoRoute.legs.find((l) => l.type === 'air');
+
       const sanitizedLegs = existingRoute.legs.map((leg) => {
         let dest = leg.destinationLocation;
         let orig = leg.originLocation;
@@ -514,6 +775,24 @@ export default function RoutePlanningPage() {
           if (orig.includes('Sân bay') && orig.includes('Origin')) {
             orig = depName;
           }
+          const airlineMeta = resolveAirlineMeta(leg.airlineName || airlineName, order);
+          const depMeta = resolveAirportMeta(orig, leg.departureAirportId ?? existingRoute.managerDepartureAirportId, leg.departureAirportCode ?? existingRoute.managerDepartureAirportCode, true);
+          const arrMeta = resolveAirportMeta(dest, leg.arrivalAirportId ?? existingRoute.managerArrivalAirportId, leg.arrivalAirportCode ?? existingRoute.managerArrivalAirportCode, false);
+          return {
+            ...leg,
+            originLocation: orig,
+            destinationLocation: dest,
+            airlineId: leg.airlineId ?? airlineMeta.airlineId,
+            airlineName: leg.airlineName || airlineMeta.airlineName,
+            departureAirportId: leg.departureAirportId ?? depMeta.airportId,
+            departureAirportCode: leg.departureAirportCode || depMeta.iataCode,
+            arrivalAirportId: leg.arrivalAirportId ?? arrMeta.airportId,
+            arrivalAirportCode: leg.arrivalAirportCode || arrMeta.iataCode,
+            flightNumber: leg.flightNumber || `${depMeta.iataCode}-${arrMeta.iataCode}-CARGO`,
+            bookingReference: leg.bookingReference || `AWB-${order.requestCode}-${arrMeta.iataCode}`,
+            stallsBooked: Math.max(Number(leg.stallsBooked || 0), Number(order.horseCount || 1)),
+            distanceKm: leg.distanceKm || flightPreview?.distanceKm || 1150,
+          };
         }
         if (leg.legType === 'road') {
           if (orig.includes('đích đến') || orig.includes('SIN / BKK')) {
@@ -523,7 +802,9 @@ export default function RoutePlanningPage() {
         return { ...leg, destinationLocation: dest, originLocation: orig };
       });
 
-      setLegs(sanitizedLegs);
+      const scheduledExisting = applyDefaultScheduleToLegs(sanitizedLegs, order);
+      setLegs(scheduledExisting);
+      setPlanTotalDistanceKm(sumLegsDistanceKm(scheduledExisting, existingRoute.totalDistanceKm || 500));
       setStops(existingRoute.stops && existingRoute.stops.length > 0 ? existingRoute.stops : []);
     } else {
       // Check if template was passed OR matches origin and destination!
@@ -531,62 +812,46 @@ export default function RoutePlanningPage() {
 
       if (matched) {
         setPlanRouteName(matched.name);
-        setPlanTotalDistanceKm(matched.distanceKm);
 
+        const geoCheck = buildEquineRoute(
+          order.origin,
+          order.destination,
+          order.transportMode === 'road' ? 'road' : 'air'
+        );
         const normName = normalizeVietnamese(matched.name);
-        const isFlight = normName.includes('hang khong') || normName.includes('air') || normName.includes('bay');
+        const isFlight =
+          order.transportMode === 'air' ||
+          (order.transportMode !== 'road' &&
+            (normName.includes('hang khong') ||
+              normName.includes('air') ||
+              normName.includes('bay') ||
+              geoCheck.mode === 'air'));
 
         if (!isFlight) {
-          // 1 Single road leg
-          setLegs([
-            {
-              sequenceNo: 1,
-              legType: 'road',
-              originLocation: order.origin,
-              destinationLocation: order.destination,
-              distanceKm: matched.distanceKm,
-              durationHours: Math.max(1, Math.round(matched.distanceKm / 60)),
-              vehiclePlate: vehicles.find((v) => v.status === 'available')?.code || '60C-555.33',
-            },
-          ]);
+          const defaultVehicle = pickDefaultRoadVehicle(order);
+          const singleRoadLeg: RouteLegItem = {
+            sequenceNo: 1,
+            legType: 'road',
+            originLocation: order.origin,
+            destinationLocation: order.destination,
+            distanceKm: matched.distanceKm,
+            durationHours: Math.max(1, Math.round(matched.distanceKm / 60)),
+            vehiclePlate: defaultVehicle.vehiclePlate,
+            vehicleId: defaultVehicle.vehicleId,
+          };
+          const scheduled = applyDefaultScheduleToLegs([singleRoadLeg], order);
+          setLegs(scheduled);
+          setPlanTotalDistanceKm(sumLegsDistanceKm(scheduled, matched.distanceKm));
         } else {
-          // Flight 3 legs (Road to airport -> Flight -> Road to stable)
-          const { depName, depCargoName, arrName, airlineName } = resolveAirLegLocations(
+          const built = buildMultimodalAirLegs(
+            order.origin,
+            order.destination,
+            order.horseCount,
             order,
             matched.stops
           );
-
-          setLegs([
-            {
-              sequenceNo: 1,
-              legType: 'road',
-              originLocation: order.origin,
-              destinationLocation: depCargoName,
-              distanceKm: 45,
-              durationHours: 2,
-              vehiclePlate: vehicles.find((v) => v.status === 'available')?.code || 'TRK-VN-089',
-            },
-            {
-              sequenceNo: 2,
-              legType: 'flight',
-              originLocation: depName,
-              destinationLocation: arrName,
-              airlineName: airlineName,
-              flightNumber: '',
-              bookingReference: '',
-              stallsBooked: order.horseCount,
-              durationHours: 2.5,
-            },
-            {
-              sequenceNo: 3,
-              legType: 'road',
-              originLocation: arrName,
-              destinationLocation: order.destination,
-              distanceKm: 35,
-              durationHours: 1.5,
-              vehiclePlate: `Xe từ ${order.destination.split(',')[0].trim()} đến đón (Bên nhận tự rước)`,
-            },
-          ]);
+          setLegs(built);
+          setPlanTotalDistanceKm(sumLegsDistanceKm(built, matched.distanceKm));
         }
 
         // Sync stops: match template stops exactly, clear if template has 0 stops
@@ -603,93 +868,91 @@ export default function RoutePlanningPage() {
           setStops([]);
         }
       } else {
-        // Fallback default: If both in Vietnam -> 1 road leg!
-        const normOo = normalizeVietnamese(order.origin);
-        const normOd = normalizeVietnamese(order.destination);
-        const isAbroad =
-          normOo.includes('singapore') ||
-          normOd.includes('singapore') ||
-          normOo.includes('bangkok') ||
-          normOd.includes('bangkok') ||
-          normOo.includes('malaysia') ||
-          normOd.includes('malaysia') ||
-          normOo.includes('indonesia') ||
-          normOd.includes('indonesia') ||
-          normOo.includes('kalimantan') ||
-          normOd.includes('kalimantan');
+        const geoPreview = buildEquineRoute(
+          order.origin,
+          order.destination,
+          order.transportMode === 'road' ? 'road' : 'air'
+        );
+        const shouldUseAir =
+          geoPreview.mode === 'air' &&
+          (order.transportMode === 'air' || (order.transportMode !== 'road' && !geoPreview.isDomestic));
 
-        setPlanRouteName(`Hành lang vận chuyển: ${order.origin.split(',')[0]} → ${order.destination.split(',')[0]}`);
-        setPlanTotalDistanceKm(isAbroad ? 850 : 250);
+        setPlanRouteName(`Hành lang vận chuyển: ${(order.origin || '').split(',')[0]} → ${(order.destination || '').split(',')[0]}`);
 
-        if (!isAbroad) {
-          // Pure domestic road default (1 leg!)
-          setLegs([
-            {
-              sequenceNo: 1,
-              legType: 'road',
-              originLocation: order.origin,
-              destinationLocation: order.destination,
-              distanceKm: 120,
-              durationHours: 3,
-              vehiclePlate: vehicles.find((v) => v.status === 'available')?.code || '60C-555.33',
-            },
-          ]);
-          setStops([]);
+        if (!shouldUseAir) {
+          const defaultVehicle = pickDefaultRoadVehicle(order);
+          const roadDist = geoPreview.distanceKm || (geoPreview.isDomestic ? 250 : 850);
+          const singleRoadLeg: RouteLegItem = {
+            sequenceNo: 1,
+            legType: 'road',
+            originLocation: order.origin,
+            destinationLocation: order.destination,
+            distanceKm: roadDist,
+            durationHours: Math.max(2, Math.round(geoPreview.durationHours || 3)),
+            vehiclePlate: defaultVehicle.vehiclePlate,
+            vehicleId: defaultVehicle.vehicleId,
+          };
+          const scheduled = applyDefaultScheduleToLegs([singleRoadLeg], order);
+          setLegs(scheduled);
+          setPlanTotalDistanceKm(sumLegsDistanceKm(scheduled, roadDist));
+
+          const inferredStops: RouteStopItem[] = geoPreview.waypoints
+            .filter((w) => w.type === 'checkpoint' || w.type === 'rest')
+            .map((w, idx) => ({
+              sequenceNo: idx + 1,
+              stopType: w.type === 'checkpoint' ? 'border_check' : 'rest',
+              locationName: w.name,
+              country: w.country,
+            }));
+          setStops(inferredStops);
         } else {
-          // International default (3 legs)
-          const { depName, depCargoName, arrName, airlineName } = resolveAirLegLocations(order);
+          const { depName, arrName } = resolveAirLegLocations(order);
+          const airLeg = geoPreview.legs.find((l) => l.type === 'air');
+          const builtLegs = buildMultimodalAirLegs(
+            order.origin,
+            order.destination,
+            order.horseCount,
+            order,
+            undefined,
+            airLeg?.durationHours ?? 2.5
+          );
+          setLegs(builtLegs);
+          setPlanTotalDistanceKm(sumLegsDistanceKm(builtLegs, geoPreview.distanceKm || 1200));
 
-          setLegs([
-            {
-              sequenceNo: 1,
-              legType: 'road',
-              originLocation: order.origin,
-              destinationLocation: depCargoName,
-              distanceKm: 45,
-              durationHours: 2,
-              vehiclePlate: vehicles.find((v) => v.status === 'available')?.code || 'TRK-VN-089',
-            },
-            {
-              sequenceNo: 2,
-              legType: 'flight',
-              originLocation: depName,
-              destinationLocation: arrName,
-              airlineName: airlineName,
-              flightNumber: '',
-              bookingReference: '',
-              stallsBooked: order.horseCount,
-              durationHours: 2.5,
-            },
-            {
-              sequenceNo: 3,
-              legType: 'road',
-              originLocation: arrName,
-              destinationLocation: order.destination,
-              distanceKm: 32,
-              durationHours: 1.5,
-              vehiclePlate: `Xe từ ${order.destination.split(',')[0].trim()} đến đón (Bên nhận tự rước)`,
-            },
-          ]);
-          setStops([
-            {
-              sequenceNo: 1,
+          const defaultStops: RouteStopItem[] = [];
+          let stopSeq = 1;
+          if (!isAirportLocationText(order.origin)) {
+            defaultStops.push({
+              sequenceNo: stopSeq++,
               stopType: 'rest',
-              locationName: 'Trạm dừng chân Củ Chi (Điểm chuẩn bị & tải ngựa)',
-              country: 'Việt Nam',
-            },
-            {
-              sequenceNo: 2,
-              stopType: 'quarantine',
-              locationName: 'Trung tâm Kiểm dịch Động vật Cảng Hàng không SGN',
-              country: 'Việt Nam',
-            },
-            {
-              sequenceNo: 3,
+              locationName:
+                language === 'en'
+                  ? `${order.origin.split(',')[0].trim()} Pickup & Prep`
+                  : `Điểm tập kết ${(order.origin || '').split(',')[0].trim()} - Đón & tải ngựa lên xe thùng`,
+              country: geoPreview.origin.country || (language === 'en' ? 'Vietnam' : 'Việt Nam'),
+            });
+          }
+          defaultStops.push({
+            sequenceNo: stopSeq++,
+            stopType: 'quarantine',
+            locationName:
+              language === 'en'
+                ? `${depName} Animal Quarantine Center`
+                : `Trung tâm Kiểm dịch Động vật ${depName}`,
+            country: geoPreview.origin.country || (language === 'en' ? 'Vietnam' : 'Việt Nam'),
+          });
+          if (!geoPreview.isDomestic) {
+            defaultStops.push({
+              sequenceNo: stopSeq++,
               stopType: 'border_check',
-              locationName: 'Trạm Kiểm dịch Cửa khẩu Hàng không Changi (AVS Singapore)',
-              country: 'Singapore',
-            },
-          ]);
+              locationName:
+                language === 'en'
+                  ? `${arrName} Border Quarantine Gate`
+                  : `Trạm Kiểm dịch Cửa khẩu ${arrName}`,
+              country: geoPreview.destination.country || 'International',
+            });
+          }
+          setStops(defaultStops);
         }
       }
     }
@@ -703,36 +966,106 @@ export default function RoutePlanningPage() {
     if (type === 'road') {
       const isAfterFlight = legs.some((l) => l.legType === 'flight');
       const destClean = (selectedPlanningOrder?.destination || 'Địa điểm đích').split(',')[0].trim();
+      const defaultVehicle = pickDefaultRoadVehicle(selectedPlanningOrder);
       const defaultPlate = isAfterFlight
-        ? `Xe từ ${destClean} đến đón (Bên nhận tự rước)`
-        : (vehicles[0]?.code || 'TRK-VN-089');
-      setLegs([
-        ...legs,
-        {
-          sequenceNo: nextSeq,
-          legType: 'road',
-          originLocation: legs.length > 0 ? legs[legs.length - 1].destinationLocation : 'Điểm tập kết',
-          destinationLocation: isAfterFlight ? (selectedPlanningOrder?.destination || 'Địa điểm đích') : 'Điểm đến chặng đường bộ',
-          distanceKm: isAfterFlight ? 35 : 120,
-          durationHours: isAfterFlight ? 1.5 : 3,
-          vehiclePlate: defaultPlate,
-        },
-      ]);
+        ? (language === 'en' ? `Vehicle from ${destClean} - Consignee pickup` : `Xe từ ${destClean} đến đón (Bên nhận tự rước)`)
+        : defaultVehicle.vehiclePlate;
+      const nextLegs = applyDefaultScheduleToLegs(
+        [
+          ...legs,
+          {
+            sequenceNo: nextSeq,
+            legType: 'road',
+            originLocation: legs.length > 0 ? legs[legs.length - 1].destinationLocation : (language === 'en' ? 'Assembly Point' : 'Điểm tập kết'),
+            destinationLocation: isAfterFlight ? (selectedPlanningOrder?.destination || (language === 'en' ? 'Destination' : 'Địa điểm đích')) : (language === 'en' ? 'Road Leg Destination' : 'Điểm đến chặng đường bộ'),
+            distanceKm: isAfterFlight ? 35 : 120,
+            durationHours: isAfterFlight ? 1.5 : 3,
+            vehiclePlate: defaultPlate,
+            vehicleId: isAfterFlight ? null : defaultVehicle.vehicleId,
+            roadTripId: isAfterFlight ? null : undefined,
+          },
+        ],
+        selectedPlanningOrder
+      );
+      setLegs(nextLegs);
+      setPlanTotalDistanceKm(sumLegsDistanceKm(nextLegs, planTotalDistanceKm));
     } else {
-      setLegs([
-        ...legs,
-        {
-          sequenceNo: nextSeq,
-          legType: 'flight',
-          originLocation: 'Sân bay xuất phát (SGN)',
-          destinationLocation: 'Sân bay hạ cánh (SIN)',
-          airlineName: airlines[0]?.name || 'Singapore Airlines Cargo',
-          flightNumber: 'SQ-Cargo',
-          bookingReference: 'BK-AIR-TBD',
-          stallsBooked: selectedPlanningOrder?.horseCount || 1,
-          durationHours: 3,
-        },
-      ]);
+      const { depName, depCargoName, arrName, airlineName } = resolveAirLegLocations(
+        selectedPlanningOrder,
+        stops
+      );
+      const airlineMeta = resolveAirlineMeta(airlineName, selectedPlanningOrder);
+      const depMeta = resolveAirportMeta(
+        depName,
+        selectedPlanningOrder?.routeDetail?.managerDepartureAirportId,
+        selectedPlanningOrder?.routeDetail?.managerDepartureAirportCode,
+        true
+      );
+      const arrMeta = resolveAirportMeta(
+        arrName,
+        selectedPlanningOrder?.routeDetail?.managerArrivalAirportId,
+        selectedPlanningOrder?.routeDetail?.managerArrivalAirportCode,
+        false
+      );
+      const flightBase = {
+        legType: 'flight' as const,
+        originLocation: depName,
+        destinationLocation: arrName,
+        airlineId: airlineMeta.airlineId,
+        airlineName: airlineMeta.airlineName,
+        departureAirportId: depMeta.airportId,
+        departureAirportCode: depMeta.iataCode,
+        arrivalAirportId: arrMeta.airportId,
+        arrivalAirportCode: arrMeta.iataCode,
+        flightNumber: `${depMeta.iataCode}-${arrMeta.iataCode}-CARGO`,
+        bookingReference: `AWB-${selectedPlanningOrder?.requestCode || 'AIR'}-${arrMeta.iataCode}`,
+        stallsBooked: selectedPlanningOrder?.horseCount || 1,
+        distanceKm: 1150,
+        durationHours: 3,
+      };
+
+      if (legs.length === 0 && selectedPlanningOrder?.origin && !isAirportLocationText(selectedPlanningOrder.origin)) {
+        const defaultVehicle = pickDefaultRoadVehicle(selectedPlanningOrder);
+        const nextLegs = applyDefaultScheduleToLegs(
+          [
+            {
+              sequenceNo: 1,
+              legType: 'road',
+              originLocation: selectedPlanningOrder.origin,
+              destinationLocation: depCargoName,
+              distanceKm: 45,
+              durationHours: 2,
+              vehiclePlate: defaultVehicle.vehiclePlate,
+              vehicleId: defaultVehicle.vehicleId,
+            },
+            {
+              sequenceNo: 2,
+              ...flightBase,
+            },
+          ],
+          selectedPlanningOrder
+        );
+        setLegs(nextLegs);
+        setPlanTotalDistanceKm(sumLegsDistanceKm(nextLegs, planTotalDistanceKm));
+        toast.success(
+          language === 'en'
+            ? 'Automatically added Leg 1 (Horse Truck transfer to airport) before the flight leg.'
+            : 'Đã tự động thêm Chặng 1 (Xe thùng chở ngựa ra sân bay) trước chặng bay.'
+        );
+      } else {
+        const nextLegs = applyDefaultScheduleToLegs(
+          [
+            ...legs,
+            {
+              sequenceNo: nextSeq,
+              ...flightBase,
+            },
+          ],
+          selectedPlanningOrder
+        );
+        setLegs(nextLegs);
+        setPlanTotalDistanceKm(sumLegsDistanceKm(nextLegs, planTotalDistanceKm));
+      }
     }
   };
 
@@ -740,6 +1073,7 @@ export default function RoutePlanningPage() {
   const handleRemoveLeg = (idx: number) => {
     const updated = legs.filter((_, i) => i !== idx).map((l, i) => ({ ...l, sequenceNo: i + 1 }));
     setLegs(updated);
+    setPlanTotalDistanceKm(sumLegsDistanceKm(updated, planTotalDistanceKm));
   };
 
   // Add Stop
@@ -755,14 +1089,14 @@ export default function RoutePlanningPage() {
           country: masterStop.country,
         },
       ]);
-      toast.success(`Đã thêm trạm "${masterStop.name}" vào lộ trình!`);
+      toast.success(language === 'en' ? `Added stop "${masterStop.name}" to route!` : `Đã thêm trạm "${masterStop.name}" vào lộ trình!`);
     } else {
       setStops([
         ...stops,
         {
           sequenceNo: nextSeq,
           stopType: 'rest',
-          locationName: 'Trạm dừng nghỉ mới',
+          locationName: language === 'en' ? 'New Rest Stop' : 'Trạm dừng nghỉ mới',
           country: 'Vietnam',
         },
       ]);
@@ -778,31 +1112,37 @@ export default function RoutePlanningPage() {
   // Cho phép Coordinator reset về form trống chuẩn để tự điền hoàn toàn từ đầu
   const handleResetToManualForm = () => {
     if (!selectedPlanningOrder) return;
-    setPlanRouteName(`Lộ trình: ${selectedPlanningOrder.origin.split(',')[0]} → ${selectedPlanningOrder.destination.split(',')[0]}`);
-    setPlanTotalDistanceKm(180);
-    setLegs([
-      {
-        sequenceNo: 1,
-        legType: 'road',
-        originLocation: selectedPlanningOrder.origin,
-        destinationLocation: selectedPlanningOrder.destination,
-        distanceKm: 180,
-        durationHours: 3.5,
-        vehiclePlate: vehicles.find((v) => v.status === 'available')?.code || '60C-555.33',
-      },
-    ]);
+    const defaultVehicle = pickDefaultRoadVehicle(selectedPlanningOrder);
+    setPlanRouteName(`Lộ trình: ${(selectedPlanningOrder.origin || '').split(',')[0]} → ${(selectedPlanningOrder.destination || '').split(',')[0]}`);
+    const manualLegs = applyDefaultScheduleToLegs(
+      [
+        {
+          sequenceNo: 1,
+          legType: 'road',
+          originLocation: selectedPlanningOrder.origin,
+          destinationLocation: selectedPlanningOrder.destination,
+          distanceKm: 180,
+          durationHours: 3.5,
+          vehiclePlate: defaultVehicle.vehiclePlate,
+          vehicleId: defaultVehicle.vehicleId,
+        },
+      ],
+      selectedPlanningOrder
+    );
+    setLegs(manualLegs);
+    setPlanTotalDistanceKm(sumLegsDistanceKm(manualLegs, 180));
     setStops([]);
-    toast.success('Đã làm mới form kế hoạch. Bạn có thể tự do điền và chỉnh sửa mọi thông tin!');
+    toast.success(language === 'en' ? 'Reset route plan form. You can freely fill in all details!' : 'Đã làm mới form kế hoạch. Bạn có thể tự do điền và chỉnh sửa mọi thông tin!');
   };
 
   // Lưu lộ trình đang điền thành một Tuyến mẫu mới vào Thư viện ngay trong Modal
   const handleSaveCurrentPlanAsTemplate = () => {
     if (!planRouteName.trim()) {
-      toast.error('Vui lòng nhập tên lộ trình trước khi lưu vào Thư viện mẫu!');
+      toast.error(language === 'en' ? 'Please enter route template name before saving to library!' : 'Vui lòng nhập tên lộ trình trước khi lưu vào Thư viện mẫu!');
       return;
     }
-    const orig = legs[0]?.originLocation || selectedPlanningOrder?.origin || 'Điểm xuất phát';
-    const dest = legs[legs.length - 1]?.destinationLocation || selectedPlanningOrder?.destination || 'Điểm đích';
+    const orig = legs[0]?.originLocation || selectedPlanningOrder?.origin || (language === 'en' ? 'Origin' : 'Điểm xuất phát');
+    const dest = legs[legs.length - 1]?.destinationLocation || selectedPlanningOrder?.destination || (language === 'en' ? 'Destination' : 'Điểm đích');
 
     const newTemplate = addRoute({
       name: planRouteName.trim(),
@@ -812,32 +1152,33 @@ export default function RoutePlanningPage() {
       distanceKm: Number(planTotalDistanceKm) || 300,
       stops: stops.map((s, idx) => ({
         seq: idx + 1,
-        name: s.locationName || `Trạm dừng ${idx + 1}`,
+        name: s.locationName || (language === 'en' ? `Stop ${idx + 1}` : `Trạm dừng ${idx + 1}`),
         type: s.stopType === 'quarantine' ? 'Quarantine' : s.stopType === 'border_check' ? 'Border Gate' : 'Rest',
-        country: s.country || 'Việt Nam',
+        country: s.country || (language === 'en' ? 'Vietnam' : 'Việt Nam'),
       })),
       status: 'active',
     });
 
-    toast.success(`Đã lưu "${newTemplate.name}" vào Thư viện Tuyến Mẫu thành công! Các đơn hàng sau có thể tái sử dụng.`);
+    toast.success(language === 'en' ? `Saved "${newTemplate.name}" to Route Templates Library successfully!` : `Đã lưu "${newTemplate.name}" vào Thư viện Tuyến Mẫu thành công! Các đơn hàng sau có thể tái sử dụng.`);
   };
 
   // Save Plan as Draft (Bước 1b)
   const handleSaveDraft = async () => {
-    if (!selectedPlanningOrder) return;
+    if (!selectedPlanningOrder || isSubmittingPlan) return;
     setIsSubmittingPlan(true);
     try {
       await routesApi.buildDetailedPlan(selectedPlanningOrder.id, {
         routeName: planRouteName,
-        totalDistanceKm: Number(planTotalDistanceKm) || 500,
+        totalDistanceKm: Number(planTotalDistanceKm) || sumLegsDistanceKm(legs, 500),
         legs,
         stops,
+        notes: notes.trim() || undefined,
       });
-      toast.success('Đã lưu bản nháp lộ trình chi tiết thành công!');
+      toast.success(t('coordinator.routes.saveDraftSuccess', 'Đã lưu bản nháp lộ trình chi tiết thành công!'));
       setIsDetailModalOpen(false);
       await loadMasterDataAndOrders();
     } catch (err: any) {
-      toast.error(err?.message || 'Lỗi khi lưu bản nháp lộ trình');
+      toast.error(err?.message || t('coordinator.routes.errSaveDraft', 'Lỗi khi lưu bản nháp lộ trình'));
     } finally {
       setIsSubmittingPlan(false);
     }
@@ -845,9 +1186,100 @@ export default function RoutePlanningPage() {
 
   // Submit Plan for Approval (Bước 1b -> Manager duyệt Bước 2)
   const handleSubmitForApproval = async () => {
-    if (!selectedPlanningOrder) return;
+    if (!selectedPlanningOrder || isSubmittingPlan) return;
     if (legs.length === 0) {
-      toast.error('Vui lòng dựng ít nhất 1 chặng vận chuyển trước khi gửi duyệt!');
+      toast.error(t('coordinator.routes.errNeedOneLeg', 'Vui lòng dựng ít nhất 1 chặng vận chuyển trước khi gửi duyệt!'));
+      return;
+    }
+
+    const sortedLegs = [...legs].sort((a, b) => Number(a.sequenceNo) - Number(b.sequenceNo));
+    const firstFlightIdx = sortedLegs.findIndex((l) => l.legType === 'flight');
+    if (firstFlightIdx !== -1) {
+      let lastFlightIdx = firstFlightIdx;
+      for (let i = sortedLegs.length - 1; i >= 0; i--) {
+        if (sortedLegs[i].legType === 'flight') {
+          lastFlightIdx = i;
+          break;
+        }
+      }
+      if (!isAirportLocationText(selectedPlanningOrder.origin)) {
+        const hasPickupRoadLeg = sortedLegs.slice(0, firstFlightIdx).some((l) => l.legType === 'road');
+        if (!hasPickupRoadLeg) {
+          toast.error(
+            language === 'en'
+              ? 'Air shipments from a farm/stable require a Horse Truck road leg to the departure airport before the flight leg.'
+              : 'Đơn đi hàng không bắt buộc phải có chặng Xe thùng đường bộ chở ngựa từ điểm xuất phát ra sân bay đi trước chặng bay!',
+            { duration: 6000 }
+          );
+          return;
+        }
+      }
+      if (!isAirportLocationText(selectedPlanningOrder.destination)) {
+        const hasDeliveryRoadLeg = sortedLegs.slice(lastFlightIdx + 1).some((l) => l.legType === 'road');
+        if (!hasDeliveryRoadLeg) {
+          toast.error(
+            language === 'en'
+              ? 'Air shipments to a non-airport destination require a Horse Truck road leg from the arrival airport to the final destination after landing.'
+              : 'Đơn đi hàng không bắt buộc phải có chặng Xe thùng đường bộ từ sân bay hạ cánh đưa ngựa về đích đến sau chặng bay!',
+            { duration: 6000 }
+          );
+          return;
+        }
+      }
+    }
+
+    // Kiểm tra giờ khởi hành / đến dự kiến, thông tin xe đường bộ nội bộ và thông tin chuyến bay trước khi gửi duyệt
+    for (let i = 0; i < sortedLegs.length; i++) {
+      const l = sortedLegs[i];
+      const seqLabel = l.sequenceNo || i + 1;
+      const depMs = l.plannedDeparture ? new Date(l.plannedDeparture).getTime() : NaN;
+      const arrMs = l.plannedArrival ? new Date(l.plannedArrival).getTime() : NaN;
+      if (!Number.isFinite(depMs) || !Number.isFinite(arrMs) || arrMs <= depMs) {
+        toast.error(
+          language === 'en'
+            ? `Leg #${seqLabel}: Please enter valid Planned Departure and Planned Arrival times (arrival must be after departure).`
+            : `Chặng #${seqLabel}: Vui lòng kiểm tra Giờ khởi hành và Giờ đến dự kiến (giờ đến phải sau giờ khởi hành)!`,
+          { duration: 6000 }
+        );
+        return;
+      }
+
+      const isPostFlightRoad = l.legType === 'road' && firstFlightIdx !== -1 && i > firstFlightIdx;
+      if (l.legType === 'road' && !isPostFlightRoad && !l.vehiclePlate && !l.vehicleId && !l.roadTripId) {
+        toast.error(
+          language === 'en'
+            ? `Leg #${seqLabel}: Please select a specialized horse truck for the domestic road leg.`
+            : `Chặng #${seqLabel}: Vui lòng chọn phương tiện / xe chuyên dụng cho chặng đường bộ nội địa!`,
+          { duration: 6000 }
+        );
+        return;
+      }
+
+      if (l.legType === 'flight') {
+        if (!l.airlineName?.trim() || !l.flightNumber?.trim() || !l.bookingReference?.trim()) {
+          toast.error(
+            language === 'en'
+              ? `Leg #${seqLabel} (Flight): Please enter Airline, Flight Number, and Booking Reference (AWB) before submitting for approval.`
+              : `Chặng #${seqLabel} (Hàng không): Vui lòng điền đủ Hãng bay, Số hiệu chuyến bay và Mã đặt chỗ (AWB) trước khi gửi duyệt!`,
+            { duration: 6000 }
+          );
+          return;
+        }
+      }
+    }
+
+    // Kiểm tra an toàn sức khỏe ngựa trên chặng đường bộ dài (> 350km hoặc > 4.5 giờ)
+    const hasLongRoadLeg = legs.some(
+      (leg) => leg.legType === 'road' && (Number(leg.distanceKm) > 350 || Number(leg.durationHours) > 4.5)
+    );
+    const hasRestStop = stops.some((s) => s.stopType === 'rest');
+    if (hasLongRoadLeg && !hasRestStop) {
+      toast.error(
+        language === 'en'
+          ? 'Equine Welfare Check: Any road leg exceeding 350km or 4.5 hours requires at least 1 Rest stop for hydration and vital checks!'
+          : 'Đảm bảo an toàn sức khỏe cho ngựa: Chặng đường bộ vượt quá 350km hoặc 4.5 giờ bắt buộc phải có ít nhất 1 Trạm dừng nghỉ để kiểm tra thể trạng và tiếp nước cho ngựa!',
+        { duration: 6000 }
+      );
       return;
     }
 
@@ -856,18 +1288,19 @@ export default function RoutePlanningPage() {
       // 1. Save detailed plan
       await routesApi.buildDetailedPlan(selectedPlanningOrder.id, {
         routeName: planRouteName,
-        totalDistanceKm: Number(planTotalDistanceKm) || 500,
+        totalDistanceKm: Number(planTotalDistanceKm) || sumLegsDistanceKm(legs, 500),
         legs,
         stops,
+        notes: notes.trim() || undefined,
       });
 
       // 2. Submit for approval
       await routesApi.submitPlanForApproval(selectedPlanningOrder.id);
-      toast.success('Đã gửi kế hoạch chi tiết cho Logistics Manager phê duyệt!');
+      toast.success(t('coordinator.routes.submitManagerSuccess', 'Đã gửi kế hoạch chi tiết cho Logistics Manager phê duyệt!'));
       setIsDetailModalOpen(false);
       await loadMasterDataAndOrders();
     } catch (err: any) {
-      toast.error(err?.message || 'Lỗi khi gửi duyệt kế hoạch');
+      toast.error(err?.message || t('coordinator.routes.errSubmitManager', 'Lỗi khi gửi duyệt kế hoạch'));
     } finally {
       setIsSubmittingPlan(false);
     }
@@ -879,25 +1312,25 @@ export default function RoutePlanningPage() {
     try {
       await routesApi.reportIncident(order.id, {
         incidentType: 'traffic_delay',
-        description: 'Tài xế báo cáo: Tuyến đường chính bị phong tỏa / sự cố giao thông, xe không thể tiếp tục di chuyển. Yêu cầu Coordinator hiệu chỉnh lại chặng đường vòng tránh!',
+        description: language === 'en' ? 'Driver reports: Main route blocked / traffic incident, vehicle cannot proceed. Reroute requested.' : 'Tài xế báo cáo: Tuyến đường chính bị phong tỏa / sự cố giao thông, xe không thể tiếp tục di chuyển. Yêu cầu Coordinator hiệu chỉnh lại chặng đường vòng tránh!',
         severity: 'critical',
       });
-      toast.success('Đã kích hoạt báo cáo sự cố từ tài xế! Quyền hiệu chỉnh chặng khẩn cấp đã mở.');
+      toast.success(t('coordinator.routes.incidentTriggerSuccess', 'Đã kích hoạt báo cáo sự cố từ tài xế! Quyền hiệu chỉnh chặng khẩn cấp đã mở.'));
       await loadMasterDataAndOrders();
       try {
         const updatedRoute = await routesApi.getRouteByShipmentId(order.id);
         setSelectedPlanningOrder((prev) => prev ? { ...prev, routeDetail: updatedRoute } : null);
       } catch {}
     } catch (err: any) {
-      toast.error(err?.message || 'Không thể ghi nhận sự cố');
+      toast.error(err?.message || t('coordinator.routes.errRecordIncident', 'Không thể ghi nhận sự cố'));
     }
   };
 
-  // Flow 5: Save Emergency Reroute
-  const handleSaveEmergencyReroute = async () => {
-    if (!selectedPlanningOrder) return;
+  // Flow 5: Save Emergency Reroute & Optionally Submit for Manager Approval under single loading guard
+  const handleSaveEmergencyReroute = async (submitForApproval = true) => {
+    if (!selectedPlanningOrder || isSubmittingPlan) return;
     if (legs.length === 0) {
-      toast.error('Vui lòng dựng ít nhất 1 chặng vận chuyển!');
+      toast.error(t('coordinator.routes.errNeedOneLegGeneral', 'Vui lòng dựng ít nhất 1 chặng vận chuyển!'));
       return;
     }
 
@@ -909,6 +1342,7 @@ export default function RoutePlanningPage() {
         totalDistanceKm: Number(planTotalDistanceKm) || 500,
         legs,
         stops,
+        notes: notes.trim() || undefined,
       });
 
       // 2. Resolve the active incident
@@ -916,22 +1350,45 @@ export default function RoutePlanningPage() {
         await routesApi.resolveIncident(selectedPlanningOrder.routeDetail.activeIncident.id);
       }
 
-      toast.success('Đã lưu lộ trình tránh sự cố thành công! Tài xế đã nhận lộ trình cập nhật mới.');
+      // 3. Submit detour plan for Manager re-approval
+      if (submitForApproval) {
+        await routesApi.submitPlanForApproval(selectedPlanningOrder.id);
+      }
+
+      toast.success(
+        submitForApproval
+          ? t('coordinator.routes.submitDetourSuccess', 'Đã gửi kế hoạch hiệu chỉnh do sự cố cho Manager duyệt!')
+          : t('coordinator.routes.saveDetourSuccess', 'Đã lưu lộ trình tránh sự cố thành công! Tài xế đã nhận lộ trình cập nhật mới.')
+      );
       setIsDetailModalOpen(false);
       await loadMasterDataAndOrders();
     } catch (err: any) {
-      toast.error(err?.message || 'Lỗi khi lưu lộ trình sự cố');
+      toast.error(err?.message || t('coordinator.routes.errSaveDetour', 'Lỗi khi lưu lộ trình sự cố'));
     } finally {
       setIsSubmittingPlan(false);
     }
   };
+
+  // Auto-open shipment if ?shipmentId= is supplied in URL
+  const openDetailRef = useRef(handleOpenDetailModal);
+  openDetailRef.current = handleOpenDetailModal;
+  useEffect(() => {
+    if (!urlShipmentId || planningOrders.length === 0 || openedShipmentRef.current === urlShipmentId) {
+      return;
+    }
+    const target = planningOrders.find((o) => String(o.id) === String(urlShipmentId));
+    if (target) {
+      openedShipmentRef.current = urlShipmentId;
+      openDetailRef.current(target);
+    }
+  }, [urlShipmentId, planningOrders]);
 
   // Flow 5: Resolve Incident directly
   const handleResolveIncidentOnly = async (incidentId?: number) => {
     if (!incidentId) return;
     try {
       await routesApi.resolveIncident(incidentId);
-      toast.success('Đã đánh dấu giải quyết sự cố thành công!');
+      toast.success(t('coordinator.routes.resolveIncidentSuccess', 'Đã đánh dấu giải quyết sự cố thành công!'));
       await loadMasterDataAndOrders();
       if (selectedPlanningOrder) {
         try {
@@ -940,7 +1397,7 @@ export default function RoutePlanningPage() {
         } catch {}
       }
     } catch (err: any) {
-      toast.error(err?.message || 'Không thể giải quyết sự cố');
+      toast.error(err?.message || t('coordinator.routes.errResolveIncident', 'Không thể giải quyết sự cố'));
     }
   };
 
@@ -957,9 +1414,9 @@ export default function RoutePlanningPage() {
   const renderPlanStatusBadge = (status?: string, activeIncident?: any) => {
     if (activeIncident) {
       return (
-        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1.5 shadow-2xs animate-pulse">
+        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1.5 shadow-sm animate-pulse">
           <AlertCircle size={13} className="text-rose-600" />
-          <span>⚠️ Sự cố lộ trình: Cần hiệu chỉnh tuyến</span>
+          <span>⚠️ {t('coordinator.routes.incidentRerouteRequired', 'Sự cố lộ trình: Cần hiệu chỉnh tuyến')}</span>
         </span>
       );
     }
@@ -967,53 +1424,53 @@ export default function RoutePlanningPage() {
     switch (status) {
       case 'in_transit':
         return (
-          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 text-sky-800 border border-sky-300 flex items-center gap-1.5 shadow-2xs">
+          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 text-sky-800 border border-sky-300 flex items-center gap-1.5 shadow-sm">
             <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse" />
             <Truck size={13} className="text-sky-600" />
-            <span>Đang vận chuyển (In Transit)</span>
+            <span>{translateStatus('in_transit')}</span>
           </span>
         );
       case 'completed':
         return (
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
             <CheckCircle2 size={12} className="text-emerald-600" />
-            <span>Đã hoàn thành (Completed)</span>
+            <span>{translateStatus('completed')}</span>
           </span>
         );
       case 'pending_approval':
         return (
-          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1">
-            <Clock size={12} className="animate-spin text-blue-600" /> Chờ Manager duyệt (Pending)
+          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-[#F3EFE4] text-[#181A17] border border-[#EAE5DA] flex items-center gap-1">
+            <Clock size={12} className="animate-spin text-[#A67C2E]" /> {translateStatus('pending_approval')}
           </span>
         );
       case 'approved':
         return (
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-            <CheckCircle2 size={12} className="text-emerald-600" /> Manager đã duyệt (Approved)
+            <CheckCircle2 size={12} className="text-emerald-600" /> {translateStatus('approved')}
           </span>
         );
       case 'confirmed':
         return (
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-teal-100 text-teal-800 border border-teal-200 flex items-center gap-1">
-            <CheckCircle2 size={12} className="text-teal-600" /> Tài xế đã xác nhận (Confirmed)
+            <CheckCircle2 size={12} className="text-teal-600" /> {translateStatus('confirmed')}
           </span>
         );
       case 'ready_to_depart':
         return (
-          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1">
-            <Sparkles size={12} className="text-purple-600" /> Sẵn sàng xuất phát (Ready to depart)
+          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-[#F3EFE4] text-[#181A17] border border-[#EAE5DA] flex items-center gap-1">
+            <Sparkles size={12} className="text-[#A67C2E]" /> {translateStatus('ready_to_depart')}
           </span>
         );
       case 'rejected':
         return (
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200 flex items-center gap-1">
-            <AlertCircle size={12} className="text-red-600" /> Bị trả về (Rejected)
+            <AlertCircle size={12} className="text-red-600" /> {translateStatus('rejected')}
           </span>
         );
       default:
         return (
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1">
-            <Edit size={12} className="text-slate-500" /> Chờ dựng chi tiết (Draft)
+            <Edit size={12} className="text-slate-500" /> {translateStatus('draft')}
           </span>
         );
     }
@@ -1024,57 +1481,82 @@ export default function RoutePlanningPage() {
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-slate-900 m-0">Cross-Border Route Planning</h1>
-            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800">
-              Điều Phối Tuyến &amp; Kế Hoạch Thực Thi
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold text-[#181A17] m-0">{t('coordinator.routes.title', 'Lập Kế Hoạch Tuyến Đường Vận Chuyển')}</h1>
+            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#F3EFE4] text-[#181A17]">
+              {t('coordinator.routes.badge', 'Điều Phối Tuyến & Kế Hoạch Thực Thi')}
             </span>
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            Dựng chi tiết từng chặng vận chuyển (đường bộ, chuyến bay), chọn xe có biển số, trạm dừng nghỉ &amp; gửi duyệt cho Manager.
+            {t('coordinator.routes.subtitle', 'Dựng chi tiết từng chặng vận chuyển (đường bộ, chuyến bay), chọn xe có biển số, trạm dừng nghỉ & gửi duyệt cho Manager.')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Button
+            type="button"
             variant="outline"
-            onClick={loadMasterDataAndOrders}
+            onClick={() => void loadMasterDataAndOrders()}
             disabled={isLoadingOrders}
             className="shadow-sm"
           >
-            <RefreshCw size={15} className={`mr-1.5 text-blue-600 ${isLoadingOrders ? 'animate-spin' : ''}`} />
-            Làm mới dữ liệu
+            <RefreshCw size={15} className={`mr-1.5 text-[#A67C2E] ${isLoadingOrders ? 'animate-spin' : ''}`} />
+            {t('coordinator.routes.refreshBtn', 'Làm mới dữ liệu')}
           </Button>
         </div>
       </div>
 
+      {loadError && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-red-800"
+        >
+          <div className="flex items-center gap-2 font-medium">
+            <AlertCircle size={16} className="text-red-600 shrink-0" />
+            <span>{loadError}</span>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isLoadingOrders}
+            onClick={() => void loadMasterDataAndOrders()}
+            className="border-red-200 bg-white text-red-700 hover:bg-red-100 text-xs"
+          >
+            <RotateCcw size={13} className="mr-1" /> {t('common.retry', language === 'en' ? 'Retry' : 'Thử lại')}
+          </Button>
+        </div>
+      )}
+
       {/* TABS */}
-      <div className="flex border-b border-slate-200 gap-4">
+      <div className="flex flex-wrap border-b border-slate-200 gap-4">
         <button
+          type="button"
           onClick={() => setActiveTab('flow3_planning')}
-          className={`pb-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${
+          className={`pb-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
             activeTab === 'flow3_planning'
-              ? 'border-blue-600 text-blue-600'
+              ? 'border-[#181A17] text-[#A67C2E]'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
           <Navigation size={17} />
-          Lập kế hoạch lộ trình chi tiết
-          <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-700 font-extrabold">
+          {t('coordinator.routes.tabPlanning', 'Lập kế hoạch lộ trình chi tiết')}
+          <span className="px-2 py-0.5 text-xs rounded-full bg-[#FAF8F4] text-[#181A17] font-extrabold">
             {planningOrders.length}
           </span>
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('corridor_catalog')}
-          className={`pb-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${
+          className={`pb-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors cursor-pointer ${
             activeTab === 'corridor_catalog'
-              ? 'border-blue-600 text-blue-600'
+              ? 'border-[#181A17] text-[#A67C2E]'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
           <Layers size={17} />
-          Thư viện Tuyến đường &amp; Bản đồ số
+          {t('coordinator.routes.tabCatalog', 'Thư viện Tuyến đường & Bản đồ số')}
           <span className="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600 font-extrabold">
             {routes.length}
           </span>
@@ -1085,29 +1567,33 @@ export default function RoutePlanningPage() {
       {activeTab === 'flow3_planning' && (
         <div className="flex flex-col gap-5">
           {/* Search bar */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center justify-between">
+          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 w-full sm:w-96">
               <Search size={16} className="text-slate-400 mr-2 shrink-0" />
               <input
                 type="text"
-                placeholder="Tìm mã đơn, tên ngựa, điểm đi, điểm đến..."
+                aria-label={t('coordinator.routes.searchPlaceholder', 'Tìm mã đơn, tên ngựa, điểm đi, điểm đến...')}
+                placeholder={t('coordinator.routes.searchPlaceholder', 'Tìm mã đơn, tên ngựa, điểm đi, điểm đến...')}
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => handleSearchChange(e.target.value)}
                 className="border-none outline-none text-sm w-full bg-transparent"
               />
             </div>
             <div className="text-xs text-slate-500 flex items-center gap-1.5">
-              <span>Định hướng từ Manager</span>
-              <span className="text-slate-400">→</span>
-              <strong className="text-blue-700">Dựng chặng chi tiết</strong>
-              <span className="text-slate-400">→</span>
-              <span>Gửi duyệt</span>
+              <span>{t('coordinator.routes.stepGuide', 'Định hướng từ Manager → Dựng chặng chi tiết → Gửi duyệt')}</span>
             </div>
           </div>
 
           {/* Orders Cards Grid */}
           <div className="flex flex-col gap-4">
-            {filteredOrders.map((order) => {
+            {isLoadingOrders && planningOrders.length === 0 ? (
+              <div className="p-12 text-center bg-white rounded-xl border border-slate-200 shadow-sm text-slate-500">
+                <RefreshCw size={28} className="animate-spin text-[#A67C2E] mx-auto mb-2.5" />
+                <p className="text-sm font-medium m-0">
+                  {t('coordinator.routes.loadingOrders', language === 'en' ? 'Loading route planning orders...' : 'Đang tải danh sách đơn hàng cần lập lộ trình...')}
+                </p>
+              </div>
+            ) : filteredOrders.map((order) => {
               const route = order.routeDetail;
               const planStatus = route?.planStatus || (order.status === 'in_transit' ? 'in_transit' : 'draft');
               const activeIncident = route?.activeIncident;
@@ -1117,18 +1603,18 @@ export default function RoutePlanningPage() {
               return (
                 <div
                   key={order.id}
-                  className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col gap-4 hover:border-blue-300 transition-all"
+                  className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col gap-4 hover:border-[#D4C5A3] transition-all"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                     <div className="flex items-center gap-3">
-                      <span className="font-extrabold text-blue-600 text-sm bg-blue-50 px-2.5 py-1 rounded-md">
+                      <span className="font-extrabold text-[#A67C2E] text-sm bg-[#FAF8F4] px-2.5 py-1 rounded-md">
                         {order.requestCode}
                       </span>
                       <div>
                         <div className="font-bold text-slate-900 text-base m-0 flex items-center gap-2">
-                          {renderHorseNamesDisplay(order.horses, order.horseCount)}
+                          {renderHorseNamesDisplay(order.horses, order.horseCount, t)}
                         </div>
-                        <p className="text-xs text-slate-400 m-0 mt-0.5">Khách hàng: {order.customerName}</p>
+                        <p className="text-xs text-slate-500 m-0 mt-0.5">{t('coordinator.routes.clientPrefix', 'Khách hàng: {name}', { name: order.customerName || '' })}</p>
                       </div>
                     </div>
 
@@ -1136,100 +1622,100 @@ export default function RoutePlanningPage() {
                       {renderPlanStatusBadge(isInTransit ? 'in_transit' : planStatus, activeIncident)}
                       {order.paymentState === 'PAID' && (
                         <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          💳 Đã thanh toán
+                          💳 {language === 'en' ? 'Paid' : 'Đã thanh toán'}
                         </span>
                       )}
                       {order.paymentState === 'PENDING' && (
-                        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                          ⏳ Chờ thanh toán QR
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#FAF8F4] text-[#181A17] border border-[#EAE5DA]">
+                          ⏳ {language === 'en' ? 'Awaiting QR Payment' : 'Chờ thanh toán QR'}
                         </span>
                       )}
                       {order.paymentState === 'AWAITING_CONFIRMATION' && (
                         <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                          🕒 Chờ xác nhận CK
+                          🕒 {language === 'en' ? 'Awaiting Confirmation' : 'Chờ xác nhận CK'}
                         </span>
                       )}
                       {order.paymentState === 'NEEDS_REVIEW' && (
                         <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-orange-50 text-orange-700 border border-orange-200">
-                          ⚠️ Cần kiểm tra TT
+                          ⚠️ {language === 'en' ? 'Payment Review' : 'Cần kiểm tra TT'}
                         </span>
                       )}
                       {order.paymentState === 'EXPIRED' && (
                         <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-50 text-red-700 border border-red-200">
-                          Hết hạn TT
+                          {language === 'en' ? 'Payment Expired' : 'Hết hạn TT'}
                         </span>
                       )}
                       {(order.paymentState === 'WAITING_FLOW2' || order.paymentState === 'DOCUMENTS_APPROVED') && (
                         <span className="px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                          Chưa gửi YC TT
+                          {language === 'en' ? 'Invoice Not Issued' : 'Chưa gửi YC TT'}
                         </span>
                       )}
 
-                      {/* Phân loại nút hành động: Khi đã duyệt/hoàn thành chỉ xem, chỉ mở lại khi gặp sự cố */}
+                      {/* Phân loại nút hành động */}
                       {(() => {
                         const isCompleted = order.status === 'completed' || planStatus === 'completed';
                         const isPlanApproved = planStatus === 'approved' || planStatus === 'confirmed' || planStatus === 'ready_to_depart' || isInTransit || isCompleted;
 
-                        // 1. Trường hợp có sự cố phát sinh từ tài xế (chỉ khi chuyến đi chưa hoàn thành): Mở nút hiệu chỉnh khẩn cấp
                         if (activeIncident && !isCompleted) {
                           return (
                             <Button
+                              type="button"
                               variant="primary"
                               size="sm"
                               onClick={() => handleOpenDetailModal(order)}
                               className="shadow-sm font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 animate-pulse"
-                              title="Tài xế báo sự cố - Bấm để hiệu chỉnh lại chặng khẩn cấp"
+                              title={t('coordinator.routes.driverIncidentTitle', 'Tài xế báo sự cố - Bấm để hiệu chỉnh lại chặng khẩn cấp')}
                             >
                               <AlertCircle size={14} />
-                              <span>Hiệu chỉnh chặng do sự cố</span>
+                              <span>{t('coordinator.routes.incidentRerouteBtn', 'Hiệu chỉnh chặng do sự cố')}</span>
                             </Button>
                           );
                         }
 
-                        // 2. Trường hợp ĐÃ HOÀN THÀNH: Không còn hiệu chỉnh chặng, chỉ xem lại lịch sử lộ trình
                         if (isCompleted) {
                           return (
                             <Button
+                              type="button"
                               variant="outline"
                               size="sm"
                               onClick={() => handleOpenDetailModal(order)}
                               className="shadow-sm font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300 flex items-center gap-1.5"
-                              title="Chuyến đi đã cập bến hoàn thành - Bấm để xem lại lộ trình chi tiết"
+                              title={t('coordinator.routes.completedTripTitle', 'Chuyến đi đã cập bến hoàn thành - Bấm để xem lại lộ trình chi tiết')}
                             >
                               <Eye size={14} className="text-slate-500" />
-                              <span>Xem lộ trình</span>
+                              <span>{t('coordinator.routes.viewRouteBtn', 'Xem lộ trình')}</span>
                             </Button>
                           );
                         }
 
-                        // 3. Trường hợp Manager đã duyệt kế hoạch hoặc đang vận chuyển (và KHÔNG có sự cố): CHỈ HIỂN THỊ NÚT XEM LỘ TRÌNH
                         if (isPlanApproved) {
                           return (
                             <Button
+                              type="button"
                               variant="outline"
                               size="sm"
                               onClick={() => handleOpenDetailModal(order)}
                               className="shadow-sm font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300 flex items-center gap-1.5"
-                              title="Kế hoạch đã được Manager phê duyệt - Bấm để xem chi tiết lộ trình"
+                              title={t('coordinator.routes.approvedTripTitle', 'Kế hoạch đã được Manager phê duyệt - Bấm để xem chi tiết lộ trình')}
                             >
                               <Eye size={14} className="text-slate-500" />
-                              <span>Xem lộ trình</span>
+                              <span>{t('coordinator.routes.viewRouteBtn', 'Xem lộ trình')}</span>
                             </Button>
                           );
                         }
 
-                        // 4. Trường hợp chưa duyệt (Draft / Rejected / Đang chờ duyệt):
                         return (
                           <Button
+                            type="button"
                             variant="primary"
                             size="sm"
                             onClick={() => handleOpenDetailModal(order)}
-                            className="shadow-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                            className="shadow-sm font-semibold bg-[#181A17] hover:bg-[#242722] text-white"
                           >
                             <Edit size={14} className="mr-1.5" />
                             {planStatus === 'draft' || isRejected
-                              ? 'Dựng kế hoạch chi tiết'
-                              : 'Xem & Hiệu chỉnh chặng'}
+                              ? t('coordinator.routes.buildPlanBtn', 'Dựng kế hoạch chi tiết')
+                              : t('coordinator.routes.viewEditLegsBtn', 'Xem & Hiệu chỉnh chặng')}
                           </Button>
                         );
                       })()}
@@ -1237,42 +1723,52 @@ export default function RoutePlanningPage() {
                   </div>
 
                   {/* Manager Strategic Framework Banner */}
-                  <div className="p-3.5 bg-gradient-to-r from-blue-50/70 to-indigo-50/50 rounded-xl border border-blue-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="p-3.5 bg-gradient-to-r from-[#C4B38E]/70 to-[#C4B38E]/50 rounded-xl border border-[#EAE5DA] text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex flex-col gap-1">
-                      <span className="font-extrabold text-blue-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                        <ShieldCheck size={13} className="text-blue-700" />
-                        Khung Kế Hoạch Định Hướng (Từ Logistics Manager)
+                      <span className="font-extrabold text-[#181A17] uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                        <ShieldCheck size={13} className="text-[#181A17]" />
+                        {t('coordinator.routes.frameworkTitle', 'Khung Kế Hoạch Định Hướng (Từ Logistics Manager)')}
                       </span>
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-700">
-                        <span>
-                          Loại xe yêu cầu: <strong className="text-blue-900">{route?.managerVehicleType || 'Xe tải chuyên dụng có stall'}</strong>
-                        </span>
-                        {route?.managerAirlineName && (
-                          <span>
-                            Hãng bay: <strong className="text-blue-900">{route.managerAirlineName}</strong>
-                          </span>
-                        )}
-                        {route?.managerDepartureAirportCode && route?.managerArrivalAirportCode && (
-                          <span>
-                            Sân bay: <strong className="text-blue-900">{route.managerDepartureAirportCode} → {route.managerArrivalAirportCode}</strong>
-                          </span>
-                        )}
-                        {route?.managerMainCorridor && (
-                          <span>
-                            Hành lang: <strong className="text-slate-800">{route.managerMainCorridor}</strong>
-                          </span>
-                        )}
-                      </div>
-                      {route?.strategicNotes && (
-                        <p className="text-[11px] text-slate-600 m-0 mt-0.5 italic">
-                          Chỉ thị của Manager: &quot;{route.strategicNotes}&quot;
+                      {order.hasManagerFramework ? (
+                        <>
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-700">
+                            <span>
+                              {t('coordinator.routes.requiredVehicle', 'Loại xe yêu cầu:')} <strong className="text-[#181A17]">{route?.managerVehicleType ? translateVehicleType(route.managerVehicleType) : translateVehicleType('truck')}</strong>
+                            </span>
+                            {order.transportMode !== 'road' && route?.managerAirlineName && (
+                              <span>
+                                {t('coordinator.routes.airline', 'Hãng bay:')} <strong className="text-[#181A17]">{route.managerAirlineName}</strong>
+                              </span>
+                            )}
+                            {order.transportMode !== 'road' && route?.managerDepartureAirportCode && route?.managerArrivalAirportCode && (
+                              <span>
+                                {t('coordinator.routes.airportPair', 'Sân bay:')} <strong className="text-[#181A17]">{route.managerDepartureAirportCode} → {route.managerArrivalAirportCode}</strong>
+                              </span>
+                            )}
+                            {route?.managerMainCorridor && (
+                              <span>
+                                {t('coordinator.routes.corridor', 'Hành lang:')} <strong className="text-slate-800">{route.managerMainCorridor}</strong>
+                              </span>
+                            )}
+                          </div>
+                          {route?.strategicNotes && (
+                            <p className="text-[11px] text-slate-600 m-0 mt-0.5 italic">
+                              {t('coordinator.routes.managerDirective', 'Chỉ thị của Manager:')} &quot;{route.strategicNotes}&quot;
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-amber-900 font-medium m-0 mt-0.5">
+                          {language === 'en'
+                            ? '⏳ Quote approved — Awaiting Manager Strategic Framework (Step 1a) or Coordinator can pre-draft the detailed route.'
+                            : '⏳ Đơn đã duyệt báo giá — Đang chờ Manager thiết lập khung định hướng (Bước 1a) hoặc Điều phối viên có thể dựng sẵn lộ trình chi tiết.'}
                         </p>
                       )}
                     </div>
 
                     {route?.assignedCoordinatorName && (
                       <div className="text-right shrink-0">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Điều phối viên chỉ định</span>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">{t('coordinator.routes.assignedCoordinator', 'Điều phối viên chỉ định')}</span>
                         <span className="font-bold text-slate-800">{route.assignedCoordinatorName}</span>
                       </div>
                     )}
@@ -1283,7 +1779,7 @@ export default function RoutePlanningPage() {
                     <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-start gap-2">
                       <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
                       <div>
-                        <strong>Yêu cầu chỉnh sửa từ Manager:</strong> {route.rejectionReason}
+                        <strong>{t('coordinator.routes.rejectionAlertTitle', 'Yêu cầu chỉnh sửa từ Manager:')}</strong> {route.rejectionReason}
                       </div>
                     </div>
                   )}
@@ -1291,18 +1787,18 @@ export default function RoutePlanningPage() {
                   {/* Route & Legs Overview */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-50 p-3.5 rounded-lg border border-slate-100">
                     <div>
-                      <span className="text-slate-400 font-bold uppercase text-[10px] block">Lộ trình tổng quát</span>
+                      <span className="text-slate-400 font-bold uppercase text-[10px] block">{t('coordinator.routes.generalRoute', 'Lộ trình tổng quát')}</span>
                       <p className="font-semibold text-slate-800 m-0 mt-0.5">
                         {order.origin} → {order.destination}
                       </p>
                       <p className="text-slate-500 m-0 mt-1">
-                        Tên tuyến: <strong>{route?.routeName || 'Chưa đặt tên'}</strong> • Cự ly: <strong>{route?.totalDistanceKm || 850} km</strong>
+                        {t('coordinator.routes.routeNameLabel', 'Tên tuyến:')} <strong>{route?.routeName || t('coordinator.routes.unnamed', 'Chưa đặt tên')}</strong> • {t('coordinator.routes.distanceLabel', 'Cự ly:')} <strong>{route?.totalDistanceKm || 850} km</strong>
                       </p>
                     </div>
 
                     <div>
                       <span className="text-slate-400 font-bold uppercase text-[10px] block">
-                        Các chặng chi tiết đã dựng ({route?.legs?.length || 0} chặng, {route?.stops?.length || 0} trạm dừng)
+                        {t('coordinator.routes.legsConfigured', 'Các chặng chi tiết đã dựng ({legs} chặng, {stops} trạm dừng)', { legs: route?.legs?.length || 0, stops: route?.stops?.length || 0 })}
                       </span>
                       {route?.legs && route.legs.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5 mt-1">
@@ -1311,19 +1807,19 @@ export default function RoutePlanningPage() {
                               key={leg.sequenceNo}
                               className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
                                 leg.legType === 'flight'
-                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  ? 'bg-[#FAF8F4] text-[#181A17] border-[#EAE5DA]'
                                   : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               }`}
                             >
                               {leg.legType === 'flight' ? '✈️ Bay: ' : '🚚 Xe: '}
                               {leg.legType === 'flight'
                                 ? `${leg.flightNumber || 'Flight'} (${leg.departureAirportCode || 'SGN'} → ${leg.arrivalAirportCode || 'SIN'})`
-                                : `${leg.vehiclePlate || 'Xe tải'}`}
+                                : `${leg.vehiclePlate || (language === 'en' ? 'Truck' : 'Xe tải')}`}
                             </span>
                           ))}
                         </div>
                       ) : (
-                        <p className="text-slate-400 italic m-0 mt-1">Chưa có chặng nào được dựng. Vui lòng bấm &quot;Dựng kế hoạch chi tiết&quot;.</p>
+                        <p className="text-slate-400 italic m-0 mt-1">{t('coordinator.routes.noLegsBuilt', 'Chưa có chặng nào được dựng. Vui lòng bấm "Dựng kế hoạch chi tiết".')}</p>
                       )}
                     </div>
                   </div>
@@ -1331,9 +1827,9 @@ export default function RoutePlanningPage() {
               );
             })}
 
-            {filteredOrders.length === 0 && (
+            {filteredOrders.length === 0 && !isLoadingOrders && (
               <div className="p-12 text-center bg-white rounded-xl border border-slate-200 text-slate-500">
-                Không tìm thấy đơn vận chuyển nào cần lập kế hoạch.
+                {t('coordinator.routes.noOrdersFound', 'Không tìm thấy đơn vận chuyển nào cần lập kế hoạch.')}
               </div>
             )}
           </div>
@@ -1344,85 +1840,89 @@ export default function RoutePlanningPage() {
       {activeTab === 'corridor_catalog' && (
         <div className="flex flex-col gap-6">
           {/* Interactive Free Route Search & Simulation Bar */}
-          <div className="bg-white rounded-xl border border-blue-200 shadow-sm p-5 flex flex-col gap-4">
+          <div className="bg-white rounded-xl border border-[#EAE5DA] shadow-sm p-5 flex flex-col gap-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2 flex-wrap">
-                <Compass className="text-blue-600 shrink-0" size={20} />
+                <Compass className="text-[#A67C2E] shrink-0" size={20} />
                 <span className="font-bold text-base text-slate-900">
-                  Công Cụ Tra Cứu &amp; Mô Phỏng Lộ Trình Tự Do
+                  {t('coordinator.routes.freeSimulationTitle', 'Công Cụ Tra Cứu & Mô Phỏng Lộ Trình Tự Do')}
                 </span>
                 <span className="text-xs font-semibold bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
-                  <span>✨</span> Định tuyến đường bộ thực tế (OSRM)
+                  <span>✨</span> {t('coordinator.routes.osrmBadge', 'Định tuyến đường bộ thực tế')}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
+                  type="button"
                   variant="primary"
                   size="sm"
                   onClick={() => handleOpenSaveTemplateModal(true)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
-                  title="Lưu lộ trình đang tra cứu thành tuyến mẫu trong Thư viện để tái sử dụng sau này"
+                  className="bg-[#181A17] hover:bg-[#242722] text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+                  title={t('coordinator.routes.saveCatalogTitle', 'Lưu lộ trình đang tra cứu thành tuyến mẫu trong Thư viện để tái sử dụng sau này')}
                 >
                   <BookmarkPlus size={15} />
-                  <span>Lưu Tuyến Này Vào Thư Viện</span>
+                  <span>{t('coordinator.routes.saveToCatalogBtn', 'Lưu Tuyến Này Vào Thư Viện')}</span>
                 </Button>
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => setShowMap(!showMap)}
                   className="text-xs h-8"
                 >
-                  {showMap ? 'Thu gọn bản đồ' : 'Mở bản đồ số'}
+                  {showMap ? t('coordinator.routes.collapseMap', 'Thu gọn bản đồ') : t('coordinator.routes.expandMap', 'Mở bản đồ số')}
                 </Button>
               </div>
             </div>
 
             {/* Origin & Destination Free Inputs */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition-all shadow-2xs">
+              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus-within:border-[#C4B38E] focus-within:bg-white transition-all shadow-sm">
                 <span className="mr-2 text-base shrink-0">🟢</span>
                 <div className="flex flex-col w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Điểm xuất phát (Origin)
+                  <label htmlFor="sim-origin-input" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    {t('coordinator.routes.originLabel', 'Điểm xuất phát')}
                   </label>
                   <input
+                    id="sim-origin-input"
                     type="text"
                     value={searchOrigin}
                     onChange={(e) => setSearchOrigin(e.target.value)}
-                    placeholder="Gõ địa chỉ hoặc trang trại (VD: Trang trại Củ Chi, Đà Lạt, Đà Nẵng...)"
+                    placeholder={t('coordinator.routes.originPlaceholder', 'Gõ địa chỉ hoặc trang trại (VD: Trang trại Củ Chi, Đà Lạt, Đà Nẵng...')}
                     className="text-xs font-bold text-slate-800 outline-none bg-transparent w-full"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition-all shadow-2xs">
+              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus-within:border-[#C4B38E] focus-within:bg-white transition-all shadow-sm">
                 <span className="mr-2 text-base shrink-0">🏁</span>
                 <div className="flex flex-col w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Điểm đến (Destination)
+                  <label htmlFor="sim-dest-input" className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    {t('coordinator.routes.destinationLabel', 'Điểm đến')}
                   </label>
                   <input
+                    id="sim-dest-input"
                     type="text"
                     value={searchDestination}
                     onChange={(e) => setSearchDestination(e.target.value)}
-                    placeholder="Gõ địa điểm đích (VD: Singapore Turf Club, Royal Bangkok, Sóc Sơn...)"
+                    placeholder={t('coordinator.routes.destinationPlaceholder', 'Gõ địa điểm đích (VD: Singapore Turf Club, Royal Bangkok, Sóc Sơn...')}
                     className="text-xs font-bold text-slate-800 outline-none bg-transparent w-full"
                   />
                 </div>
               </div>
             </div>
 
-            {/* Quick Suggestion Chips & Scope Selector */}
+            {/* Quick Suggestion Chips & Auto-Detected Scope Badge */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-0.5 border-t border-slate-100 mt-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-bold text-slate-400 uppercase">Gợi ý nhanh:</span>
+                <span className="text-[11px] font-bold text-slate-500 uppercase">{t('coordinator.routes.quickSuggestions', 'Gợi ý nhanh:')}</span>
                 {[
-                  { label: '🇸🇬 TP.HCM ➔ Singapore', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Singapore Turf Club, Kranji, Singapore' },
-                  { label: '🇹🇭 TP.HCM ➔ Bangkok (Đường bộ)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Royal Bangkok Sports Club, Bangkok, Thái Lan' },
-                  { label: '🇲🇾 TP.HCM ➔ Malaysia (Selangor)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Selangor Turf Club, Kuala Lumpur, Malaysia' },
-                  { label: '🇻🇳 TP.HCM ➔ Hà Nội (Nội địa)', orig: 'Trang trại Củ Chi, TP.HCM', dest: 'Trang trại Ngựa Thể thao Sóc Sơn, Hà Nội' },
-                  { label: '⛰️ Đà Lạt ➔ TP.HCM (Nội địa)', orig: 'Trang trại Ngựa Cao nguyên Đà Lạt, Lâm Đồng', dest: 'Trang trại Củ Chi, TP.HCM' },
-                  { label: '🏖️ Đà Nẵng ➔ TP.HCM (Nội địa)', orig: 'Trung tâm Huấn luyện Ngựa Đà Nẵng', dest: 'Trang trại Củ Chi, TP.HCM' },
+                  { label: language === 'en' ? 'HCMC ➔ Singapore' : 'TP.HCM ➔ Singapore', orig: language === 'en' ? 'Cu Chi Horse Farm, HCMC' : 'Trang trại Củ Chi, TP.HCM', dest: 'Singapore Turf Club, Kranji, Singapore' },
+                  { label: language === 'en' ? 'HCMC ➔ Bangkok' : 'TP.HCM ➔ Bangkok', orig: language === 'en' ? 'Cu Chi Horse Farm, HCMC' : 'Trang trại Củ Chi, TP.HCM', dest: language === 'en' ? 'Royal Bangkok Sports Club, Bangkok, Thailand' : 'Royal Bangkok Sports Club, Bangkok, Thái Lan' },
+                  { label: language === 'en' ? 'HCMC ➔ Malaysia' : 'TP.HCM ➔ Malaysia', orig: language === 'en' ? 'Cu Chi Horse Farm, HCMC' : 'Trang trại Củ Chi, TP.HCM', dest: 'Selangor Turf Club, Kuala Lumpur, Malaysia' },
+                  { label: language === 'en' ? 'HCMC ➔ Hanoi' : 'TP.HCM ➔ Hà Nội', orig: language === 'en' ? 'Cu Chi Horse Farm, HCMC' : 'Trang trại Củ Chi, TP.HCM', dest: language === 'en' ? 'Soc Son Equestrian Farm, Hanoi' : 'Trang trại Ngựa Thể thao Sóc Sơn, Hà Nội' },
+                  { label: language === 'en' ? 'Da Lat ➔ HCMC' : 'Đà Lạt ➔ TP.HCM', orig: language === 'en' ? 'Da Lat Highlands Horse Farm, Lam Dong' : 'Trang trại Ngựa Cao nguyên Đà Lạt, Lâm Đồng', dest: language === 'en' ? 'Cu Chi Horse Farm, HCMC' : 'Trang trại Củ Chi, TP.HCM' },
+                  { label: language === 'en' ? 'Da Nang ➔ HCMC' : 'Đà Nẵng ➔ TP.HCM', orig: language === 'en' ? 'Da Nang Horse Training Center' : 'Trung tâm Huấn luyện Ngựa Đà Nẵng', dest: language === 'en' ? 'Cu Chi Horse Farm, HCMC' : 'Trang trại Củ Chi, TP.HCM' },
                 ].map((chip, idx) => (
                   <button
                     key={idx}
@@ -1431,55 +1931,44 @@ export default function RoutePlanningPage() {
                       setSearchOrigin(chip.orig);
                       setSearchDestination(chip.dest);
                       setTransportTypeChoice('auto');
-                      toast.success(`Đã nạp hành lang: ${chip.label}`);
+                      toast.success(language === 'en' ? `Loaded corridor: ${chip.label}` : `Đã nạp hành lang: ${chip.label}`);
                     }}
-                    className="text-[11px] px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 font-semibold border border-slate-200 transition-colors"
+                    className="text-[11px] px-2.5 py-1 rounded-full bg-slate-100 hover:bg-[#FAF8F4] hover:text-[#181A17] text-slate-600 font-semibold border border-slate-200 transition-colors cursor-pointer"
                   >
                     {chip.label}
                   </button>
                 ))}
               </div>
 
-              {/* Scope Segmented Pill */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="text-[11px] font-bold text-slate-500 uppercase">Phạm vi:</span>
-                <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setTransportTypeChoice('auto')}
-                    className={`px-2 py-0.5 rounded text-[11.5px] font-semibold transition-all ${
-                      transportTypeChoice === 'auto'
-                        ? 'bg-white text-blue-700 shadow-2xs font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                    title="Tự động kiểm tra: Nếu 2 điểm cùng trong Việt Nam là Nội địa, khác quốc gia là Quốc tế"
-                  >
-                    ⚡ Tự động
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTransportTypeChoice('Domestic')}
-                    className={`px-2 py-0.5 rounded text-[11.5px] font-semibold transition-all ${
-                      transportTypeChoice === 'Domestic'
-                        ? 'bg-white text-emerald-700 shadow-2xs font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    🇻🇳 Nội địa
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTransportTypeChoice('International')}
-                    className={`px-2 py-0.5 rounded text-[11.5px] font-semibold transition-all ${
-                      transportTypeChoice === 'International'
-                        ? 'bg-white text-purple-700 shadow-2xs font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    🌐 Quốc tế
-                  </button>
-                </div>
-              </div>
+              {/* Automatic Corridor Scope Indicator */}
+              {(() => {
+                const isDom =
+                  searchOrigin && searchDestination
+                    ? buildEquineRoute(searchOrigin, searchDestination).isDomestic
+                    : true;
+                return (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase">
+                      {t('coordinator.routes.scope', 'Phạm vi tuyến:')}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold ${
+                        isDom
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-[#FAF8F4] text-[#181A17] border-[#D4C5A3]'
+                      }`}
+                    >
+                      {isDom
+                        ? language === 'en'
+                          ? '🚚 Domestic Corridor'
+                          : '🚚 Tuyến Nội Địa'
+                        : language === 'en'
+                        ? '✈️ International Corridor'
+                        : '✈️ Tuyến Quốc Tế'}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Map Canvas */}
@@ -1488,7 +1977,11 @@ export default function RoutePlanningPage() {
                 <RoutePlanningMap
                   originText={searchOrigin}
                   destinationText={searchDestination}
-                  transportType={transportTypeChoice === 'auto' ? undefined : transportTypeChoice}
+                  onApplyPreset={(preset) => {
+                    setSearchOrigin(language === 'en' && preset.originEn ? preset.originEn : preset.origin);
+                    setSearchDestination(language === 'en' && preset.destinationEn ? preset.destinationEn : preset.destination);
+                    setTransportTypeChoice('auto');
+                  }}
                   onRouteCalculated={(data) => {
                     setSimulatedKm(data.distanceKm);
                     setSimulatedHours(data.durationHours);
@@ -1503,22 +1996,23 @@ export default function RoutePlanningPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-2">
             <div>
               <div className="flex items-center gap-2">
-                <Layers className="text-blue-600" size={20} />
+                <Layers className="text-[#A67C2E]" size={20} />
                 <h2 className="text-lg font-bold text-slate-900 m-0">
-                  Thư Viện Tuyến Đường Mẫu Chuẩn ({routes.length})
+                  {t('coordinator.routes.catalogTitle', 'Thư Viện Tuyến Đường Mẫu Chuẩn ({count})', { count: routes.length })}
                 </h2>
               </div>
               <p className="text-xs text-slate-500 m-0 mt-0.5">
-                Các tuyến đường đã được khảo sát &amp; lưu trữ. Khi khách hàng mới có cùng lộ trình, bạn chỉ cần xem và áp dụng trực tiếp.
+                {t('coordinator.routes.catalogSubtitle', 'Các tuyến đường đã được khảo sát & lưu trữ. Khi khách hàng mới có cùng lộ trình, bạn chỉ cần xem và áp dụng trực tiếp.')}
               </p>
             </div>
 
             <div className="flex items-center gap-2.5 flex-wrap">
-              <div className="flex items-center bg-white border border-slate-200 rounded-lg px-3 py-1.5 w-60 shadow-2xs">
+              <div className="flex items-center bg-white border border-slate-200 rounded-lg px-3 py-1.5 w-full sm:w-60 shadow-sm">
                 <Search size={14} className="text-slate-400 mr-2 shrink-0" />
                 <input
                   type="text"
-                  placeholder="Tìm tuyến mẫu trong kho..."
+                  aria-label={t('coordinator.routes.catalogSearchPlaceholder', 'Tìm tuyến mẫu trong kho...')}
+                  placeholder={t('coordinator.routes.catalogSearchPlaceholder', 'Tìm tuyến mẫu trong kho...')}
                   value={catalogSearchTerm}
                   onChange={(e) => setCatalogSearchTerm(e.target.value)}
                   className="border-none outline-none text-xs w-full bg-transparent font-medium"
@@ -1526,60 +2020,74 @@ export default function RoutePlanningPage() {
               </div>
 
               <Button
+                type="button"
                 variant="primary"
                 size="sm"
                 onClick={() => handleOpenSaveTemplateModal(false)}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
               >
                 <Plus size={14} />
-                <span>+ Tạo Tuyến Mẫu Mới</span>
+                <span>{t('coordinator.routes.createNewTemplateBtn', 'Tạo Tuyến Mẫu Mới').replace(/^\+\s*/, '')}</span>
               </Button>
             </div>
           </div>
 
           {/* Catalog list cards */}
           <div className="flex flex-col gap-4">
-            {routes
-              .filter(
+            {(() => {
+              const filteredCatalogRoutes = routes.filter(
                 (r) =>
                   r.name.toLowerCase().includes(catalogSearchTerm.toLowerCase()) ||
                   r.origin.toLowerCase().includes(catalogSearchTerm.toLowerCase()) ||
                   r.destination.toLowerCase().includes(catalogSearchTerm.toLowerCase())
-              )
-              .map((route) => (
+              );
+
+              if (filteredCatalogRoutes.length === 0) {
+                return (
+                  <div className="p-10 text-center bg-white rounded-xl border border-slate-200 text-slate-500 text-sm">
+                    {language === 'en'
+                      ? 'No saved route templates match your search.'
+                      : 'Không có tuyến đường mẫu nào khớp với tìm kiếm hoặc thư viện hiện đang trống.'}
+                  </div>
+                );
+              }
+
+              return filteredCatalogRoutes.map((route) => (
                 <div
                   key={route.id}
-                  className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col gap-4 hover:border-blue-300 transition-all"
+                  className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col gap-4 hover:border-[#D4C5A3] transition-all"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                     <div>
                       <div className="flex items-center gap-2.5 flex-wrap">
                         <h3 className="text-base font-bold text-slate-900 m-0">{route.name}</h3>
                         <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                          Khả dụng (Active)
+                          {translateStatus('available')}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-1 m-0 flex items-center gap-2">
-                        <span>Lộ trình: <strong className="text-slate-700">{route.origin}</strong> ➔ <strong className="text-slate-700">{route.destination}</strong></span>
+                      <p className="text-xs text-slate-500 mt-1 m-0 flex flex-wrap items-center gap-2">
+                        <span>{t('coordinator.routes.generalRoute', 'Lộ trình')}: <strong className="text-slate-700">{route.origin}</strong> ➔ <strong className="text-slate-700">{route.destination}</strong></span>
                         <span>•</span>
-                        <span>Cự ly: <strong className="text-blue-700 font-bold">{route.distanceKm} km</strong></span>
+                        <span>{t('coordinator.routes.distanceLabel', 'Cự ly')}: <strong className="text-[#181A17] font-bold">{route.distanceKm} km</strong></span>
                         <span>•</span>
-                        <span>{route.stops?.length || 0} trạm dừng kiểm dịch</span>
+                        <span>{route.stops?.length || 0} {language === 'en' ? 'quarantine stops' : 'trạm dừng kiểm dịch'}</span>
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <Button
+                        type="button"
                         variant="primary"
                         size="sm"
                         onClick={() => setViewingCatalogRoute(route)}
-                        className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold text-xs shadow-2xs flex items-center gap-1"
+                        className="bg-[#FAF8F4] hover:bg-[#F3EFE4] text-[#181A17] border border-[#EAE5DA] font-semibold text-xs shadow-sm flex items-center gap-1"
                       >
                         <Eye size={14} />
-                        <span>Xem chi tiết</span>
+                        <span>{t('coordinator.routes.viewDetailsBtn', 'Xem chi tiết')}</span>
                       </Button>
 
                       <Button
+                        type="button"
                         variant="outline"
                         size="sm"
                         onClick={() => {
@@ -1593,12 +2101,12 @@ export default function RoutePlanningPage() {
                           } else {
                             window.scrollTo({ top: 180, behavior: 'smooth' });
                           }
-                          toast.success(`Đã nạp lộ trình "${route.name}" lên bản đồ số!`);
+                          toast.success(language === 'en' ? `Loaded route "${route.name}" on digital map!` : `Đã nạp lộ trình "${route.name}" lên bản đồ số!`);
                         }}
-                        className="text-slate-700 hover:bg-slate-50 font-semibold text-xs shadow-2xs flex items-center gap-1"
+                        className="text-slate-700 hover:bg-slate-50 font-semibold text-xs shadow-sm flex items-center gap-1"
                       >
-                        <MapPin size={14} className="text-blue-600" />
-                        <span>Nạp lên bản đồ</span>
+                        <MapPin size={14} className="text-[#A67C2E]" />
+                        <span>{t('coordinator.routes.loadToMapBtn', 'Nạp lên bản đồ')}</span>
                       </Button>
                     </div>
                   </div>
@@ -1611,17 +2119,15 @@ export default function RoutePlanningPage() {
                         className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-xs flex flex-col justify-between gap-1"
                       >
                         <div className="flex justify-between items-center">
-                          <span className="font-bold text-slate-500 text-[10px] uppercase">Trạm #{stop.seq}</span>
+                          <span className="font-bold text-slate-500 text-[10px] uppercase">{t('coordinator.routes.stopNumber', 'Trạm #{seq}', { seq: stop.seq })}</span>
                           <span
                             className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                               stop.type === 'Quarantine'
                                 ? 'bg-amber-100 text-amber-800'
-                                : stop.type === 'Border Gate'
-                                ? 'bg-purple-100 text-purple-800'
-                                : 'bg-blue-100 text-blue-800'
+                                : 'bg-[#F3EFE4] text-[#181A17]'
                             }`}
                           >
-                            {stop.type === 'Quarantine' ? 'Kiểm dịch' : stop.type === 'Border Gate' ? 'Cửa khẩu' : 'Nghỉ thú y'}
+                            {stop.type === 'Quarantine' ? translateStopType('quarantine') : stop.type === 'Border Gate' ? translateStopType('border_check') : t('coordinator.routes.vetRestStop', 'Nghỉ thú y')}
                           </span>
                         </div>
                         <p className="font-bold text-slate-900 m-0 line-clamp-1">{stop.name}</p>
@@ -1630,7 +2136,8 @@ export default function RoutePlanningPage() {
                     ))}
                   </div>
                 </div>
-              ))}
+              ));
+            })()}
           </div>
         </div>
       )}
@@ -1650,31 +2157,44 @@ export default function RoutePlanningPage() {
         return (
           <Modal
             isOpen={isDetailModalOpen}
-            onClose={() => setIsDetailModalOpen(false)}
+            onClose={() => {
+              if (!isSubmittingPlan) setIsDetailModalOpen(false);
+            }}
+            closeDisabled={isSubmittingPlan}
             title={
               isCompleted
-                ? `Chi Tiết Lộ Trình Vận Chuyển (Chuyến đi đã hoàn tất 🏁)`
+                ? t('coordinator.routes.modalCompletedTitle', 'Chi Tiết Lộ Trình Vận Chuyển (Chuyến đi đã hoàn tất 🏁)')
                 : isReadOnlyModal
-                ? `Chi Tiết Kế Hoạch Lộ Trình (Chế độ xem an toàn)`
-                : `Xây Dựng / Hiệu Chỉnh Kế Hoạch Lộ Trình Chi Tiết`
+                ? t('coordinator.routes.modalSafeViewTitle', 'Chi Tiết Kế Hoạch Lộ Trình (Chế độ xem an toàn)')
+                : t('coordinator.routes.modalBuildPlanTitle', 'Xây Dựng / Hiệu Chỉnh Kế Hoạch Lộ Trình Chi Tiết')
             }
-            subtitle={`Đơn hàng: ${selectedPlanningOrder.requestCode} • ${selectedPlanningOrder.horseName} (${selectedPlanningOrder.horseCount} ngựa)`}
+            subtitle={t('coordinator.routes.modalSubtitle', 'Đơn hàng: {code} • {horse} ({count} ngựa)', { code: selectedPlanningOrder.requestCode, horse: selectedPlanningOrder.horseName, count: selectedPlanningOrder.horseCount })}
             maxWidth="920px"
           >
-            <div className="flex flex-col gap-6 max-h-[75vh] overflow-y-auto pr-1">
-              <p className="rounded-lg bg-blue-50 p-3 font-semibold text-blue-800">{bookingName(selectedPlanningOrder.bookingType)} · {selectedPlanningOrder.horseCount} ô chuồng{selectedPlanningOrder.transportMode ? ` · ${selectedPlanningOrder.transportMode === 'road' ? 'Đường bộ' : 'Hàng không'}` : ''}</p>
+            <div className="flex flex-col gap-6">
+              <p className="rounded-lg bg-[#FAF8F4] p-3 font-semibold text-[#181A17] m-0 text-xs sm:text-sm">
+                {bookingName(selectedPlanningOrder.bookingType)} · {selectedPlanningOrder.horseCount}{' '}
+                {t('coordinator.stallsUnit', 'buồng')}
+                {selectedPlanningOrder.transportMode
+                  ? ` · ${
+                      selectedPlanningOrder.transportMode === 'road'
+                        ? t('manager.requests.modeRoad', language === 'en' ? 'Road Transit' : 'Đường bộ')
+                        : t('manager.requests.modeAir', language === 'en' ? 'Air Cargo' : 'Hàng không')
+                    }`
+                  : ''}
+              </p>
               {/* IN-TRANSIT & INCIDENT & APPROVAL & COMPLETED BANNERS */}
               {isCompleted ? (
-                <div className="p-4 bg-slate-100 border border-slate-300 rounded-xl flex items-start gap-3 text-slate-800 shadow-2xs">
+                <div className="p-4 bg-slate-100 border border-slate-300 rounded-xl flex items-start gap-3 text-slate-800 shadow-sm">
                   <div className="w-9 h-9 rounded-xl bg-slate-700 text-white flex items-center justify-center shrink-0 mt-0.5">
                     <CheckCircle2 size={20} className="text-emerald-400" />
                   </div>
                   <div>
                     <h4 className="font-bold text-sm m-0 text-slate-900">
-                      Chuyến đi đã cập bến đích an toàn — Khóa chỉnh sửa (Chế độ lưu trữ & đối soát)
+                      {t('coordinator.routes.bannerCompletedTitle', 'Chuyến đi đã cập bến đích an toàn — Khóa chỉnh sửa (Chế độ lưu trữ & đối soát)')}
                     </h4>
                     <p className="text-xs text-slate-600 m-0 mt-0.5">
-                      Toàn bộ các chặng đường bộ và chặng bay đã hoàn thành. Kế hoạch lộ trình được lưu trữ nguyên trạng để phục vụ kiểm toán, đối soát chi phí và tra cứu lịch sử vận chuyển.
+                      {t('coordinator.routes.bannerCompletedDesc', 'Toàn bộ các chặng đường bộ và chặng bay đã hoàn thành. Kế hoạch lộ trình được lưu trữ nguyên trạng để phục vụ kiểm toán, đối soát chi phí và tra cứu lịch sử vận chuyển.')}
                     </p>
                   </div>
                 </div>
@@ -1687,90 +2207,97 @@ export default function RoutePlanningPage() {
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-extrabold text-sm uppercase text-rose-900">
-                          🚨 Báo cáo sự cố từ tài xế (Flow 5)
+                          {t('coordinator.routes.bannerIncidentTitle', '🚨 Báo cáo sự cố từ tài xế')}
                         </span>
                         <span className="bg-rose-200 text-rose-900 text-xs px-2.5 py-0.5 rounded-full font-bold">
-                          Loại: {activeIncident.incidentType}
+                          {t('coordinator.routes.incidentTypeLabel', 'Loại')}: {translateIncident(activeIncident.incidentType)}
                         </span>
                       </div>
                       <p className="text-xs text-rose-950 m-0 mt-1 font-semibold">
                         {activeIncident.description}
                       </p>
                       <p className="text-[11px] text-rose-700 m-0 mt-0.5">
-                        Thời gian báo: {new Date(activeIncident.reportedAt).toLocaleString('vi-VN')}
+                        {t('coordinator.routes.incidentReportedAt', 'Thời gian báo: ')}{new Date(activeIncident.reportedAt).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN')}
                       </p>
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
+                  <div className="sm:text-right shrink-0">
                     <span className="text-xs font-extrabold text-rose-700 block">
-                      ĐÃ MỞ QUYỀN HIỆU CHỈNH CHẶNG KHẨN CẤP
+                      {t('coordinator.routes.emergencyRerouteUnlocked', 'ĐÃ MỞ QUYỀN HIỆU CHỈNH CHẶNG KHẨN CẤP')}
                     </span>
                     <span className="text-[11px] text-slate-500">
-                      Bạn có thể sửa chặng hoặc trạm dừng để vòng tránh sự cố
+                      {t('coordinator.routes.emergencyRerouteDesc', 'Bạn có thể sửa chặng hoặc trạm dừng để vòng tránh sự cố')}
                     </span>
                   </div>
                 </div>
               ) : isReadOnlyModal ? (
-                <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl flex items-start gap-3 text-emerald-950 shadow-2xs">
+                <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl flex items-start gap-3 text-emerald-950 shadow-sm">
                   <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 mt-0.5">
                     <ShieldCheck size={20} />
                   </div>
                   <div>
                     <h4 className="font-bold text-sm m-0 text-emerald-900">
-                      Kế hoạch lộ trình đã được Logistics Manager phê duyệt — Chế độ xem an toàn
+                      {t('coordinator.routes.bannerApprovedTitle', 'Kế hoạch lộ trình đã được Logistics Manager phê duyệt — Chế độ xem an toàn')}
                     </h4>
                     <p className="text-xs text-emerald-800 m-0 mt-0.5">
-                      Lộ trình này đã được phê duyệt chính thức và khóa chỉnh sửa để phục vụ điều phối và vận chuyển. 
-                      Hệ thống chỉ mở lại quyền hiệu chỉnh chặng khi có báo cáo sự cố (tắc đường, sạt lở, xe hỏng...) từ tài xế.
+                      {t('coordinator.routes.bannerApprovedDesc', 'Lộ trình này đã được phê duyệt chính thức và khóa chỉnh sửa để phục vụ điều phối và vận chuyển. Hệ thống chỉ mở lại quyền hiệu chỉnh khi có báo cáo sự cố.')}
                     </p>
                   </div>
                 </div>
               ) : null}
 
               {/* 1. Manager Framework Banner */}
-              <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-xl flex flex-col gap-2">
-              <div className="flex items-center gap-2 text-blue-900 font-extrabold text-xs uppercase tracking-wide">
-                <ShieldCheck size={16} className="text-blue-600" />
-                Khung Định Hướng Của Logistics Manager (Cần tuân thủ)
+              <div className="p-4 bg-[#FAF8F4] border border-[#D4C5A3] rounded-xl flex flex-col gap-2">
+              <div className="flex items-center gap-2 text-[#181A17] font-extrabold text-xs uppercase tracking-wide">
+                <ShieldCheck size={16} className="text-[#A67C2E]" />
+                {t('coordinator.routes.managerComplianceTitle', 'Khung Định Hướng Của Logistics Manager (Cần tuân thủ)')}
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs text-slate-700">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-700">
                 <div>
-                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Loại xe Manager chọn:</span>
-                  <strong className="text-blue-900">
-                    {selectedPlanningOrder.routeDetail?.managerVehicleType || 'Xe chuyên dụng 4 stall'}
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">{t('coordinator.routes.managerVehicleChoice', 'Loại xe Manager chọn:')}</span>
+                  <strong className="text-[#181A17]">
+                    {selectedPlanningOrder.routeDetail?.managerVehicleType
+                      ? translateVehicleType(selectedPlanningOrder.routeDetail.managerVehicleType)
+                      : translateVehicleType('truck')}
                   </strong>
                 </div>
-                <div>
-                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Hãng hàng không:</span>
-                  <strong className="text-blue-900">
-                    {selectedPlanningOrder.routeDetail?.managerAirlineName || 'Singapore Airlines Cargo'}
-                  </strong>
-                </div>
-                <div>
-                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Cặp Sân bay:</span>
-                  <strong className="text-blue-900">
-                    {selectedPlanningOrder.routeDetail?.managerDepartureAirportCode || 'SGN'} → {selectedPlanningOrder.routeDetail?.managerArrivalAirportCode || 'SIN'}
-                  </strong>
-                </div>
+                {selectedPlanningOrder.transportMode !== 'road' && selectedPlanningOrder.routeDetail?.managerAirlineName && (
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">{t('coordinator.routes.airline', 'Hãng hàng không:')}</span>
+                    <strong className="text-[#181A17]">
+                      {selectedPlanningOrder.routeDetail.managerAirlineName}
+                    </strong>
+                  </div>
+                )}
+                {selectedPlanningOrder.transportMode !== 'road' &&
+                  selectedPlanningOrder.routeDetail?.managerDepartureAirportCode &&
+                  selectedPlanningOrder.routeDetail?.managerArrivalAirportCode && (
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">{t('coordinator.routes.airportPair', 'Cặp Sân bay:')}</span>
+                    <strong className="text-[#181A17]">
+                      {selectedPlanningOrder.routeDetail.managerDepartureAirportCode} → {selectedPlanningOrder.routeDetail.managerArrivalAirportCode}
+                    </strong>
+                  </div>
+                )}
               </div>
               {selectedPlanningOrder.routeDetail?.strategicNotes && (
-                <div className="text-[11px] text-slate-600 italic border-t border-blue-100 pt-1.5 mt-0.5">
-                  Ghi chú của Manager: &quot;{selectedPlanningOrder.routeDetail.strategicNotes}&quot;
+                <div className="text-[11px] text-slate-600 italic border-t border-[#EAE5DA] pt-1.5 mt-0.5">
+                  {t('coordinator.routes.managerNotes', 'Ghi chú của Manager:')} &quot;{selectedPlanningOrder.routeDetail.strategicNotes}&quot;
                 </div>
               )}
             </div>
 
             {/* 1b. Coordinator Flexibility & Template Tools */}
             {!isReadOnlyModal && (
-              <div className="p-4 bg-gradient-to-r from-slate-50 to-blue-50/40 border border-slate-200 rounded-xl flex flex-col gap-3">
+              <div className="p-4 bg-gradient-to-r from-slate-50 to-[#FAF8F4] border border-slate-200 rounded-xl flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
                   <div>
                     <div className="flex items-center gap-2 text-slate-800 font-extrabold text-xs uppercase tracking-wide">
-                      <Compass size={15} className="text-blue-600" />
-                      Chế Độ Thiết Lập Tuyến Cho Coordinator
+                      <Compass size={15} className="text-[#A67C2E]" />
+                      {t('coordinator.routes.coordinatorSetupMode', 'Chế Độ Thiết Lập Tuyến Cho Điều Phối Viên')}
                     </div>
                     <p className="text-[11px] text-slate-500 m-0 mt-0.5">
-                      Coordinator có thể <strong>tự do điền mọi thông số</strong> trực tiếp bên dưới, hoặc <strong>đồng bộ từ Tuyến Mẫu</strong> rồi chỉnh sửa theo ý muốn.
+                      {t('coordinator.routes.coordinatorSetupDesc', 'Điều phối viên có thể tự do điền mọi thông số trực tiếp bên dưới, hoặc đồng bộ từ Tuyến Mẫu rồi chỉnh sửa theo ý muốn.')}
                     </p>
                   </div>
 
@@ -1780,11 +2307,11 @@ export default function RoutePlanningPage() {
                       variant="outline"
                       size="sm"
                       onClick={handleResetToManualForm}
-                      className="text-xs text-slate-700 border-slate-300 hover:bg-white flex items-center gap-1 font-semibold shadow-2xs"
-                      title="Thiết lập lại form để tự do điền thông số từ đầu"
+                      className="text-xs text-slate-700 border-slate-300 hover:bg-white flex items-center gap-1 font-semibold shadow-sm"
+                      title={t('coordinator.routes.resetFormTitle', 'Thiết lập lại form để tự do điền thông số từ đầu')}
                     >
                       <RotateCcw size={12} />
-                      <span>Làm Mới / Tự Điền</span>
+                      <span>{t('coordinator.routes.resetToManualBtn', 'Làm Mới / Tự Điền')}</span>
                     </Button>
                   </div>
                 </div>
@@ -1802,13 +2329,13 @@ export default function RoutePlanningPage() {
                             </div>
                             <div>
                               <div className="font-bold text-emerald-950 text-xs flex items-center gap-1.5 flex-wrap">
-                                <span>Phát hiện Tuyến Mẫu Trùng Điểm Đi &amp; Điểm Đến:</span>
+                                <span>{t('coordinator.routes.templateMatchFound', 'Phát hiện Tuyến Mẫu Trùng Điểm Đi & Điểm Đến:')}</span>
                                 <span className="px-2 py-0.5 rounded bg-emerald-200 text-emerald-900 font-extrabold text-[11px]">
                                   {matchedTemplate.name}
                                 </span>
                               </div>
                               <p className="text-[11px] text-emerald-800 m-0 mt-0.5">
-                                Cự ly mẫu: <strong>{matchedTemplate.distanceKm} km</strong> • {matchedTemplate.stops?.length || 0} trạm dừng kiểm dịch chuẩn hóa.
+                                {t('coordinator.routes.templateDistanceLabel', 'Cự ly mẫu: {km} km • {stops} trạm dừng kiểm dịch chuẩn hóa.', { km: matchedTemplate.distanceKm, stops: matchedTemplate.stops?.length || 0 })}
                               </p>
                             </div>
                           </div>
@@ -1821,28 +2348,29 @@ export default function RoutePlanningPage() {
                             className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shrink-0 shadow-sm flex items-center gap-1"
                           >
                             <Sparkles size={13} />
-                            <span>⚡ Đồng Bộ Tuyến Mẫu Này</span>
+                            <span>{t('coordinator.routes.syncThisTemplateBtn', '⚡ Đồng Bộ Tuyến Mẫu Này')}</span>
                           </Button>
                         </div>
                       )}
 
                       <div className="flex items-center justify-between gap-2 bg-white p-2 rounded-lg border border-slate-200 text-xs flex-wrap">
                         <div className="flex items-center gap-1.5">
-                          <BookmarkPlus size={14} className="text-blue-600 shrink-0" />
+                          <BookmarkPlus size={14} className="text-[#A67C2E] shrink-0" />
                           <span className="font-bold text-slate-700 whitespace-nowrap">
-                            Hoặc áp dụng tuyến mẫu khác từ Thư viện:
+                            {t('coordinator.routes.orApplyOtherTemplate', 'Hoặc áp dụng tuyến mẫu khác từ Thư viện:')}
                           </span>
                         </div>
                         <select
+                          aria-label={t('coordinator.routes.orApplyOtherTemplate', 'Chọn tuyến mẫu từ thư viện')}
                           onChange={(e) => {
-                            const t = routes.find((r) => r.id === e.target.value);
-                            if (t) handleApplyTemplate(t);
+                            const tpl = routes.find((r) => r.id === e.target.value);
+                            if (tpl) handleApplyTemplate(tpl);
                           }}
                           defaultValue=""
                           className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs font-semibold outline-none flex-1 max-w-md"
                         >
                           <option value="" disabled>
-                            -- Chọn một tuyến mẫu trong thư viện ({routes.length} tuyến) --
+                            {t('coordinator.routes.selectTemplatePlaceholder', '-- Chọn một tuyến mẫu trong thư viện ({count} tuyến) --', { count: routes.length })}
                           </option>
                           {routes.map((r) => (
                             <option key={r.id} value={r.id}>
@@ -1860,44 +2388,48 @@ export default function RoutePlanningPage() {
             {/* 2. Route Name & Total Distance */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="sm:col-span-2">
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Tên Lộ Trình Vận Chuyển <span className="text-red-500">*</span>
+                <label htmlFor="plan-route-name" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  {t('coordinator.routes.planRouteNameLabel', 'Tên Lộ Trình Vận Chuyển')} <span className="text-red-500">*</span>
                 </label>
                 <input
+                  id="plan-route-name"
                   type="text"
+                  disabled={isReadOnlyModal}
                   value={planRouteName}
                   onChange={(e) => setPlanRouteName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold focus:border-blue-500 outline-none"
-                  placeholder="Ví dụ: Hành lang Củ Chi - Tân Sơn Nhất - Singapore Turf Club"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold focus:border-[#C4B38E] outline-none disabled:bg-slate-50 disabled:text-slate-600"
+                  placeholder={t('coordinator.routes.planRouteNamePlaceholder', 'Ví dụ: Hành lang Củ Chi - Tân Sơn Nhất - Singapore Turf Club')}
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Tổng cự ly dự kiến (km)
+                <label htmlFor="plan-total-distance" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  {t('coordinator.routes.totalEstDistanceKm', 'Tổng cự ly dự kiến (km)')}
                 </label>
                 <input
+                  id="plan-total-distance"
                   type="number"
+                  disabled={isReadOnlyModal}
                   value={planTotalDistanceKm}
                   onChange={(e) => setPlanTotalDistanceKm(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold focus:border-blue-500 outline-none"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold focus:border-[#C4B38E] outline-none disabled:bg-slate-50 disabled:text-slate-600"
                 />
               </div>
             </div>
 
             {/* 3. Multi-modal Legs Builder */}
             <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="text-sm font-bold text-slate-900 m-0 flex items-center gap-2">
-                    <Navigation size={16} className="text-blue-600" />
-                    Các Chặng Vận Chuyển Đa Phương Thức (Legs: Đường bộ / Đường bay)
+                    <Navigation size={16} className="text-[#A67C2E]" />
+                    {t('coordinator.routes.multimodalLegsTitle', 'Các Chặng Vận Chuyển Đa Phương Thức (Đường bộ / Đường bay)')}
                   </h4>
                   <p className="text-xs text-slate-500 m-0">
-                    Coordinator chọn xe có biển số cụ thể và nhập thông tin booking chuyến bay thực tế.
+                    {t('coordinator.routes.multimodalLegsSubtitle', 'Điều phối viên chọn xe có biển số cụ thể và nhập thông tin đặt chỗ chuyến bay thực tế.')}
                   </p>
                 </div>
                 {!isReadOnlyModal && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
                       variant="outline"
@@ -1905,16 +2437,16 @@ export default function RoutePlanningPage() {
                       onClick={() => handleAddLeg('road')}
                       className="text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50"
                     >
-                      <Truck size={13} className="mr-1" /> + Thêm Chặng Đường Bộ
+                      <Truck size={13} className="mr-1" /> {t('coordinator.routes.addRoadLegBtn', 'Thêm Chặng Đường Bộ').replace(/^\+\s*/, '')}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       onClick={() => handleAddLeg('flight')}
-                      className="text-xs text-purple-700 border-purple-300 hover:bg-purple-50"
+                      className="text-xs text-[#181A17] border-[#D4C5A3] hover:bg-[#FAF8F4]"
                     >
-                      <Plane size={13} className="mr-1" /> + Thêm Chặng Bay
+                      <Plane size={13} className="mr-1" /> {t('coordinator.routes.addFlightLegBtn', 'Thêm Chặng Bay').replace(/^\+\s*/, '')}
                     </Button>
                   </div>
                 )}
@@ -1927,7 +2459,7 @@ export default function RoutePlanningPage() {
                     key={idx}
                     className={`p-4 rounded-xl border transition-all ${
                       leg.legType === 'flight'
-                        ? 'bg-purple-50/40 border-purple-200'
+                        ? 'bg-[#FAF8F4] border-[#D4C5A3]'
                         : 'bg-emerald-50/40 border-emerald-200'
                     }`}
                   >
@@ -1939,37 +2471,62 @@ export default function RoutePlanningPage() {
                         <span
                           className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
                             leg.legType === 'flight'
-                              ? 'bg-purple-200 text-purple-900'
+                              ? 'bg-[#F3EFE4] text-[#181A17]'
                               : 'bg-emerald-200 text-emerald-900'
                           }`}
                         >
-                          {leg.legType === 'flight' ? '✈️ Chặng Đường Hàng Không' : '🚚 Chặng Đường Bộ'}
+                          {leg.legType === 'flight' ? t('coordinator.routes.flightLegTitle', '✈️ Chặng Đường Hàng Không') : t('coordinator.routes.roadLegTitle', '🚚 Chặng Đường Bộ')}
                         </span>
                       </div>
                       {!isReadOnlyModal && (
                         <button
                           type="button"
                           onClick={() => handleRemoveLeg(idx)}
-                          className="text-red-500 hover:text-red-700 text-xs font-semibold flex items-center gap-1"
+                          className="text-red-500 hover:text-red-700 text-xs font-semibold flex items-center gap-1 cursor-pointer"
                         >
-                          <Trash2 size={13} /> Xóa chặng
+                          <Trash2 size={13} /> {t('coordinator.routes.deleteLegBtn', 'Xóa chặng')}
                         </button>
                       )}
                     </div>
 
-                    {leg.legType === 'road' && <RoadTripPicker leg={leg} bookingType={selectedPlanningOrder.bookingType} readOnly={isReadOnlyModal}
-                      onChange={next => setLegs(current => current.map((item, index) => index === idx ? next : item))} />}
-                    <fieldset disabled={isReadOnlyModal || Boolean(leg.roadTripId)}>
+                    {(() => {
+                      const firstFlightIndex = legs.findIndex((l) => l.legType === 'flight');
+                      const isOverseasConsigneeRoadLeg =
+                        leg.legType === 'road' &&
+                        ((firstFlightIndex !== -1 && idx > firstFlightIndex) ||
+                          Boolean(
+                            leg.vehiclePlate &&
+                              (leg.vehiclePlate.includes('đến đón') ||
+                                leg.vehiclePlate.includes('đến rước') ||
+                                leg.vehiclePlate.includes('Consignee') ||
+                                leg.vehiclePlate.includes('pickup'))
+                          ));
+                      return (
+                        leg.legType === 'road' &&
+                        !isOverseasConsigneeRoadLeg && (
+                          <RoadTripPicker
+                            leg={leg}
+                            bookingType={selectedPlanningOrder.bookingType}
+                            readOnly={isReadOnlyModal}
+                            language={language}
+                            onChange={(next) =>
+                              setLegs((current) => current.map((item, index) => (index === idx ? next : item)))
+                            }
+                          />
+                        )
+                      );
+                    })()}
+                    <fieldset disabled={isReadOnlyModal || Boolean(leg.roadTripId)} className="m-0 p-0 border-0">
                     {/* Road Leg details */}
                     {leg.legType === 'road' && (
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Phương Tiện / Xe Chuyên Dụng *</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.vehicleDedicated', 'Phương Tiện / Xe Chuyên Dụng *')}</label>
                           {(() => {
                             const destClean = (leg.destinationLocation || selectedPlanningOrder?.destination || 'Địa điểm đích').split(',')[0].trim();
                             const receiverOption = leg.vehiclePlate && (leg.vehiclePlate.includes('đến đón') || leg.vehiclePlate.includes('đến rước'))
                               ? leg.vehiclePlate
-                              : `Xe từ ${destClean} đến đón (Bên nhận tự rước)`;
+                              : (language === 'en' ? `Vehicle from ${destClean} - Consignee pickup` : `Xe từ ${destClean} đến đón (Bên nhận tự rước)`);
                             const isOverseasOrLastMile = leg.sequenceNo > 1 || legs.some((l) => l.legType === 'flight');
 
                             return (
@@ -1978,25 +2535,33 @@ export default function RoutePlanningPage() {
                                   value={leg.vehiclePlate ?? ''}
                                   onChange={(e) => {
                                     const val = e.target.value;
-                                    const updated = [...legs];
                                     const matchedVehicle = vehicles.find((v) => v.code === val);
                                     const parsed = matchedVehicle ? Number(String(matchedVehicle.id).replace(/\D/g, '')) : NaN;
                                     const resolvedVehicleId = Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-                                    updated[idx].vehiclePlate = val;
-                                    updated[idx].vehicleId = resolvedVehicleId || null;
-                                    setLegs(updated);
+                                    setLegs((prev) =>
+                                      prev.map((item, i) =>
+                                        i === idx
+                                          ? {
+                                              ...item,
+                                              vehiclePlate: val,
+                                              vehicleId: resolvedVehicleId,
+                                              roadTripId: resolvedVehicleId ? item.roadTripId : null,
+                                            }
+                                          : item
+                                      )
+                                    );
                                   }}
-                                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800 text-xs"
+                                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800 text-xs disabled:bg-slate-50"
                                 >
-                                  <option value="">-- Chọn xe / phương tiện --</option>
+                                  <option value="">{t('coordinator.routes.selectVehiclePlaceholder', '-- Chọn xe / phương tiện --')}</option>
                                   {isOverseasOrLastMile && (
-                                    <optgroup label="Phương tiện địa điểm đích (Nước ngoài)">
+                                    <optgroup label={t('coordinator.routes.overseasVehicleGroup', 'Phương tiện địa điểm đích (Nước ngoài)')}>
                                       <option value={receiverOption}>
                                         🚗 {receiverOption}
                                       </option>
                                     </optgroup>
                                   )}
-                                  <optgroup label="Đội xe chuyên dụng nội bộ (Việt Nam)">
+                                  <optgroup label={t('coordinator.routes.domesticFleetGroup', 'Đội xe chuyên dụng nội bộ (Việt Nam)')}>
                                     {vehicles
                                       .filter((v) => !v.type?.toLowerCase().includes('air'))
                                       .map((v) => {
@@ -2004,22 +2569,26 @@ export default function RoutePlanningPage() {
                                           v.status === 'in_use' &&
                                           v.assignedTripCode &&
                                           v.assignedTripCode !== selectedPlanningOrder?.requestCode;
+                                        const requiredStalls = Math.max(1, Number(selectedPlanningOrder?.horseCount || 1));
+                                        const isUnderCapacity = Number(v.capacity || 0) < requiredStalls;
                                         return (
-                                          <option key={v.id} value={v.code} disabled={Boolean(isBusy)}>
-                                            {v.code} — {v.type} ({v.capacity} stall, {v.location}){' '}
-                                            {isBusy
-                                              ? `— ⚠️ Đang chạy chuyến ${v.assignedTripCode}`
+                                          <option key={v.id} value={v.code} disabled={Boolean(isBusy || isUnderCapacity)}>
+                                            {v.code} — {translateVehicleType(v.type)} ({v.capacity} stall, {v.location}){' '}
+                                            {isUnderCapacity
+                                              ? `— ⚠️ ${language === 'en' ? `Insufficient stalls (${v.capacity}/${requiredStalls})` : `Không đủ chuồng (${v.capacity}/${requiredStalls} ngựa)`}`
+                                              : isBusy
+                                              ? `— ⚠️ ${language === 'en' ? `Running trip ${v.assignedTripCode}` : `Đang chạy chuyến ${v.assignedTripCode}`}`
                                               : v.status === 'in_use'
-                                              ? '— (Đang dùng cho chuyến này)'
-                                              : '— Sẵn sàng'}
+                                              ? `— (${language === 'en' ? 'In use for this trip' : 'Đang dùng cho chuyến này'})`
+                                              : `— ${language === 'en' ? 'Available' : 'Sẵn sàng'}`}
                                           </option>
                                         );
                                       })}
                                   </optgroup>
                                 </select>
-                                {leg.vehiclePlate && (leg.vehiclePlate.includes('đến đón') || leg.vehiclePlate.includes('đến rước')) && (
-                                  <p className="mt-1 text-[11px] text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-200">
-                                    ℹ️ Chặng nước ngoài: Bên nhận tự điều xe đến đón tại sân bay (không yêu cầu xe nội bộ).
+                                {leg.vehiclePlate && (leg.vehiclePlate.includes('đến đón') || leg.vehiclePlate.includes('đến rước') || leg.vehiclePlate.includes('pickup') || leg.vehiclePlate.includes('Consignee')) && (
+                                  <p className="mt-1 text-[11px] text-[#181A17] bg-[#FAF8F4] px-2 py-1 rounded border border-[#EAE5DA]">
+                                    {t('coordinator.routes.overseasNotice', 'ℹ️ Chặng nước ngoài: Bên nhận tự điều xe đến đón tại sân bay (không yêu cầu xe nội bộ).')}
                                   </p>
                                 )}
                               </>
@@ -2027,25 +2596,29 @@ export default function RoutePlanningPage() {
                           })()}
                         </div>
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Điểm Xuất Phát Chặng</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.legOriginLabel', 'Điểm Xuất Phát Chặng')}</label>
                           <input
                             type="text"
                             value={leg.originLocation}
                             onChange={(e) => {
                               const val = e.target.value;
-                              const updated = [...legs];
-                              updated[idx].originLocation = val;
-
-                              // Nếu đây là chặng đường bộ sau chặng bay (Chặng 3), tự động đồng bộ ngược lại Sân bay hạ cánh của chặng bay
-                              const prevFlightLeg = updated.find(
-                                (l) => l.sequenceNo === updated[idx].sequenceNo - 1 && l.legType === 'flight'
+                              const targetSeq = leg.sequenceNo - 1;
+                              setLegs((prev) =>
+                                prev.map((item, i) => {
+                                  if (i === idx) return { ...item, originLocation: val };
+                                  if (item.sequenceNo === targetSeq && item.legType === 'flight') {
+                                    const arrMeta = resolveAirportMeta(val, item.arrivalAirportId, item.arrivalAirportCode, false);
+                                    return {
+                                      ...item,
+                                      destinationLocation: val,
+                                      arrivalAirportId: arrMeta.airportId,
+                                      arrivalAirportCode: arrMeta.iataCode,
+                                    };
+                                  }
+                                  return item;
+                                })
                               );
-                              if (prevFlightLeg) {
-                                prevFlightLeg.destinationLocation = val;
-                              }
-                              setLegs(updated);
 
-                              // Đồng bộ sang trạm kiểm dịch sân bay đích nếu có
                               setStops((prevStops) =>
                                 prevStops.map((st) => {
                                   const isArrAirportStop =
@@ -2059,162 +2632,196 @@ export default function RoutePlanningPage() {
                                 })
                               );
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium disabled:bg-slate-50"
                           />
                         </div>
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Điểm Đến Chặng</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.legDestLabel', 'Điểm Đến Chặng')}</label>
                           <input
                             type="text"
                             value={leg.destinationLocation}
                             onChange={(e) => {
                               const val = e.target.value;
-                              const updated = [...legs];
-                              updated[idx].destinationLocation = val;
-
-                              // Nếu chặng 1 đến sân bay, tự động cập nhật Sân bay cất cánh của chặng 2
-                              const nextFlightLeg = updated.find(
-                                (l) => l.sequenceNo === updated[idx].sequenceNo + 1 && l.legType === 'flight'
+                              const targetSeq = leg.sequenceNo + 1;
+                              setLegs((prev) =>
+                                prev.map((item, i) => {
+                                  if (i === idx) return { ...item, destinationLocation: val };
+                                  if (item.sequenceNo === targetSeq && item.legType === 'flight') {
+                                    const cleanOrigin = val.replace(' Cargo Terminal', '');
+                                    const depMeta = resolveAirportMeta(cleanOrigin, item.departureAirportId, item.departureAirportCode, true);
+                                    return {
+                                      ...item,
+                                      originLocation: cleanOrigin,
+                                      departureAirportId: depMeta.airportId,
+                                      departureAirportCode: depMeta.iataCode,
+                                    };
+                                  }
+                                  return item;
+                                })
                               );
-                              if (nextFlightLeg) {
-                                nextFlightLeg.originLocation = val.replace(' Cargo Terminal', '');
-                              }
-                              setLegs(updated);
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium disabled:bg-slate-50"
                           />
                         </div>
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Khoảng cách chặng (km)</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.legDistKm', 'Khoảng cách chặng (km)')}</label>
                           <input
                             type="number"
                             value={leg.distanceKm || 0}
                             onChange={(e) => {
-                              const updated = [...legs];
-                              updated[idx].distanceKm = Number(e.target.value);
-                              setLegs(updated);
+                              const num = Number(e.target.value);
+                              setLegs((prev) => {
+                                const updated = prev.map((item, i) => (i === idx ? { ...item, distanceKm: num } : item));
+                                setPlanTotalDistanceKm(sumLegsDistanceKm(updated, planTotalDistanceKm));
+                                return updated;
+                              });
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-50"
                           />
                         </div>
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Thời gian chạy dự kiến (giờ)</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.legDurationHours', 'Thời gian chạy dự kiến (giờ)')}</label>
                           <input
                             type="number"
                             step="0.5"
                             value={leg.durationHours || 0}
                             onChange={(e) => {
-                              const updated = [...legs];
-                              updated[idx].durationHours = Number(e.target.value);
-                              setLegs(updated);
+                              const num = Number(e.target.value);
+                              setLegs((prev) => prev.map((item, i) => (i === idx ? { ...item, durationHours: num } : item)));
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-50"
                           />
                         </div>
                       </div>
                     )}
 
                     </fieldset>
-                    <LegScheduleFields leg={leg} readOnly={isReadOnlyModal} onChange={next => setLegs(current => current.map((item, index) => index === idx ? next : item))} />
+                    <LegScheduleFields leg={leg} readOnly={isReadOnlyModal} language={language} onChange={next => setLegs(current => current.map((item, index) => index === idx ? next : item))} />
                     {/* Flight Leg details */}
                     {leg.legType === 'flight' && (
+                      <fieldset disabled={isReadOnlyModal} className="m-0 p-0 border-0">
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Hãng Hàng Không *</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.airlineLabel', 'Hãng Hàng Không *')}</label>
                           <select
                             value={leg.airlineName || ''}
                             onChange={(e) => {
-                              const updated = [...legs];
-                              updated[idx].airlineName = e.target.value;
-                              setLegs(updated);
+                              const val = e.target.value;
+                              const airlineMeta = resolveAirlineMeta(val, selectedPlanningOrder);
+                              setLegs((prev) =>
+                                prev.map((item, i) =>
+                                  i === idx ? { ...item, airlineName: val, airlineId: airlineMeta.airlineId } : item
+                                )
+                              );
                             }}
-                            className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800"
+                            className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800 disabled:bg-slate-50"
                           >
-                            <option value="">-- Chọn hãng bay --</option>
+                            <option value="">{t('coordinator.routes.selectAirlinePlaceholder', '-- Chọn hãng bay --')}</option>
                             {airlines.map((a) => (
                               <option key={a.id} value={a.name}>
                                 {a.name} ({a.code})
                               </option>
                             ))}
-                            <option value="Cathay Pacific Cargo (CX)">Cathay Pacific Cargo (CX)</option>
-                            <option value="Singapore Airlines Cargo">Singapore Airlines Cargo (SQ)</option>
-                            <option value="Emirates SkyCargo">Emirates SkyCargo (EK)</option>
-                            <option value="Qatar Airways Cargo">Qatar Airways Cargo (QR)</option>
-                            <option value="Vietnam Airlines Cargo">Vietnam Airlines Cargo (VN)</option>
+                            {leg.airlineName && !airlines.some((a) => a.name === leg.airlineName) && (
+                              <option value={leg.airlineName}>{leg.airlineName}</option>
+                            )}
+                            {airlines.length === 0 && (
+                              <>
+                                <option value="Cathay Pacific Cargo (CX)">Cathay Pacific Cargo (CX)</option>
+                                <option value="Singapore Airlines Cargo">Singapore Airlines Cargo (SQ)</option>
+                                <option value="Emirates SkyCargo">Emirates SkyCargo (EK)</option>
+                                <option value="Qatar Airways Cargo">Qatar Airways Cargo (QR)</option>
+                                <option value="Vietnam Airlines Cargo">Vietnam Airlines Cargo (VN)</option>
+                              </>
+                            )}
                           </select>
                         </div>
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Số Hiệu Chuyến Bay *</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.flightNumberLabel', 'Số Hiệu Chuyến Bay *')}</label>
                           <input
                             type="text"
-                            placeholder="Ví dụ: SQ711 hoặc EK981"
+                            placeholder={t('coordinator.routes.flightNumberPlaceholder', 'Ví dụ: SQ711 hoặc EK981')}
                             value={leg.flightNumber || ''}
                             onChange={(e) => {
-                              const updated = [...legs];
-                              updated[idx].flightNumber = e.target.value;
-                              setLegs(updated);
+                              const val = e.target.value;
+                              setLegs((prev) => prev.map((item, i) => (i === idx ? { ...item, flightNumber: val } : item)));
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold disabled:bg-slate-50"
                           />
                         </div>
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Mã Đặt Chỗ (AWB / Booking Ref)</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.bookingRefLabel', 'Mã Đặt Chỗ (AWB)')}</label>
                           <input
                             type="text"
-                            placeholder="Ví dụ: BK-SQ-88192"
+                            placeholder={t('coordinator.routes.bookingRefPlaceholder', 'Ví dụ: BK-SQ-88192')}
                             value={leg.bookingReference || ''}
                             onChange={(e) => {
-                              const updated = [...legs];
-                              updated[idx].bookingReference = e.target.value;
-                              setLegs(updated);
+                              const val = e.target.value;
+                              setLegs((prev) => prev.map((item, i) => (i === idx ? { ...item, bookingReference: val } : item)));
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white disabled:bg-slate-50"
                           />
                         </div>
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Sân bay cất cánh (Origin)</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.depAirportLabel', 'Sân bay cất cánh')}</label>
                           <input
                             type="text"
-                            placeholder="Ví dụ: Sân bay Tân Sơn Nhất (SGN)"
+                            placeholder={t('coordinator.routes.depAirportPlaceholder', 'Ví dụ: Sân bay Tân Sơn Nhất (SGN)')}
                             value={leg.originLocation}
                             onChange={(e) => {
                               const val = e.target.value;
-                              const updated = [...legs];
-                              updated[idx].originLocation = val;
-
-                              // Đồng bộ ngược lại điểm đến của Chặng 1 đường bộ
-                              const prevRoadLeg = updated.find(
-                                (l) => l.sequenceNo === updated[idx].sequenceNo - 1 && l.legType === 'road'
+                              const prevSeq = leg.sequenceNo - 1;
+                              const depMeta = resolveAirportMeta(val, leg.departureAirportId, leg.departureAirportCode, true);
+                              setLegs((prev) =>
+                                prev.map((item, i) => {
+                                  if (i === idx) {
+                                    return {
+                                      ...item,
+                                      originLocation: val,
+                                      departureAirportId: depMeta.airportId,
+                                      departureAirportCode: depMeta.iataCode,
+                                    };
+                                  }
+                                  if (item.sequenceNo === prevSeq && item.legType === 'road') {
+                                    return {
+                                      ...item,
+                                      destinationLocation: val.includes('Cargo') ? val : `${val} Cargo Terminal`,
+                                    };
+                                  }
+                                  return item;
+                                })
                               );
-                              if (prevRoadLeg) {
-                                prevRoadLeg.destinationLocation = val.includes('Cargo') ? val : `${val} Cargo Terminal`;
-                              }
-                              setLegs(updated);
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium disabled:bg-slate-50"
                           />
                         </div>
                         <div>
-                          <label className="font-bold text-slate-700 block mb-1">Sân bay hạ cánh (Destination)</label>
+                          <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.arrAirportLabel', 'Sân bay hạ cánh')}</label>
                           <input
                             type="text"
-                            placeholder="Ví dụ: Sân bay Quốc tế Syamsudin Noor (BDJ Cargo), Kalimantan"
+                            placeholder={t('coordinator.routes.arrAirportPlaceholder', 'Ví dụ: Sân bay Changi (SIN Cargo Terminal)')}
                             value={leg.destinationLocation}
                             onChange={(e) => {
                               const val = e.target.value;
-                              const updated = [...legs];
-                              updated[idx].destinationLocation = val;
-
-                              // Tự động đồng bộ Điểm xuất phát của Chặng đường bộ liền sau (Leg 3)
-                              const nextRoadLeg = updated.find(
-                                (l) => l.sequenceNo === updated[idx].sequenceNo + 1 && l.legType === 'road'
+                              const nextSeq = leg.sequenceNo + 1;
+                              const arrMeta = resolveAirportMeta(val, leg.arrivalAirportId, leg.arrivalAirportCode, false);
+                              setLegs((prev) =>
+                                prev.map((item, i) => {
+                                  if (i === idx) {
+                                    return {
+                                      ...item,
+                                      destinationLocation: val,
+                                      arrivalAirportId: arrMeta.airportId,
+                                      arrivalAirportCode: arrMeta.iataCode,
+                                    };
+                                  }
+                                  if (item.sequenceNo === nextSeq && item.legType === 'road') {
+                                    return { ...item, originLocation: val };
+                                  }
+                                  return item;
+                                })
                               );
-                              if (nextRoadLeg) {
-                                nextRoadLeg.originLocation = val;
-                              }
-                              setLegs(updated);
 
-                              // Tự động đồng bộ sang trạm kiểm dịch sân bay đích ở bảng stops bên dưới
                               setStops((prevStops) =>
                                 prevStops.map((st) => {
                                   const isArrAirportStop =
@@ -2228,10 +2835,10 @@ export default function RoutePlanningPage() {
                                 })
                               );
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium"
-                            list="suggested-airports-list"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium disabled:bg-slate-50"
+                            list={`suggested-airports-list-${idx}`}
                           />
-                          <datalist id="suggested-airports-list">
+                          <datalist id={`suggested-airports-list-${idx}`}>
                             {airports.map((ap) => (
                               <option key={ap.id} value={`${ap.name} (${ap.iataCode})`}>
                                 {ap.iataCode} - {ap.country}
@@ -2240,38 +2847,54 @@ export default function RoutePlanningPage() {
                           </datalist>
                         </div>
                         <div>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-3 gap-2">
                             <div>
-                              <label className="font-bold text-slate-700 block mb-1">Stall Đã Book</label>
+                              <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.stallsBookedLabel', 'Stall Đã Book')}</label>
                               <input
                                 type="number"
                                 min={1}
                                 value={leg.stallsBooked || selectedPlanningOrder.horseCount}
                                 onChange={(e) => {
-                                  const updated = [...legs];
-                                  updated[idx].stallsBooked = Number(e.target.value);
-                                  setLegs(updated);
+                                  const num = Number(e.target.value);
+                                  setLegs((prev) => prev.map((item, i) => (i === idx ? { ...item, stallsBooked: num } : item)));
                                 }}
-                                className="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold"
+                                className="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold disabled:bg-slate-50"
                               />
                             </div>
                             <div>
-                              <label className="font-bold text-slate-700 block mb-1">Giờ bay (h)</label>
+                              <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.legDistKm', 'Cự ly bay (km)')}</label>
+                              <input
+                                type="number"
+                                min={50}
+                                value={leg.distanceKm || 1150}
+                                onChange={(e) => {
+                                  const num = Number(e.target.value);
+                                  setLegs((prev) => {
+                                    const updated = prev.map((item, i) => (i === idx ? { ...item, distanceKm: num } : item));
+                                    setPlanTotalDistanceKm(sumLegsDistanceKm(updated, planTotalDistanceKm));
+                                    return updated;
+                                  });
+                                }}
+                                className="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold disabled:bg-slate-50"
+                              />
+                            </div>
+                            <div>
+                              <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.flightHoursLabel', 'Giờ bay (h)')}</label>
                               <input
                                 type="number"
                                 step="0.5"
                                 value={leg.durationHours || 2.5}
                                 onChange={(e) => {
-                                  const updated = [...legs];
-                                  updated[idx].durationHours = Number(e.target.value);
-                                  setLegs(updated);
+                                  const num = Number(e.target.value);
+                                  setLegs((prev) => prev.map((item, i) => (i === idx ? { ...item, durationHours: num } : item)));
                                 }}
-                                className="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold"
+                                className="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold disabled:bg-slate-50"
                               />
                             </div>
                           </div>
                         </div>
                       </div>
+                      </fieldset>
                     )}
                   </div>
                 ))}
@@ -2280,14 +2903,14 @@ export default function RoutePlanningPage() {
 
             {/* 4. Stops & Quarantine Stations Catalog */}
             <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="text-sm font-bold text-slate-900 m-0 flex items-center gap-2">
                     <ShieldCheck size={16} className="text-amber-600" />
-                    Trạm Dừng Nghỉ, Kiểm Dịch &amp; Cửa Khẩu (Stops)
+                    {t('coordinator.routes.stopsTitle', 'Trạm Dừng Nghỉ, Kiểm Dịch & Cửa Khẩu')}
                   </h4>
                   <p className="text-xs text-slate-500 m-0">
-                    Bổ sung các trạm kiểm tra thú y và trạm nạp nước / cỏ khô dọc tuyến (tự điền hoặc chọn mẫu).
+                    {t('coordinator.routes.stopsSubtitle', 'Bổ sung các trạm kiểm tra thú y và trạm nạp nước / cỏ khô dọc tuyến (tự điền hoặc chọn mẫu).')}
                   </p>
                 </div>
                 {!isReadOnlyModal && (
@@ -2296,9 +2919,9 @@ export default function RoutePlanningPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => handleAddStop()}
-                    className="text-xs text-amber-900 border-amber-300 hover:bg-amber-100 flex items-center gap-1 font-bold shadow-2xs"
+                    className="text-xs text-amber-900 border-amber-300 hover:bg-amber-100 flex items-center gap-1 font-bold shadow-sm"
                   >
-                    <Plus size={13} /> + Thêm Trạm Mới (Tự Điền)
+                    <Plus size={13} /> {t('coordinator.routes.addNewStopBtn', 'Thêm Trạm Mới (Tự Điền)').replace(/^\+\s*/, '')}
                   </Button>
                 )}
               </div>
@@ -2307,7 +2930,7 @@ export default function RoutePlanningPage() {
               {!isReadOnlyModal && (
                 <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-xl">
                   <span className="text-[11px] font-bold text-amber-900 uppercase block mb-1.5">
-                    Chọn nhanh từ Danh mục Trạm Kiểm dịch &amp; Trạm dừng tiêu chuẩn:
+                    {t('coordinator.routes.quickMasterStopsLabel', 'Chọn nhanh từ Danh mục Trạm Kiểm dịch & Trạm dừng tiêu chuẩn:')}
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {masterStops.map((ms) => (
@@ -2315,9 +2938,9 @@ export default function RoutePlanningPage() {
                         key={ms.id}
                         type="button"
                         onClick={() => handleAddStop(ms)}
-                        className="px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors flex items-center gap-1 shadow-2xs"
+                        className="px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
                       >
-                        <Plus size={11} /> {ms.name} ({ms.stopType})
+                        <Plus size={11} /> {ms.name} ({translateStopType(ms.stopType)})
                       </button>
                     ))}
                   </div>
@@ -2325,15 +2948,16 @@ export default function RoutePlanningPage() {
               )}
 
               {/* Stops Table */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full text-xs text-left">
+              <fieldset disabled={isReadOnlyModal} className="m-0 p-0 border-0">
+              <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-xs text-left min-w-[620px]">
                   <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase">
                     <tr>
                       <th className="p-2.5 w-12 text-center">#</th>
-                      <th className="p-2.5">Tên Trạm / Điểm Kiểm Dịch</th>
-                      <th className="p-2.5 w-32">Loại Trạm</th>
-                      <th className="p-2.5 w-28">Quốc Gia</th>
-                      <th className="p-2.5 w-16 text-center">Xóa</th>
+                      <th className="p-2.5">{t('coordinator.routes.stopNameCol', 'Tên Trạm / Điểm Kiểm Dịch')}</th>
+                      <th className="p-2.5 w-36">{t('coordinator.routes.stopTypeCol', 'Loại Trạm')}</th>
+                      <th className="p-2.5 w-32">{t('coordinator.routes.countryCol', 'Quốc Gia')}</th>
+                      <th className="p-2.5 w-16 text-center">{t('common.delete', 'Xóa')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -2344,49 +2968,34 @@ export default function RoutePlanningPage() {
                           <input
                             type="text"
                             value={stop.locationName}
+                            disabled={isReadOnlyModal}
                             onChange={(e) => {
                               const val = e.target.value;
-                              const updated = [...stops];
-                              updated[idx].locationName = val;
-                              setStops(updated);
-
-                              // Nếu là trạm kiểm dịch sân bay đến (ở nước ngoài hoặc trạm thứ 2 trong chặng bay)
-                              const isAirportOrAbroad =
-                                (val.toLowerCase().includes('sân bay') && !val.toLowerCase().includes('tân sơn nhất') && !val.toLowerCase().includes('nội bài')) ||
-                                (stop.country && !stop.country.toLowerCase().includes('việt nam') && !stop.country.toLowerCase().includes('vietnam'));
-
-                              if (isAirportOrAbroad) {
-                                setLegs((prevLegs) =>
-                                  prevLegs.map((l) => {
-                                    if (l.legType === 'flight') {
-                                      return { ...l, destinationLocation: val };
-                                    }
-                                    if (l.legType === 'road' && l.sequenceNo > 1) {
-                                      return { ...l, originLocation: val };
-                                    }
-                                    return l;
-                                  })
-                                );
-                              }
+                              setStops((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, locationName: val } : item))
+                              );
                             }}
-                            className="w-full px-2 py-1 rounded border border-slate-200 text-xs font-medium"
+                            className="w-full px-2 py-1 rounded border border-slate-200 text-xs font-medium disabled:bg-slate-50 disabled:text-slate-600"
                           />
                         </td>
                         <td className="p-2.5">
                           <select
                             value={stop.stopType}
+                            disabled={isReadOnlyModal}
                             onChange={(e) => {
-                              const updated = [...stops];
-                              updated[idx].stopType = e.target.value as any;
-                              setStops(updated);
+                              const val = e.target.value as any;
+                              setStops((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, stopType: val } : item))
+                              );
                             }}
-                            className="w-full px-2 py-1 rounded border border-slate-200 text-xs font-semibold"
+                            className="w-full px-2 py-1 rounded border border-slate-200 text-xs font-semibold disabled:bg-slate-50 disabled:text-slate-600"
                           >
-                            <option value="rest">Nghỉ ngơi (Rest)</option>
-                            <option value="quarantine">Kiểm dịch (Quarantine)</option>
-                            <option value="border_check">Cửa khẩu (Border)</option>
-                            <option value="refuel">Nhiên liệu (Refuel)</option>
-                            <option value="transfer_hub">Điểm đón/trả ghép (Transfer Hub)</option>
+                            <option value="rest">{translateStopType('rest')}</option>
+                            <option value="quarantine">{translateStopType('quarantine')}</option>
+                            <option value="border_check">{translateStopType('border_check')}</option>
+                            <option value="transfer_hub">{language === 'en' ? 'Shared Consolidation Hub (Transfer Hub)' : 'Điểm đón/trả ghép (Transfer Hub)'}</option>
+                            <option value="refuel">{translateStopType('refuel')}</option>
+                            <option value="other">{translateStopType('other')}</option>
                           </select>
                         </td>
                         <td className="p-2.5">
@@ -2394,9 +3003,10 @@ export default function RoutePlanningPage() {
                             type="text"
                             value={stop.country || 'Vietnam'}
                             onChange={(e) => {
-                              const updated = [...stops];
-                              updated[idx].country = e.target.value;
-                              setStops(updated);
+                              const val = e.target.value;
+                              setStops((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, country: val } : item))
+                              );
                             }}
                             disabled={isReadOnlyModal}
                             className="w-full px-2 py-1 rounded border border-slate-200 text-xs disabled:bg-slate-50 disabled:text-slate-600"
@@ -2407,7 +3017,8 @@ export default function RoutePlanningPage() {
                             <button
                               type="button"
                               onClick={() => handleRemoveStop(idx)}
-                              className="text-red-500 hover:text-red-700"
+                              aria-label={language === 'en' ? `Delete stop ${stop.sequenceNo}` : `Xóa trạm #${stop.sequenceNo}`}
+                              className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 cursor-pointer"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -2420,42 +3031,43 @@ export default function RoutePlanningPage() {
                   </tbody>
                 </table>
               </div>
+              </fieldset>
             </div>
 
             {/* 5. Dispatch Instructions & Notes */}
             <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                Hướng dẫn vận hành &amp; Chăm sóc ngựa trên đường (Notes)
+              <label htmlFor="plan-operational-notes" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                {t('coordinator.routes.operationalNotesLabel', 'Hướng dẫn vận hành & Chăm sóc ngựa trên đường')}
               </label>
               <textarea
+                id="plan-operational-notes"
                 rows={2}
                 value={notes}
+                disabled={isReadOnlyModal}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Nhiệt độ khoang xe, lịch tiêm/kiểm tra thú y FEI, hướng dẫn bàn giao tại cửa khẩu..."
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:border-blue-500 outline-none resize-none"
+                placeholder={t('coordinator.routes.operationalNotesPlaceholder', 'Nhiệt độ khoang xe, lịch tiêm/kiểm tra thú y FEI, hướng dẫn bàn giao tại cửa khẩu...')}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:border-[#181A17] outline-none resize-none disabled:bg-slate-50 disabled:text-slate-600"
               />
             </div>
-          </div>
+            </div>
 
-          {/* Modal Actions */}
+          {/* Sticky Modal Actions Footer */}
           {(() => {
             if (isReadOnlyModal) {
               return (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100 pt-4 mt-4">
+                <div className="sticky -bottom-6 -mx-6 px-6 py-3.5 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 z-10">
                   <span className="text-xs text-emerald-800 font-semibold flex items-center gap-1.5">
-                    <ShieldCheck size={16} className="text-emerald-600" />
-                    Kế hoạch đã được phê duyệt. Đang hiển thị ở chế độ xem an toàn (Khóa chỉnh sửa).
+                    <ShieldCheck size={16} className="text-emerald-600 shrink-0" />
+                    {t('coordinator.routes.planApprovedSafeView', 'Kế hoạch đã được phê duyệt. Đang hiển thị ở chế độ xem an toàn (Khóa chỉnh sửa).')}
                   </span>
 
-                  <div className="flex items-center gap-2.5 shrink-0 flex-nowrap">
+                  <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                     <Button
                       type="button"
                       variant="primary"
                       onClick={() => setIsDetailModalOpen(false)}
                       className="bg-slate-800 hover:bg-slate-900 text-white font-bold px-5 py-2 text-xs whitespace-nowrap"
-                    >
-                      Đóng
-                    </Button>
+                    >{t('common.close', 'Đóng')}</Button>
                   </div>
                 </div>
               );
@@ -2463,13 +3075,13 @@ export default function RoutePlanningPage() {
 
             if (activeIncident) {
               return (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-rose-200 bg-rose-50/50 p-3 rounded-lg mt-4">
+                <div className="sticky -bottom-6 -mx-6 px-6 py-3.5 bg-rose-50/95 backdrop-blur-sm border-t border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 z-10">
                   <span className="text-xs text-rose-900 font-semibold flex items-center gap-1.5">
                     <AlertCircle size={14} className="text-rose-600 shrink-0" />
-                    Đang hiệu chỉnh lộ trình thay thế do sự cố trên đường. Lộ trình mới sẽ được gửi đến Logistics Manager duyệt lại.
+                    {t('coordinator.routes.incidentRerouteNotice', 'Đang hiệu chỉnh lộ trình thay thế do sự cố trên đường. Lộ trình mới sẽ được gửi đến Logistics Manager duyệt lại.')}
                   </span>
 
-                  <div className="flex items-center gap-2.5 shrink-0 flex-nowrap">
+                  <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                     <Button
                       type="button"
                       variant="outline"
@@ -2477,7 +3089,7 @@ export default function RoutePlanningPage() {
                       disabled={isSubmittingPlan}
                       className="border-slate-300 text-slate-600 hover:bg-white font-medium px-4 py-2 text-xs"
                     >
-                      Hủy bỏ
+                      {t('common.cancel', 'Hủy bỏ')}
                     </Button>
                     <Button
                       type="button"
@@ -2486,23 +3098,17 @@ export default function RoutePlanningPage() {
                       disabled={isSubmittingPlan}
                       className="border-rose-300 text-rose-700 bg-white hover:bg-rose-50 font-semibold px-3 py-2 text-xs"
                     >
-                      Đánh dấu hết sự cố
+                      {t('coordinator.routes.markIncidentResolvedBtn', 'Đánh dấu hết sự cố')}
                     </Button>
                     <Button
                       type="button"
                       variant="primary"
-                      onClick={async () => {
-                        await handleSaveEmergencyReroute();
-                        try {
-                          await routesApi.submitPlanForApproval(selectedPlanningOrder.id);
-                          toast.success('Đã gửi kế hoạch hiệu chỉnh do sự cố cho Manager duyệt!');
-                        } catch {}
-                      }}
+                      onClick={() => void handleSaveEmergencyReroute(true)}
                       disabled={isSubmittingPlan || legs.length === 0}
-                      className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-5 py-2 shadow-sm text-xs flex items-center gap-1.5 animate-pulse"
+                      className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-5 py-2 shadow-sm text-xs flex items-center gap-1.5"
                     >
                       <Send size={14} />
-                      <span>{isSubmittingPlan ? 'Đang gửi duyệt...' : 'Lưu Lộ Trình Mới & Gửi Manager Duyệt'}</span>
+                      <span>{isSubmittingPlan ? t('coordinator.routes.submittingApproval', 'Đang gửi duyệt...') : t('coordinator.routes.saveRerouteSubmitBtn', 'Lưu Lộ Trình Mới & Gửi Manager Duyệt')}</span>
                     </Button>
                   </div>
                 </div>
@@ -2510,39 +3116,37 @@ export default function RoutePlanningPage() {
             }
 
             return (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100 pt-4 mt-4">
+              <div className="sticky -bottom-6 -mx-6 px-6 py-3.5 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 z-10">
                 <span className="text-xs text-slate-500">
-                  Kế hoạch sau khi gửi sẽ được chuyển đến <strong>Logistics Manager</strong> để xem xét và phê duyệt.
+                  {t('coordinator.routes.submitNotice', 'Kế hoạch sau khi gửi sẽ được chuyển đến Logistics Manager để xem xét và phê duyệt.')}
                 </span>
 
-                <div className="flex items-center gap-2.5 shrink-0 flex-nowrap">
+                <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => setIsDetailModalOpen(false)}
                     disabled={isSubmittingPlan}
                     className="border-slate-300 text-slate-600 hover:bg-slate-50 font-medium px-4 py-2 text-xs whitespace-nowrap"
-                  >
-                    Đóng
-                  </Button>
+                  >{t('common.close', 'Đóng')}</Button>
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={handleSaveDraft}
+                    onClick={() => void handleSaveDraft()}
                     disabled={isSubmittingPlan}
                     className="border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold px-4 py-2 text-xs whitespace-nowrap"
                   >
-                    Lưu Bản Nháp (Draft)
+                    {t('coordinator.routes.saveDraftBtn', 'Lưu Bản Nháp')}
                   </Button>
                   <Button
                     type="button"
                     variant="primary"
-                    onClick={handleSubmitForApproval}
+                    onClick={() => void handleSubmitForApproval()}
                     disabled={isSubmittingPlan || legs.length === 0}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2 shadow-sm text-xs whitespace-nowrap flex items-center gap-1.5"
+                    className="bg-[#181A17] hover:bg-[#242722] text-white font-bold px-5 py-2 shadow-sm text-xs whitespace-nowrap flex items-center gap-1.5"
                   >
                     <Send size={14} />
-                    <span>{isSubmittingPlan ? 'Đang gửi duyệt...' : 'Gửi Duyệt Cho Manager'}</span>
+                    <span>{isSubmittingPlan ? t('coordinator.routes.submittingApproval', 'Đang gửi duyệt...') : t('coordinator.routes.submitForApprovalBtn', 'Gửi Duyệt Cho Manager')}</span>
                   </Button>
                 </div>
               </div>
@@ -2557,40 +3161,40 @@ export default function RoutePlanningPage() {
         <Modal
           isOpen={Boolean(viewingCatalogRoute)}
           onClose={() => setViewingCatalogRoute(null)}
-          title={`Chi Tiết Tuyến Đường Mẫu`}
-          subtitle={`Hành lang chuẩn hóa: ${viewingCatalogRoute.name}`}
+          title={t('coordinator.routes.catalogDetailTitle', 'Chi Tiết Tuyến Đường Mẫu')}
+          subtitle={t('coordinator.routes.catalogDetailSub', 'Hành lang chuẩn hóa: {name}', { name: viewingCatalogRoute.name })}
           maxWidth="720px"
         >
-          <div className="flex flex-col gap-5 max-h-[75vh] overflow-y-auto pr-1">
+          <div className="flex flex-col gap-5">
             {/* Overview Card */}
-            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-extrabold uppercase text-blue-900 flex items-center gap-1.5">
-                  <ShieldCheck size={16} className="text-blue-600" />
-                  Hành Lang Vận Chuyển Đã Kiểm Chuẩn
+            <div className="p-4 bg-gradient-to-r from-[#FAF8F4] to-[#FAF8F4] border border-[#EAE5DA] rounded-xl flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-extrabold uppercase text-[#181A17] flex items-center gap-1.5">
+                  <ShieldCheck size={16} className="text-[#A67C2E]" />
+                  {t('coordinator.routes.validatedCorridorBadge', 'Hành Lang Vận Chuyển Đã Kiểm Chuẩn')}
                 </span>
                 <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  Trạng thái: Hoạt động (Active)
+                  {t('coordinator.routes.catalogStatusActive', 'Trạng thái: Hoạt động')}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
-                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Điểm xuất phát:</span>
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">{t('coordinator.routes.originStationLabel', 'Điểm xuất phát:')}</span>
                   <strong className="text-slate-800 text-sm">{viewingCatalogRoute.origin}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Điểm đích đến:</span>
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">{t('coordinator.routes.destStationLabel', 'Điểm đích đến:')}</span>
                   <strong className="text-slate-800 text-sm">{viewingCatalogRoute.destination}</strong>
                 </div>
               </div>
 
-              <div className="flex items-center gap-6 text-xs border-t border-blue-100 pt-2 text-slate-700">
+              <div className="flex flex-wrap items-center gap-6 text-xs border-t border-[#EAE5DA] pt-2 text-slate-700">
                 <div>
-                  Cự ly ước tính: <strong className="text-blue-900 font-bold">{viewingCatalogRoute.distanceKm} km</strong>
+                  {t('coordinator.routes.estDistLabel', 'Cự ly ước tính:')} <strong className="text-[#181A17] font-bold">{viewingCatalogRoute.distanceKm} km</strong>
                 </div>
                 <div>
-                  Tổng số trạm dừng: <strong className="text-blue-900 font-bold">{viewingCatalogRoute.stops?.length || 0} trạm</strong>
+                  {t('coordinator.routes.totalStopsLabel', 'Tổng số trạm dừng:')} <strong className="text-[#181A17] font-bold">{viewingCatalogRoute.stops?.length || 0} {language === 'en' ? 'stops' : 'trạm'}</strong>
                 </div>
               </div>
             </div>
@@ -2598,17 +3202,17 @@ export default function RoutePlanningPage() {
             {/* Stops list table */}
             <div className="flex flex-col gap-2">
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider m-0">
-                Danh Sách Các Điểm Dừng Chân, Kiểm Dịch &amp; Cửa Khẩu:
+                {t('coordinator.routes.stopsListHeading', 'Danh Sách Các Điểm Dừng Chân, Kiểm Dịch & Cửa Khẩu:')}
               </h4>
 
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-                <table className="w-full text-xs text-left">
+              <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+                <table className="w-full text-xs text-left min-w-[560px]">
                   <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase">
                     <tr>
-                      <th className="p-2.5 w-12 text-center">Thứ tự</th>
-                      <th className="p-2.5">Tên Trạm / Điểm Kiểm Dịch</th>
-                      <th className="p-2.5 w-36">Tính Chất Trạm</th>
-                      <th className="p-2.5 w-32">Quốc Gia / Khu Vực</th>
+                      <th className="p-2.5 w-14 text-center">{t('coordinator.routes.seqCol', 'Thứ tự')}</th>
+                      <th className="p-2.5">{t('coordinator.routes.stopNameCol', 'Tên Trạm / Điểm Kiểm Dịch')}</th>
+                      <th className="p-2.5 w-36">{t('coordinator.routes.natureCol', 'Tính Chất Trạm')}</th>
+                      <th className="p-2.5 w-32">{t('coordinator.routes.countryRegionCol', 'Quốc Gia / Khu Vực')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -2621,12 +3225,10 @@ export default function RoutePlanningPage() {
                             className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                               stop.type === 'Quarantine'
                                 ? 'bg-amber-100 text-amber-800'
-                                : stop.type === 'Border Gate'
-                                ? 'bg-purple-100 text-purple-800'
-                                : 'bg-blue-100 text-blue-800'
+                                : 'bg-[#F3EFE4] text-[#181A17]'
                             }`}
                           >
-                            {stop.type === 'Quarantine' ? 'Kiểm dịch động vật' : stop.type === 'Border Gate' ? 'Cửa khẩu quốc tế' : 'Trạm dừng nghỉ'}
+                            {stop.type === 'Quarantine' ? translateStopType('quarantine') : stop.type === 'Border Gate' ? translateStopType('border_check') : translateStopType('rest')}
                           </span>
                         </td>
                         <td className="p-2.5 text-slate-600 font-medium">{stop.country}</td>
@@ -2637,8 +3239,8 @@ export default function RoutePlanningPage() {
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100 pt-4 mt-2">
+            {/* Sticky Actions */}
+            <div className="sticky -bottom-6 -mx-6 px-6 py-3.5 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-2 z-10">
               <Button
                 type="button"
                 variant="outline"
@@ -2648,18 +3250,16 @@ export default function RoutePlanningPage() {
                 className="text-red-600 border-red-200 hover:bg-red-50 text-xs font-semibold"
               >
                 <Trash2 size={13} className="mr-1" />
-                Xóa tuyến mẫu này
+                {t('coordinator.routes.deleteTemplateBtn', 'Xóa tuyến mẫu này')}
               </Button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setViewingCatalogRoute(null)}
                   className="text-xs"
-                >
-                  Đóng
-                </Button>
+                >{t('common.close', 'Đóng')}</Button>
 
                 <Button
                   type="button"
@@ -2669,23 +3269,22 @@ export default function RoutePlanningPage() {
                     setActiveTab('flow3_planning');
                     setViewingCatalogRoute(null);
 
-                    // Check if an order matches origin & destination!
                     const matchedOrder = planningOrders.find((o) => isRouteMatchingOrder(templateToUse, o));
                     if (matchedOrder) {
                       toast.success(
-                        `Tìm thấy đơn ${matchedOrder.requestCode} trùng khớp lộ trình! Đã mở và đồng bộ tuyến mẫu.`
+                        language === 'en' ? `Found order ${matchedOrder.requestCode} matching route! Opened and synced template.` : `Tìm thấy đơn ${matchedOrder.requestCode} trùng khớp lộ trình! Đã mở và đồng bộ tuyến mẫu.`
                       );
                       handleOpenDetailModal(matchedOrder, templateToUse);
                     } else {
                       toast.success(
-                        `Đã chọn tuyến mẫu "${templateToUse.name}". Vui lòng bấm "Dựng kế hoạch chi tiết" ở đơn hàng bạn muốn áp dụng.`
+                        language === 'en' ? `Selected route template "${templateToUse.name}". Please click "Build Detailed Plan" on the order.` : `Đã chọn tuyến mẫu "${templateToUse.name}". Vui lòng bấm "Dựng kế hoạch chi tiết" ở đơn hàng bạn muốn áp dụng.`
                       );
                     }
                   }}
                   className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs"
                 >
-                  <Navigation size={13} className="mr-1 text-blue-600" />
-                  Dùng Cho Lập Kế Hoạch
+                  <Navigation size={13} className="mr-1 text-[#A67C2E]" />
+                  {t('coordinator.routes.useForPlanningBtn', 'Dùng Cho Lập Kế Hoạch')}
                 </Button>
 
                 <Button
@@ -2699,12 +3298,12 @@ export default function RoutePlanningPage() {
                     setViewingCatalogRoute(null);
                     const el = document.getElementById('map-section');
                     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    toast.success(`Đã nạp tuyến "${viewingCatalogRoute.name}" lên bản đồ số!`);
+                    toast.success(language === 'en' ? `Loaded route "${viewingCatalogRoute.name}" on digital map!` : `Đã nạp tuyến "${viewingCatalogRoute.name}" lên bản đồ số!`);
                   }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm"
+                  className="bg-[#181A17] hover:bg-[#242722] text-white font-bold text-xs shadow-sm"
                 >
                   <MapPin size={13} className="mr-1" />
-                  Tải Lên Bản Đồ Số
+                  {t('coordinator.routes.loadToMapBtn', 'Tải Lên Bản Đồ Số')}
                 </Button>
               </div>
             </div>
@@ -2712,13 +3311,13 @@ export default function RoutePlanningPage() {
         </Modal>
       )}
 
-      {/* MODAL XÁC NHẬN XÓA TUYẾN ĐƯỜNG MẪU (Thay thế browser confirm) */}
+      {/* MODAL XÁC NHẬN XÓA TUYẾN ĐƯỜNG MẪU */}
       {routeToDelete && (
         <Modal
           isOpen={Boolean(routeToDelete)}
           onClose={() => setRouteToDelete(null)}
-          title="Xác Nhận Xóa Tuyến Mẫu"
-          subtitle="Hành động này sẽ gỡ bỏ tuyến đường mẫu khỏi Thư viện số."
+          title={t('coordinator.routes.confirmDeleteTemplateTitle', 'Xác Nhận Xóa Tuyến Mẫu')}
+          subtitle={t('coordinator.routes.confirmDeleteTemplateSub', 'Hành động này sẽ gỡ bỏ tuyến đường mẫu khỏi Thư viện số.')}
           maxWidth="480px"
         >
           <div className="flex flex-col gap-4 py-2">
@@ -2727,35 +3326,35 @@ export default function RoutePlanningPage() {
                 <Trash2 size={18} />
               </div>
               <div>
-                <h4 className="font-bold text-red-900 text-xs m-0">Xóa vĩnh viễn tuyến đường mẫu này?</h4>
+                <h4 className="font-bold text-red-900 text-xs m-0">{t('coordinator.routes.confirmDeleteTemplateHeading', 'Xóa vĩnh viễn tuyến đường mẫu này?')}</h4>
                 <p className="text-xs text-red-700 m-0 mt-1 leading-relaxed">
-                  Bạn có chắc muốn xóa tuyến <strong>&ldquo;{routeToDelete.name}&rdquo;</strong> khỏi Thư viện không? Hành động này không thể hoàn tác.
+                  {t('coordinator.routes.confirmDeleteTemplateDesc', 'Bạn có chắc muốn xóa tuyến "{name}" khỏi Thư viện không? Hành động này không thể hoàn tác.', { name: routeToDelete.name })}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setRouteToDelete(null)}
                 className="text-xs font-medium px-4 py-2 border-slate-300 text-slate-700 hover:bg-slate-100"
               >
-                Hủy Bỏ
+                {t('common.cancel', 'Hủy Bỏ')}
               </Button>
               <Button
                 type="button"
                 variant="primary"
                 onClick={() => {
                   deleteRoute(routeToDelete.id);
-                  toast.success('Đã xóa tuyến đường mẫu khỏi thư viện!');
+                  toast.success(t('coordinator.routes.deleteTemplateSuccess', 'Đã xóa tuyến đường mẫu khỏi thư viện!'));
                   setRouteToDelete(null);
                   setViewingCatalogRoute(null);
                 }}
                 className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-4 py-2 shadow-sm flex items-center gap-1.5"
               >
                 <Trash2 size={13} />
-                Xác Nhận Xóa
+                {t('common.delete', 'Xác Nhận Xóa')}
               </Button>
             </div>
           </div>
@@ -2767,74 +3366,78 @@ export default function RoutePlanningPage() {
         <Modal
           isOpen={isSaveModalOpen}
           onClose={() => setIsSaveModalOpen(false)}
-          title={`Lưu Tuyến Đường Mẫu Vào Thư Viện`}
-          subtitle="Tạo mới hoặc lưu hành lang vận chuyển chuẩn để tái sử dụng nhanh cho các đơn hàng tiếp theo."
+          title={t('coordinator.routes.saveTemplateModalTitle', 'Lưu Tuyến Đường Mẫu Vào Thư Viện')}
+          subtitle={t('coordinator.routes.saveTemplateModalSub', 'Tạo mới hoặc lưu hành lang vận chuyển chuẩn để tái sử dụng nhanh cho các đơn hàng tiếp theo.')}
           maxWidth="760px"
         >
-          <div className="flex flex-col gap-4 max-h-[75vh] overflow-y-auto pr-1">
+          <div className="flex flex-col gap-4">
             {/* Form Fields */}
             <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                Tên Tuyến Đường Mẫu <span className="text-red-500">*</span>
+              <label htmlFor="save-tpl-name" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                {t('coordinator.routes.templateNameLabel', 'Tên Tuyến Đường Mẫu *')}
               </label>
               <input
+                id="save-tpl-name"
                 type="text"
                 value={saveTemplateName}
                 onChange={(e) => setSaveTemplateName(e.target.value)}
-                placeholder="VD: Hành lang TP.HCM ➔ Singapore Turf Club (Hàng không)"
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold text-slate-900 outline-none focus:border-blue-500"
+                placeholder={t('coordinator.routes.templateNamePlaceholder', 'VD: Hành lang TP.HCM ➔ Singapore Turf Club (Hàng không)')}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold text-slate-900 outline-none focus:border-[#C4B38E]"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Điểm xuất phát (Origin) <span className="text-red-500">*</span>
+                <label htmlFor="save-tpl-orig" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  {t('coordinator.routes.originLabel', 'Điểm xuất phát')} <span className="text-red-500">*</span>
                 </label>
                 <input
+                  id="save-tpl-orig"
                   type="text"
                   value={saveTemplateOrigin}
                   onChange={(e) => setSaveTemplateOrigin(e.target.value)}
-                  placeholder="VD: Trang trại Củ Chi, TP.HCM"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800 outline-none focus:border-blue-500"
+                  placeholder={language === 'en' ? 'e.g. Cu Chi Farm, HCMC' : 'VD: Trang trại Củ Chi, TP.HCM'}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800 outline-none focus:border-[#C4B38E]"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Điểm đích đến (Destination) <span className="text-red-500">*</span>
+                <label htmlFor="save-tpl-dest" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  {t('coordinator.routes.destinationLabel', 'Điểm đích đến')} <span className="text-red-500">*</span>
                 </label>
                 <input
+                  id="save-tpl-dest"
                   type="text"
                   value={saveTemplateDestination}
                   onChange={(e) => setSaveTemplateDestination(e.target.value)}
                   placeholder="VD: Singapore Turf Club, Kranji, Singapore"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800 outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800 outline-none focus:border-[#C4B38E]"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                Tổng cự ly ước tính (km)
+              <label htmlFor="save-tpl-dist" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                {t('coordinator.routes.totalEstDistanceKm', 'Tổng cự ly ước tính (km)')}
               </label>
               <input
+                id="save-tpl-dist"
                 type="number"
                 value={saveTemplateDistance}
                 onChange={(e) => setSaveTemplateDistance(Number(e.target.value))}
-                className="w-full sm:w-48 px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold text-blue-900 outline-none focus:border-blue-500"
+                className="w-full sm:w-48 px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold text-[#181A17] outline-none focus:border-[#C4B38E]"
               />
             </div>
 
             {/* Stops Editor */}
             <div className="flex flex-col gap-2 pt-1 border-t border-slate-100">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider m-0">
-                    Các trạm kiểm dịch &amp; trạm dừng chân mẫu ({saveTemplateStops.length} trạm)
+                    {t('coordinator.routes.templateStopsHeader', 'Các trạm kiểm dịch & trạm dừng chân mẫu ({count} trạm)', { count: saveTemplateStops.length })}
                   </h4>
                   <p className="text-[11px] text-slate-400 m-0">
-                    Có thể thêm/xóa trạm để chuẩn hóa lộ trình cho chú ngựa.
+                    {t('coordinator.routes.templateStopsDesc', 'Có thể thêm/xóa trạm để chuẩn hóa lộ trình cho chú ngựa.')}
                   </p>
                 </div>
 
@@ -2843,31 +3446,31 @@ export default function RoutePlanningPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    setSaveTemplateStops([
-                      ...saveTemplateStops,
+                    setSaveTemplateStops((prev) => [
+                      ...prev,
                       {
-                        seq: saveTemplateStops.length + 1,
-                        name: 'Trạm kiểm dịch mới',
+                        seq: prev.length + 1,
+                        name: language === 'en' ? 'New Quarantine Station' : 'Trạm kiểm dịch mới',
                         type: 'Quarantine',
-                        country: 'Việt Nam',
+                        country: language === 'en' ? 'Vietnam' : 'Việt Nam',
                       },
                     ]);
                   }}
-                  className="text-xs font-semibold text-blue-700 border-blue-200 bg-blue-50 hover:bg-blue-100 flex items-center gap-1"
+                  className="text-xs font-semibold text-[#181A17] border-[#EAE5DA] bg-[#FAF8F4] hover:bg-[#F3EFE4] flex items-center gap-1"
                 >
-                  <Plus size={13} /> Thêm trạm
+                  <Plus size={13} /> {t('coordinator.routes.addStopBtn', 'Thêm trạm').replace(/^\+\s*/, '')}
                 </Button>
               </div>
 
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-                <table className="w-full text-xs text-left">
+              <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+                <table className="w-full text-xs text-left min-w-[560px]">
                   <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase">
                     <tr>
                       <th className="p-2 w-10 text-center">#</th>
-                      <th className="p-2">Tên Trạm</th>
-                      <th className="p-2 w-36">Loại Trạm</th>
-                      <th className="p-2 w-28">Quốc Gia</th>
-                      <th className="p-2 w-12 text-center">Xóa</th>
+                      <th className="p-2">{t('coordinator.routes.stopNameCol', 'Tên Trạm')}</th>
+                      <th className="p-2 w-36">{t('coordinator.routes.stopTypeCol', 'Loại Trạm')}</th>
+                      <th className="p-2 w-28">{t('coordinator.routes.countryCol', 'Quốc Gia')}</th>
+                      <th className="p-2 w-12 text-center">{t('common.delete', 'Xóa')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -2879,9 +3482,10 @@ export default function RoutePlanningPage() {
                             type="text"
                             value={stop.name}
                             onChange={(e) => {
-                              const updated = [...saveTemplateStops];
-                              updated[idx].name = e.target.value;
-                              setSaveTemplateStops(updated);
+                              const val = e.target.value;
+                              setSaveTemplateStops((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, name: val } : item))
+                              );
                             }}
                             className="w-full px-2 py-1 border border-slate-200 rounded text-xs font-medium"
                           />
@@ -2890,15 +3494,16 @@ export default function RoutePlanningPage() {
                           <select
                             value={stop.type}
                             onChange={(e) => {
-                              const updated = [...saveTemplateStops];
-                              updated[idx].type = e.target.value as any;
-                              setSaveTemplateStops(updated);
+                              const val = e.target.value as any;
+                              setSaveTemplateStops((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, type: val } : item))
+                              );
                             }}
                             className="w-full px-1.5 py-1 border border-slate-200 rounded text-xs font-semibold"
                           >
-                            <option value="Quarantine">Kiểm dịch (Quarantine)</option>
-                            <option value="Rest">Nghỉ ngơi (Rest)</option>
-                            <option value="Border Gate">Cửa khẩu (Border Gate)</option>
+                            <option value="Quarantine">{translateStopType('quarantine')}</option>
+                            <option value="Rest">{translateStopType('rest')}</option>
+                            <option value="Border Gate">{translateStopType('border_check')}</option>
                           </select>
                         </td>
                         <td className="p-2">
@@ -2906,9 +3511,10 @@ export default function RoutePlanningPage() {
                             type="text"
                             value={stop.country}
                             onChange={(e) => {
-                              const updated = [...saveTemplateStops];
-                              updated[idx].country = e.target.value;
-                              setSaveTemplateStops(updated);
+                              const val = e.target.value;
+                              setSaveTemplateStops((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, country: val } : item))
+                              );
                             }}
                             className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
                           />
@@ -2917,12 +3523,12 @@ export default function RoutePlanningPage() {
                           <button
                             type="button"
                             onClick={() => {
-                              const updated = saveTemplateStops
-                                .filter((_, i) => i !== idx)
-                                .map((s, i) => ({ ...s, seq: i + 1 }));
-                              setSaveTemplateStops(updated);
+                              setSaveTemplateStops((prev) =>
+                                prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, seq: i + 1 }))
+                              );
                             }}
-                            className="text-red-500 hover:text-red-700"
+                            aria-label={language === 'en' ? `Delete template stop ${stop.seq}` : `Xóa trạm mẫu #${stop.seq}`}
+                            className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 cursor-pointer"
                           >
                             <Trash2 size={13} />
                           </button>
@@ -2934,15 +3540,15 @@ export default function RoutePlanningPage() {
               </div>
             </div>
 
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-4 mt-2">
+            {/* Sticky Modal Actions */}
+            <div className="sticky -bottom-6 -mx-6 px-6 py-3.5 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-wrap items-center justify-end gap-2 mt-2 z-10">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setIsSaveModalOpen(false)}
                 className="text-xs font-medium"
               >
-                Hủy bỏ
+                {t('common.cancel', 'Hủy bỏ')}
               </Button>
               <Button
                 type="button"
@@ -2951,12 +3557,22 @@ export default function RoutePlanningPage() {
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
               >
                 <BookmarkPlus size={14} />
-                <span>Lưu Tuyến Mẫu Vào Thư Viện</span>
+                <span>{t('coordinator.routes.saveTemplateBtn', 'Lưu Tuyến Mẫu Vào Thư Viện')}</span>
               </Button>
             </div>
           </div>
         </Modal>
       )}
     </div>
+  );
+}
+
+
+export default function RoutePlanningPage() {
+  const { t } = useLanguage();
+  return (
+    <Suspense fallback={<div className="p-12 text-center text-slate-500 font-medium">{t('coordinator.routes.loadingCoordinationCenter', 'Đang tải Trung tâm Điều phối Tuyến đường...')}</div>}>
+      <RoutePlanningContent />
+    </Suspense>
   );
 }

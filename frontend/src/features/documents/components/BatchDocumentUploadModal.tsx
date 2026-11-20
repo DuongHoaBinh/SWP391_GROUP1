@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { FileText, Upload, CheckCircle2, AlertCircle, X, ShieldCheck, Loader2 } from 'lucide-react';
+import { FileText, Upload, CheckCircle2, X, Loader2, AlertTriangle } from 'lucide-react';
 import { documentsApi, RegulationItem } from '../api/documents.api';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 import toast from 'react-hot-toast';
 
 interface BatchDocumentUploadModalProps {
@@ -18,36 +19,58 @@ interface BatchDocumentUploadModalProps {
   missingRegulations: RegulationItem[];
 }
 
-interface SelectedFileMap {
-  [regulationId: number]: {
-    file: File;
-    docNumber?: string;
-  };
+interface SelectedFileEntry {
+  file?: File | null;
+  docNumber?: string;
 }
+
+interface SelectedFileMap {
+  [regulationId: number]: SelectedFileEntry;
+}
+
+interface FailedUploadItem {
+  regId: number;
+  title: string;
+  error: string;
+}
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
+
+const isValidFileType = (file: File): boolean => {
+  const mimeType = file.type?.toLowerCase() || '';
+  const fileName = file.name?.toLowerCase() || '';
+  return ALLOWED_EXTENSIONS.some((ext) => fileName.endsWith(ext)) || ALLOWED_MIME_TYPES.includes(mimeType);
+};
 
 export const BatchDocumentUploadModal: React.FC<BatchDocumentUploadModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
-  orderId,
   horseId,
   horseName,
   destinationCountry,
   missingRegulations,
 }) => {
+  const { t, language, translateCountry, translateDocType } = useLanguage();
   const [selectedFiles, setSelectedFiles] = useState<SelectedFileMap>({});
+  const [failedItems, setFailedItems] = useState<FailedUploadItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isOpen) {
       setSelectedFiles({});
+      setFailedItems([]);
       setUploadProgress(null);
     }
   }, [isOpen]);
 
   const handleClose = () => {
+    if (isUploading) return;
     setSelectedFiles({});
+    setFailedItems([]);
     setUploadProgress(null);
     onClose();
   };
@@ -56,19 +79,37 @@ export const BatchDocumentUploadModal: React.FC<BatchDocumentUploadModalProps> =
 
   const handleFileChange = (regId: number, file: File | null) => {
     if (!file) {
-      setSelectedFiles((prev) => {
-        const next = { ...prev };
-        delete next[regId];
-        return next;
-      });
+      // Preserve docNumber when user only removes the attached file
+      setSelectedFiles((prev) => ({
+        ...prev,
+        [regId]: {
+          ...(prev[regId] || {}),
+          file: null,
+        },
+      }));
+      setFailedItems((prev) => prev.filter((f) => f.regId !== regId));
       return;
     }
 
-    if (file.size > 25 * 1024 * 1024) {
-      toast.error(`Tệp "${file.name}" vượt quá giới hạn 25MB`);
+    if (!isValidFileType(file)) {
+      toast.error(
+        language === 'en'
+          ? `File "${file.name}" is invalid. Only .pdf, .jpg, .jpeg, .png are accepted.`
+          : `Tệp "${file.name}" không hợp lệ. Chỉ chấp nhận .pdf, .jpg, .jpeg, .png`
+      );
       return;
     }
 
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error(
+        language === 'en'
+          ? `File "${file.name}" exceeds 10MB limit.`
+          : `Tệp "${file.name}" vượt quá giới hạn 10MB`
+      );
+      return;
+    }
+
+    setFailedItems((prev) => prev.filter((f) => f.regId !== regId));
     setSelectedFiles((prev) => ({
       ...prev,
       [regId]: {
@@ -82,40 +123,54 @@ export const BatchDocumentUploadModal: React.FC<BatchDocumentUploadModalProps> =
     setSelectedFiles((prev) => ({
       ...prev,
       [regId]: {
-        ...(prev[regId] || { file: new File([], '') }),
+        ...(prev[regId] || {}),
         docNumber,
       },
     }));
   };
 
-  const selectedCount = Object.keys(selectedFiles).filter((k) => selectedFiles[Number(k)]?.file?.size > 0).length;
+  const selectedCount = Object.keys(selectedFiles).filter((k) => {
+    const f = selectedFiles[Number(k)]?.file;
+    return Boolean(f && f.size > 0);
+  }).length;
 
   const handleSubmitAll = async () => {
+    if (isUploading) return;
     const regIdsToUpload = Object.keys(selectedFiles)
       .map(Number)
-      .filter((k) => selectedFiles[k]?.file?.size > 0);
+      .filter((k) => {
+        const f = selectedFiles[k]?.file;
+        return Boolean(f && f.size > 0);
+      });
 
     if (regIdsToUpload.length === 0) {
-      toast.error('Vui lòng chọn ít nhất một tệp tài liệu để nộp');
+      toast.error(t('documents.batch.selectAtLeastOne', language === 'en' ? 'Please select at least one document to submit' : 'Vui lòng chọn ít nhất một tệp tài liệu để nộp'));
       return;
     }
 
     setIsUploading(true);
+    setFailedItems([]);
     setUploadProgress({ current: 0, total: regIdsToUpload.length });
 
-    let successCount = 0;
-    let failedCount = 0;
+    const succeededIds: number[] = [];
+    const newFailed: FailedUploadItem[] = [];
 
     for (let i = 0; i < regIdsToUpload.length; i++) {
       const regId = regIdsToUpload[i];
       const item = selectedFiles[regId];
+      const fileObj = item?.file;
+      if (!fileObj) continue;
+
       const regObj = missingRegulations.find((r) => r.id === regId);
+      const regLabel = regObj
+        ? translateDocType(regObj.documentType, regObj.description)
+        : `#${regId}`;
 
       setUploadProgress({ current: i + 1, total: regIdsToUpload.length });
 
       try {
         const formData = new FormData();
-        formData.append('file', item.file);
+        formData.append('file', fileObj);
         formData.append('horseId', String(horseId));
         formData.append('regulationId', String(regId));
         formData.append('docType', regObj?.documentType || 'health_certificate');
@@ -124,186 +179,251 @@ export const BatchDocumentUploadModal: React.FC<BatchDocumentUploadModalProps> =
         }
 
         await documentsApi.uploadDocument(formData);
-        successCount++;
+        succeededIds.push(regId);
       } catch (err: any) {
         console.error(`Lỗi khi nộp tài liệu #${regId}:`, err);
-        failedCount++;
+        newFailed.push({
+          regId,
+          title: regLabel,
+          error:
+            err?.message ||
+            (language === 'en' ? 'Upload failed' : 'Không thể tải lên tệp này'),
+        });
       }
     }
 
     setIsUploading(false);
     setUploadProgress(null);
 
-    if (successCount > 0) {
-      toast.success(`Đã nộp thành công ${successCount} tài liệu kiểm dịch cho ngựa ${horseName}!`);
-      setSelectedFiles({});
+    if (succeededIds.length > 0) {
+      setSelectedFiles((prev) => {
+        const next = { ...prev };
+        for (const id of succeededIds) {
+          delete next[id];
+        }
+        return next;
+      });
       onSuccess();
+    }
+
+    if (newFailed.length === 0 && succeededIds.length > 0) {
+      toast.success(
+        language === 'en'
+          ? `Successfully uploaded ${succeededIds.length} quarantine documents for ${horseName}!`
+          : `Đã nộp thành công ${succeededIds.length} tài liệu kiểm dịch cho ngựa ${horseName}!`
+      );
+      setSelectedFiles({});
       onClose();
+    } else if (succeededIds.length > 0 && newFailed.length > 0) {
+      setFailedItems(newFailed);
+      toast.error(
+        language === 'en'
+          ? `Uploaded ${succeededIds.length} documents, but ${newFailed.length} failed. Please retry the failed items below.`
+          : `Đã nộp ${succeededIds.length} tài liệu, nhưng ${newFailed.length} mục gặp lỗi. Vui lòng kiểm tra và thử lại bên dưới.`
+      );
     } else {
-      toast.error('Không thể nộp tài liệu. Vui lòng thử lại sau.');
+      setFailedItems(newFailed);
+      toast.error(
+        language === 'en'
+          ? 'Unable to submit documents. Please check the errors and try again.'
+          : 'Không thể nộp tài liệu. Vui lòng kiểm tra lỗi và thử lại sau.'
+      );
     }
   };
+
+  const countryLabel = translateCountry(destinationCountry || 'International');
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={`Nộp Trọn Bộ Hồ Sơ Kiểm Dịch — ${horseName}`}
-      subtitle={`Hành trình đi ${destinationCountry || 'Quốc tế'} • Tải lên cùng lúc toàn bộ các chứng từ bắt buộc`}
+      closeDisabled={isUploading}
+      title={`${t('documents.batch.title', language === 'en' ? 'Submit Full Quarantine Dossier' : 'Nộp Trọn Bộ Hồ Sơ Kiểm Dịch')} — ${horseName}`}
+      subtitle={`${t('common.destination', language === 'en' ? 'Destination' : 'Điểm đến')}: ${countryLabel} • ${t('documents.batch.subtitle', language === 'en' ? 'Upload all required certificates in one batch' : 'Tải lên cùng lúc toàn bộ các chứng từ bắt buộc')}`}
       maxWidth="680px"
     >
-      <div className="flex flex-col gap-4">
-        {/* Destination notice */}
-        <div className="bg-blue-50 border border-blue-200/80 rounded-xl p-3.5 flex items-start gap-3">
-          <ShieldCheck size={20} className="text-blue-600 shrink-0 mt-0.5" />
-          <div className="text-xs text-blue-900 leading-relaxed">
-            <strong>Danh mục quy chế kiểm dịch & hải quan ({destinationCountry}):</strong>
-            <p className="m-0 mt-0.5 text-blue-800">
-              Bạn có thể chọn file từ máy tính cho từng mục dưới đây rồi nhấn <strong>"Nộp tất cả"</strong> một lần duy nhất mà không cần mở tải từng chứng từ riêng lẻ.
+      <div className="flex flex-col gap-3.5">
+        {failedItems.length > 0 && (
+          <div role="alert" className="bg-red-50 border border-red-200 rounded-xl p-3.5 text-xs text-red-800 space-y-1.5">
+            <div className="font-bold flex items-center gap-1.5 text-red-900">
+              <AlertTriangle size={15} className="text-red-600 shrink-0" />
+              {language === 'en'
+                ? `${failedItems.length} document(s) failed to upload:`
+                : `Có ${failedItems.length} chứng từ tải lên thất bại:`}
+            </div>
+            <ul className="list-disc pl-5 m-0 space-y-0.5">
+              {failedItems.map((f) => (
+                <li key={f.regId}>
+                  <strong>{f.title}</strong>: {f.error}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {missingRegulations.length === 0 ? (
+          <div className="py-10 px-4 text-center rounded-xl border border-dashed border-[#D8CEBE] bg-[#FAF8F4]">
+            <CheckCircle2 size={32} className="mx-auto text-emerald-600 mb-2" />
+            <p className="text-sm font-bold text-[#181A17] m-0">
+              {language === 'en'
+                ? 'All required quarantine documents are already submitted!'
+                : 'Tất cả chứng từ kiểm dịch bắt buộc đã được nộp đầy đủ!'}
+            </p>
+            <p className="text-xs text-[#5B6779] mt-1 mb-0">
+              {language === 'en'
+                ? `No pending regulations remain for ${horseName} (${countryLabel}).`
+                : `Không còn danh mục quy chế còn thiếu nào cho ${horseName} (${countryLabel}).`}
             </p>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {missingRegulations.map((reg, index) => {
+              const currentItem = selectedFiles[reg.id];
+              const hasFile = Boolean(currentItem?.file && currentItem.file.size > 0);
+              const failedRow = failedItems.find((f) => f.regId === reg.id);
+              const titleText = translateDocType(reg.documentType, reg.description);
 
-        {/* Regulation list checklist */}
-        <div className="flex flex-col gap-3 max-h-[460px] overflow-y-auto pr-1">
-          {missingRegulations.map((reg, index) => {
-            const currentItem = selectedFiles[reg.id];
-            const hasFile = Boolean(currentItem?.file && currentItem.file.size > 0);
-
-            return (
-              <div
-                key={reg.id}
-                className={`border rounded-xl p-3.5 transition-all ${
-                  hasFile
-                    ? 'border-green-300 bg-green-50/40 shadow-xs'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="flex items-start gap-2.5">
-                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 text-slate-700 text-xs font-bold shrink-0 mt-0.5">
-                      {index + 1}
-                    </span>
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-900 m-0">
-                        {reg.description || reg.documentType}
+              return (
+                <div
+                  key={reg.id}
+                  className={`border rounded-xl p-3 transition-all ${
+                    failedRow
+                      ? 'border-red-300 bg-red-50/40'
+                      : hasFile
+                      ? 'border-[#287653]/50 bg-[#E8F2EB]/60'
+                      : 'border-[#D8CEBE] bg-white hover:border-[#C5B6A0]'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <span className="flex items-center justify-center w-5 h-5 rounded-full bg-[#181A17] text-[#B49A68] text-[11px] font-bold shrink-0">
+                        {index + 1}
+                      </span>
+                      <h4 className="text-sm font-semibold text-[#181A17] m-0 truncate">
+                        {titleText}
                       </h4>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                          {reg.documentType}
-                        </span>
-                        <span className="text-[11px] text-red-600 font-semibold">
-                          * Bắt buộc ({reg.country})
-                        </span>
-                      </div>
+                      <span className="text-[11px] font-medium text-[#5B6779] bg-[#F0EEE8] border border-[#D8CEBE] px-2 py-0.5 rounded shrink-0">
+                        {translateCountry(reg.country)}
+                      </span>
                     </div>
-                  </div>
 
-                  {hasFile && (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full shrink-0">
-                      <CheckCircle2 size={13} /> Sẵn sàng
-                    </span>
-                  )}
-                </div>
-
-                {/* File picker & doc number inputs */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-3 pt-2.5 border-t border-slate-100">
-                  {/* File input button */}
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                      Tệp đính kèm (PDF, PNG, JPG) <span className="text-red-500">*</span>
-                    </label>
-
-                    {hasFile ? (
-                      <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-green-300 text-xs">
-                        <div className="flex items-center gap-2 truncate pr-2">
-                          <FileText size={16} className="text-green-600 shrink-0" />
-                          <span className="truncate font-medium text-slate-800" title={currentItem.file.name}>
-                            {currentItem.file.name}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={isUploading}
-                          onClick={() => handleFileChange(reg.id, null)}
-                          className="text-slate-400 hover:text-red-600 transition-colors p-1"
-                          title="Hủy chọn tệp này"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ) : (
-                      <label className="flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-blue-400 hover:border-blue-600 bg-blue-50/50 hover:bg-blue-50 rounded-lg text-xs font-semibold text-blue-700 cursor-pointer transition-colors">
-                        <Upload size={14} />
-                        <span>Chọn tệp từ máy tính</span>
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png"
-                          disabled={isUploading}
-                          className="hidden"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) handleFileChange(reg.id, f);
-                          }}
-                        />
-                      </label>
+                    {hasFile && !failedRow && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#287653] bg-[#E8F2EB] border border-[#287653]/30 px-2 py-0.5 rounded-full shrink-0">
+                        <CheckCircle2 size={12} /> {language === 'en' ? 'Ready' : 'Sẵn sàng'}
+                      </span>
                     )}
                   </div>
 
-                  {/* Doc Number input */}
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                      Mã / Số hiệu chứng từ (Tùy chọn)
-                    </label>
+                  {failedRow && (
+                    <p className="text-xs text-red-700 font-medium mt-1.5 mb-0">
+                      ⚠️ {failedRow.error}
+                    </p>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-2.5">
+                    <div className="flex-1 min-w-0">
+                      {hasFile && currentItem?.file ? (
+                        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white border border-[#287653]/40 text-xs">
+                          <div className="flex items-center gap-2 truncate pr-2">
+                            <FileText size={15} className="text-[#287653] shrink-0" />
+                            <span className="truncate font-medium text-[#181A17]" title={currentItem.file.name}>
+                              {currentItem.file.name}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isUploading}
+                            onClick={() => handleFileChange(reg.id, null)}
+                            aria-label={language === 'en' ? `Remove file for ${titleText}` : `Gỡ tệp cho ${titleText}`}
+                            title={language === 'en' ? 'Clear file' : 'Hủy chọn tệp này'}
+                            className="text-[#8892A0] hover:text-[#B33E3E] transition-colors p-0.5 cursor-pointer disabled:opacity-40 shrink-0"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <label
+                          htmlFor={`batch-file-input-${reg.id}`}
+                          className="relative flex items-center justify-center gap-2 px-3 py-1.5 border border-dashed border-[#C4B38E]/60 hover:border-[#C4B38E] bg-[#FAF8F4]/60 hover:bg-[#FAF8F4] rounded-lg text-xs font-semibold text-[#A67C2E] cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-[#A67C2E]"
+                        >
+                          <Upload size={13} />
+                          <span>{t('documents.batch.chooseFile', language === 'en' ? 'Choose file (PDF, PNG, JPG)' : 'Chọn tệp (PDF, PNG, JPG)')}</span>
+                          <input
+                            id={`batch-file-input-${reg.id}`}
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            disabled={isUploading}
+                            className="sr-only"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) handleFileChange(reg.id, f);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+
                     <input
+                      id={`batch-doc-num-${reg.id}`}
                       type="text"
                       disabled={isUploading}
-                      placeholder="VD: FEI-2026-9812..."
+                      aria-label={t('documents.batch.docNumberLabel', language === 'en' ? 'Document / Permit No. (Optional)' : 'Số hiệu chứng từ (Tùy chọn)')}
+                      placeholder={language === 'en' ? 'Doc No. (optional)' : 'Số hiệu (tùy chọn)'}
                       value={currentItem?.docNumber || ''}
                       onChange={(e) => handleDocNumberChange(reg.id, e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white outline-none focus:border-blue-500 font-medium"
+                      className="w-full sm:w-44 px-2.5 py-1.5 text-xs rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] outline-none focus:border-[#C4B38E] font-medium shrink-0"
                     />
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
-        {/* Footer Actions */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-200 mt-2">
-          <div className="text-xs text-slate-600 font-medium">
-            Đã đính kèm: <strong className="text-blue-700 text-sm font-bold">{selectedCount}</strong> /{' '}
-            {missingRegulations.length} danh mục
+        <div className="sticky -bottom-6 -mx-6 px-6 py-3.5 bg-white/95 backdrop-blur-sm border-t border-[#E8E2D8] flex flex-col sm:flex-row items-center justify-between gap-3 mt-2 z-10">
+          <div className="text-xs text-[#5B6779] font-medium">
+            {t('documents.batch.attachedCount', language === 'en' ? 'Attached:' : 'Đã đính kèm:')}{' '}
+            <strong className="text-[#A67C2E] text-sm font-bold">{selectedCount}</strong> / {missingRegulations.length}{' '}
+            {t('documents.batch.categories', language === 'en' ? 'items' : 'danh mục')}
           </div>
 
-          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
-            <button
+          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto justify-end">
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               disabled={isUploading}
               onClick={handleClose}
-              className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors"
             >
-              Hủy bỏ
-            </button>
-            <Button
-              variant="primary"
-              disabled={isUploading || selectedCount === 0}
-              onClick={handleSubmitAll}
-              className="px-5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 shadow-sm flex items-center gap-1.5"
-            >
-              {isUploading ? (
-                <>
-                  <Loader2 size={14} className="animate-spin" />
-                  Đang nộp ({uploadProgress?.current}/{uploadProgress?.total})...
-                </>
-              ) : (
-                <>
-                  <Upload size={14} />
-                  Nộp tất cả ({selectedCount}/{missingRegulations.length})
-                </>
-              )}
+              {t('common.cancel', language === 'en' ? 'Cancel' : 'Hủy bỏ')}
             </Button>
+            {missingRegulations.length > 0 && (
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={isUploading || selectedCount === 0}
+                onClick={handleSubmitAll}
+                className="flex items-center gap-1.5"
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    {language === 'en'
+                      ? `Submitting (${uploadProgress?.current || 0}/${uploadProgress?.total || 0})...`
+                      : `Đang nộp (${uploadProgress?.current || 0}/${uploadProgress?.total || 0})...`}
+                  </>
+                ) : (
+                  <>
+                    <Upload size={14} />
+                    {language === 'en'
+                      ? `Submit All (${selectedCount}/${missingRegulations.length})`
+                      : `Nộp tất cả (${selectedCount}/${missingRegulations.length})`}
+                  </>
+                )}
+              </Button>
+            )}
           </div>
         </div>
       </div>

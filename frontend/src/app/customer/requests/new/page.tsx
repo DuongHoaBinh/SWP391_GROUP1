@@ -5,19 +5,20 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ChevronRight,
-  MapPin,
-  Flag,
-  Calendar,
-  Plane,
   Plus,
   Check,
   ArrowRight,
   AlertCircle,
   Loader2,
   Truck,
+  Plane,
   Navigation,
   Clock,
+  Search,
+  X,
 } from 'lucide-react';
+import { AddressAutocompleteInput } from '@/components/ui/AddressAutocompleteInput';
+import { normalizeVietnamese, type GeocodedLocation, type RouteLegPreview } from '@/lib/geo-corridors';
 import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
 const HORSE_PLACEHOLDER_SVG =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='40' fill='%23F0EEE8'/%3E%3Ctext x='40' y='47' text-anchor='middle' font-family='serif' font-weight='700' font-size='22' fill='%23A67C2E'%3EEQ%3C/text%3E%3C/svg%3E";
@@ -72,7 +73,6 @@ const getDateOffsetString = (days: number) => {
   const utc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) + days * 86_400_000;
   return new Date(utc).toISOString().split('T')[0];
 };
-const getTodayString = () => getDateOffsetString(0);
 
 const parseLocalDate = (val: string) => {
   const parts = val.split('-').map(Number);
@@ -81,42 +81,24 @@ const parseLocalDate = (val: string) => {
 };
 
 const getFormSchema = (lang: string) =>
-  z
-    .object({
-      title: z.string().min(1, lang === 'en' ? 'Request title is required' : 'Vui lòng nhập tiêu đề yêu cầu'),
-      transportType: z.enum(['International', 'Domestic']),
-      origin: z.string().min(1, lang === 'en' ? 'Origin is required' : 'Vui lòng chọn điểm khởi hành'),
-      destination: z.string().min(1, lang === 'en' ? 'Destination is required' : 'Vui lòng chọn điểm đến'),
-      departureDate: z
-        .string()
-        .min(1, lang === 'en' ? 'Departure date is required' : 'Vui lòng chọn ngày khởi hành')
-        .refine((val) => {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const dep = parseLocalDate(val);
-          dep.setHours(0, 0, 0, 0);
-          return dep >= today;
-        }, lang === 'en' ? 'Departure date cannot be in the past' : 'Ngày khởi hành không được chọn ngày trong quá khứ'),
-      arrivalDate: z.string().optional(),
-      horseCount: z.coerce.number().min(1),
-      specialReqs: z.string().optional(),
-    })
-    .refine(
-      (data) => {
-        if (data.arrivalDate && data.departureDate) {
-          const dep = parseLocalDate(data.departureDate);
-          const arr = parseLocalDate(data.arrivalDate);
-          dep.setHours(0, 0, 0, 0);
-          arr.setHours(0, 0, 0, 0);
-          return arr >= dep;
-        }
-        return true;
-      },
-      {
-        message: lang === 'en' ? 'Estimated arrival date must be on or after departure date' : 'Ngày đến dự kiến phải từ ngày khởi hành trở đi',
-        path: ['arrivalDate'],
-      }
-    );
+  z.object({
+    title: z.string().min(1, lang === 'en' ? 'Request title is required' : 'Vui lòng nhập tiêu đề yêu cầu'),
+    transportType: z.enum(['International', 'Domestic']),
+    origin: z.string().min(1, lang === 'en' ? 'Origin is required' : 'Vui lòng chọn điểm khởi hành'),
+    destination: z.string().min(1, lang === 'en' ? 'Destination is required' : 'Vui lòng chọn điểm đến'),
+    departureDate: z
+      .string()
+      .min(1, lang === 'en' ? 'Departure date is required' : 'Vui lòng chọn ngày khởi hành')
+      .refine((val) => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dep = parseLocalDate(val);
+        dep.setHours(0, 0, 0, 0);
+        return dep >= today;
+      }, lang === 'en' ? 'Departure date cannot be in the past' : 'Ngày khởi hành không được chọn ngày trong quá khứ'),
+    horseCount: z.coerce.number().min(1),
+    specialReqs: z.string().optional(),
+  });
 
 type FormData = z.infer<ReturnType<typeof getFormSchema>>;
 
@@ -152,9 +134,7 @@ function CreateTransportRequestForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
 
-  const todayStr = getTodayString();
-  const defaultDepartureStr = getDateOffsetString(18);
-  const defaultArrivalStr = getDateOffsetString(19);
+  const defaultDepartureStr = getDateOffsetString(7);
 
   // Form states using react-hook-form
   const currentFormSchema = useMemo(() => getFormSchema(language), [language]);
@@ -173,7 +153,6 @@ function CreateTransportRequestForm() {
       origin: 'Ho Chi Minh City, Vietnam',
       destination: 'Singapore Turf Club',
       departureDate: defaultDepartureStr,
-      arrivalDate: defaultArrivalStr,
       horseCount: 1,
       specialReqs: '',
     },
@@ -182,10 +161,37 @@ function CreateTransportRequestForm() {
   const formValues = watch();
 
   // Route calculation and corridor metrics from Leaflet map
-  const [routeData, setRouteData] = useState<{ distanceKm: number; durationHours: number; mode: 'air' | 'road' } | null>(null);
+  const [selectedOriginGeo, setSelectedOriginGeo] = useState<GeocodedLocation | null>(null);
+  const [selectedDestGeo, setSelectedDestGeo] = useState<GeocodedLocation | null>(null);
+  const [routeData, setRouteData] = useState<{
+    distanceKm: number;
+    durationHours: number;
+    mode: 'air' | 'road';
+    legs?: RouteLegPreview[];
+  } | null>(null);
+
+  useEffect(() => {
+    register('origin');
+    register('destination');
+  }, [register]);
+
+  const estimatedArrivalDisplay = useMemo(() => {
+    if (!formValues.departureDate) return '—';
+    const dep = parseLocalDate(formValues.departureDate);
+    if (Number.isNaN(dep.getTime())) return '—';
+    const durationHours = routeData?.durationHours ?? 24;
+    const arr = new Date(dep.getTime() + durationHours * 3_600_000);
+    return arr.toLocaleDateString(language === 'en' ? 'en-US' : 'vi-VN', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+  }, [formValues.departureDate, routeData?.durationHours, language]);
 
   // Horse quantities mapping: horseId -> quantity
   const [horseQuantities, setHorseQuantities] = useState<Record<string, number>>({});
+  const [horseFilter, setHorseFilter] = useState<'available' | 'all'>('available');
+  const [horseSearch, setHorseSearch] = useState('');
   const [bookingType, setBookingType] = useState<BookingType>('shared_stall');
   const [insuranceValues, setInsuranceValues] = useState<Record<string, InsuranceInput>>({});
   const [insuranceError, setInsuranceError] = useState('');
@@ -209,7 +215,7 @@ function CreateTransportRequestForm() {
     earliestDepartureDate: string;
   }>(cutoffQuery, (url) => apiClient(url), { shouldRetryOnError: false });
 
-  const minLeadDays = cutoffPolicy?.minLeadDays ?? (bookingType === 'dedicated_charter' ? 4 : 7);
+  const minLeadDays = cutoffPolicy?.minLeadDays ?? (bookingType === 'dedicated_charter' ? 2 : 3);
   const earliestDepartureDate = cutoffPolicy?.earliestDepartureDate ?? getDateOffsetString(minLeadDays);
 
   const refreshedStep = useRef<number | null>(null);
@@ -295,17 +301,45 @@ function CreateTransportRequestForm() {
     return acc;
   }, {} as Record<string, number>);
 
+  const getHorseRowState = (h: Horse) => {
+    const activeOrder = getHorseActiveOrder(h);
+    const activeStatus = String(activeOrder?.status || '').toLowerCase();
+    const horseStatus = String(h.status || '').toLowerCase();
+    const isInTransit =
+      (h.availabilityStatus || '').toLowerCase().includes('transit') ||
+      horseStatus === 'in_transit' ||
+      activeStatus === 'in_transit';
+    const isScheduled = !isInTransit && Boolean(activeOrder);
+    const isRetired =
+      horseStatus === 'retired' ||
+      horseStatus === 'deceased' ||
+      (Boolean(horseStatus) && horseStatus !== 'active' && !isInTransit);
+    const isUnavailable = isInTransit || isScheduled || isRetired;
+    const sortRank = isUnavailable ? (isScheduled ? 1 : isInTransit ? 2 : 3) : 0;
+    return { activeOrder, isInTransit, isScheduled, isRetired, isUnavailable, sortRank };
+  };
+
+  // Show selectable horses first without re-sorting on selection toggle
+  const sortedHorses = horses
+    .map((horse, index) => ({ horse, index, ...getHorseRowState(horse) }))
+    .sort((a, b) => a.sortRank - b.sortRank || a.index - b.index);
+
+  const availableHorsesCount = sortedHorses.filter((row) => !row.isUnavailable).length;
+  const normalizedHorseQuery = normalizeVietnamese(horseSearch.trim());
+  const filteredHorses = sortedHorses.filter((row) => {
+    if (horseFilter === 'available' && row.isUnavailable) return false;
+    if (!normalizedHorseQuery) return true;
+    return (
+      normalizeVietnamese(row.horse.name || '').includes(normalizedHorseQuery) ||
+      normalizeVietnamese(row.horse.breed || '').includes(normalizedHorseQuery) ||
+      normalizeVietnamese(translateBreed(row.horse.breed) || '').includes(normalizedHorseQuery)
+    );
+  });
+
   const toggleHorseSelection = (id: string) => {
     const target = horses.find((h) => String(h.id) === String(id));
     if (!target) return;
-    const activeOrder = getHorseActiveOrder(target);
-    const isInTransit =
-      (target.availabilityStatus || '').toLowerCase().includes('transit') ||
-      activeOrder?.status === 'IN_TRANSIT' ||
-      activeOrder?.status === 'in_transit';
-    const isScheduled = !isInTransit && Boolean(activeOrder);
-    const isRetired = target.status === 'retired' || target.status === 'deceased';
-    const isUnavailable = isInTransit || isScheduled || isRetired;
+    const { activeOrder, isInTransit, isScheduled, isUnavailable } = getHorseRowState(target);
 
     if (isUnavailable) {
       if (isInTransit) {
@@ -339,7 +373,7 @@ function CreateTransportRequestForm() {
 
   const handleContinue = async () => {
     if (currentStep === 1) {
-      const isValid = await trigger(['title', 'origin', 'destination', 'departureDate', 'arrivalDate']);
+      const isValid = await trigger(['title', 'origin', 'destination', 'departureDate']);
       if (!isValid) return;
       if (isDepartureBeforeCutoff(formValues.departureDate)) {
         toast.error(cutoffViolationMessage());
@@ -352,16 +386,7 @@ function CreateTransportRequestForm() {
         toast.error(language === 'en' ? 'Please select at least one horse available for transit.' : 'Vui lòng chọn ít nhất một con ngựa sẵn sàng vận chuyển.');
         return;
       }
-      const invalidSelected = selectedHorses.find((h) => {
-        const activeOrder = getHorseActiveOrder(h);
-        return (
-          Boolean(activeOrder) ||
-          (h.availabilityStatus || '').toLowerCase().includes('transit') ||
-          h.status === 'in_transit' ||
-          h.status === 'retired' ||
-          (Boolean(h.status) && h.status !== 'active')
-        );
-      });
+      const invalidSelected = selectedHorses.find((h) => getHorseRowState(h).isUnavailable);
       if (invalidSelected) {
         const activeOrder = getHorseActiveOrder(invalidSelected);
         toast.error(
@@ -424,8 +449,21 @@ function CreateTransportRequestForm() {
       }
 
       const currentUser = getCurrentUser();
+      const legChain =
+        routeData?.legs && routeData.legs.length > 0
+          ? routeData.legs
+              .map(
+                (l) =>
+                  `Chặng ${l.sequenceNo} (${l.type === 'road' ? 'Xe thùng' : 'Hàng không'}): ${l.fromName} -> ${l.toName}`
+              )
+              .join(' > ')
+          : '';
       const routeNote = routeData
-        ? `[Lộ trình: ${routeData.mode === 'air' ? 'Đường Hàng Không' : 'Đường Bộ Liên Vận'}, ${routeData.distanceKm} km, ~${routeData.durationHours}h]`
+        ? `[Lộ trình: ${
+            routeData.mode === 'air'
+              ? `Đa phương thức (${legChain || 'Xe thùng + Hàng không'})`
+              : 'Xe thùng đường bộ'
+          }, ${routeData.distanceKm} km, ~${routeData.durationHours}h]`
         : '';
       const typeNote = `[Hình thức: ${data.transportType === 'International' ? 'Quốc tế' : 'Nội địa'}]`;
       const titleNote = data.title ? `[Tiêu đề: ${data.title.trim()}]` : '';
@@ -473,55 +511,37 @@ function CreateTransportRequestForm() {
   const progressPercent = ((currentStep - 1) / 2) * 100;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* Top Breadcrumb */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-          <Link href="/customer" style={{ color: 'var(--text-muted)' }}>
+    <div className="flex flex-col gap-6 pb-8">
+      {/* Editorial Header */}
+      <header className="border-b border-[#E5DDD0] pb-5">
+        <div className="flex items-center gap-1.5 text-xs text-[#747D88] mb-1.5 flex-wrap">
+          <Link href="/customer" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
             {language === 'en' ? 'Dashboard' : 'Bảng điều khiển'}
           </Link>
           <ChevronRight size={12} aria-hidden="true" />
-          <Link href="/customer/requests" style={{ color: 'var(--text-muted)' }}>
+          <Link href="/customer/requests" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
             {t('customer.requestsTitle', 'Yêu cầu vận chuyển')}
           </Link>
           <ChevronRight size={12} aria-hidden="true" />
-          <span style={{ color: 'var(--text-heading)', fontWeight: 600 }}>{t('customer.createRequestTitle', 'Tạo yêu cầu vận chuyển')}</span>
+          <span className="text-[#181A17] font-semibold">{t('customer.createRequestTitle', 'Tạo yêu cầu vận chuyển')}</span>
         </div>
-        <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
+        <h1 className="text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
           {t('customer.createRequestTitle', 'Tạo Yêu Cầu Vận Chuyển')}
         </h1>
-      </div>
+        <p className="text-sm text-[#5F6977] mt-1 mb-0">
+          {language === 'en'
+            ? 'Configure your route, select horses, and confirm insurance preferences.'
+            : 'Điền thông tin hành trình, chọn ngựa vận chuyển và xác nhận gói bảo hiểm.'}
+        </p>
+      </header>
 
       {/* PROGRESS INDICATOR */}
-      <div
-        style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          border: '1px solid var(--border-card)',
-          padding: '20px 24px',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
-        <div style={{ maxWidth: '750px', margin: '0 auto', position: 'relative' }}>
-          {/* Track bounded to center of first and last step */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '16px',
-              left: '16.666%',
-              right: '16.666%',
-              height: '3px',
-              backgroundColor: '#F0EEE8',
-              zIndex: 0,
-            }}
-          >
+      <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 shadow-sm">
+        <div className="max-w-[720px] mx-auto relative">
+          <div className="absolute top-4 left-[16.666%] right-[16.666%] h-[2px] bg-[#EFEAE0] z-0">
             <div
-              style={{
-                width: `${progressPercent}%`,
-                height: '100%',
-                backgroundColor: 'var(--primary)',
-                transition: 'width 0.3s ease',
-              }}
+              className="h-full bg-[#181A17] transition-all duration-300"
+              style={{ width: `${progressPercent}%` }}
             />
           </div>
 
@@ -535,32 +555,19 @@ function CreateTransportRequestForm() {
               const isActive = step.num === currentStep;
 
               return (
-                <div key={step.num} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', textAlign: 'center' }}>
+                <div key={step.num} className="flex flex-col items-center gap-1.5 text-center">
                   <div
-                    style={{
-                      width: '34px',
-                      height: '34px',
-                      borderRadius: '50%',
-                      backgroundColor: isPast ? '#2D5A3F' : isActive ? 'var(--primary)' : '#ffffff',
-                      color: isPast || isActive ? '#ffffff' : '#5F6977',
-                      border: isPast || isActive ? '2px solid transparent' : '2px solid #D8CEBE',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      boxShadow: isActive ? '0 0 0 4px rgba(166, 124, 46, 0.2)' : 'none',
-                    }}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                      isPast
+                        ? 'bg-[#287653] text-white'
+                        : isActive
+                          ? 'bg-[#181A17] text-[#C4B38E] ring-4 ring-[#C4B38E]/25'
+                          : 'bg-white text-[#5F6977] border border-[#D8CEBE]'
+                    }`}
                   >
-                    {isPast ? <Check size={16} strokeWidth={3} aria-hidden="true" /> : `0${step.num}`}
+                    {isPast ? <Check size={15} strokeWidth={3} aria-hidden="true" /> : `0${step.num}`}
                   </div>
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      fontWeight: isActive ? 700 : 500,
-                      color: isActive ? 'var(--text-heading)' : '#5F6977',
-                    }}
-                  >
+                  <span className={`text-xs ${isActive ? 'font-bold text-[#181A17]' : 'font-medium text-[#5F6977]'}`}>
                     {step.label}
                   </span>
                 </div>
@@ -571,23 +578,15 @@ function CreateTransportRequestForm() {
       </div>
 
       {/* STEP CONTENT CONTAINER */}
-      <div style={{ maxWidth: '850px', width: '100%', margin: '0 auto' }}>
+      <div className="max-w-[850px] w-full mx-auto">
         {/* STEP 1: TRANSPORT INFORMATION */}
         {currentStep === 1 && (
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#F0EEE8' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+            <div className="px-6 py-4 bg-white border-b border-[#EFEAE0]">
+              <h2 className="text-base font-extrabold text-[#181A17] m-0">
                 {language === 'en' ? 'Transport Information' : 'Thông tin vận chuyển'}
               </h2>
-              <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+              <p className="text-xs text-[#5F6977] mt-1 mb-0">
                 {language === 'en' ? 'Please provide the route and schedule details for your request.' : 'Vui lòng cung cấp chi tiết lộ trình và lịch trình dự kiến cho yêu cầu của bạn.'}
               </p>
             </div>
@@ -635,17 +634,24 @@ function CreateTransportRequestForm() {
                   <label htmlFor="req-origin" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
                     {language === 'en' ? 'Origin' : 'Điểm xuất phát'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
                   </label>
-                  <div className="relative">
-                    <MapPin size={16} color="#5F6977" aria-hidden="true" style={{ position: 'absolute', top: '13px', left: '12px' }} />
-                    <input
-                      id="req-origin"
-                      type="text"
-                      aria-invalid={Boolean(errors.origin)}
-                      {...register('origin')}
-                      placeholder={language === 'en' ? 'Search origin (e.g. Ho Chi Minh City, Vietnam)' : 'Tìm điểm đón ngựa (VD: TP. Hồ Chí Minh, Việt Nam)'}
-                      className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.origin ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
-                    />
-                  </div>
+                  <AddressAutocompleteInput
+                    id="req-origin"
+                    name="origin"
+                    icon="origin"
+                    value={formValues.origin || ''}
+                    domesticOnly={formValues.transportType === 'Domestic'}
+                    hasError={Boolean(errors.origin)}
+                    language={language}
+                    placeholder={language === 'en' ? 'Enter pickup address (e.g. Ho Chi Minh City, Vietnam)' : 'Nhập địa chỉ xuất phát (VD: Quận 7, TP. Hồ Chí Minh)'}
+                    onChangeText={(val) => {
+                      setValue('origin', val, { shouldValidate: true, shouldDirty: true });
+                      setSelectedOriginGeo(null);
+                    }}
+                    onSelectSuggestion={(address, geo) => {
+                      setValue('origin', address, { shouldValidate: true, shouldDirty: true });
+                      setSelectedOriginGeo(geo);
+                    }}
+                  />
                   {errors.origin && <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', display: 'block', marginTop: '4px' }}>{errors.origin.message}</span>}
                 </div>
 
@@ -653,17 +659,24 @@ function CreateTransportRequestForm() {
                   <label htmlFor="req-destination" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
                     {language === 'en' ? 'Destination' : 'Điểm đến'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
                   </label>
-                  <div className="relative">
-                    <Flag size={16} color="#5F6977" aria-hidden="true" style={{ position: 'absolute', top: '13px', left: '12px' }} />
-                    <input
-                      id="req-destination"
-                      type="text"
-                      aria-invalid={Boolean(errors.destination)}
-                      {...register('destination')}
-                      placeholder={language === 'en' ? 'Search destination (e.g. Singapore Turf Club)' : 'Tìm điểm đến (VD: Singapore Turf Club)'}
-                      className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.destination ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
-                    />
-                  </div>
+                  <AddressAutocompleteInput
+                    id="req-destination"
+                    name="destination"
+                    icon="destination"
+                    value={formValues.destination || ''}
+                    domesticOnly={formValues.transportType === 'Domestic'}
+                    hasError={Boolean(errors.destination)}
+                    language={language}
+                    placeholder={language === 'en' ? 'Enter destination address (e.g. Singapore Turf Club)' : 'Nhập địa chỉ đến (VD: Đà Lạt, Singapore, New Delhi...)'}
+                    onChangeText={(val) => {
+                      setValue('destination', val, { shouldValidate: true, shouldDirty: true });
+                      setSelectedDestGeo(null);
+                    }}
+                    onSelectSuggestion={(address, geo) => {
+                      setValue('destination', address, { shouldValidate: true, shouldDirty: true });
+                      setSelectedDestGeo(geo);
+                    }}
+                  />
                   {errors.destination && <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', display: 'block', marginTop: '4px' }}>{errors.destination.message}</span>}
                 </div>
               </div>
@@ -673,13 +686,20 @@ function CreateTransportRequestForm() {
                 originText={formValues.origin}
                 destinationText={formValues.destination}
                 transportType={formValues.transportType}
+                selectedOriginGeo={selectedOriginGeo}
+                selectedDestGeo={selectedDestGeo}
                 onRouteCalculated={setRouteData}
                 onApplyPreset={(preset) => {
+                  setSelectedOriginGeo(null);
+                  setSelectedDestGeo(null);
                   setValue('origin', preset.origin, { shouldValidate: true });
                   setValue('destination', preset.destination, { shouldValidate: true });
                   setValue('transportType', preset.type, { shouldValidate: true });
                 }}
               />
+
+              {/* Booking Type (placed on Step 1 so changing Shared Stall / Charter immediately updates Order Cutoff) */}
+              <BookingChoice value={bookingType} onChange={setBookingType} horseCount={0} compact />
 
               {/* Row 3: Dates */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
@@ -692,14 +712,7 @@ function CreateTransportRequestForm() {
                     type="date"
                     min={earliestDepartureDate}
                     aria-invalid={Boolean(errors.departureDate) || isDepartureBeforeCutoff(formValues.departureDate)}
-                    {...register('departureDate', {
-                      onChange: (e) => {
-                        const newDep = e.target.value;
-                        if (formValues.arrivalDate && formValues.arrivalDate < newDep) {
-                          setValue('arrivalDate', newDep, { shouldValidate: true });
-                        }
-                      },
-                    })}
+                    {...register('departureDate')}
                     className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.departureDate || isDepartureBeforeCutoff(formValues.departureDate) ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
                   />
                   {errors.departureDate && (
@@ -727,22 +740,22 @@ function CreateTransportRequestForm() {
                 </div>
 
                 <div>
-                  <label htmlFor="req-arrival-date" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    {language === 'en' ? 'Expected Arrival' : 'Dự kiến đến nơi'}
-                  </label>
-                  <input
-                    id="req-arrival-date"
-                    type="date"
-                    min={formValues.departureDate || todayStr}
-                    aria-invalid={Boolean(errors.arrivalDate)}
-                    {...register('arrivalDate')}
-                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.arrivalDate ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
-                  />
-                  {errors.arrivalDate && (
-                    <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', display: 'block', marginTop: '4px' }}>
-                      {errors.arrivalDate.message}
-                    </span>
-                  )}
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                    {language === 'en' ? 'Estimated Arrival (Auto-calculated)' : 'Dự kiến đến nơi (ước tính tự động)'}
+                  </span>
+                  <div className="w-full px-3.5 py-2.5 rounded-lg border border-[#E5DDD0] bg-[#FAF8F4] text-[#181A17] font-semibold text-sm flex items-center justify-between gap-2">
+                    <span>{estimatedArrivalDisplay}</span>
+                    {routeData && (
+                      <span className="text-xs font-medium text-[#5F6977]">
+                        (~{routeData.durationHours}{language === 'en' ? 'h' : ' giờ'})
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[#747D88] mt-1.5 mb-0">
+                    {language === 'en'
+                      ? 'Final ETA is confirmed by the Coordinator during route planning.'
+                      : 'Thời gian đến chính thức sẽ do Điều phối viên chốt theo lịch xe/bay.'}
+                  </p>
                 </div>
               </div>
 
@@ -766,41 +779,24 @@ function CreateTransportRequestForm() {
 
         {/* STEP 2: SELECT HORSE */}
         {currentStep === 2 && (
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#F0EEE8',
-                      color: '#181A17', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+            <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
+                <h2 className="text-base font-extrabold text-[#181A17] m-0">
                   {t('customer.newRequest.horseInfoTitle', 'Horse Information')}
                 </h2>
-                <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                <p className="text-xs text-[#5F6977] mt-1 mb-0">
                   {t('customer.newRequest.selectHorsesDesc', 'Tích chọn các con ngựa cần vận chuyển từ đàn của bạn (Đã chọn: {count} con).').replace('{count}', String(totalSelectedHorses))}
                 </p>
                 {selectedHorses.length > 0 && (
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-heading)' }}>
+                  <div className="flex gap-2 flex-wrap mt-2.5 items-center">
+                    <span className="text-[11.5px] font-bold text-[#181A17]">
                       {t('customer.newRequest.breedBreakdown', 'Breed Breakdown:')}
                     </span>
                     {Object.entries(breedBreakdown).map(([breed, count]) => (
                       <span
                         key={breed}
-                        style={{
-                          fontSize: '11.5px',
-                          padding: '3px 10px',
-                          borderRadius: '20px',
-                          backgroundColor: '#F5EFE2',
-                          color: '#8C6621',
-                          fontWeight: 600,
-                          border: '1px solid #DFCA9A',
-                        }}
+                        className="text-[11.5px] px-2.5 py-0.5 rounded-full bg-[#FAF8F4] text-[#8C6621] font-semibold border border-[#E5DDD0]"
                       >
                         {translateBreed(breed)}: <strong>{count}</strong>
                       </span>
@@ -811,246 +807,425 @@ function CreateTransportRequestForm() {
               <button
                 type="button"
                 onClick={() => setIsAddHorseModalOpen(true)}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E]"
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  backgroundColor: '#FAF8F4',
-                  color: 'var(--primary)',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  border: '1px solid #D4C5A3',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  cursor: 'pointer',
-                }}
+                className="px-3.5 py-2 rounded-xl bg-white hover:border-[#B49A68] text-[#181A17] text-xs font-semibold border border-[#D8CEBE] inline-flex items-center gap-1.5 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E]"
               >
-                <Plus size={14} aria-hidden="true" /> {t('customer.newRequest.addNewHorseBtn', 'Add New Horse')}
+                <Plus size={14} className="text-[#A67C2E]" aria-hidden="true" /> {t('customer.newRequest.addNewHorseBtn', 'Add New Horse')}
               </button>
             </div>
 
-            <div className="p-4 sm:p-6 space-y-5">
-              <div className="overflow-x-auto w-full">
-                <table style={{ width: '100%', minWidth: '650px', borderCollapse: 'collapse', textAlign: 'left' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #D8CEBE', backgroundColor: '#F0EEE8' }}>
-                    <th style={{ padding: '12px 16px', width: '44px' }} />
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977' }}>{t('customer.newRequest.horse', 'Horse')}</th>
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977' }}>{t('customer.table.breed', 'Breed')}</th>
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977' }}>{t('customer.newRequest.ageGender', 'Age / Gender')}</th>
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977' }}>{t('customer.newRequest.medicalStatus', 'Medical Status')}</th>
-                    <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#5F6977', textAlign: 'right' }}>{t('customer.newRequest.profile', 'Profile')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {horses.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ padding: '40px 20px', textAlign: 'center', color: '#5F6977' }}>
-                        <p style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600 }}>
-                          {language === 'en' ? 'No horses in your stable yet.' : 'Chưa có ngựa nào trong chuồng của bạn.'}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setIsAddHorseModalOpen(true)}
-                          style={{
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            backgroundColor: '#181A17',
-                            color: '#FAF8F4',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            border: 'none',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                          }}
-                        >
-                          <Plus size={14} aria-hidden="true" /> {t('customer.newRequest.addNewHorseBtn', 'Thêm ngựa mới')}
-                        </button>
-                      </td>
-                    </tr>
-                  ) : horses.map((h) => {
-                    const activeOrder = getHorseActiveOrder(h);
-                    const isInTransit =
-                      (h.availabilityStatus || '').toLowerCase().includes('transit') ||
-                      activeOrder?.status === 'IN_TRANSIT' ||
-                      activeOrder?.status === 'in_transit';
-                    const isScheduled = !isInTransit && Boolean(activeOrder);
-                    const isRetired = h.status === 'retired' || h.status === 'deceased';
-                    const isUnavailable = isInTransit || isScheduled || isRetired;
-                    const isSelected = (horseQuantities[h.id] || 0) > 0;
-                    const orderCode = activeOrder?.requestCode;
+            <div className="p-4 sm:p-6 space-y-4">
+              {/* Filter & Quick-Search Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                <div
+                  className="inline-flex rounded-xl border border-[#E5DDD0] bg-[#FAF8F4] p-0.5"
+                  role="tablist"
+                  aria-label={language === 'en' ? 'Filter horses' : 'Lọc danh sách ngựa'}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={horseFilter === 'available'}
+                    onClick={() => setHorseFilter('available')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      horseFilter === 'available'
+                        ? 'bg-white text-[#181A17] shadow-xs'
+                        : 'text-[#5F6977] hover:text-[#181A17]'
+                    }`}
+                  >
+                    {language === 'en'
+                      ? `Ready (${availableHorsesCount})`
+                      : `Sẵn sàng (${availableHorsesCount})`}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={horseFilter === 'all'}
+                    onClick={() => setHorseFilter('all')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      horseFilter === 'all'
+                        ? 'bg-white text-[#181A17] shadow-xs'
+                        : 'text-[#5F6977] hover:text-[#181A17]'
+                    }`}
+                  >
+                    {language === 'en'
+                      ? `All (${sortedHorses.length})`
+                      : `Tất cả (${sortedHorses.length})`}
+                  </button>
+                </div>
 
-                    return (
-                      <tr
-                        key={h.id}
-                        style={{
-                          borderBottom: '1px solid var(--border-light)',
-                          backgroundColor: isSelected ? '#FAF8F4' : isUnavailable ? '#F0EEE8' : 'transparent',
-                          opacity: isUnavailable ? 0.72 : 1,
-                        }}
+                <div className="relative w-full sm:w-64">
+                  <Search
+                    size={14}
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#747D88]"
+                  />
+                  <input
+                    type="text"
+                    value={horseSearch}
+                    onChange={(e) => setHorseSearch(e.target.value)}
+                    placeholder={
+                      language === 'en'
+                        ? 'Search by name or breed...'
+                        : 'Tìm tên hoặc giống ngựa...'
+                    }
+                    aria-label={
+                      language === 'en'
+                        ? 'Search horses by name or breed'
+                        : 'Tìm ngựa theo tên hoặc giống'
+                    }
+                    className="w-full rounded-xl border border-[#D8CEBE] bg-white pl-8 pr-8 py-1.5 text-xs font-medium text-[#181A17] placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all"
+                  />
+                  {horseSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setHorseSearch('')}
+                      aria-label={language === 'en' ? 'Clear search' : 'Xóa từ khóa tìm kiếm'}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#747D88] hover:text-[#181A17] cursor-pointer"
+                    >
+                      <X size={13} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Quick-Remove Chips Bar for Selected Horses */}
+              {selectedHorses.length > 0 && (
+                <div className="rounded-xl border border-[#E5DDD0] bg-[#FAF8F4] px-3 py-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11.5px] font-bold text-[#181A17] mr-0.5">
+                    {language === 'en'
+                      ? `Selected (${totalSelectedHorses}):`
+                      : `Đã chọn (${totalSelectedHorses}):`}
+                  </span>
+                  {selectedHorses.map((h) => (
+                    <span
+                      key={h.id}
+                      className="inline-flex items-center gap-1 rounded-full border border-[#D8CEBE] bg-white px-2.5 py-0.5 text-[11.5px] font-semibold text-[#181A17]"
+                    >
+                      <span>{h.name}</span>
+                      {h.quantity > 1 && (
+                        <span className="text-[#8C6621] font-bold">×{h.quantity}</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggleHorseSelection(h.id)}
+                        aria-label={
+                          language === 'en'
+                            ? `Remove ${h.name} from selection`
+                            : `Bỏ chọn ${h.name}`
+                        }
+                        className="ml-0.5 rounded-full p-0.5 text-[#747D88] hover:bg-[#F0EEE8] hover:text-[#181A17] cursor-pointer transition-colors"
                       >
-                        <td style={{ padding: '8px 16px', textAlign: 'center' }}>
-                          <label
-                            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center cursor-pointer select-none"
-                            style={{ cursor: isUnavailable ? 'not-allowed' : 'pointer' }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              disabled={isUnavailable}
-                              aria-label={`${language === 'en' ? 'Select horse' : 'Chọn chiến mã'} ${h.name}`}
-                              onChange={() => !isUnavailable && toggleHorseSelection(h.id)}
-                              title={
-                                isInTransit
-                                  ? t('customer.newRequest.inTransitTooltip', 'Horse is currently in transit ({code})').replace('{code}', orderCode || 'REQ')
-                                  : isScheduled
-                                  ? t('customer.newRequest.scheduledTooltip', 'Horse is scheduled in order {code}').replace('{code}', orderCode || '')
-                                  : t('customer.newRequest.selectTooltip', 'Select for transport')
-                              }
-                              style={{
-                                width: '18px',
-                                height: '18px',
-                                cursor: isUnavailable ? 'not-allowed' : 'pointer',
-                                accentColor: '#A67C2E',
-                              }}
-                            />
-                          </label>
-                        </td>
-                        <td style={{ padding: '16px', fontWeight: 700, color: 'var(--text-heading)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div
-                              style={{
-                                width: '42px',
-                                height: '42px',
-                                borderRadius: '50%',
-                                overflow: 'hidden',
-                                backgroundColor: '#F0EEE8',
-                                border: '2px solid #ffffff',
-                                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.08)',
-                                flexShrink: 0,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              <img
-                                src={getFullPhotoUrl(h.photoUrl) || HORSE_PLACEHOLDER_SVG}
-                                alt={h.name}
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                onError={(e) => {
-                                  const img = e.currentTarget as HTMLImageElement;
-                                  if (img.src !== HORSE_PLACEHOLDER_SVG) img.src = HORSE_PLACEHOLDER_SVG;
-                                }}
-                              />
-                            </div>
-                            <div>
-                              <div>{h.name}</div>
-                              {isSelected && Number(h.quantity ?? 1) > 1 && <label className="mt-2 flex items-center gap-2 text-xs font-medium">
-                                {language === 'en' ? 'Horses' : 'Số ngựa'}
-                                <input type="number" min={1} max={h.quantity} step={1} value={horseQuantities[h.id]}
-                                  aria-label={language === 'en' ? `Horse count for ${h.name}` : `Số ngựa từ hồ sơ ${h.name}`}
-                                  onChange={e => {
-                                    const quantity = Number(e.target.value);
-                                    if (Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= Number(h.quantity)) {
-                                      setHorseQuantities(previous => ({ ...previous, [h.id]: quantity }));
-                                    }
-                                  }} className="w-20 rounded border border-[#D8CEBE] p-2" />
-                                / {h.quantity}
-                              </label>}
-                              {isInTransit ? (
-                                <div
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '5px',
-                                    marginTop: '3px',
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    backgroundColor: '#F5EFE2',
-                                    color: '#8C6621',
-                                    fontSize: '11px',
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  <Truck size={12} aria-hidden="true" />
-                                  <span>{t('customer.newRequest.inTransitStatus', 'In Transit ({code})').replace('{code}', orderCode || 'REQ-001')}</span>
-                                </div>
-                              ) : isScheduled ? (
-                                <div
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '5px',
-                                    marginTop: '3px',
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    backgroundColor: '#D8CEBE',
-                                    color: '#242722',
-                                    fontSize: '11px',
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  <Clock size={12} aria-hidden="true" />
-                                  <span>{t('customer.newRequest.scheduledStatus', 'Scheduled ({code})').replace('{code}', orderCode || 'REQ-002')}</span>
-                                </div>
-                              ) : (
-                                <div
-                                  style={{
-                                    fontSize: '11px',
-                                    fontWeight: 600,
-                                    color: '#287653',
-                                    marginTop: '2px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '5px',
-                                  }}
-                                >
-                                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#287653', display: 'inline-block' }} />
-                                  {t('customer.newRequest.readyStatus', 'Ready for transit')}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td style={{ padding: '16px', color: 'var(--text-body)' }}>{translateBreed(h.breed)}</td>
-                        <td style={{ padding: '16px', color: 'var(--text-body)' }}>
-                          {h.age} {t('horses.yearsOld', 'years old')} • {translateGender(h.gender)}
-                        </td>
-                        <td style={{ padding: '16px' }}>
-                          <span
+                        <X size={11} aria-hidden="true" />
+                      </button>
+                    </span>
+                  ))}
+                  {selectedHorses.length >= 2 && (
+                    <button
+                      type="button"
+                      onClick={() => setHorseQuantities({})}
+                      className="ml-auto text-[11.5px] font-semibold text-[#A67C2E] hover:text-[#8C6621] hover:underline cursor-pointer"
+                    >
+                      {language === 'en' ? 'Clear all' : 'Bỏ chọn tất cả'}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Bounded Scrollable Table with Sticky Header */}
+              <div className="overflow-x-auto max-h-[380px] overflow-y-auto rounded-xl border border-[#E5DDD0] w-full">
+                <table className="w-full min-w-[650px] border-collapse text-left">
+                  <thead className="sticky top-0 z-10 bg-[#FAF8F4] shadow-[0_1px_0_#E5DDD0]">
+                    <tr>
+                      <th className="py-2.5 px-3 w-11" />
+                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                        {t('customer.newRequest.horse', 'Horse')}
+                      </th>
+                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                        {t('customer.table.breed', 'Breed')}
+                      </th>
+                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                        {t('customer.newRequest.ageGender', 'Age / Gender')}
+                      </th>
+                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                        {t('customer.newRequest.medicalStatus', 'Medical Status')}
+                      </th>
+                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] text-right whitespace-nowrap">
+                        {t('customer.newRequest.profile', 'Profile')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {horses.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ padding: '40px 20px', textAlign: 'center', color: '#5F6977' }}>
+                          <p style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600 }}>
+                            {language === 'en' ? 'No horses in your stable yet.' : 'Chưa có ngựa nào trong chuồng của bạn.'}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setIsAddHorseModalOpen(true)}
                             style={{
-                              padding: '3px 8px',
-                              borderRadius: '6px',
-                              fontSize: '11px',
-                              fontWeight: 700,
-                              backgroundColor: isUnavailable ? '#F0EEE8' : '#E8F2EB',
-                              color: isUnavailable ? '#5F6977' : '#287653',
+                              padding: '8px 16px',
+                              borderRadius: '8px',
+                              backgroundColor: '#181A17',
+                              color: '#FAF8F4',
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              border: 'none',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
                             }}
                           >
-                            {isUnavailable
-                              ? (isInTransit
-                                  ? t('customer.newRequest.inTransitBadge', 'In Transit')
-                                  : isScheduled
-                                  ? t('customer.newRequest.scheduledBadge', 'Scheduled')
-                                  : t('customer.newRequest.unavailableBadge', 'Unavailable'))
-                              : (h.medicalStatus || (language === 'en' ? 'Healthy' : 'Khỏe mạnh'))}
-                          </span>
-                        </td>
-                        <td style={{ padding: '16px', textAlign: 'right' }}>
-                          <Link href={`/customer/horses/${h.id}`} target="_blank" style={{ fontSize: '12.5px', color: 'var(--primary)', fontWeight: 600 }}>
-                            {t('customer.newRequest.viewProfile', 'View Profile ↗')}
-                          </Link>
+                            <Plus size={14} aria-hidden="true" /> {t('customer.newRequest.addNewHorseBtn', 'Thêm ngựa mới')}
+                          </button>
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ) : filteredHorses.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-5 py-8 text-center text-[#5F6977]">
+                          {horseSearch.trim() ? (
+                            <div className="space-y-3">
+                              <p className="text-sm font-semibold text-[#181A17] m-0">
+                                {language === 'en'
+                                  ? `No horses match "${horseSearch.trim()}".`
+                                  : `Không tìm thấy ngựa phù hợp với "${horseSearch.trim()}".`}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setHorseSearch('')}
+                                className="px-3.5 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] cursor-pointer transition-colors"
+                              >
+                                {language === 'en' ? 'Clear search' : 'Xóa từ khóa'}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <p className="text-sm font-semibold text-[#181A17] m-0">
+                                {language === 'en'
+                                  ? 'No horses are currently ready for transport (all are busy or scheduled).'
+                                  : 'Hiện không có ngựa nào sẵn sàng vận chuyển (tất cả đang bận hoặc đã lên lịch).'}
+                              </p>
+                              <div className="flex flex-wrap items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setHorseFilter('all')}
+                                  className="px-3.5 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] cursor-pointer transition-colors"
+                                >
+                                  {language === 'en'
+                                    ? `Show all (${sortedHorses.length})`
+                                    : `Xem tất cả (${sortedHorses.length})`}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsAddHorseModalOpen(true)}
+                                  className="px-3.5 py-1.5 rounded-lg bg-[#181A17] text-[#FAF8F4] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <Plus size={13} aria-hidden="true" />{' '}
+                                  {t('customer.newRequest.addNewHorseBtn', 'Thêm ngựa mới')}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredHorses.map(({ horse: h, activeOrder, isInTransit, isScheduled, isUnavailable }) => {
+                        const isSelected = (horseQuantities[h.id] || 0) > 0;
+                        const orderCode = activeOrder?.requestCode;
+
+                        return (
+                          <tr
+                            key={h.id}
+                            style={{
+                              borderBottom: '1px solid var(--border-light)',
+                              backgroundColor: isSelected ? '#FAF8F4' : isUnavailable ? '#F0EEE8' : 'transparent',
+                              opacity: isUnavailable ? 0.72 : 1,
+                            }}
+                          >
+                            <td className="py-2 px-3 text-center">
+                              <label
+                                className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center cursor-pointer select-none"
+                                style={{ cursor: isUnavailable ? 'not-allowed' : 'pointer' }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  disabled={isUnavailable}
+                                  aria-label={`${language === 'en' ? 'Select horse' : 'Chọn chiến mã'} ${h.name}`}
+                                  onChange={() => !isUnavailable && toggleHorseSelection(h.id)}
+                                  title={
+                                    isInTransit
+                                      ? t('customer.newRequest.inTransitTooltip', 'Horse is currently in transit ({code})').replace('{code}', orderCode || 'REQ')
+                                      : isScheduled
+                                      ? t('customer.newRequest.scheduledTooltip', 'Horse is scheduled in order {code}').replace('{code}', orderCode || '')
+                                      : t('customer.newRequest.selectTooltip', 'Select for transport')
+                                  }
+                                  style={{
+                                    width: '17px',
+                                    height: '17px',
+                                    cursor: isUnavailable ? 'not-allowed' : 'pointer',
+                                    accentColor: '#A67C2E',
+                                  }}
+                                />
+                              </label>
+                            </td>
+                            <td className="py-2.5 px-3 font-bold text-[#181A17]">
+                              <div className="flex items-center gap-2.5">
+                                <div
+                                  className="w-9 h-9 rounded-full overflow-hidden bg-[#F0EEE8] border-2 border-white shadow-xs shrink-0 flex items-center justify-center"
+                                >
+                                  <img
+                                    src={getFullPhotoUrl(h.photoUrl) || HORSE_PLACEHOLDER_SVG}
+                                    alt={h.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      const img = e.currentTarget as HTMLImageElement;
+                                      if (img.src !== HORSE_PLACEHOLDER_SVG) img.src = HORSE_PLACEHOLDER_SVG;
+                                    }}
+                                  />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-[13px] font-bold text-[#181A17] leading-snug">{h.name}</div>
+                                  {isSelected && Number(h.quantity ?? 1) > 1 && (
+                                    <label className="mt-1.5 flex items-center gap-2 text-xs font-medium">
+                                      {language === 'en' ? 'Horses' : 'Số ngựa'}
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={h.quantity}
+                                        step={1}
+                                        value={horseQuantities[h.id]}
+                                        aria-label={language === 'en' ? `Horse count for ${h.name}` : `Số ngựa từ hồ sơ ${h.name}`}
+                                        onChange={(e) => {
+                                          const quantity = Number(e.target.value);
+                                          if (Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= Number(h.quantity)) {
+                                            setHorseQuantities((previous) => ({ ...previous, [h.id]: quantity }));
+                                          }
+                                        }}
+                                        className="w-20 rounded border border-[#D8CEBE] px-2 py-1 text-xs"
+                                      />
+                                      / {h.quantity}
+                                    </label>
+                                  )}
+                                  {isInTransit ? (
+                                    <div className="inline-flex items-center gap-1 mt-0.5 px-2 py-0.5 rounded bg-[#F5EFE2] text-[#8C6621] text-[11px] font-bold">
+                                      <Truck size={11} aria-hidden="true" />
+                                      <span>{t('customer.newRequest.inTransitStatus', 'In Transit ({code})').replace('{code}', orderCode || 'REQ-001')}</span>
+                                    </div>
+                                  ) : isScheduled ? (
+                                    <div className="inline-flex items-center gap-1 mt-0.5 px-2 py-0.5 rounded bg-[#D8CEBE] text-[#242722] text-[11px] font-bold">
+                                      <Clock size={11} aria-hidden="true" />
+                                      <span>{t('customer.newRequest.scheduledStatus', 'Scheduled ({code})').replace('{code}', orderCode || 'REQ-002')}</span>
+                                    </div>
+                                  ) : (
+                                    <div className="text-[11px] font-semibold text-[#287653] mt-0.5 flex items-center gap-1.5">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-[#287653] inline-block" />
+                                      {t('customer.newRequest.readyStatus', 'Ready for transit')}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-[13px] text-[#3F443D] whitespace-nowrap">
+                              {translateBreed(h.breed)}
+                            </td>
+                            <td className="py-2.5 px-3 text-[13px] text-[#3F443D] whitespace-nowrap">
+                              {h.age} {t('horses.yearsOld', 'years old')} • {translateGender(h.gender)}
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <span
+                                className="inline-block whitespace-nowrap px-2 py-0.5 rounded-md text-[11px] font-bold"
+                                style={{
+                                  backgroundColor: isUnavailable ? '#F0EEE8' : '#E8F2EB',
+                                  color: isUnavailable ? '#5F6977' : '#287653',
+                                }}
+                              >
+                                {isUnavailable
+                                  ? (isInTransit
+                                      ? t('customer.newRequest.inTransitBadge', 'In Transit')
+                                      : isScheduled
+                                      ? t('customer.newRequest.scheduledBadge', 'Scheduled')
+                                      : t('customer.newRequest.unavailableBadge', 'Unavailable'))
+                                  : (h.medicalStatus || (language === 'en' ? 'Healthy' : 'Khỏe mạnh'))}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                              <Link href={`/customer/horses/${h.id}`} target="_blank" className="text-xs text-[#A67C2E] hover:underline font-semibold whitespace-nowrap">
+                                {t('customer.newRequest.viewProfile', 'View Profile ↗')}
+                              </Link>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
-              <BookingChoice value={bookingType} onChange={setBookingType} horseCount={totalSelectedHorses} />
+
+              {filteredHorses.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11.5px] text-[#5F6977]">
+                  <span>
+                    {language === 'en'
+                      ? `Showing ${filteredHorses.length} / ${sortedHorses.length} horses`
+                      : `Đang hiển thị ${filteredHorses.length} / ${sortedHorses.length} ngựa`}
+                  </span>
+                  {horseFilter === 'available' && sortedHorses.length > availableHorsesCount && (
+                    <button
+                      type="button"
+                      onClick={() => setHorseFilter('all')}
+                      className="font-semibold text-[#A67C2E] hover:text-[#8C6621] hover:underline cursor-pointer"
+                    >
+                      {language === 'en'
+                        ? `Show ${sortedHorses.length - availableHorsesCount} unavailable / busy horses`
+                        : `Hiện thêm ${sortedHorses.length - availableHorsesCount} ngựa đang bận`}
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="rounded-xl border border-[#E5DDD0] bg-[#FAF8F4] px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-xs text-[#5F6977]">
+                  <span className="font-semibold text-[#181A17]">
+                    {language === 'en' ? 'Selected Booking Type:' : 'Hình thức đã chọn:'}
+                  </span>{' '}
+                  <span className="font-bold text-[#8C6621]">
+                    {bookingType === 'dedicated_charter'
+                      ? (language === 'en' ? 'Dedicated Charter' : 'Bao nguyên xe (Dedicated Charter)')
+                      : (language === 'en' ? 'Shared Stall' : 'Ghép ô chuồng (Shared Stall)')}
+                  </span>
+                  {totalSelectedHorses >= 3 && bookingType === 'shared_stall' && (
+                    <span className="block sm:inline sm:ml-2 text-[#181A17]">
+                      · {language === 'en'
+                        ? `With ${totalSelectedHorses} horses selected, Dedicated Charter is often more convenient.`
+                        : `Với ${totalSelectedHorses} ngựa đã chọn, Bao nguyên xe sẽ tối ưu hơn.`}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {totalSelectedHorses >= 3 && bookingType === 'shared_stall' ? (
+                    <button
+                      type="button"
+                      onClick={() => setBookingType('dedicated_charter')}
+                      className="px-3 py-1.5 rounded-lg bg-[#181A17] text-[#C4B38E] text-xs font-semibold cursor-pointer hover:bg-[#2A2D27] transition-colors"
+                    >
+                      {language === 'en' ? 'Switch to Dedicated Charter' : 'Chuyển sang Bao nguyên xe'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBookingType(bookingType === 'shared_stall' ? 'dedicated_charter' : 'shared_stall')
+                      }
+                      className="px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] cursor-pointer transition-colors"
+                    >
+                      {bookingType === 'shared_stall'
+                        ? (language === 'en' ? 'Switch to Charter' : 'Đổi sang Bao nguyên xe')
+                        : (language === 'en' ? 'Switch to Shared Stall' : 'Đổi sang Ghép ô chuồng')}
+                    </button>
+                  )}
+                </div>
+              </div>
               {selectedHorses.length > 0 && <InsuranceSelection horses={selectedHorses} values={insuranceValues}
                 onChange={(id, value) => { setInsuranceValues(previous => ({ ...previous, [id]: value })); setInsuranceError(''); }}
                 policy={policy ?? null} error={policyError ? (language === 'en' ? 'Unable to load insurance policy.' : 'Chưa tải được chính sách bảo hiểm.') : insuranceError} onRetry={() => void reloadPolicy()} />}
@@ -1060,102 +1235,105 @@ function CreateTransportRequestForm() {
 
         {/* STEP 3: REVIEW & SUBMIT */}
         {currentStep === 3 && (
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#F0EEE8' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+            <div className="px-6 py-4 bg-white border-b border-[#EFEAE0]">
+              <h2 className="text-base font-extrabold text-[#181A17] m-0">
                 {t('customer.newRequest.reviewTitle', 'Review & Submit Request')}
               </h2>
-              <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+              <p className="text-xs text-[#5F6977] mt-1 mb-0">
                 {t('customer.newRequest.reviewDesc', 'Please review your shipment parameters carefully before submitting to the operations team.')}
               </p>
             </div>
 
             <div className="p-5 sm:p-7 flex flex-col gap-5">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div style={{ backgroundColor: '#F0EEE8', color: '#181A17', padding: '14px', borderRadius: '10px' }}>
-                  <span style={{ fontSize: '11px', color: '#5F6977', textTransform: 'uppercase', fontWeight: 700 }}>
+                <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
+                  <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
                     {t('customer.newRequest.summaryTitle', 'Request Title')}
                   </span>
-                  <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-heading)', marginTop: '2px' }}>
+                  <div className="font-bold text-sm text-[#181A17] mt-1">
                     {formValues.title || (language === 'en' ? 'Untitled Request' : 'Yêu cầu vận chuyển')}
                   </div>
                 </div>
-                <div style={{ backgroundColor: '#F0EEE8', color: '#181A17', padding: '14px', borderRadius: '10px' }}>
-                  <span style={{ fontSize: '11px', color: '#5F6977', textTransform: 'uppercase', fontWeight: 700 }}>
+                <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
+                  <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
                     {t('customer.newRequest.summaryRoute', 'Route')}
                   </span>
-                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>
+                  <div className="font-bold text-sm text-[#181A17] mt-1">
                     {translateCountry(formValues.origin)} → {translateCountry(formValues.destination)}
                   </div>
                 </div>
-                <div style={{ backgroundColor: '#F0EEE8', color: '#181A17', padding: '14px', borderRadius: '10px' }}>
-                  <span style={{ fontSize: '11px', color: '#5F6977', textTransform: 'uppercase', fontWeight: 700 }}>
+                <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
+                  <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
                     {t('customer.newRequest.summaryDepartureDate', 'Departure Date')}
                   </span>
-                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-heading)', marginTop: '2px' }}>{formValues.departureDate}</div>
+                  <div className="font-bold text-sm text-[#181A17] mt-1">{formValues.departureDate}</div>
                 </div>
               </div>
 
-              {/* Route & Customs Logistics Summary */}
+              {/* Route & Multimodal Logistics Summary */}
               {routeData && (
-                <div
-                  style={{
-                    backgroundColor: '#FAF8F4',
-                    padding: '16px 20px',
-                    borderRadius: '12px',
-                    border: '1px solid #D8CEBE',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: '14px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div
-                      style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '8px',
-                        backgroundColor: '#D8CEBE',
-                        color: '#242722',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <Navigation size={18} aria-hidden="true" />
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#181A17' }}>
-                        {t('customer.newRequest.routePrefix', 'Route:')} {routeData.mode === 'air' ? t('customer.newRequest.routeAir', 'Air Freight Corridor') : t('customer.newRequest.routeRoad', 'Overland Road Transit')}
+                <div className="bg-[#FAF8F4] p-4 sm:p-5 rounded-xl border border-[#D8CEBE] flex flex-col gap-3.5">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-[#E5DDD0] text-[#181A17] flex items-center justify-center shrink-0">
+                        <Navigation size={18} aria-hidden="true" />
                       </div>
-                      <div style={{ fontSize: '12.5px', color: '#5F6977' }}>
-                        {t('customer.newRequest.distance', 'Distance:')} <strong style={{ color: '#181A17' }}>{routeData.distanceKm.toLocaleString()} km</strong> • {t('customer.newRequest.estimatedTime', 'Estimated Duration:')} <strong style={{ color: '#181A17' }}>~{routeData.durationHours} {t('customer.newRequest.hours', 'hours')}</strong>
+                      <div>
+                        <div className="text-[13.5px] font-bold text-[#181A17]">
+                          {t('customer.newRequest.routePrefix', 'Lộ trình:')}{' '}
+                          {routeData.mode === 'air'
+                            ? t('customer.newRequest.routeAir', 'Đa phương thức: Xe thùng + Hàng không')
+                            : t('customer.newRequest.routeRoad', 'Xe thùng đường bộ')}
+                        </div>
+                        <div className="text-xs text-[#5F6977]">
+                          {t('customer.newRequest.distance', 'Quãng đường:')}{' '}
+                          <strong className="text-[#181A17]">{routeData.distanceKm.toLocaleString()} km</strong> •{' '}
+                          {t('customer.newRequest.estimatedTime', 'Thời gian ước tính:')}{' '}
+                          <strong className="text-[#181A17]">
+                            ~{routeData.durationHours} {t('customer.newRequest.hours', 'giờ')}
+                          </strong>
+                        </div>
                       </div>
                     </div>
                   </div>
-                  <span
-                    style={{
-                      fontSize: '11.5px',
-                      fontWeight: 700,
-                      padding: '4px 10px',
-                      borderRadius: '20px',
-                      backgroundColor: '#E8F2EB',
-                      color: '#287653',
-                      border: '1px solid #B7DBC4',
-                    }}
-                  >
-                    {t('customer.newRequest.quarantineOptimized', '✓ Quarantine & Vet Stations Optimized')}
-                  </span>
+
+                  {routeData.legs && routeData.legs.length > 0 && (
+                    <div className="pt-3 border-t border-dashed border-[#D8CEBE] space-y-2">
+                      {routeData.legs.map((leg) => (
+                        <div
+                          key={`${leg.sequenceNo}-${leg.type}`}
+                          className="flex items-center justify-between gap-2 text-xs bg-white border border-[#E5DDD0] rounded-lg px-3 py-2 flex-wrap"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-bold text-[#181A17] shrink-0">
+                              {language === 'en' ? `Leg ${leg.sequenceNo}` : `Chặng ${leg.sequenceNo}`}
+                            </span>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold shrink-0 ${
+                                leg.type === 'air'
+                                  ? 'bg-[#181A17] text-[#C4B38E]'
+                                  : 'bg-[#F5EFE2] text-[#8C6621] border border-[#DFCA9A]'
+                              }`}
+                            >
+                              {leg.type === 'air' ? (
+                                <Plane size={11} aria-hidden="true" />
+                              ) : (
+                                <Truck size={11} aria-hidden="true" />
+                              )}
+                              <span>{language === 'en' ? leg.vehicleLabelEn : leg.vehicleLabelVi}</span>
+                            </span>
+                            <span className="text-[#181A17] font-medium truncate">
+                              {leg.fromName} <span className="text-[#A67C2E]">→</span> {leg.toName}
+                            </span>
+                          </div>
+                          <span className="text-[#5F6977] font-semibold shrink-0">
+                            ~{leg.distanceKm.toLocaleString()} km · ~{leg.durationHours}h
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1214,7 +1392,7 @@ function CreateTransportRequestForm() {
       {currentStep === 3 && (
         <section
           aria-label={language === 'en' ? 'Insurance confirmation' : 'Xác nhận bảo hiểm'}
-          className="mx-auto w-full max-w-[850px] space-y-4 rounded-2xl border border-[#D8CEBE] bg-white p-5 sm:p-6"
+          className="mx-auto w-full max-w-[850px] space-y-4 rounded-2xl border border-[#E5DDD0] bg-white p-5 sm:p-6 shadow-sm"
         >
           <h3 className="font-bold text-[#181A17]">
             {language === 'en' ? 'Insurance & Estimated Cost' : 'Bảo hiểm & chi phí dự kiến'}
@@ -1233,18 +1411,13 @@ function CreateTransportRequestForm() {
           </ul>
           <BookingSummary bookingType={bookingType} horseCount={totalSelectedHorses} />
           <CostSummary transportCost={null} insuranceFee={estimatedInsuranceFee} />
-          <p className="text-xs text-[#5F6977]">
-            {language === 'en'
-              ? 'Insurance fees are rounded to VND per horse and recalculated on the server when saved. The final quote includes base freight and insurance; no payment is required at submission.'
-              : 'Phí bảo hiểm làm tròn đến VNĐ trên mỗi ngựa. Backend xác nhận lại phí khi lưu yêu cầu. Tổng tiền sẽ gồm cước cơ bản và phí bảo hiểm; chưa yêu cầu thanh toán ở bước này.'}
-          </p>
           {insuranceError && <p role="alert" className="text-sm text-[#B33E3E]">{insuranceError}</p>}
         </section>
       )}
 
       {/* STICKY BOTTOM ACTION BAR (stays clear of Sidebar) */}
       <div
-        className="sticky bottom-0 z-20 mx-auto w-full max-w-[850px] rounded-2xl border border-[#D8CEBE] bg-white/95 px-5 py-3.5 shadow-[0_-6px_20px_rgba(24,26,23,0.08)] backdrop-blur-sm flex items-center justify-between gap-3 flex-wrap"
+        className="sticky bottom-0 z-20 mx-auto w-full max-w-[850px] rounded-2xl border border-[#E5DDD0] bg-white/95 px-5 py-3.5 shadow-[0_-6px_20px_rgba(24,26,23,0.06)] backdrop-blur-sm flex items-center justify-between gap-3 flex-wrap"
         style={{ paddingBottom: 'max(14px, env(safe-area-inset-bottom, 14px))' }}
       >
         <span className="text-xs font-semibold text-[#5F6977]">
@@ -1255,16 +1428,7 @@ function CreateTransportRequestForm() {
             <button
               type="button"
               onClick={handleBack}
-              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E] cursor-pointer"
-              style={{
-                padding: '9px 20px',
-                borderRadius: '8px',
-                border: '1px solid #D8CEBE',
-                backgroundColor: '#ffffff',
-                fontSize: '13.5px',
-                fontWeight: 600,
-                color: 'var(--text-body)',
-              }}
+              className="px-5 py-2.5 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E]"
             >
               {t('common.back', 'Back')}
             </button>
@@ -1274,22 +1438,9 @@ function CreateTransportRequestForm() {
             <button
               type="button"
               onClick={handleContinue}
-              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E] cursor-pointer"
-              style={{
-                padding: '9px 24px',
-                borderRadius: '8px',
-                backgroundColor: 'var(--primary)',
-                color: '#ffffff',
-                fontSize: '13.5px',
-                fontWeight: 600,
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 12px rgba(166, 124, 46, 0.25)',
-              }}
+              className="px-5 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold inline-flex items-center gap-2 cursor-pointer shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C4B38E]"
             >
-              {t('customer.newRequest.continueBtn', 'Continue')} <ArrowRight size={15} aria-hidden="true" />
+              {t('customer.newRequest.continueBtn', 'Continue')} <ArrowRight size={15} className="text-[#C4B38E]" aria-hidden="true" />
             </button>
           ) : (
             <button
@@ -1299,29 +1450,15 @@ function CreateTransportRequestForm() {
                 handleSubmit(onSubmitForm)();
               }}
               disabled={isSubmitting}
-              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287653]"
-              style={{
-                padding: '9px 26px',
-                borderRadius: '8px',
-                backgroundColor: isSubmitting ? '#8892A0' : '#287653',
-                color: '#ffffff',
-                fontSize: '13.5px',
-                fontWeight: 600,
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                boxShadow: isSubmitting ? 'none' : '0 4px 12px rgba(40, 118, 83, 0.25)',
-                cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              }}
+              className="px-6 py-2.5 rounded-xl bg-[#287653] hover:bg-[#205F43] disabled:bg-[#8892A0] text-white text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-colors cursor-pointer disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287653]"
             >
               {isSubmitting ? (
                 <>
-                  {t('customer.newRequest.submitting', 'Submitting...')} <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                  {t('customer.newRequest.submitting', 'Submitting...')} <Loader2 size={15} className="animate-spin" aria-hidden="true" />
                 </>
               ) : (
                 <>
-                  {t('customer.newRequest.submitBtn', 'Submit Request')} <Check size={16} strokeWidth={2.5} aria-hidden="true" />
+                  {t('customer.newRequest.submitBtn', 'Submit Request')} <Check size={15} strokeWidth={2.5} aria-hidden="true" />
                 </>
               )}
             </button>
@@ -1333,6 +1470,8 @@ function CreateTransportRequestForm() {
         isOpen={isAddHorseModalOpen}
         onClose={() => setIsAddHorseModalOpen(false)}
         onHorseAdded={(newHorse) => {
+          setHorseSearch('');
+          setHorseFilter('available');
           setHorseQuantities((prev) => ({ ...prev, [newHorse.id]: 1 }));
         }}
       />

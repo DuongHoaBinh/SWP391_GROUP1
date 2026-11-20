@@ -1,207 +1,118 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeftRight, Check, ChevronDown } from 'lucide-react';
+import React, { useId } from 'react';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
-import { Language } from '@/lib/i18n/translations';
+
+export const VietnamFlag: React.FC<{ className?: string }> = ({ className = 'w-5 h-3.5' }) => (
+  <svg
+    viewBox="0 0 30 20"
+    className={`${className} rounded-[3px] shadow-sm overflow-hidden shrink-0 block`}
+    aria-hidden="true"
+  >
+    <rect width="30" height="20" fill="#DA251D" />
+    <polygon
+      points="15,4 16.54,8.76 21.55,8.76 17.5,11.71 19.04,16.47 15,13.53 10.96,16.47 12.5,11.71 8.45,8.76 13.46,8.76"
+      fill="#FFFF00"
+    />
+  </svg>
+);
+
+export const UkFlag: React.FC<{ className?: string }> = ({ className = 'w-5 h-3.5' }) => {
+  const uid = useId();
+  const clipS = `${uid}-uk-s`;
+  const clipT = `${uid}-uk-t`;
+
+  return (
+    <svg
+      viewBox="0 0 60 30"
+      className={`${className} rounded-[3px] shadow-sm overflow-hidden shrink-0 block`}
+      aria-hidden="true"
+    >
+      <clipPath id={clipS}>
+        <path d="M0,0 v30 h60 v-30 z" />
+      </clipPath>
+      <clipPath id={clipT}>
+        <path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z" />
+      </clipPath>
+      <g clipPath={`url(#${clipS})`}>
+        <path d="M0,0 v30 h60 v-30 z" fill="#012169" />
+        <path d="M0,0 L60,30 M60,0 L0,30" stroke="#FFFFFF" strokeWidth="6" />
+        <path d="M0,0 L60,30 M60,0 L0,30" clipPath={`url(#${clipT})`} stroke="#C8102E" strokeWidth="4" />
+        <path d="M30,0 v30 M0,15 h60" stroke="#FFFFFF" strokeWidth="10" />
+        <path d="M30,0 v30 M0,15 h60" stroke="#C8102E" strokeWidth="6" />
+      </g>
+    </svg>
+  );
+};
 
 interface LanguageSwitcherProps {
   variant?: 'pill' | 'compact' | 'dropdown';
+  tone?: 'light' | 'dark';
   className?: string;
 }
 
 export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
-  variant = 'pill',
+  tone = 'light',
   className = '',
 }) => {
-  const { language, setLanguage, toggleLanguage } = useLanguage();
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const { language, setLanguage, t } = useLanguage();
+  const isDark = tone === 'dark';
 
-  // Close when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const languages: { code: Language; label: string; flag: string; short: string }[] = [
-    { code: 'vi', label: 'Tiếng Việt', flag: '🇻🇳', short: 'VI' },
-    { code: 'en', label: 'English', flag: '🇬🇧', short: 'EN' },
-  ];
-
-  const current = languages.find((l) => l.code === language) || languages[0];
-
-  // 1. PILL VARIANT: Both languages visible side-by-side. 1-click switch!
-  if (variant === 'pill') {
-    return (
-      <div
-        className={`inline-flex items-center p-0.5 rounded-lg bg-slate-100 border border-slate-200 text-xs font-semibold ${className}`}
-        style={{
-          boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.04)',
-        }}
-      >
-        {languages.map((l) => {
-          const isActive = language === l.code;
-          return (
-            <button
-              key={l.code}
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setLanguage(l.code);
-              }}
-              title={l.label}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '5px 10px',
-                borderRadius: '6px',
-                border: 'none',
-                backgroundColor: isActive ? '#2563eb' : 'transparent',
-                color: isActive ? '#ffffff' : '#475569',
-                fontWeight: isActive ? 700 : 500,
-                fontSize: '12px',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                boxShadow: isActive ? '0 1px 3px rgba(37, 99, 235, 0.3)' : 'none',
-              }}
-            >
-              <span style={{ fontSize: '13px', lineHeight: 1 }}>{l.flag}</span>
-              <span>{l.short}</span>
-            </button>
-          );
-        })}
-      </div>
-    );
-  }
-
-  // 2. COMPACT VARIANT: 1-click toggle button! Directly switches on click!
-  if (variant === 'compact') {
-    return (
+  return (
+    <div
+      role="group"
+      aria-label={t('nav.languageSelector', language === 'en' ? 'Language selector' : 'Chọn ngôn ngữ')}
+      className={`inline-flex items-center p-1 rounded-xl border shadow-sm transition-all ${
+        isDark
+          ? 'bg-[#242722] border-[#3E392E]'
+          : 'bg-surface-muted border-border'
+      } ${className}`}
+    >
       <button
         type="button"
+        aria-pressed={language === 'vi'}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          toggleLanguage();
+          setLanguage('vi');
         }}
-        title={language === 'vi' ? 'Bấm để đổi sang English' : 'Click to switch to Tiếng Việt'}
-        className={className}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '6px 10px',
-          borderRadius: '8px',
-          border: '1px solid #e2e8f0',
-          backgroundColor: '#ffffff',
-          color: '#1e293b',
-          fontSize: '12px',
-          fontWeight: 700,
-          cursor: 'pointer',
-          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
-          transition: 'all 0.15s ease',
-        }}
-        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f8fafc')}
-        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
-        aria-label="Toggle language"
+        title="Tiếng Việt (VI)"
+        aria-label="Chuyển sang Tiếng Việt"
+        className={`relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200 cursor-pointer select-none active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+          language === 'vi'
+            ? isDark
+              ? 'bg-[#36332B] border border-[#B49A68]/50 shadow-sm opacity-100'
+              : 'bg-white shadow-sm border border-border opacity-100'
+            : isDark
+              ? 'opacity-55 hover:opacity-95 hover:bg-white/5 border border-transparent'
+              : 'opacity-55 hover:opacity-95 hover:bg-white/70 border border-transparent'
+        }`}
       >
-        <span style={{ fontSize: '15px', lineHeight: 1 }}>{current.flag}</span>
-        <span style={{ color: '#2563eb' }}>{current.short}</span>
-        <ArrowLeftRight size={12} color="#94a3b8" />
+        <VietnamFlag />
       </button>
-    );
-  }
 
-  // 3. DROPDOWN VARIANT
-  return (
-    <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-block' }} className={className}>
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '8px 14px',
-          borderRadius: '9px',
-          border: '1px solid #e2e8f0',
-          backgroundColor: '#ffffff',
-          color: '#1e293b',
-          fontSize: '13px',
-          fontWeight: 600,
-          cursor: 'pointer',
-          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
-          transition: 'all 0.15s ease',
+        aria-pressed={language === 'en'}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setLanguage('en');
         }}
-        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f8fafc')}
-        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
-        aria-label="Change language"
+        title="English (EN)"
+        aria-label="Switch to English"
+        className={`relative flex items-center justify-center px-2 py-1.5 rounded-lg transition-all duration-200 cursor-pointer select-none active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+          language === 'en'
+            ? isDark
+              ? 'bg-[#36332B] border border-[#B49A68]/50 shadow-sm opacity-100'
+              : 'bg-white shadow-sm border border-border opacity-100'
+            : isDark
+              ? 'opacity-55 hover:opacity-95 hover:bg-white/5 border border-transparent'
+              : 'opacity-55 hover:opacity-95 hover:bg-white/70 border border-transparent'
+        }`}
       >
-        <span style={{ fontSize: '15px' }}>{current.flag}</span>
-        <span style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>{current.label}</span>
-        <ChevronDown size={13} color="#94a3b8" />
+        <UkFlag />
       </button>
-
-      {isOpen && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
-            width: '160px',
-            backgroundColor: '#ffffff',
-            borderRadius: '10px',
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-            padding: '5px',
-            zIndex: 100,
-          }}
-        >
-          {languages.map((l) => {
-            const isSelected = language === l.code;
-            return (
-              <button
-                key={l.code}
-                type="button"
-                onClick={() => {
-                  setLanguage(l.code);
-                  setIsOpen(false);
-                }}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '8px 12px',
-                  borderRadius: '7px',
-                  border: 'none',
-                  backgroundColor: isSelected ? '#eff6ff' : 'transparent',
-                  color: isSelected ? '#2563eb' : '#334155',
-                  fontSize: '13px',
-                  fontWeight: isSelected ? 700 : 500,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'background-color 0.15s',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '16px' }}>{l.flag}</span>
-                  <span>{l.label}</span>
-                </div>
-                {isSelected && <Check size={14} color="#2563eb" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 };

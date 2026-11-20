@@ -3,6 +3,12 @@ import { apiClient } from '@/lib/api-client';
 export interface RegulationItem {
   id: number;
   country: string;
+  borderGate?: string | null;
+  transportMode?: 'road' | 'air' | 'both';
+  docTier?: 'A' | 'B';
+  leadTimeDays?: number;
+  requiresAuthorityApproval?: boolean;
+  minValidityBufferHours?: number;
   documentType: string;
   description: string | null;
   effectiveDate: string | null;
@@ -22,6 +28,7 @@ export interface AuthorityApprovalRecord {
 
 export interface ApiTransportDocument {
   id: number;
+  requestCode?: string;
   horseId: number;
   horseName?: string;
   regulationId: number;
@@ -83,6 +90,14 @@ export interface OrderComplianceChecklist {
   complianceNotice?: string;
   tripTargetDate?: string | null;
   hasExpiredDocuments?: boolean;
+  effectiveTierALeadDays?: number;
+  tierADeadline?: string | null;
+  tierBWindowStart?: string | null;
+  tierBWindowEnd?: string | null;
+  inTransitComplianceAlert?: boolean;
+  isInternational?: boolean;
+  transportMode?: 'road' | 'air' | null;
+  matchedBorderGates?: string[];
   horses: HorseComplianceItem[];
 }
 
@@ -109,9 +124,22 @@ export interface ComplianceOrderSummary {
 
 export const documentsApi = {
   // Regulations
-  getRegulations: async (country?: string): Promise<RegulationItem[]> => {
-    const query = country ? `?country=${encodeURIComponent(country)}` : '';
-    return apiClient<RegulationItem[]>(`/documents/regulations${query}`);
+  getRegulations: async (
+    countryOrFilter?:
+      | string
+      | { country?: string; borderGate?: string; transportMode?: string; docTier?: string },
+  ): Promise<RegulationItem[]> => {
+    const params = new URLSearchParams();
+    if (typeof countryOrFilter === 'string') {
+      if (countryOrFilter) params.set('country', countryOrFilter);
+    } else if (countryOrFilter) {
+      if (countryOrFilter.country) params.set('country', countryOrFilter.country);
+      if (countryOrFilter.borderGate) params.set('borderGate', countryOrFilter.borderGate);
+      if (countryOrFilter.transportMode) params.set('transportMode', countryOrFilter.transportMode);
+      if (countryOrFilter.docTier) params.set('docTier', countryOrFilter.docTier);
+    }
+    const qs = params.toString();
+    return apiClient<RegulationItem[]>(`/documents/regulations${qs ? `?${qs}` : ''}`);
   },
 
   getPresetTemplates: async (): Promise<RegulationTemplatePreset[]> => {
@@ -137,12 +165,39 @@ export const documentsApi = {
 
   createRegulation: async (data: {
     country: string;
+    borderGate?: string;
+    transportMode?: 'road' | 'air' | 'both';
+    docTier?: 'A' | 'B';
+    leadTimeDays?: number;
+    requiresAuthorityApproval?: boolean;
+    minValidityBufferHours?: number;
     documentType: string;
     description?: string;
     effectiveDate?: string;
   }): Promise<RegulationItem> => {
     return apiClient<RegulationItem>('/documents/regulations', {
       method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateRegulation: async (
+    id: number,
+    data: {
+      country?: string;
+      borderGate?: string | null;
+      transportMode?: 'road' | 'air' | 'both';
+      docTier?: 'A' | 'B';
+      leadTimeDays?: number;
+      requiresAuthorityApproval?: boolean;
+      minValidityBufferHours?: number;
+      documentType?: string;
+      description?: string;
+      effectiveDate?: string;
+    },
+  ): Promise<RegulationItem> => {
+    return apiClient<RegulationItem>(`/documents/regulations/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(data),
     });
   },

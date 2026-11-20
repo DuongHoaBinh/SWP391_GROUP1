@@ -1,33 +1,64 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { UploadCloud, FileText, CheckCircle, AlertCircle, Ship, Compass, ShieldCheck } from 'lucide-react';
+import {
+  UploadCloud,
+  FileText,
+  CheckCircle,
+  AlertCircle,
+  Ship,
+  Compass,
+  ShieldCheck,
+  X,
+  Loader2,
+  RotateCcw,
+} from 'lucide-react';
 import { DocumentItem } from '@/lib/types';
-import { useDocumentStore } from '@/lib/document-store';
+import { useOptionalDocumentStore } from '@/lib/document-store';
 import { documentsApi, RegulationItem } from '../api/documents.api';
 import { apiClient } from '@/lib/api-client';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 import toast from 'react-hot-toast';
 
-const uploadSchema = z.object({
-  orderId: z.string().optional(),
-  horseId: z.string().min(1, 'Vui lòng chọn con ngựa'),
-  regulationId: z.string().min(1, 'Vui lòng chọn loại giấy tờ / quy định'),
-  docNumber: z.string().optional(),
-  file: z.any()
-    .refine((files) => files?.length === 1, 'Vui lòng chọn tệp tài liệu')
-    .refine((files) => files?.[0]?.size <= 25000000, 'Kích thước tệp tối đa 25MB')
-    .refine(
-      (files) => ['application/pdf', 'image/jpeg', 'image/png'].includes(files?.[0]?.type),
-      'Chỉ hỗ trợ định dạng .pdf, .jpg, .png'
-    ),
-});
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
 
-type UploadFormData = z.infer<typeof uploadSchema>;
+function buildUploadSchema(language: 'en' | 'vi') {
+  const isEn = language === 'en';
+  return z.object({
+    orderId: z.string().optional(),
+    horseId: z.string().min(1, isEn ? 'Please select a horse' : 'Vui lòng chọn con ngựa'),
+    regulationId: z
+      .string()
+      .min(1, isEn ? 'Please select a document type / regulation' : 'Vui lòng chọn loại giấy tờ / quy định'),
+    docNumber: z.string().optional(),
+    file: z
+      .any()
+      .refine((files) => files?.length === 1, isEn ? 'Please choose a document file' : 'Vui lòng chọn tệp tài liệu')
+      .refine(
+        (files) => files?.[0]?.size <= MAX_FILE_SIZE,
+        isEn ? 'Maximum file size is 10MB' : 'Kích thước tệp tối đa 10MB'
+      )
+      .refine(
+        (files) => {
+          const file = files?.[0];
+          if (!file) return false;
+          const mime = file.type?.toLowerCase() || '';
+          const name = file.name?.toLowerCase() || '';
+          return ALLOWED_MIME_TYPES.includes(mime) || ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext));
+        },
+        isEn ? 'Only .pdf, .jpg, .jpeg, .png formats are supported' : 'Chỉ hỗ trợ định dạng .pdf, .jpg, .jpeg, .png'
+      ),
+  });
+}
+
+type UploadFormData = z.infer<ReturnType<typeof buildUploadSchema>>;
 
 interface DocumentUploadModalProps {
   isOpen: boolean;
@@ -91,14 +122,34 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   reuploadTitle,
   onSwitchToBatch,
 }) => {
+  const { t, language, translateDocType, translateCountry } = useLanguage();
   const [isUploading, setIsUploading] = useState(false);
   const [isDone, setIsDone] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isLoadingOptions, setIsLoadingOptions] = useState(false);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
   const [orders, setOrders] = useState<OrderOption[]>([]);
   const [allHorses, setAllHorses] = useState<HorseOption[]>([]);
   const [regulations, setRegulations] = useState<RegulationItem[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<string>('');
   const [showAllRegulations, setShowAllRegulations] = useState(false);
-  const { submitDocumentForReview } = useDocumentStore();
+
+  const docStore = useOptionalDocumentStore();
+  const submitDocumentForReview = docStore?.submitDocumentForReview;
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const langRef = useRef(language);
+  langRef.current = language;
+
+  const uploadSchema = useMemo(() => buildUploadSchema(language), [language]);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   const {
     register,
@@ -112,134 +163,169 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     shouldUnregister: false,
   });
 
-  // Fetch orders, horses, and regulations when modal opens
-  useEffect(() => {
-    if (!isOpen) {
-      reset({ docNumber: '', file: undefined });
-      setIsDone(false);
-      setShowAllRegulations(false);
-      return;
-    }
+  const { ref: registerFileRef, ...fileInputProps } = register('file');
 
-    const loadData = async () => {
-      try {
-        const [ordersRes, regsRes, horsesRes] = await Promise.allSettled([
-          apiClient<any[]>('/orders/my-orders'),
-          documentsApi.getRegulations(),
-          apiClient<any[]>('/horses'),
-        ]);
+  const fetchModalOptions = useCallback(async () => {
+    const lang = langRef.current;
+    setIsLoadingOptions(true);
+    setOptionsError(null);
+    try {
+      const [ordersRes, regsRes, horsesRes] = await Promise.allSettled([
+        apiClient<any[]>('/orders/my-orders'),
+        documentsApi.getRegulations(),
+        apiClient<any[]>('/horses'),
+      ]);
 
-        let mappedOrders: OrderOption[] = [];
-        if (ordersRes.status === 'fulfilled' && Array.isArray(ordersRes.value)) {
-          mappedOrders = ordersRes.value
-            .map((item: any) => ({
-              id: item.id || item.shipment_id,
-              requestCode: item.requestCode || `REQ-${String(item.id || item.shipment_id).padStart(3, '0')}`,
-              origin: item.originLocation || item.origin_location || 'Vietnam',
-              destination: item.destinationLocation || item.destination_location || 'Singapore',
-              destinationCountry: detectCountry(item.destinationLocation || item.destination_location || ''),
-              status: item.status || 'requested',
-              horses: (item.horses || []).map((h: any) => ({
-                id: Number(h.horseId || h.horse_id || h.id),
-                name: h.name || 'Racehorse',
-                breed: h.breed,
-              })),
-            }))
-            // Do not show rejected or cancelled orders for document upload
-            .filter((o) => {
-              const s = String(o.status || '').toLowerCase();
-              return s !== 'rejected' && s !== 'cancelled';
-            })
-            // Put approved orders at the top
-            .sort((a, b) => {
-              const isAApproved = String(a.status).toLowerCase() === 'approved';
-              const isBApproved = String(b.status).toLowerCase() === 'approved';
-              if (isAApproved && !isBApproved) return -1;
-              if (!isAApproved && isBApproved) return 1;
-              return 0;
-            });
-          setOrders(mappedOrders);
-        }
+      const anyFailed =
+        ordersRes.status === 'rejected' &&
+        regsRes.status === 'rejected' &&
+        horsesRes.status === 'rejected';
 
-        let fetchedHorses: HorseOption[] = [];
-        if (horsesRes.status === 'fulfilled' && Array.isArray(horsesRes.value)) {
-          fetchedHorses = horsesRes.value.map((h: any) => ({
-            id: Number(h.horseId || h.horse_id || h.id),
-            name: h.name,
-            breed: h.breed,
-          }));
-          setAllHorses(fetchedHorses);
-        }
+      if (anyFailed) {
+        setOptionsError(
+          lang === 'en'
+            ? 'Unable to load shipments, horses, and regulations. Please retry.'
+            : 'Không thể tải danh sách đơn hàng, ngựa đua và quy chuẩn kiểm dịch. Vui lòng thử lại.'
+        );
+        return;
+      }
 
-        let fetchedRegs: RegulationItem[] = [];
-        if (regsRes.status === 'fulfilled' && Array.isArray(regsRes.value) && regsRes.value.length > 0) {
-          fetchedRegs = regsRes.value;
-          setRegulations(fetchedRegs);
+      if (ordersRes.status === 'rejected' && !defaultOrderId) {
+        setOptionsError(
+          ordersRes.reason?.message ||
+            (lang === 'en'
+              ? 'Could not load transport orders. Showing direct stable horses if available.'
+              : 'Không thể tải danh sách đơn vận chuyển. Bạn vẫn có thể thử lại hoặc chọn trực tiếp ngựa.')
+        );
+      }
+
+      let mappedOrders: OrderOption[] = [];
+      if (ordersRes.status === 'fulfilled' && Array.isArray(ordersRes.value)) {
+        mappedOrders = ordersRes.value
+          .map((item: any) => ({
+            id: item.id || item.shipment_id,
+            requestCode: item.requestCode || `REQ-${String(item.id || item.shipment_id).padStart(3, '0')}`,
+            origin: item.originLocation || item.origin_location || 'Vietnam',
+            destination: item.destinationLocation || item.destination_location || 'Singapore',
+            destinationCountry: detectCountry(item.destinationLocation || item.destination_location || ''),
+            status: item.status || 'requested',
+            horses: (item.horses || []).map((h: any) => ({
+              id: Number(h.horseId || h.horse_id || h.id),
+              name: h.name || 'Racehorse',
+              breed: h.breed,
+            })),
+          }))
+          .filter((o) => {
+            const s = String(o.status || '').toLowerCase();
+            return s !== 'rejected' && s !== 'cancelled';
+          })
+          .sort((a, b) => {
+            const isAApproved = String(a.status).toLowerCase() === 'approved';
+            const isBApproved = String(b.status).toLowerCase() === 'approved';
+            if (isAApproved && !isBApproved) return -1;
+            if (!isAApproved && isBApproved) return 1;
+            return 0;
+          });
+        setOrders(mappedOrders);
+      }
+
+      let fetchedHorses: HorseOption[] = [];
+      if (horsesRes.status === 'fulfilled' && Array.isArray(horsesRes.value)) {
+        fetchedHorses = horsesRes.value.map((h: any) => ({
+          id: Number(h.horseId || h.horse_id || h.id),
+          name: h.name,
+          breed: h.breed,
+        }));
+        setAllHorses(fetchedHorses);
+      }
+
+      let fetchedRegs: RegulationItem[] = [];
+      if (regsRes.status === 'fulfilled' && Array.isArray(regsRes.value) && regsRes.value.length > 0) {
+        fetchedRegs = regsRes.value;
+        setRegulations(fetchedRegs);
+      } else {
+        fetchedRegs = [
+          { id: 1, country: 'Singapore', documentType: 'horse_passport', description: 'Hộ chiếu ngựa FEI', effectiveDate: null, createdAt: '' },
+          { id: 2, country: 'Singapore', documentType: 'health_certificate', description: 'Giấy chứng nhận kiểm dịch', effectiveDate: null, createdAt: '' },
+          { id: 3, country: 'Singapore', documentType: 'import_permit', description: 'Giấy phép nhập khẩu SFA / AVA', effectiveDate: null, createdAt: '' },
+          { id: 4, country: 'Vietnam', documentType: 'health_certificate', description: 'Giấy kiểm dịch nội địa', effectiveDate: null, createdAt: '' },
+        ];
+        setRegulations(fetchedRegs);
+      }
+
+      let initialOrder = mappedOrders.find((o) => defaultOrderId && String(o.id) === String(defaultOrderId));
+      if (!initialOrder && mappedOrders.length > 0) {
+        initialOrder = mappedOrders[0];
+      }
+
+      if (initialOrder) {
+        const ordIdStr = String(initialOrder.id);
+        setSelectedOrderId(ordIdStr);
+        setValue('orderId', ordIdStr);
+
+        if (defaultHorseId) {
+          setValue('horseId', String(defaultHorseId));
         } else {
-          fetchedRegs = [
-            { id: 1, country: 'Singapore', documentType: 'horse_passport', description: 'Hộ chiếu ngựa FEI', effectiveDate: null, createdAt: '' },
-            { id: 2, country: 'Singapore', documentType: 'health_certificate', description: 'Giấy chứng nhận kiểm dịch', effectiveDate: null, createdAt: '' },
-            { id: 3, country: 'Singapore', documentType: 'import_permit', description: 'Giấy phép nhập khẩu SFA / AVA', effectiveDate: null, createdAt: '' },
-            { id: 4, country: 'Vietnam', documentType: 'health_certificate', description: 'Giấy kiểm dịch nội địa', effectiveDate: null, createdAt: '' },
-          ];
-          setRegulations(fetchedRegs);
+          const matchedHorse = initialOrder.horses[0] || fetchedHorses[0];
+          if (matchedHorse) {
+            setValue('horseId', String(matchedHorse.id));
+          }
         }
 
-        // Auto select order and horse
-        let initialOrder = mappedOrders.find((o) => defaultOrderId && String(o.id) === String(defaultOrderId));
-        if (!initialOrder && mappedOrders.length > 0) {
-          initialOrder = mappedOrders[0];
-        }
-
-        if (initialOrder) {
-          const ordIdStr = String(initialOrder.id);
-          setSelectedOrderId(ordIdStr);
-          setValue('orderId', ordIdStr);
-
-          // Find horse in this order
-          if (defaultHorseId) {
-            setValue('horseId', String(defaultHorseId));
-          } else {
-            const matchedHorse = initialOrder.horses[0] || fetchedHorses[0];
-            if (matchedHorse) {
-              setValue('horseId', String(matchedHorse.id));
-            }
-          }
-
-          if (defaultRegulationId) {
-            setValue('regulationId', String(defaultRegulationId));
-          } else {
-            // Filter regulation matching destination or fallback to Global Baseline
-            const matchingReg =
-              fetchedRegs.find(
-                (r) => r.country.toLowerCase() === initialOrder?.destinationCountry.toLowerCase()
-              ) ||
-              fetchedRegs.find((r) => r.country.toLowerCase() === 'global baseline');
-            if (matchingReg) {
-              setValue('regulationId', String(matchingReg.id));
-            } else if (fetchedRegs.length > 0) {
-              setValue('regulationId', String(fetchedRegs[0].id));
-            }
-          }
-        } else if (fetchedHorses.length > 0) {
-          setSelectedOrderId('direct');
-          setValue('orderId', 'direct');
-          setValue('horseId', defaultHorseId ? String(defaultHorseId) : String(fetchedHorses[0].id));
-          if (defaultRegulationId) {
-            setValue('regulationId', String(defaultRegulationId));
+        if (defaultRegulationId) {
+          setValue('regulationId', String(defaultRegulationId));
+        } else {
+          const matchingReg =
+            fetchedRegs.find(
+              (r) => r.country.toLowerCase() === initialOrder?.destinationCountry.toLowerCase()
+            ) ||
+            fetchedRegs.find((r) => r.country.toLowerCase() === 'global baseline');
+          if (matchingReg) {
+            setValue('regulationId', String(matchingReg.id));
           } else if (fetchedRegs.length > 0) {
             setValue('regulationId', String(fetchedRegs[0].id));
           }
         }
-      } catch (err) {
-        console.error('Failed to load upload options', err);
+      } else if (fetchedHorses.length > 0) {
+        setSelectedOrderId('direct');
+        setValue('orderId', 'direct');
+        setValue('horseId', defaultHorseId ? String(defaultHorseId) : String(fetchedHorses[0].id));
+        if (defaultRegulationId) {
+          setValue('regulationId', String(defaultRegulationId));
+        } else if (fetchedRegs.length > 0) {
+          setValue('regulationId', String(fetchedRegs[0].id));
+        }
+      } else if (defaultHorseId) {
+        setValue('horseId', String(defaultHorseId));
+        if (defaultRegulationId) {
+          setValue('regulationId', String(defaultRegulationId));
+        }
       }
-    };
+    } catch (err: any) {
+      console.error('Failed to load upload options', err);
+      setOptionsError(
+        err?.message ||
+          (lang === 'en' ? 'Unable to load form options.' : 'Không thể tải dữ liệu biểu mẫu.')
+      );
+    } finally {
+      setIsLoadingOptions(false);
+    }
+  }, [defaultOrderId, defaultHorseId, defaultRegulationId, setValue]);
 
-    loadData();
-  }, [isOpen, defaultOrderId, defaultHorseId, defaultRegulationId, setValue]);
+  useEffect(() => {
+    if (!isOpen) {
+      reset({ docNumber: '', file: undefined });
+      setIsDone(false);
+      setIsDragging(false);
+      setShowAllRegulations(false);
+      setOptionsError(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
 
-  // Handle Order Selection Change
+    void fetchModalOptions();
+  }, [isOpen, fetchModalOptions, reset]);
+
   const handleOrderChange = (ordId: string) => {
     setSelectedOrderId(ordId);
     setValue('orderId', ordId);
@@ -255,7 +341,6 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     if (order && order.horses.length > 0) {
       setValue('horseId', String(order.horses[0].id));
 
-      // Auto update regulation for this country, fallback to Global Baseline
       const destCountry = order.destinationCountry.toLowerCase();
       const matchingReg =
         regulations.find((r) => r.country.toLowerCase() === destCountry) ||
@@ -269,22 +354,47 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   const selectedFile = watch('file');
   const fileName = selectedFile?.[0]?.name;
 
+  const handleDropFiles = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (isUploading) return;
+    const dropped = e.dataTransfer?.files;
+    if (dropped && dropped.length > 0) {
+      const dt = new DataTransfer();
+      dt.items.add(dropped[0]);
+      setValue('file', dt.files, { shouldValidate: true, shouldDirty: true });
+      if (fileInputRef.current) {
+        fileInputRef.current.files = dt.files;
+      }
+    }
+  };
+
+  const handleRemoveFile = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isUploading) return;
+    setValue('file', undefined as any, { shouldValidate: true });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const currentOrder = orders.find((o) => String(o.id) === selectedOrderId);
   const targetCountry = currentOrder ? currentOrder.destinationCountry : 'All';
 
-  // Filtered regulations: show matching country, or Global Baseline fallback, or all if toggled
   const countryRegulations = regulations.filter((r) => r.country.toLowerCase() === targetCountry.toLowerCase());
   const baselineRegulations = regulations.filter((r) => r.country.toLowerCase() === 'global baseline');
 
-  const rawRegulations = showAllRegulations || selectedOrderId === 'direct'
-    ? regulations
-    : countryRegulations.length > 0
-    ? countryRegulations
-    : baselineRegulations.length > 0
-    ? baselineRegulations
-    : regulations;
+  const rawRegulations =
+    showAllRegulations || selectedOrderId === 'direct'
+      ? regulations
+      : countryRegulations.length > 0
+      ? countryRegulations
+      : baselineRegulations.length > 0
+      ? baselineRegulations
+      : regulations;
 
-  // Make sure defaultRegulationId is always present in availableRegulations
   const availableRegulations = [...rawRegulations];
   if (defaultRegulationId) {
     const targetReg = regulations.find((r) => String(r.id) === String(defaultRegulationId));
@@ -294,13 +404,19 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   }
 
   const selectedHorseId = watch('horseId') || defaultHorseId;
-  const selectedHorse = currentOrder?.horses?.find((h) => String(h.id) === String(selectedHorseId)) || allHorses.find((h) => String(h.id) === String(selectedHorseId));
-  const selectedHorseName = selectedHorse?.name || 'Ngựa được chọn';
+  const selectedHorse =
+    currentOrder?.horses?.find((h) => String(h.id) === String(selectedHorseId)) ||
+    allHorses.find((h) => String(h.id) === String(selectedHorseId));
+  const selectedHorseNameDisplay = selectedHorse?.name || (language === 'en' ? 'Selected Horse' : 'Ngựa được chọn');
 
   const selectedRegulationId = watch('regulationId') || defaultRegulationId;
   const currentRegulation = regulations.find((r) => String(r.id) === String(selectedRegulationId));
 
+  // Keep form steps implicit without noisy numbered prefixes
+  const showHorseSelector = !defaultOrderId && !(currentOrder && currentOrder.horses.length === 1);
+
   const onSubmit = async (data: UploadFormData) => {
+    if (isUploading) return;
     setIsUploading(true);
     try {
       let resolvedHorseId = Number(data.horseId);
@@ -311,7 +427,13 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         resolvedHorseId = Number(allHorses[0]?.id);
       }
       if (!resolvedHorseId || isNaN(resolvedHorseId)) {
-        resolvedHorseId = 16;
+        toast.error(
+          language === 'en'
+            ? 'Please select a horse before uploading.'
+            : 'Vui lòng chọn thông tin ngựa trước khi tải lên tài liệu.'
+        );
+        setIsUploading(false);
+        return;
       }
 
       let resolvedRegId = Number(data.regulationId);
@@ -320,15 +442,15 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       }
 
       const selectedReg = regulations.find((r) => Number(r.id) === resolvedRegId);
-      let selectedHorseName = 'Selected Horse';
+      let resolvedHorseName = 'Selected Horse';
 
       if (currentOrder) {
         const h = currentOrder.horses.find((item) => Number(item.id) === resolvedHorseId);
-        if (h) selectedHorseName = h.name;
+        if (h) resolvedHorseName = h.name;
       }
-      if (selectedHorseName === 'Selected Horse') {
+      if (resolvedHorseName === 'Selected Horse') {
         const h = allHorses.find((item) => Number(item.id) === resolvedHorseId);
-        if (h) selectedHorseName = h.name;
+        if (h) resolvedHorseName = h.name;
       }
 
       const fileObj = data.file[0];
@@ -341,7 +463,6 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         formData.append('docNumber', data.docNumber);
       }
 
-      // 1. Send to real Backend API (either Re-upload or Upload new)
       let uploadedDocFromApi: any = null;
       try {
         if (reuploadDocId) {
@@ -350,36 +471,37 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           uploadedDocFromApi = await documentsApi.uploadDocument(formData);
         }
       } catch (apiErr: any) {
-        console.warn('API upload encountered error, handling:', apiErr);
-        toast.error(apiErr.message || 'API upload error');
+        console.error('API upload error:', apiErr);
+        toast.error(apiErr.message || (language === 'en' ? 'Document upload failed' : 'Tải lên tài liệu thất bại'));
+        setIsUploading(false);
+        return;
       }
 
-      // 2. Sync to Specialist Review Queue
       const docTitle = selectedReg?.description || selectedReg?.documentType || 'Giấy chứng nhận';
       const requestCode = currentOrder?.requestCode || `TR-HORSE-${data.horseId}`;
 
-      submitDocumentForReview({
+      submitDocumentForReview?.({
         id: uploadedDocFromApi?.id ? `DOC-${uploadedDocFromApi.id}` : undefined,
         reqCode: requestCode,
-        horseName: selectedHorseName,
+        horseName: resolvedHorseName,
         type: docTitle,
         customerName: 'You',
         fileUrl: uploadedDocFromApi?.fileUrl || `/uploads/documents/${fileObj.name}`,
       });
 
       const mapDocType = (typeStr: string): DocumentItem['documentType'] => {
-        const t = typeStr.toLowerCase();
-        if (t.includes('passport')) return 'PASSPORT';
-        if (t.includes('health') || t.includes('vaccin') || t.includes('kiểm dịch')) return 'HEALTH_CERT';
-        if (t.includes('export')) return 'EXPORT_PERMIT';
-        if (t.includes('import')) return 'IMPORT_PERMIT';
+        const typeLower = typeStr.toLowerCase();
+        if (typeLower.includes('passport')) return 'PASSPORT';
+        if (typeLower.includes('health') || typeLower.includes('vaccin') || typeLower.includes('kiểm dịch')) return 'HEALTH_CERT';
+        if (typeLower.includes('export')) return 'EXPORT_PERMIT';
+        if (typeLower.includes('import')) return 'IMPORT_PERMIT';
         return 'CUSTOMS_DECLARATION';
       };
 
       const updated: DocumentItem = {
         id: uploadedDocFromApi ? `DOC-${uploadedDocFromApi.id}` : `DOC-${Date.now()}`,
         requestCode,
-        horseName: selectedHorseName,
+        horseName: resolvedHorseName,
         title: docTitle,
         documentType: mapDocType(selectedReg?.documentType || 'health_certificate'),
         status: 'SUBMITTED',
@@ -390,26 +512,36 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       setIsDone(true);
       toast.success(
         reuploadDocId
-          ? 'Đã cập nhật lại hồ sơ thành công! Đang chờ chuyên viên duyệt lại.'
+          ? language === 'en'
+            ? 'Document updated! Awaiting Specialist re-review.'
+            : 'Đã cập nhật lại hồ sơ thành công! Đang chờ chuyên viên duyệt lại.'
+          : language === 'en'
+          ? 'Document uploaded and queued for Specialist review!'
           : 'Hồ sơ đã được tải lên và chuyển đến Chuyên viên kiểm dịch xét duyệt!'
       );
       onSuccess(updated);
 
-      setTimeout(() => {
+      timeoutRef.current = setTimeout(() => {
         setIsDone(false);
         reset();
         onClose();
       }, 700);
     } catch (err: any) {
       setIsUploading(false);
-      toast.error(err.message || 'Upload failed');
+      toast.error(err.message || (language === 'en' ? 'Upload failed' : 'Tải lên thất bại'));
     }
   };
 
   const handleClose = () => {
+    if (isUploading) return;
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
     reset({ docNumber: '', file: undefined });
     setIsDone(false);
+    setIsDragging(false);
     setShowAllRegulations(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
     onClose();
   };
 
@@ -417,34 +549,74 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={reuploadDocId ? `Cập Nhật / Nộp Lại: ${reuploadTitle || 'Hồ Sơ'}` : 'Tải Lên Hồ Sơ Kiểm Dịch & Pháp Lý'}
+      closeDisabled={isUploading}
+      title={
+        reuploadDocId
+          ? `${t('documents.reuploadTitle', 'Cập Nhật / Nộp Lại')}: ${translateDocType(reuploadTitle || 'Hồ Sơ')}`
+          : t('documents.uploadTitle', 'Tải Lên Hồ Sơ Kiểm Dịch & Pháp Lý')
+      }
       subtitle={
         reuploadDocId
-          ? 'Chọn tệp mới để cập nhật và gửi lại cho chuyên viên kiểm duyệt.'
-          : 'Cung cấp các giấy chứng nhận kiểm dịch, hộ chiếu hoặc giấy phép vận chuyển.'
+          ? t('documents.reuploadSubtitle', 'Chọn tệp mới để cập nhật và gửi lại cho chuyên viên kiểm duyệt.')
+          : t('documents.uploadSubtitle', 'Cung cấp các giấy chứng nhận kiểm dịch, hộ chiếu hoặc giấy phép vận chuyển.')
       }
       maxWidth="620px"
     >
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
-        {/* Quick Switch to Batch Upload Banner */}
+        {optionsError && (
+          <div
+            role="alert"
+            className="bg-red-50 border border-red-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs text-red-800"
+          >
+            <div className="flex items-center gap-2 font-medium">
+              <AlertCircle size={15} className="text-red-600 shrink-0" />
+              <span>{optionsError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void fetchModalOptions()}
+              className="px-2.5 py-1 rounded-lg bg-white border border-red-200 text-red-700 font-bold hover:bg-red-100 flex items-center gap-1 cursor-pointer"
+            >
+              <RotateCcw size={12} /> {t('common.retry', language === 'en' ? 'Retry' : 'Thử lại')}
+            </button>
+          </div>
+        )}
+
+        {isLoadingOptions && (
+          <div className="bg-[#FAF8F4] border border-[#D8CEBE] rounded-xl p-3 flex items-center gap-2 text-xs text-[#5F6977]">
+            <Loader2 size={14} className="animate-spin text-[#A67C2E] shrink-0" />
+            <span>
+              {language === 'en'
+                ? 'Loading shipments, horses, and quarantine requirements...'
+                : 'Đang tải danh sách đơn hàng, ngựa đua và quy định kiểm dịch...'}
+            </span>
+          </div>
+        )}
+
         {onSwitchToBatch && !reuploadDocId && (
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/90 rounded-xl p-3 flex items-center justify-between gap-3 text-xs shadow-xs">
-            <div className="flex items-center gap-2 text-blue-900">
-              <span className="text-base">⚡</span>
+          <div className="bg-[#FAF8F4] border border-[#D4C5A3] rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5 text-[#181A17] min-w-0 flex-1">
+              <span className="text-base shrink-0">⚡</span>
               <div>
-                <strong className="block text-blue-950 font-bold">Nộp cùng lúc trọn bộ hồ sơ?</strong>
-                <span className="text-blue-700">Chuyến đi này có thể đính kèm và nộp tất cả chứng từ trong 1 lần duy nhất.</span>
+                <strong className="block text-[#181A17] font-bold">
+                  {t('documents.batchBannerTitle', 'Nộp cùng lúc trọn bộ hồ sơ?')}
+                </strong>
+                <span className="text-[#5B6779]">
+                  {t('documents.batchBannerDesc', 'Chuyến đi này có thể đính kèm và nộp tất cả chứng từ trong 1 lần duy nhất.')}
+                </span>
               </div>
             </div>
             <button
               type="button"
+              disabled={isUploading}
               onClick={() => {
+                if (isUploading) return;
                 onClose();
                 onSwitchToBatch();
               }}
-              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shrink-0 shadow-xs cursor-pointer text-xs"
+              className="px-3.5 py-1.5 bg-[#181A17] hover:bg-[#242722] disabled:opacity-50 text-white font-bold rounded-lg shrink-0 cursor-pointer text-xs transition-colors"
             >
-              Nộp cả 4 file
+              {t('documents.batchButton', 'Nộp cả bộ')}
             </button>
           </div>
         )}
@@ -453,156 +625,174 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           <>
             <input type="hidden" {...register('horseId')} />
             <input type="hidden" {...register('regulationId')} />
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-blue-900 bg-blue-100 px-2.5 py-1 rounded-md">
-                  {currentOrder?.requestCode || `Đơn #${defaultOrderId}`}
+            <div className="bg-[#F0EEE8] border border-[#D8CEBE] rounded-xl p-3.5 flex flex-col gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-[#181A17] bg-[#FFFFFF] border border-[#D8CEBE] px-2.5 py-1 rounded-md font-mono">
+                  {currentOrder?.requestCode || `REQ-${String(defaultOrderId).padStart(3, '0')}`}
                 </span>
-                <span className="text-xs text-slate-500 font-medium">
-                  Điểm đến: <strong className="text-slate-800">{currentOrder?.destination || 'Điểm đến'}</strong>
+                <span className="text-xs text-[#5B6779] font-medium">
+                  {t('common.destination', 'Điểm đến')}:{' '}
+                  <strong className="text-[#181A17]">
+                    {currentOrder?.destinationCountry ? translateCountry(currentOrder.destinationCountry) : currentOrder?.destination || (language === 'en' ? 'Destination' : 'Điểm đến')}
+                  </strong>
                 </span>
               </div>
-              <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-200/80">
-                <span className="text-slate-600 font-medium">
-                  Ngựa vận chuyển: <strong className="text-slate-900">{selectedHorseName}</strong>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-2 border-t border-[#D8CEBE]/80">
+                <span className="text-[#5B6779] font-medium">
+                  {t('customer.table.horse', 'Chiến mã')}: <strong className="text-[#181A17]">{selectedHorseNameDisplay}</strong>
                 </span>
-                <span className="text-slate-600 font-medium">
-                  Loại giấy tờ: <strong className="text-blue-700">{reuploadTitle || currentRegulation?.description || 'Hồ sơ kiểm dịch'}</strong>
+                <span className="text-[#5B6779] font-medium">
+                  {t('documents.docTypeLabel', 'Loại giấy tờ')}:{' '}
+                  <strong className="text-[#966516]">
+                    {translateDocType(currentRegulation?.documentType || reuploadTitle || 'Hồ sơ kiểm dịch', reuploadTitle || currentRegulation?.description)}
+                  </strong>
                 </span>
               </div>
             </div>
           </>
         ) : (
           <>
-            {/* Step 1: Select Transport Request */}
             <div>
-              <label className="text-sm font-semibold text-slate-800 flex items-center justify-between mb-1.5">
+              <label htmlFor="upload-order-select" className="text-sm font-semibold text-[#181A17] flex items-center justify-between gap-2 mb-1.5 flex-wrap">
                 <span className="flex items-center gap-1.5">
-                  <Ship size={16} className="text-blue-600" />
-                  1. Chọn Đơn Vận Chuyển (Transport Request) <span className="text-red-500">*</span>
+                  <Ship size={16} className="text-[#A67C2E]" />
+                  {language === 'en' ? 'Transport Order' : 'Đơn vận chuyển'} <span className="text-[#B33E3E]">*</span>
                 </span>
-                <span className="text-xs font-normal text-slate-500">
-                  {orders.length} đơn vận chuyển khả dụng
+                <span className="text-xs font-normal text-[#5B6779]">
+                  {orders.length} {t('documents.availableOrders', 'đơn vận chuyển khả dụng')}
                 </span>
               </label>
               <select
+                id="upload-order-select"
                 value={selectedOrderId}
+                disabled={isLoadingOptions || isUploading}
                 onChange={(e) => handleOrderChange(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm bg-white font-medium text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                className="w-full px-3 py-2.5 rounded-lg border border-[#D8CEBE] text-sm bg-white font-medium text-[#181A17] outline-none focus:border-[#C4B38E] transition-colors"
               >
                 {orders.map((ord) => {
-                  const horseNames = ord.horses.map((h) => h.name).join(', ') || 'Ngựa đua';
+                  const horseNames = ord.horses.map((h) => h.name).join(', ') || (language === 'en' ? 'Racehorse' : 'Ngựa đua');
                   const isApproved = String(ord.status).toLowerCase() === 'approved';
-                  const statusTag = isApproved ? '✓ Đã duyệt' : '⏳ Chờ duyệt';
+                  const statusTag = isApproved
+                    ? language === 'en'
+                      ? '✓ Approved'
+                      : '✓ Đã duyệt'
+                    : language === 'en'
+                    ? '⏳ Pending'
+                    : '⏳ Chờ duyệt';
                   return (
                     <option key={ord.id} value={ord.id}>
-                      [{ord.requestCode}] {horseNames} — Đi {ord.destination} ({statusTag})
+                      [{ord.requestCode}] {horseNames} — {ord.destination} ({statusTag})
                     </option>
                   );
                 })}
-                <option value="direct">-- Hoặc chọn trực tiếp ngựa trong chuồng (Không theo đơn) --</option>
+                <option value="direct">
+                  {language === 'en'
+                    ? '-- Select horse directly from stable (No order) --'
+                    : '-- Chọn trực tiếp ngựa trong chuồng (Không theo đơn) --'}
+                </option>
               </select>
             </div>
 
-            {/* Order Status Notice if not yet approved */}
             {currentOrder && String(currentOrder.status).toLowerCase() !== 'approved' && selectedOrderId !== 'direct' && (
-              <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs flex items-start gap-2.5">
-                <span className="text-amber-600 text-base leading-none">⚠️</span>
-                <div>
-                  <strong className="block mb-0.5">Đơn vận chuyển đang chờ Logistics Manager xét duyệt</strong>
-                  <span>
-                    Bạn có thể nộp trước giấy tờ kiểm dịch. Sau khi Quản lý duyệt đơn (Approved), Chuyên viên vận chuyển mới chính thức thụ lý và gửi hồ sơ cho Hải quan.
-                  </span>
-                </div>
+              <div className="bg-[#F8F0DF] border border-[#DFCA9A] text-[#966516] rounded-xl px-3 py-2 text-xs flex items-center gap-2">
+                <span className="text-sm leading-none shrink-0">⚠️</span>
+                <span>
+                  {language === 'en'
+                    ? 'Order is awaiting Manager approval — you can upload documents in advance.'
+                    : 'Đơn đang chờ Quản lý duyệt — bạn vẫn có thể nộp trước hồ sơ kiểm dịch.'}
+                </span>
               </div>
             )}
 
-            {/* Step 2: Auto-selected Horse Details */}
-            <input
-              type="hidden"
-              {...register('horseId')}
-              value={currentOrder?.horses?.[0]?.id ? String(currentOrder.horses[0].id) : ''}
-            />
             {currentOrder && currentOrder.horses.length === 1 ? (
-              <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3 flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
-                    🐎
+              <>
+                <input type="hidden" {...register('horseId')} />
+                <div className="bg-[#FAF8F4] border border-[#EAE5DA] rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-[#181A17] text-[#C4B38E] border border-[#2D312C] flex items-center justify-center font-bold text-sm shrink-0">
+                      🐎
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-bold text-[#8A7548] uppercase tracking-wider">
+                        {t('documents.targetHorseLabel', 'Chiến mã')}
+                      </div>
+                      <div className="text-sm font-bold text-[#181A17]">
+                        {currentOrder.horses[0].name}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-bold text-blue-900 uppercase tracking-wider">
-                      Ngựa vận chuyển mục tiêu
-                    </div>
-                    <div className="text-sm font-bold text-slate-900">
-                      {currentOrder.horses[0].name}{' '}
-                      {currentOrder.horses[0].id && !isNaN(Number(currentOrder.horses[0].id)) ? (
-                        <span className="text-xs font-medium text-slate-500">(Mã ID: #{currentOrder.horses[0].id})</span>
-                      ) : null}
-                    </div>
+                  <div className="text-right">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-[#F3EFE6] text-[#181A17] border border-[#C4B38E]">
+                      <Compass size={12} /> {translateCountry(currentOrder.destinationCountry)}
+                    </span>
                   </div>
                 </div>
-                <div className="text-right">
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
-                    <Compass size={12} /> {currentOrder.destinationCountry}
-                  </span>
-                </div>
-              </div>
+              </>
             ) : (
               <div>
-                <label className="text-sm font-semibold text-slate-800 block mb-1">
-                  2. Chọn Ngựa Đua Mục Tiêu <span className="text-red-500">*</span>
+                <label htmlFor="upload-horse-select" className="text-sm font-semibold text-[#181A17] block mb-1">
+                  {language === 'en' ? 'Target Horse' : 'Chiến mã'} <span className="text-[#9E3B3B]">*</span>
                 </label>
                 <select
+                  id="upload-horse-select"
+                  disabled={isLoadingOptions || isUploading}
                   {...register('horseId')}
                   className={`w-full px-3 py-2 rounded-lg border text-sm bg-white outline-none transition-colors ${
-                    errors.horseId ? 'border-red-500' : 'border-slate-300 focus:border-blue-500'
+                    errors.horseId ? 'border-[#9E3B3B]' : 'border-[#EAE5DA] focus:border-[#C4B38E]'
                   }`}
                 >
                   {(currentOrder ? currentOrder.horses : allHorses).map((h) => (
                     <option key={h.id} value={h.id}>
-                      {h.name} (Mã ID: #{h.id}) {h.breed ? `— Giống: ${h.breed}` : ''}
+                      {h.name}{h.breed ? ` — ${h.breed}` : ''}
                     </option>
                   ))}
                 </select>
                 {errors.horseId && (
-                  <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                  <span className="text-xs text-[#9E3B3B] mt-1 flex items-center gap-1">
                     <AlertCircle size={12} /> {errors.horseId.message as string}
                   </span>
                 )}
               </div>
             )}
 
-            {/* Step 3: Document Requirement Selection */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-                  <ShieldCheck size={16} className="text-emerald-600" />
-                  3. Loại Giấy Tờ Cần Tải Lên <span className="text-red-500">*</span>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                <label htmlFor="upload-reg-select" className="text-sm font-semibold text-[#181A17] flex items-center gap-1.5">
+                  <ShieldCheck size={16} className="text-[#287653]" />
+                  {language === 'en' ? 'Document Type' : 'Loại giấy tờ'} <span className="text-[#B33E3E]">*</span>
                 </label>
                 {currentOrder && (
                   <button
                     type="button"
                     onClick={() => setShowAllRegulations(!showAllRegulations)}
-                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                    className="text-xs text-[#A67C2E] hover:text-[#242722] hover:underline font-semibold cursor-pointer"
                   >
-                    {showAllRegulations ? 'Chỉ hiện hồ sơ nước đến' : 'Hiện tất cả các nước'}
+                    {showAllRegulations
+                      ? language === 'en'
+                        ? 'Show destination only'
+                        : 'Chỉ hiện hồ sơ nước đến'
+                      : language === 'en'
+                      ? 'Show all countries'
+                      : 'Hiện tất cả các nước'}
                   </button>
                 )}
               </div>
               <select
+                id="upload-reg-select"
+                disabled={isLoadingOptions || isUploading}
                 {...register('regulationId')}
                 className={`w-full px-3 py-2.5 rounded-lg border text-sm bg-white font-medium outline-none transition-colors ${
-                  errors.regulationId ? 'border-red-500' : 'border-slate-300 focus:border-blue-500'
+                  errors.regulationId ? 'border-[#B33E3E]' : 'border-[#D8CEBE] focus:border-[#C4B38E]'
                 }`}
               >
                 {availableRegulations.map((reg) => (
                   <option key={reg.id} value={reg.id}>
-                    [{reg.country}] {reg.description || reg.documentType} ({reg.documentType})
+                    [{translateCountry(reg.country)}] {translateDocType(reg.documentType, reg.description)}
                   </option>
                 ))}
               </select>
               {errors.regulationId && (
-                <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                <span className="text-xs text-[#B33E3E] mt-1 flex items-center gap-1">
                   <AlertCircle size={12} /> {errors.regulationId.message as string}
                 </span>
               )}
@@ -610,84 +800,123 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           </>
         )}
 
-        {/* Step 4: Document / Passport Number */}
         <div>
-          <label className="text-sm font-semibold text-slate-800 block mb-1">
-            4. Số Hiệu Chứng Từ / Mã Giấy Phép (Không bắt buộc)
-          </label>
-          <input
-            type="text"
-            placeholder="Ví dụ: FEI-2026-9812 hoặc VET-SG-2026-004"
-            {...register('docNumber')}
-            className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white outline-none focus:border-blue-500"
-          />
-        </div>
-
-        {/* Step 5: File Explorer Upload Area */}
-        <div>
-          <label className="text-sm font-semibold text-slate-800 block mb-1">
-            5. Tệp Đính Kèm Từ Máy Tính <span className="text-red-500">*</span>
+          <label htmlFor="doc-upload-file-input" className="text-sm font-semibold text-[#181A17] block mb-1">
+            {language === 'en' ? 'Document File' : 'Tệp đính kèm'} <span className="text-[#B33E3E]">*</span>
           </label>
           <label
-            className={`border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-colors ${
-              errors.file ? 'border-red-400 bg-red-50/50' : 'border-blue-300 bg-slate-50 hover:bg-blue-50/50'
+            htmlFor="doc-upload-file-input"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!isUploading) setIsDragging(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDragging(false);
+            }}
+            onDrop={handleDropFiles}
+            className={`relative border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-all focus-within:ring-2 focus-within:ring-[#A67C2E] ${
+              isDragging
+                ? 'border-[#A67C2E] bg-[#FAF5EB] ring-2 ring-[#A67C2E]/30'
+                : errors.file
+                ? 'border-[#B33E3E] bg-[#F8EAEA]'
+                : 'border-[#C4B38E]/60 bg-[#F0EEE8] hover:bg-[#FAF8F4]'
             }`}
           >
             <input
+              id="doc-upload-file-input"
               type="file"
               accept=".pdf,.jpg,.jpeg,.png"
-              {...register('file')}
-              className="hidden"
+              disabled={isUploading}
+              {...fileInputProps}
+              ref={(el) => {
+                registerFileRef(el);
+                fileInputRef.current = el;
+              }}
+              className="sr-only"
             />
 
             {fileName ? (
-              <div className="flex items-center gap-3">
-                <FileText size={32} className="text-blue-600 shrink-0" />
-                <div className="text-left">
-                  <div className="text-sm font-semibold text-slate-900 break-all">{fileName}</div>
-                  <div className="text-xs text-green-600 font-medium">✓ Đã chọn từ máy tính, sẵn sàng tải lên</div>
+              <div className="flex items-center justify-between gap-3 w-full max-w-md bg-white border border-[#D8CEBE] rounded-xl px-3.5 py-2.5 shadow-sm">
+                <div className="flex items-center gap-3 min-w-0">
+                  <FileText size={26} className="text-[#A67C2E] shrink-0" />
+                  <div className="text-left min-w-0">
+                    <div className="text-sm font-semibold text-[#181A17] break-all">{fileName}</div>
+                    <div className="text-xs text-[#287653] font-medium">
+                      {language === 'en' ? '✓ File selected, ready to upload' : '✓ Đã chọn tệp, sẵn sàng tải lên'}
+                    </div>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  disabled={isUploading}
+                  onClick={handleRemoveFile}
+                  aria-label={language === 'en' ? 'Remove selected file' : 'Gỡ tệp đã chọn'}
+                  title={language === 'en' ? 'Remove file' : 'Gỡ tệp'}
+                  className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer shrink-0 disabled:opacity-40"
+                >
+                  <X size={16} />
+                </button>
               </div>
             ) : (
               <>
-                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-2">
+                <div className="w-10 h-10 rounded-full bg-[#FAF8F4] flex items-center justify-center text-[#A67C2E] mb-2 border border-[#D4C5A3]">
                   <UploadCloud size={20} />
                 </div>
-                <div className="text-sm font-semibold text-slate-900">
-                  Nhấn để mở File Explorer chọn tệp hoặc kéo thả vào đây
+                <div className="text-sm font-semibold text-[#181A17]">
+                  {language === 'en'
+                    ? 'Click to choose a file or drag & drop here'
+                    : 'Chọn tệp hoặc kéo thả vào đây'}
                 </div>
-                <div className="text-xs text-slate-500 mt-1">
-                  Định dạng hỗ trợ: PDF, JPG, PNG (tối đa 25MB)
+                <div className="text-xs text-[#5B6779] mt-1">
+                  {t('documents.dropzoneFormats', 'Hỗ trợ PDF, JPG, PNG (tối đa 10MB)')}
                 </div>
               </>
             )}
           </label>
           {errors.file && (
-            <span className="text-xs text-red-600 mt-1.5 flex items-center gap-1">
+            <span className="text-xs text-[#B33E3E] mt-1.5 flex items-center gap-1">
               <AlertCircle size={12} /> {errors.file.message as string}
             </span>
           )}
         </div>
 
-        {/* Actions */}
-        <div className="flex justify-end gap-3 mt-2 pt-2 border-t border-slate-100">
-          <Button type="button" variant="outline" onClick={handleClose}>
-            Hủy Bỏ
+        <div>
+          <label htmlFor="upload-doc-number" className="text-sm font-semibold text-[#181A17] block mb-1">
+            {language === 'en' ? 'Document / Permit No. (Optional)' : 'Số hiệu chứng từ (Tùy chọn)'}
+          </label>
+          <input
+            id="upload-doc-number"
+            type="text"
+            disabled={isUploading}
+            placeholder={language === 'en' ? 'e.g. FEI-2026-9812 or VET-SG-2026-004' : 'Ví dụ: FEI-2026-9812 hoặc VET-SG-2026-004'}
+            {...register('docNumber')}
+            className="w-full px-3 py-2 rounded-lg border border-[#D8CEBE] text-sm bg-white outline-none focus:border-[#C4B38E]"
+          />
+        </div>
+
+        <div className="sticky -bottom-6 -mx-6 px-6 py-3.5 bg-white/95 backdrop-blur-sm border-t border-[#E8E2D8] flex flex-wrap justify-end gap-3 mt-2 z-10">
+          <Button type="button" variant="outline" disabled={isUploading} onClick={handleClose}>
+            {t('common.cancel', 'Hủy Bỏ')}
           </Button>
           <Button
             type="submit"
             variant="primary"
-            disabled={isUploading || isDone}
-            className="min-w-[160px] bg-blue-600 hover:bg-blue-700"
+            disabled={isUploading || isDone || isLoadingOptions}
+            className="min-w-[160px]"
           >
             {isDone ? (
               <span className="flex items-center gap-1.5">
-                <CheckCircle size={16} /> Đã Tải Lên!
+                <CheckCircle size={16} /> {language === 'en' ? 'Uploaded!' : 'Đã Tải Lên!'}
               </span>
             ) : isUploading ? (
-              'Đang Tải Lên...'
+              <span className="flex items-center gap-1.5">
+                <Loader2 size={16} className="animate-spin" /> {t('common.loading', 'Đang Tải Lên...')}
+              </span>
             ) : (
-              'Tải Lên Hồ Sơ'
+              t('common.submit', 'Tải Lên Hồ Sơ')
             )}
           </Button>
         </div>

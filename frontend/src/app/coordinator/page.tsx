@@ -1,62 +1,258 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   Truck,
   Plane,
-  CalendarCheck,
   Clock,
-  Wrench,
   Filter,
   MapPin,
   Flag,
   ShieldAlert,
   Bed,
   CheckCircle2,
-  Sliders,
   CalendarDays,
   Bell,
   Check,
+  RotateCcw,
+  AlertTriangle,
+  Loader2,
+  ChevronRight,
+  Route as RouteIcon,
 } from 'lucide-react';
-import toast from 'react-hot-toast';
 import { useFleetRouteStore } from '@/lib/fleet-route-store';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
+import { FlightyRouteDisplay } from '@/components/ui/FlightyRouteDisplay';
+import { NumberTicker } from '@/components/ui/NumberTicker';
+import { trackingApi, AssignedTripSummary, TripTrackingDetails } from '@/features/tracking/api/tracking.api';
+import { apiClient } from '@/lib/api-client';
+import toast from 'react-hot-toast';
 
 export default function CoordinatorDashboardPage() {
-  const router = useRouter();
-  const { t } = useLanguage();
+  const { t, language, translateVehicleType, translateStatus, translateNotification } = useLanguage();
+  const isEn = language === 'en';
   const { vehicles, routes, schedules, alerts, acknowledgeAlert } = useFleetRouteStore();
   const [tripFilter, setTripFilter] = useState('ALL');
   const [showTripFilterDropdown, setShowTripFilterDropdown] = useState(false);
+  const [realTrips, setRealTrips] = useState<AssignedTripSummary[]>([]);
+  const [awaitingPlanningCount, setAwaitingPlanningCount] = useState<number>(0);
+  const [selectedFeaturedId, setSelectedFeaturedId] = useState<number | null>(null);
+  const [featuredTracking, setFeaturedTracking] = useState<TripTrackingDetails | null>(null);
+  const [isLoadingMilestones, setIsLoadingMilestones] = useState(false);
+  const [liveNotifications, setLiveNotifications] = useState<any[]>([]);
+  const [isLoadingRealTrips, setIsLoadingRealTrips] = useState(true);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
 
-  // Dynamic KPI Metrics
-  const activeTrips = schedules.filter((s) => s.status === 'In Transit').length;
-  const scheduledDepartures = schedules.filter((s) => s.status === 'Scheduled').length;
-  const delayedTrips = schedules.filter((s) => s.status === 'Delayed').length;
-  const completedTrips = schedules.filter((s) => s.status === 'Completed').length;
+  const loadDashboardData = useCallback(async () => {
+    try {
+      setIsLoadingRealTrips(true);
+      setDashboardError(null);
+      const [tripsRes, notifRes, ordersRes] = await Promise.allSettled([
+        trackingApi.getMyTrips(),
+        apiClient<any[]>('/notifications'),
+        apiClient<any[]>('/orders'),
+      ]);
+
+      if (tripsRes.status === 'fulfilled' && Array.isArray(tripsRes.value)) {
+        setRealTrips(tripsRes.value);
+        const preferred =
+          tripsRes.value.find((r) => r.shipment_status === 'in_transit') || tripsRes.value[0];
+        if (preferred) {
+          setSelectedFeaturedId((prev) =>
+            prev && tripsRes.value.some((r) => r.shipment_id === prev) ? prev : preferred.shipment_id
+          );
+        } else {
+          setSelectedFeaturedId(null);
+        }
+      } else if (tripsRes.status === 'rejected') {
+        setDashboardError(
+          tripsRes.reason?.message ||
+            t(
+              'coordinator.dashboard.loadError',
+              isEn ? 'Unable to sync live trips from server.' : 'Không thể đồng bộ dữ liệu chuyến đi trực tiếp từ máy chủ.'
+            )
+        );
+      }
+
+      if (notifRes.status === 'fulfilled' && Array.isArray(notifRes.value)) {
+        setLiveNotifications(notifRes.value);
+      }
+
+      if (ordersRes.status === 'fulfilled' && Array.isArray(ordersRes.value)) {
+        const pendingPlan = ordersRes.value.filter((o) =>
+          ['approved', 'planning'].includes(String(o?.status || '').toLowerCase())
+        ).length;
+        setAwaitingPlanningCount(pendingPlan);
+      }
+    } catch (err: any) {
+      setDashboardError(
+        err?.message ||
+          t('coordinator.dashboard.loadError', isEn ? 'Unable to load coordinator dashboard.' : 'Không thể tải dữ liệu điều phối.')
+      );
+    } finally {
+      setIsLoadingRealTrips(false);
+    }
+  }, [isEn, t]);
+
+  useEffect(() => {
+    void loadDashboardData();
+  }, [loadDashboardData]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedFeaturedId) {
+      setFeaturedTracking(null);
+      return;
+    }
+    const loadFeaturedDetails = async () => {
+      try {
+        setIsLoadingMilestones(true);
+        const details = await trackingApi.getTrackingDetails(selectedFeaturedId);
+        if (!cancelled) {
+          setFeaturedTracking(details);
+        }
+      } catch {
+        if (!cancelled) setFeaturedTracking(null);
+      } finally {
+        if (!cancelled) setIsLoadingMilestones(false);
+      }
+    };
+    void loadFeaturedDetails();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFeaturedId]);
+
+  useEffect(() => {
+    if (!showTripFilterDropdown) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowTripFilterDropdown(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showTripFilterDropdown]);
+
+  const mapBackendStatusToScheduleStatus = (st?: string): 'Scheduled' | 'Boarding' | 'In Transit' | 'Completed' | 'Delayed' => {
+    const s = String(st || '').toLowerCase();
+    if (s === 'in_transit') return 'In Transit';
+    if (s === 'completed' || s === 'arrived') return 'Completed';
+    if (s === 'incident_reported' || s === 'delayed') return 'Delayed';
+    if (s === 'ready_to_depart') return 'Boarding';
+    return 'Scheduled';
+  };
+
+  const displaySchedules = useMemo(
+    () =>
+      realTrips.length > 0
+        ? realTrips.map((r) => ({
+            id: String(r.shipment_id),
+            shipmentId: r.shipment_id,
+            orderCode: r.request_code || `REQ-${String(r.shipment_id).padStart(3, '0')}`,
+            horseName: r.request_title || r.contact_name || `${r.requested_horse_count} ${t('common.horsesUnit', 'ngựa')}`,
+            horseCount: Number(r.requested_horse_count || 1),
+            departureTime: r.requested_date || '',
+            routeTitle: r.route_name || `${r.origin_location} → ${r.destination_location}`,
+            origin: r.origin_location,
+            destination: r.destination_location,
+            status: mapBackendStatusToScheduleStatus(r.shipment_status),
+          }))
+        : schedules.map((s) => ({
+            id: s.id,
+            shipmentId: null as number | null,
+            orderCode: s.orderCode,
+            horseName: s.horseName,
+            horseCount: Number(s.horseCount || 1),
+            departureTime: s.departureTime,
+            routeTitle: `${s.origin} → ${s.destination}`,
+            origin: s.origin,
+            destination: s.destination,
+            status: s.status,
+          })),
+    [realTrips, schedules, t]
+  );
+
+  // Compute KPI from backend tracking & orders
+  const realActive = realTrips.filter((r) => r.shipment_status === 'in_transit').length;
+  const realScheduled = realTrips.filter(
+    (r) =>
+      r.shipment_status === 'ready_to_depart' ||
+      r.shipment_status === 'scheduled' ||
+      r.shipment_status === 'planning' ||
+      r.shipment_status === 'confirmed'
+  ).length;
+  const realDelayed = realTrips.filter(
+    (r) => r.shipment_status === 'incident_reported' || r.shipment_status === 'delayed'
+  ).length;
+
+  const activeTrips =
+    realTrips.length > 0 ? realActive : displaySchedules.filter((s) => s.status === 'In Transit').length;
+  const scheduledDepartures =
+    realTrips.length > 0
+      ? realScheduled
+      : displaySchedules.filter((s) => s.status === 'Scheduled' || s.status === 'Boarding').length;
+  const delayedTrips =
+    realTrips.length > 0 ? realDelayed : displaySchedules.filter((s) => s.status === 'Delayed').length;
 
   const availableVehicles = vehicles.filter((v) => v.status === 'available').length;
-  const inUseVehicles = vehicles.filter((v) => v.status === 'in_use').length;
   const inMaintenanceVehicles = vehicles.filter((v) => v.status === 'maintenance').length;
 
-  const unacknowledgedAlerts = alerts.filter((a) => !a.isAcknowledged);
+  const liveUnreadAlerts = liveNotifications
+    .filter((n) => !n.isRead && ['incident', 'status_update', 'document_missing'].includes(String(n.type || '').toLowerCase()))
+    .map((n) => {
+      const loc = translateNotification(n.title, n.message);
+      return {
+        id: `notif-${n.id}`,
+        notificationId: Number(n.id),
+        type: loc.title || n.title || t('coordinator.alerts.opsAlert', 'Thông báo điều phối'),
+        message: loc.message || n.message || n.title || '',
+        timeAgo: n.createdAt ? new Date(n.createdAt).toLocaleDateString(isEn ? 'en-US' : 'vi-VN') : '',
+        tripCode: n.shipmentId ? `REQ-${String(n.shipmentId).padStart(3, '0')}` : 'OPS',
+        isAcknowledged: false,
+      };
+    });
+
+  const unacknowledgedAlerts =
+    liveUnreadAlerts.length > 0 ? liveUnreadAlerts : alerts.filter((a) => !a.isAcknowledged);
 
   // Featured trip for Route Progress
-  const featuredTrip = schedules.find((s) => s.status === 'In Transit') || schedules[0];
+  const featuredTrip =
+    (selectedFeaturedId
+      ? displaySchedules.find((s) => s.shipmentId === selectedFeaturedId)
+      : undefined) ||
+    displaySchedules.find((s) => s.status === 'In Transit') ||
+    displaySchedules[0];
+  const featuredRoute = featuredTrip ? routes.find((r) => r.orderCode === featuredTrip.orderCode) : null;
+
+  const realMilestones = useMemo(
+    () => featuredTracking?.milestones || [],
+    [featuredTracking]
+  );
+  const featuredProgressPercent = useMemo(() => {
+    if (realMilestones.length > 0) {
+      const completed = realMilestones.filter((m) => m.status === 'COMPLETED').length;
+      const hasCurrent = realMilestones.some((m) => m.status === 'CURRENT');
+      return Math.min(100, Math.round(((completed + (hasCurrent ? 0.5 : 0)) / realMilestones.length) * 100));
+    }
+    return null;
+  }, [realMilestones]);
 
   // Filtered schedules for table
-  const filteredSchedules = tripFilter === 'ALL' 
-    ? schedules 
-    : schedules.filter((s) => s.status === tripFilter);
+  const filteredSchedules =
+    tripFilter === 'ALL' ? displaySchedules : displaySchedules.filter((s) => s.status === tripFilter);
 
-  const formatDisplayDate = (dStr: string) => {
+  const formatDisplayDate = (dStr?: string) => {
     if (!dStr) return '—';
     if (dStr.includes('T')) {
       try {
         const d = new Date(dStr);
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleDateString(language === 'en' ? 'en-US' : 'vi-VN', {
+          month: 'numeric',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
       } catch {
         return dStr;
       }
@@ -65,506 +261,563 @@ export default function CoordinatorDashboardPage() {
   };
 
   const getTripStatusBadge = (status: string) => {
-    switch (status) {
-      case 'In Transit':
-        return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} /> {t('status.inTransit', 'In Transit')}
-          </span>
-        );
-      case 'Delayed':
-        return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#fef2f2', color: '#b91c1c' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444' }} /> {t('status.delayed', 'Delayed')}
-          </span>
-        );
-      case 'Scheduled':
-        return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#f3f4f6', color: '#4b5563' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#6b7280' }} /> {t('status.scheduled', 'Scheduled')}
-          </span>
-        );
-      case 'Completed':
-        return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#ecfdf5', color: '#047857' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} /> {t('status.completed', 'Completed')}
-          </span>
-        );
-      default:
-        return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, backgroundColor: '#f1f5f9', color: '#475569' }}>
-            {status}
-          </span>
-        );
+    const label = translateStatus(status);
+    const lower = (status || '').toLowerCase();
+    if (lower.includes('transit') || lower.includes('đang vận chuyển')) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#FAF8F4] text-[#966516] border border-[#C4B38E]/50">
+          <span className="w-2 h-2 rounded-full bg-[#181A17] animate-pulse" />
+          {label}
+        </span>
+      );
     }
+    if (lower.includes('delay') || lower.includes('trễ')) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+          <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+          {label}
+        </span>
+      );
+    }
+    if (lower.includes('completed') || lower.includes('hoàn tất')) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          {label}
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+        <span className="w-2 h-2 rounded-full bg-slate-400" />
+        {label}
+      </span>
+    );
   };
 
   const getVehicleStatusBadge = (status: string) => {
-    switch (status) {
-      case 'available':
-        return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#ecfdf5', color: '#047857' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} /> {t('status.available', 'Available')}
-          </span>
-        );
-      case 'in_use':
-        return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} /> {t('status.inUse', 'In Use')}
-          </span>
-        );
-      case 'maintenance':
-      default:
-        return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#fffbeb', color: '#b45309' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b' }} /> {t('status.maintenance', 'Maintenance')}
-          </span>
-        );
+    const label = translateStatus(status);
+    const lower = (status || '').toLowerCase();
+    if (lower.includes('available') || lower.includes('sẵn sàng')) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          {label}
+        </span>
+      );
     }
+    if (lower.includes('in_use') || lower.includes('in_transit') || lower.includes('in use') || lower.includes('đang')) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#FAF8F4] text-[#181A17] border border-[#EAE5DA]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#A67C2E]" />
+          {label}
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+        {label}
+      </span>
+    );
   };
 
+  const getCity = (locationStr?: string) => {
+    if (!locationStr) return '—';
+    return locationStr.split(',')[0].trim();
+  };
+
+  const displaySchedulesFiltered = filteredSchedules;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* 1. WELCOME BANNER */}
-      <div
-        style={{
-          backgroundColor: '#0f172a',
-          backgroundImage:
-            'linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px)',
-          backgroundSize: '20px 20px',
-          borderRadius: '16px',
-          padding: '28px 34px',
-          border: '1px solid rgba(15, 23, 42, 0.2)',
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '20px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-        }}
-      >
+    <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-10">
+      {/* 1. EDITORIAL LIGHT HEADER */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-5 pb-5 border-b border-[#E5DDD0]">
         <div>
-          <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.12em', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '8px' }}>
-            Saturday, September 26
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#966516] m-0 mb-1.5">
+            {t('coordinator.crossBorderTag', isEn ? 'Fleet & Route Operations' : 'Điều Phối Tuyến & Đội Xe')}
           </p>
-          <h2 style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff', margin: '0 0 6px 0', lineHeight: 1.2 }}>
-            {t('coordinator.welcome', 'Good morning')}, Alex
-          </h2>
-          <p style={{ fontSize: '14px', color: '#94a3b8', margin: 0, fontWeight: 500 }}>
-            {t('coordinator.subtitle', "Here is an overview of today's fleet and route operations.")}
-          </p>
-
-          {/* Chips */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px', marginTop: '20px' }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: '#ffffff',
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              <Plane size={14} color="#60a5fa" />
-              <span>{String(activeTrips).padStart(2, '0')} {t('coordinator.activeTrips', 'active trips')}</span>
-            </div>
-
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: '#ffffff',
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              <Truck size={14} color="#34d399" />
-              <span>{String(availableVehicles).padStart(2, '0')} {t('coordinator.availableVehicles', 'vehicles available')}</span>
-            </div>
-
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: delayedTrips > 0 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.1)',
-                border: delayedTrips > 0 ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: '#ffffff',
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              <Clock size={14} color={delayedTrips > 0 ? '#f87171' : '#94a3b8'} />
-              <span>{String(delayedTrips).padStart(2, '0')} {t('coordinator.delayedTrips', 'delayed trips')}</span>
-            </div>
-          </div>
-        </div>
-
-        <button
-          onClick={() => router.push('/coordinator/routes')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: '#2563eb',
-            color: '#ffffff',
-            padding: '12px 22px',
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: 600,
-            border: '1px solid rgba(96, 165, 250, 0.3)',
-            boxShadow: '0 0 20px rgba(37, 99, 235, 0.4)',
-            cursor: 'pointer',
-            transition: 'background-color 0.15s',
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#1d4ed8')}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#2563eb')}
-        >
-          <MapPin size={16} /> {t('coordinator.planNewRoute', 'Plan New Route')}
-        </button>
-      </div>
-
-      {/* 2. KPI CARDS (5 Columns) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '16px',
-        }}
-      >
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-            <Truck size={20} />
-          </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(activeTrips).padStart(2, '0')}</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.activeTrips', 'Active Trips')}</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-            <Truck size={20} />
-          </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(availableVehicles).padStart(2, '0')}</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.availableVehicles', 'Available Vehicles')}</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#f8fafc', color: '#475569', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-            <CalendarCheck size={20} />
-          </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(scheduledDepartures).padStart(2, '0')}</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.scheduledDepartures', 'Scheduled Departures')}</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: delayedTrips > 0 ? '#fef2f2' : '#f8fafc', color: delayedTrips > 0 ? '#ef4444' : '#6b7280', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Clock size={20} />
-            </div>
-            {delayedTrips > 0 && (
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#dc2626', backgroundColor: '#fef2f2', padding: '2px 7px', borderRadius: '4px' }}>Action Req</span>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#181A17] m-0">
+            {t('coordinator.welcome', 'Xin chào')},{' '}
+            <span className="text-[#966516]">{t('role.coordinator', 'Điều Phối Viên')}</span>
+          </h1>
+          <p className="text-sm text-[#5F6977] mt-1.5 mb-0 max-w-2xl">
+            {t(
+              'coordinator.subtitle',
+              'Tổng quan tình trạng vận hành đội xe và tiến độ điều phối các chuyến vận chuyển ngựa đua hôm nay.'
             )}
-          </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: delayedTrips > 0 ? '#dc2626' : '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(delayedTrips).padStart(2, '0')}</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.delayedTrips', 'Delayed Trips')}</p>
+          </p>
         </div>
 
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-            <Wrench size={20} />
-          </div>
-          <h3 style={{ fontSize: '30px', fontWeight: 800, color: '#111827', margin: '0 0 4px 0', lineHeight: 1 }}>{String(inMaintenanceVehicles).padStart(2, '0')}</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{t('coordinator.inMaintenance', 'In Maintenance')}</p>
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => void loadDashboardData()}
+            disabled={isLoadingRealTrips}
+            className="px-3.5 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] text-xs font-bold border border-[#D8CEBE] inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 ${isLoadingRealTrips ? 'animate-spin' : ''}`} />
+            <span>{t('common.refresh', isEn ? 'Refresh' : 'Làm mới')}</span>
+          </button>
+
+          <Link
+            href="/coordinator/schedule"
+            className="px-4 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] text-xs font-bold border border-[#D8CEBE] inline-flex items-center gap-1.5 transition-colors no-underline"
+          >
+            <CalendarDays className="w-3.5 h-3.5 text-[#966516]" />
+            <span>{t('coordinator.viewSchedule', 'Lịch Trình')}</span>
+          </Link>
+
+          <Link
+            href="/coordinator/routes"
+            className="px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D28] text-white text-xs font-bold shadow-sm inline-flex items-center gap-2 transition-colors no-underline"
+          >
+            <MapPin className="w-3.5 h-3.5 text-[#D4C5A3]" />
+            <span>{t('coordinator.planNewRoute', 'Lập Lộ Trình Mới')}</span>
+          </Link>
         </div>
       </div>
 
-      {/* 3. MAIN GRID (2 Cols Left, 1 Col Right) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
-          gap: '24px',
-          alignItems: 'start',
-        }}
-      >
-        {/* LEFT COLUMN: Route Progress + Trip Schedule + Vehicle Fleet */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', gridColumn: 'span 2' }}>
-          {/* PREMIUM ROUTE OVERVIEW */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
+      {dashboardError && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-red-800"
+        >
+          <div className="flex items-center gap-2 font-medium">
+            <AlertTriangle size={16} className="text-red-600 shrink-0" />
+            <span>{dashboardError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadDashboardData()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-red-200 text-red-700 font-bold hover:bg-red-100 cursor-pointer"
           >
-            <div
-              style={{
-                padding: '18px 24px',
-                borderBottom: '1px solid #e5e7eb',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                backgroundColor: 'rgba(249, 250, 251, 0.5)',
-              }}
-            >
-              <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>
-                {t('coordinator.routeProgress', 'Active Route Progress')}
-              </h3>
-              <div
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: '6px',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  backgroundColor: '#eff6ff',
-                  color: '#2563eb',
-                  border: '1px solid #dbeafe',
-                }}
-              >
-                {featuredTrip ? `${featuredTrip.id} (${featuredTrip.horseName})` : 'No Active Trip'}
+            <RotateCcw size={13} /> {t('common.retry', isEn ? 'Retry' : 'Thử lại')}
+          </button>
+        </div>
+      )}
+
+      {/* 2. CLICKABLE 4-KPI ROW */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Link
+          href="/coordinator/routes"
+          className={`no-underline rounded-2xl p-5 border shadow-sm flex flex-col justify-between transition-all hover:shadow-md ${
+            awaitingPlanningCount > 0
+              ? 'bg-[#FAF8F4] border-[#C4B38E]'
+              : 'bg-white border-[#E5DDD0] hover:border-[#C4B38E]'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[11px] font-bold tracking-wider uppercase text-[#966516]">
+              {t('coordinator.kpi.awaitingPlan', isEn ? 'Awaiting Routing' : 'Chờ Lập Tuyến')}
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-[#F3ECE0] flex items-center justify-center text-[#966516]">
+              <RouteIcon className="w-4 h-4" />
+            </div>
+          </div>
+          <div>
+            <div className="text-3xl font-black text-[#181A17] tracking-tight">
+              <NumberTicker value={awaitingPlanningCount} padZero />
+            </div>
+            <div className="mt-2 flex items-center justify-between text-xs text-[#966516] font-semibold">
+              <span>{t('coordinator.kpi.awaitingPlanSub', isEn ? 'Approved orders to plan' : 'Đơn đã duyệt cần xếp lịch')}</span>
+              <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+            </div>
+          </div>
+        </Link>
+
+        <Link
+          href="/coordinator/monitoring"
+          className="no-underline bg-white rounded-2xl p-5 border border-[#E5DDD0] hover:border-[#C4B38E] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[11px] font-bold tracking-wider uppercase text-[#181A17]">
+              {t('coordinator.kpi.inTransit', 'Đang Di Chuyển')}
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] flex items-center justify-center text-[#A67C2E]">
+              <Truck className="w-4 h-4" />
+            </div>
+          </div>
+          <div>
+            <div className="text-3xl font-black text-[#181A17] tracking-tight">
+              <NumberTicker value={activeTrips} padZero />
+            </div>
+            <div className="mt-2 flex items-center justify-between text-xs text-[#5F6977] font-medium">
+              <span>{t('coordinator.kpi.rolling', 'Đang lăn bánh trên tuyến')}</span>
+              <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[#966516]" />
+            </div>
+          </div>
+        </Link>
+
+        <Link
+          href="/coordinator/schedule"
+          className="no-underline bg-white rounded-2xl p-5 border border-[#E5DDD0] hover:border-[#C4B38E] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[11px] font-bold tracking-wider uppercase text-[#5F6977]">
+              {t('coordinator.kpi.scheduled', 'Chờ Xuất Phát')}
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-[#F4F1EA] flex items-center justify-center text-[#181A17]">
+              <CalendarDays className="w-4 h-4" />
+            </div>
+          </div>
+          <div>
+            <div className="text-3xl font-black text-[#181A17] tracking-tight">
+              <NumberTicker value={scheduledDepartures} padZero />
+            </div>
+            <div className="mt-2 flex items-center justify-between text-xs text-[#5F6977] font-medium">
+              <span>
+                {delayedTrips > 0
+                  ? `${delayedTrips} ${t('coordinator.kpi.delayedInline', isEn ? 'need attention' : 'cần chú ý')}`
+                  : t('coordinator.kpi.approvedPlan', 'Đã duyệt kế hoạch')}
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[#966516]" />
+            </div>
+          </div>
+        </Link>
+
+        <Link
+          href="/coordinator/vehicles"
+          className="no-underline bg-white rounded-2xl p-5 border border-[#E5DDD0] hover:border-[#B7DBC4] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[11px] font-bold tracking-wider uppercase text-[#287653]">
+              {t('coordinator.kpi.available', 'Xe Sẵn Sàng')}
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-[#E8F2EB] flex items-center justify-center text-[#287653]">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+          </div>
+          <div>
+            <div className="text-3xl font-black text-[#287653] tracking-tight flex items-baseline gap-1">
+              <NumberTicker value={availableVehicles} padZero />
+              <span className="text-base font-bold text-[#747D88]">/{vehicles.length}</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between text-xs text-[#287653] font-medium">
+              <span>
+                {inMaintenanceVehicles > 0
+                  ? `${inMaintenanceVehicles} ${t('coordinator.kpi.inMaintInline', isEn ? 'in maintenance' : 'đang bảo trì')}`
+                  : t('coordinator.kpi.atDepots', 'Sẵn sàng tại các depot')}
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+            </div>
+          </div>
+        </Link>
+      </div>
+
+      {/* 3. MAIN DASHBOARD CONTENT */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        {/* LEFT COLUMN: Route Progress + Schedule Table (Span 2) */}
+        <div className="lg:col-span-2 flex flex-col gap-6 min-w-0">
+          {/* ACTIVE ROUTE STEPPER */}
+          <div className="rounded-2xl border border-[#E5DDD0] bg-white shadow-sm overflow-hidden">
+            <div className="px-6 py-4 bg-[#FAF8F4] border-b border-[#E5DDD0] flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h2 className="text-sm font-bold text-[#181A17] uppercase tracking-wider flex items-center gap-2 m-0">
+                  <Plane className="w-4 h-4 text-[#A67C2E]" />
+                  {t('coordinator.routeProgress', 'Tiến Trình Tuyến Đang Vận Hành')}
+                </h2>
+
+                {realTrips.length > 1 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {realTrips.slice(0, 4).map((rt) => {
+                      const isSel = selectedFeaturedId === rt.shipment_id;
+                      const code = rt.request_code || `REQ-${String(rt.shipment_id).padStart(3, '0')}`;
+                      return (
+                        <button
+                          key={rt.shipment_id}
+                          type="button"
+                          onClick={() => setSelectedFeaturedId(rt.shipment_id)}
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors cursor-pointer ${
+                            isSel
+                              ? 'bg-[#181A17] text-white border-[#181A17]'
+                              : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#A67C2E]'
+                          }`}
+                        >
+                          {code}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {featuredProgressPercent !== null ? (
+                  <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-[#181A17] text-[#D4C5A3]">
+                    {featuredProgressPercent}%
+                  </span>
+                ) : featuredTrip ? (
+                  <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#FAF8F4] text-[#966516] border border-[#D4C5A3]">
+                    {translateStatus(featuredTrip.status)}
+                  </span>
+                ) : null}
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-white text-[#181A17] border border-[#D8CEBE]">
+                  {featuredTrip
+                    ? `${featuredTrip.orderCode || featuredTrip.id} • ${featuredTrip.horseName || t('coordinator.transportShipment', isEn ? 'Transport Shipment' : 'Chuyến vận chuyển')}`
+                    : t('coordinator.noActiveTrip', 'Chưa có chuyến nào')}
+                </span>
               </div>
             </div>
 
-            <div style={{ padding: '36px 32px' }}>
-              <div style={{ position: 'relative', maxWidth: '750px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                {/* Background Line */}
-                <div style={{ position: 'absolute', left: '20px', right: '20px', top: '22px', height: '4px', backgroundColor: '#e5e7eb', zIndex: 0, borderRadius: '999px' }} />
-                {/* Progress Active Line (50%) */}
-                <div style={{ position: 'absolute', left: '20px', top: '22px', height: '4px', width: '50%', backgroundColor: '#2563eb', zIndex: 0, borderRadius: '999px' }} />
+            <div className="p-6 sm:p-7">
+              {isLoadingRealTrips && realTrips.length === 0 && schedules.length === 0 ? (
+                <div className="py-8 flex flex-col items-center gap-2 text-[#747D88] text-xs">
+                  <Loader2 size={22} className="animate-spin text-[#A67C2E]" />
+                  <span>{t('coordinator.loadingProgress', isEn ? 'Syncing route progress...' : 'Đang đồng bộ tiến trình tuyến...')}</span>
+                </div>
+              ) : isLoadingMilestones ? (
+                <div className="py-8 flex flex-col items-center gap-2 text-[#747D88] text-xs">
+                  <Loader2 size={20} className="animate-spin text-[#A67C2E]" />
+                  <span>{t('coordinator.loadingMilestones', isEn ? 'Loading route checkpoints...' : 'Đang tải các mốc hành trình...')}</span>
+                </div>
+              ) : realMilestones.length > 0 ? (
+                <div className="overflow-x-auto pb-2">
+                  <div className="relative min-w-[540px] max-w-2xl mx-auto flex items-start justify-between gap-2">
+                    <div className="absolute left-8 right-8 top-5 h-1 bg-[#E5DDD0] rounded-full" />
+                    <div
+                      className="absolute left-8 top-5 h-1 bg-[#181A17] rounded-full transition-all duration-500"
+                      style={{
+                        width: `calc(${Math.max(0, Math.min(100, featuredProgressPercent ?? 0))}% - 32px)`,
+                      }}
+                    />
 
-                {/* Stop 1: Origin */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '90px', position: 'relative', zIndex: 10, textAlign: 'center' }}>
-                  <div style={{ width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#2563eb', color: '#ffffff', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Flag size={18} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize: '12px', fontWeight: 700, color: '#1f2937', margin: 0, lineHeight: 1.2 }}>
-                      {featuredTrip ? featuredTrip.origin.split(',')[0] : 'Origin'}
-                    </p>
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
-                      {t('coordinator.origin', 'Origin')}
-                    </p>
+                    {realMilestones.slice(0, 5).map((ms, idx) => {
+                      const isDone = ms.status === 'COMPLETED';
+                      const isCurr = ms.status === 'CURRENT';
+                      return (
+                        <div key={ms.id ?? idx} className="flex flex-col items-center gap-2 relative z-10 text-center w-28 shrink-0">
+                          <div
+                            className={`w-11 h-11 rounded-full ring-4 ring-white shadow-sm flex items-center justify-center ${
+                              isDone
+                                ? 'bg-[#181A17] text-white'
+                                : isCurr
+                                ? 'bg-white border-[3px] border-[#A67C2E] text-[#A67C2E]'
+                                : 'bg-white border-2 border-[#D8CEBE] text-[#747D88]'
+                            }`}
+                          >
+                            {isDone ? (
+                              <Check className="w-4 h-4" />
+                            ) : isCurr ? (
+                              <Truck className="w-4 h-4" />
+                            ) : idx === realMilestones.slice(0, 5).length - 1 ? (
+                              <CheckCircle2 className="w-4 h-4" />
+                            ) : (
+                              <MapPin className="w-4 h-4" />
+                            )}
+                          </div>
+                          <div>
+                            <p
+                              className={`text-xs font-bold leading-tight line-clamp-2 m-0 ${
+                                isDone || isCurr ? 'text-[#181A17]' : 'text-[#5F6977]'
+                              }`}
+                            >
+                              {ms.title}
+                            </p>
+                            {ms.location && (
+                              <p className="text-[10px] text-[#747D88] font-medium line-clamp-1 mt-0.5 m-0">
+                                {ms.location}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
+              ) : featuredTrip ? (
+                <div className="overflow-x-auto pb-2">
+                  <div className="relative min-w-[460px] max-w-2xl mx-auto flex items-start justify-between gap-3">
+                    <div className="absolute left-8 right-8 top-5 h-1 bg-[#E5DDD0] rounded-full" />
 
-                {/* Stop 2: Transit */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '90px', position: 'relative', zIndex: 10, textAlign: 'center' }}>
-                  <div style={{ width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#2563eb', color: '#ffffff', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Plane size={18} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize: '12px', fontWeight: 700, color: '#1f2937', margin: 0, lineHeight: 1.2 }}>Mumbai</p>
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
-                      {t('coordinator.transitStop', 'Transit Stop')}
-                    </p>
+                    {/* Origin */}
+                    <div className="flex flex-col items-center gap-2 relative z-10 text-center w-28 shrink-0">
+                      <div className="w-11 h-11 rounded-full bg-[#181A17] text-white ring-4 ring-white shadow-sm flex items-center justify-center">
+                        <Flag className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-[#181A17] leading-tight line-clamp-2 m-0">
+                          {getCity(featuredTrip.origin)}
+                        </p>
+                        <p className="text-[10px] text-[#747D88] font-medium m-0">
+                          {t('coordinator.originStation', 'Điểm xuất phát')}
+                        </p>
+                      </div>
+                    </div>
+
+                    {featuredRoute && featuredRoute.stops.length > 0 ? (
+                      featuredRoute.stops.slice(0, 3).map((st, idx) => (
+                        <div key={idx} className="flex flex-col items-center gap-2 relative z-10 text-center w-28 shrink-0">
+                          <div className="w-11 h-11 rounded-full bg-white border-2 border-[#C4B38E] text-[#966516] ring-4 ring-white shadow-sm flex items-center justify-center">
+                            {st.type === 'Quarantine' ? (
+                              <ShieldAlert className="w-4 h-4" />
+                            ) : st.type === 'Rest' ? (
+                              <Bed className="w-4 h-4" />
+                            ) : (
+                              <Plane className="w-4 h-4" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-[#181A17] leading-tight line-clamp-2 m-0">
+                              {st.name}
+                            </p>
+                            <p className="text-[10px] text-[#747D88] font-medium m-0">{st.type}</p>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 relative z-10 text-center w-40 shrink-0">
+                        <div className="w-11 h-11 rounded-full bg-[#FAF8F4] border-2 border-[#C4B38E] text-[#966516] ring-4 ring-white shadow-sm flex items-center justify-center">
+                          <Truck className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-[#181A17] leading-tight line-clamp-2 m-0">
+                            {featuredTrip.routeTitle}
+                          </p>
+                          <p className="text-[10px] text-[#747D88] font-medium m-0">
+                            {translateStatus(featuredTrip.status)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Destination */}
+                    <div className="flex flex-col items-center gap-2 relative z-10 text-center w-28 shrink-0">
+                      <div
+                        className={`w-11 h-11 rounded-full ring-4 ring-white flex items-center justify-center ${
+                          featuredTrip.status === 'Completed'
+                            ? 'bg-[#287653] text-white'
+                            : 'bg-white border-2 border-[#D8CEBE] text-[#747D88]'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-[#181A17] leading-tight line-clamp-2 m-0">
+                          {getCity(featuredTrip.destination)}
+                        </p>
+                        <p className="text-[10px] text-[#747D88] font-medium m-0">
+                          {t('coordinator.destinationStation', 'Điểm đến')}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
-
-                {/* Stop 3: Quarantine (Current) */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '90px', position: 'relative', zIndex: 10, textAlign: 'center' }}>
-                  <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#ffffff', color: '#2563eb', border: '3px solid #2563eb', boxShadow: '0 0 0 4px rgba(37, 99, 235, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <ShieldAlert size={20} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize: '12px', fontWeight: 700, color: '#2563eb', margin: 0, lineHeight: 1.2 }}>Singapore</p>
-                    <p style={{ fontSize: '10px', color: '#2563eb', margin: '2px 0 0 0', fontWeight: 600 }}>
-                      {t('coordinator.quarantine', 'Quarantine')}
-                    </p>
-                  </div>
+              ) : (
+                <div className="text-center py-6 text-[#5F6977] text-sm">
+                  {t('coordinator.noTripsInTransit', 'Hiện chưa có chuyến đi nào đang vận hành.')}
                 </div>
-
-                {/* Stop 4: Rest */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '90px', position: 'relative', zIndex: 10, textAlign: 'center' }}>
-                  <div style={{ width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#ffffff', color: '#9ca3af', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Bed size={18} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize: '12px', fontWeight: 700, color: '#4b5563', margin: 0, lineHeight: 1.2 }}>Bangkok</p>
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
-                      {t('coordinator.restStop', 'Rest Stop')}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Stop 5: Destination */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '90px', position: 'relative', zIndex: 10, textAlign: 'center' }}>
-                  <div style={{ width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#ffffff', color: '#9ca3af', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <CheckCircle2 size={18} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize: '12px', fontWeight: 700, color: '#4b5563', margin: 0, lineHeight: 1.2 }}>
-                      {featuredTrip ? featuredTrip.destination.split(',')[0] : 'Destination'}
-                    </p>
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>
-                      {t('coordinator.destination', 'Destination')}
-                    </p>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 
           {/* TRIP SCHEDULE TABLE */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                padding: '18px 24px',
-                borderBottom: '1px solid #e5e7eb',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] shadow-sm overflow-hidden">
+            <div className="px-6 py-4 bg-[#FAF8F4] border-b border-[#E5DDD0] flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>
-                  {t('coordinator.tripSchedule', 'Trip Schedule')}
-                </h3>
-                <p style={{ fontSize: '12px', fontWeight: 500, color: '#6b7280', margin: '2px 0 0 0' }}>
-                  {t('coordinator.tripScheduleDesc', 'Live monitoring of all active and scheduled trips')} ({filteredSchedules.length})
+                <h2 className="text-sm font-bold text-[#181A17] uppercase tracking-wider m-0">
+                  {t('coordinator.tripSchedule', 'Lịch Trình Vận Chuyển')}
+                </h2>
+                <p className="text-xs text-[#5F6977] mt-0.5 m-0">
+                  {t('coordinator.tripScheduleDesc', 'Danh sách các chuyến đi đã lập tuyến và đang điều phối')} ({displaySchedulesFiltered.length})
                 </p>
               </div>
-              <div style={{ position: 'relative' }}>
+
+              <div className="relative">
                 <button
-                  onClick={() => setShowTripFilterDropdown(!showTripFilterDropdown)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '6px 12px',
-                    border: tripFilter !== 'ALL' ? '1px solid #3b82f6' : '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: tripFilter !== 'ALL' ? '#2563eb' : '#374151',
-                    backgroundColor: tripFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                    cursor: 'pointer',
-                  }}
+                  type="button"
+                  aria-expanded={showTripFilterDropdown}
+                  aria-haspopup="menu"
+                  onClick={() => setShowTripFilterDropdown((prev) => !prev)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    tripFilter !== 'ALL'
+                      ? 'border-[#C4B38E] bg-[#FAF8F4] text-[#181A17]'
+                      : 'border-[#D8CEBE] bg-white text-[#181A17] hover:bg-[#FAF8F4]'
+                  }`}
                 >
-                  <Filter size={13} color={tripFilter !== 'ALL' ? '#2563eb' : '#9ca3af'} />
-                  {tripFilter === 'ALL' ? 'Filter' : tripFilter}
+                  <Filter className="w-3.5 h-3.5" />
+                  <span>{tripFilter === 'ALL' ? t('coordinator.filterAll', 'Lọc: Tất cả') : translateStatus(tripFilter)}</span>
                 </button>
+
                 {showTripFilterDropdown && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      right: 0,
-                      top: '100%',
-                      marginTop: '6px',
-                      width: '160px',
-                      backgroundColor: '#ffffff',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-                      padding: '6px',
-                      zIndex: 20,
-                    }}
-                  >
-                    {['ALL', 'In Transit', 'Delayed', 'Scheduled', 'Completed'].map((st) => (
-                      <button
-                        key={st}
-                        onClick={() => {
-                          setTripFilter(st);
-                          setShowTripFilterDropdown(false);
-                        }}
-                        style={{
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: '6px 10px',
-                          fontSize: '12px',
-                          fontWeight: tripFilter === st ? 700 : 500,
-                          color: tripFilter === st ? '#2563eb' : '#374151',
-                          backgroundColor: tripFilter === st ? '#eff6ff' : 'transparent',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {st === 'ALL' ? 'All Trips' : st}
-                      </button>
-                    ))}
-                  </div>
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowTripFilterDropdown(false)} />
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full mt-2 w-44 rounded-2xl bg-white border border-[#D8CEBE] shadow-xl p-1.5 z-20"
+                    >
+                      {['ALL', 'In Transit', 'Delayed', 'Scheduled', 'Completed'].map((st) => (
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={tripFilter === st}
+                          key={st}
+                          onClick={() => {
+                            setTripFilter(st);
+                            setShowTripFilterDropdown(false);
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                            tripFilter === st ? 'bg-[#FAF8F4] text-[#181A17] font-bold' : 'text-[#5F6977] hover:bg-[#FAF8F4]'
+                          }`}
+                        >
+                          {st === 'ALL' ? t('coordinator.allTrips', 'Tất cả chuyến') : translateStatus(st)}
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs min-w-[640px]">
                 <thead>
-                  <tr style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.tripIdHorse', 'Trip ID / Horse')}</th>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.route', 'Route')}</th>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.vehicleDriver', 'Vehicle / Driver')}</th>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.departure', 'Departure')}</th>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.arrival', 'Arrival')}</th>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.status', 'Status')}</th>
+                  <tr className="bg-[#FAF8F4]/70 border-b border-[#E5DDD0] text-[11px] font-bold text-[#5F6977] uppercase tracking-wider">
+                    <th className="px-6 py-3.5">{t('coordinator.table.tripOrder', isEn ? 'Order / Shipment' : 'Mã Đơn / Yêu Cầu')}</th>
+                    <th className="px-6 py-3.5">{t('coordinator.table.route', 'Hành lang')}</th>
+                    <th className="px-6 py-3.5">{t('coordinator.table.scaleRoute', isEn ? 'Scope & Route' : 'Quy mô / Tuyến')}</th>
+                    <th className="px-6 py-3.5">{t('coordinator.table.departure', 'Ngày dự kiến')}</th>
+                    <th className="px-6 py-3.5">{t('coordinator.table.status', 'Trạng thái')}</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {filteredSchedules.length === 0 ? (
+                <tbody className="divide-y divide-[#F0ECE3]">
+                  {displaySchedulesFiltered.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ padding: '32px 24px', textAlign: 'center', color: '#6b7280' }}>
-                        No trips found matching filter "{tripFilter}".
+                      <td colSpan={5} className="px-6 py-8 text-center text-[#5F6977]">
+                        {t('coordinator.noTripsMatchFilter', 'Không có chuyến đi nào phù hợp với bộ lọc.')}
                       </td>
                     </tr>
                   ) : (
-                    filteredSchedules.map((trip) => (
-                      <tr 
-                        key={trip.id} 
-                        style={{ 
-                          borderBottom: '1px solid #f3f4f6',
-                          backgroundColor: trip.status === 'Delayed' ? 'rgba(254, 242, 242, 0.25)' : '#ffffff',
-                        }}
-                      >
-                        <td style={{ padding: '16px 24px' }}>
-                          <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>{trip.id}</p>
-                          <p 
-                            onClick={() => router.push('/coordinator/schedule')}
-                            style={{ fontSize: '12px', color: '#2563eb', margin: '2px 0 0 0', cursor: 'pointer', fontWeight: 600 }}
+                    displaySchedulesFiltered.map((trip) => (
+                      <tr key={trip.id} className="hover:bg-[#FAF8F4]/60 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="text-[#966516] bg-[#FAF8F4] border border-[#D4C5A3] px-2 py-0.5 rounded text-[11px] font-bold">
+                            {trip.orderCode || trip.id}
+                          </span>
+                          <Link
+                            href="/coordinator/schedule"
+                            className="block text-xs text-[#181A17] font-bold hover:text-[#966516] mt-1 no-underline"
                           >
-                            {trip.horseName}
+                            {trip.horseName || t('common.racehorse', 'Ngựa đua')}
+                          </Link>
+                        </td>
+                        <td className="px-6 py-4">
+                          <FlightyRouteDisplay
+                            origin={trip.origin || t('coordinator.originStation', 'Xuất phát')}
+                            destination={trip.destination || t('coordinator.destinationStation', 'Điểm đến')}
+                            variant="ticket"
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <p className="font-bold text-[#181A17] m-0">
+                            {trip.horseCount} {t('common.horsesUnit', 'ngựa')}
                           </p>
+                          <p className="text-[11px] text-[#5F6977] m-0 line-clamp-1">{trip.routeTitle}</p>
                         </td>
-                        <td style={{ padding: '16px 24px', fontWeight: 600, color: '#1f2937' }}>
-                          {trip.origin} <span style={{ color: '#9ca3af' }}>→</span> {trip.destination}
+                        <td className="px-6 py-4 text-[#5F6977] whitespace-nowrap">
+                          {formatDisplayDate(trip.departureTime)}
                         </td>
-                        <td style={{ padding: '16px 24px' }}>
-                          <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>{trip.vehicleCode}</p>
-                          <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>{trip.driverName}</p>
-                        </td>
-                        <td style={{ padding: '16px 24px', color: '#4b5563' }}>{formatDisplayDate(trip.departureTime)}</td>
-                        <td style={{ padding: '16px 24px', color: trip.status === 'Delayed' ? '#dc2626' : '#4b5563', fontWeight: trip.status === 'Delayed' ? 700 : 400 }}>
-                          {formatDisplayDate(trip.estimatedArrival)}
-                        </td>
-                        <td style={{ padding: '16px 24px' }}>
-                          {getTripStatusBadge(trip.status)}
-                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">{getTripStatusBadge(trip.status)}</td>
                       </tr>
                     ))
                   )}
@@ -572,191 +825,84 @@ export default function CoordinatorDashboardPage() {
               </table>
             </div>
           </div>
-
-          {/* VEHICLE MANAGEMENT */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
-          >
-            <div style={{ padding: '18px 24px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: 0 }}>
-                  {t('coordinator.vehicleFleetStatus', 'Vehicle Fleet Status')}
-                </h3>
-                <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>
-                  Showing {vehicles.slice(0, 5).length} of {vehicles.length} fleet units
-                </p>
-              </div>
-              <button
-                onClick={() => router.push('/coordinator/vehicles')}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid #d1d5db',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  backgroundColor: '#ffffff',
-                  color: '#374151',
-                  cursor: 'pointer',
-                }}
-              >
-                {t('coordinator.viewAllVehicles', 'View All Vehicles →')}
-              </button>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.vehicleId', 'Vehicle ID')}</th>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.typeCap', 'Type & Cap.')}</th>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.location', 'Location')}</th>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.status', 'Status')}</th>
-                    <th style={{ padding: '12px 24px' }}>{t('coordinator.table.assignedTrip', 'Assigned Trip')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vehicles.slice(0, 5).map((veh) => (
-                    <tr 
-                      key={veh.id} 
-                      style={{ 
-                        borderBottom: '1px solid #f3f4f6',
-                        backgroundColor: veh.status === 'maintenance' ? 'rgba(255, 251, 235, 0.35)' : '#ffffff',
-                      }}
-                    >
-                      <td style={{ padding: '16px 24px', fontWeight: 700, color: '#111827' }}>
-                        <div>{veh.code}</div>
-                      </td>
-                      <td style={{ padding: '16px 24px', color: '#4b5563' }}>
-                        {veh.type} ({veh.capacity} stalls)
-                      </td>
-                      <td style={{ padding: '16px 24px', color: '#4b5563' }}>{veh.location}</td>
-                      <td style={{ padding: '16px 24px' }}>
-                        {getVehicleStatusBadge(veh.status)}
-                      </td>
-                      <td style={{ padding: '16px 24px', color: veh.assignedTripCode ? '#2563eb' : '#9ca3af', fontWeight: veh.assignedTripCode ? 600 : 400 }}>
-                        {veh.assignedTripCode || '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
 
-        {/* RIGHT COLUMN: Vehicle Status Summary + Schedule Alerts */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {/* VEHICLE STATUS SUMMARY */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              padding: '20px',
-            }}
-          >
-            <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: '0 0 16px 0' }}>
-              {t('coordinator.vehicleStatus', 'Vehicle Status')}
-            </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div style={{ padding: '12px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                  {t('status.available', 'Available')}
-                </span>
-                <span style={{ fontSize: '20px', fontWeight: 800, color: '#10b981' }}>{String(availableVehicles).padStart(2, '0')}</span>
-              </div>
-              <div style={{ padding: '12px', backgroundColor: '#eff6ff', border: '1px solid #dbeafe', borderRadius: '8px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                  {t('status.inUse', 'In Use')}
-                </span>
-                <span style={{ fontSize: '20px', fontWeight: 800, color: '#2563eb' }}>{String(inUseVehicles).padStart(2, '0')}</span>
-              </div>
-              <div style={{ padding: '12px', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', borderRadius: '8px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#d97706', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                  {t('status.maintenance', 'Maintenance')}
-                </span>
-                <span style={{ fontSize: '20px', fontWeight: 800, color: '#d97706' }}>{String(inMaintenanceVehicles).padStart(2, '0')}</span>
-              </div>
-              <div style={{ padding: '12px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                  {t('coordinator.totalFleet', 'Total Fleet')}
-                </span>
-                <span style={{ fontSize: '20px', fontWeight: 800, color: '#1e293b' }}>{String(vehicles.length).padStart(2, '0')}</span>
-              </div>
-            </div>
-          </div>
-
+        {/* RIGHT COLUMN: Schedule Alerts + Compact Fleet Status */}
+        <div className="flex flex-col gap-6">
           {/* SCHEDULE ALERTS */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
-          >
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', backgroundColor: unacknowledgedAlerts.length > 0 ? 'rgba(254, 242, 242, 0.25)' : '#f9fafb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Bell size={16} color={unacknowledgedAlerts.length > 0 ? '#ef4444' : '#6b7280'} /> {t('coordinator.alerts.title', 'Schedule Alerts')}
-              </h3>
-              <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', backgroundColor: unacknowledgedAlerts.length > 0 ? '#fee2e2' : '#e5e7eb', color: unacknowledgedAlerts.length > 0 ? '#dc2626' : '#4b5563' }}>
-                {unacknowledgedAlerts.length} {t('coordinator.alerts.active', 'Active')}
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] shadow-sm overflow-hidden">
+            <div
+              className={`px-5 py-4 border-b flex items-center justify-between gap-2 ${
+                unacknowledgedAlerts.length > 0 ? 'bg-rose-50/70 border-rose-200' : 'bg-[#FAF8F4] border-[#E5DDD0]'
+              }`}
+            >
+              <h2 className="text-sm font-bold text-[#181A17] uppercase tracking-wider flex items-center gap-2 m-0">
+                <Bell className={`w-4 h-4 ${unacknowledgedAlerts.length > 0 ? 'text-rose-600 animate-pulse' : 'text-[#747D88]'}`} />
+                {t('coordinator.alerts.title', 'Cảnh Báo Vận Hành')}
+              </h2>
+              <span
+                className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+                  unacknowledgedAlerts.length > 0 ? 'bg-rose-100 text-rose-700' : 'bg-[#EFEBE2] text-[#5F6977]'
+                }`}
+              >
+                {unacknowledgedAlerts.length} {t('coordinator.alerts.active', 'Cần xử lý')}
               </span>
             </div>
-            <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+
+            <div className="p-4 space-y-3">
               {unacknowledgedAlerts.length === 0 ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>
-                  <CheckCircle2 size={24} color="#10b981" style={{ margin: '0 auto 8px' }} />
-                  <p style={{ margin: 0, fontWeight: 600, color: '#111827' }}>{t('coordinator.alerts.allClearTitle', 'All Clear')}</p>
-                  <p style={{ margin: '2px 0 0 0', fontSize: '12px' }}>{t('coordinator.alerts.allClearDesc', 'No pending operational alerts.')}</p>
+                <div className="p-5 text-center text-[#5F6977]">
+                  <CheckCircle2 className="w-7 h-7 text-[#287653] mx-auto mb-2" />
+                  <p className="font-bold text-[#181A17] text-sm m-0">{t('coordinator.alerts.allClearTitle', 'Hành lang an toàn')}</p>
+                  <p className="text-xs text-[#5F6977] mt-1 m-0">{t('coordinator.alerts.allClearDesc', 'Không có cảnh báo vận hành nào cần xử lý.')}</p>
                 </div>
               ) : (
-                unacknowledgedAlerts.slice(0, 3).map((al) => (
-                  <div
-                    key={al.id}
-                    style={{ padding: '12px', borderRadius: '8px', border: '1px solid #f1f5f9', transition: 'background-color 0.15s' }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <p style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827', margin: 0 }}>{al.type}</p>
-                      <span style={{ fontSize: '11px', color: '#9ca3af' }}>{al.timeAgo}</span>
+                unacknowledgedAlerts.slice(0, 4).map((al) => (
+                  <div key={al.id} className="p-3.5 rounded-xl border border-[#E5DDD0] bg-[#FAF8F4]/50 hover:bg-[#FAF8F4] transition-colors">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <p className="font-bold text-[#181A17] text-xs m-0">{al.type}</p>
+                      <span className="text-[10px] text-[#747D88] shrink-0">{al.timeAgo}</span>
                     </div>
-                    <p style={{ fontSize: '12px', color: '#4b5563', margin: '4px 0 8px 0' }}>
-                      {al.message}
-                    </p>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span 
-                        onClick={() => router.push('/coordinator/alerts')}
-                        style={{ fontSize: '11px', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', cursor: 'pointer' }}
+                    <p className="text-xs text-[#5F6977] mb-3 m-0">{al.message}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Link
+                        href="/coordinator/alerts"
+                        className="text-[11px] font-bold text-[#966516] hover:underline no-underline"
                       >
-                        {t('coordinator.alerts.reviewAlert', 'Review Alert')} ({al.tripCode}) →
-                      </span>
+                        {t('coordinator.alerts.reviewAlert', 'Xem chi tiết')} ({al.tripCode}) →
+                      </Link>
                       <button
-                        onClick={() => {
-                          acknowledgeAlert(al.id);
-                          toast.success(t('coordinator.alerts.acknowledgedSuccess', 'Alert acknowledged'));
+                        type="button"
+                        disabled={acknowledgingId === al.id}
+                        onClick={async () => {
+                          if ('notificationId' in al && al.notificationId) {
+                            setAcknowledgingId(al.id);
+                            try {
+                              await apiClient(`/notifications/${al.notificationId}/read`, { method: 'PATCH' });
+                              setLiveNotifications((prev) =>
+                                prev.map((n) => (n.id === al.notificationId ? { ...n, isRead: true } : n))
+                              );
+                              if (typeof window !== 'undefined') {
+                                window.dispatchEvent(new CustomEvent('notifications-updated'));
+                              }
+                              toast.success(t('coordinator.alerts.acknowledgedSuccess', 'Đã xác nhận cảnh báo'));
+                            } catch (err: any) {
+                              toast.error(
+                                err?.message ||
+                                  t('coordinator.alerts.acknowledgeError', isEn ? 'Failed to acknowledge alert' : 'Không thể xác nhận cảnh báo')
+                              );
+                            } finally {
+                              setAcknowledgingId(null);
+                            }
+                          } else {
+                            acknowledgeAlert(al.id);
+                            toast.success(t('coordinator.alerts.acknowledgedSuccess', 'Đã xác nhận cảnh báo'));
+                          }
                         }}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          padding: '3px 8px',
-                          borderRadius: '4px',
-                          border: '1px solid #e5e7eb',
-                          backgroundColor: '#ffffff',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          color: '#4b5563',
-                          cursor: 'pointer',
-                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#D8CEBE] bg-white hover:bg-[#FAF8F4] disabled:opacity-50 text-[11px] font-semibold text-[#181A17] cursor-pointer transition-colors"
                       >
-                        <Check size={12} /> {t('coordinator.acknowledge', 'Acknowledge')}
+                        <Check className="w-3 h-3" />
+                        <span>{t('coordinator.acknowledge', 'Tiếp nhận')}</span>
                       </button>
                     </div>
                   </div>
@@ -764,74 +910,53 @@ export default function CoordinatorDashboardPage() {
               )}
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* 4. QUICK ACTIONS */}
-      <div>
-        <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', marginBottom: '14px' }}>
-          {t('coordinator.quickActions.title', 'Quick Actions')}
-        </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-          <div
-            onClick={() => router.push('/coordinator/routes')}
-            style={{ backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-              <MapPin size={20} />
+          {/* COMPACT FLEET STATUS LIST */}
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] shadow-sm overflow-hidden">
+            <div className="px-5 py-4 bg-[#FAF8F4] border-b border-[#E5DDD0] flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-bold text-[#181A17] uppercase tracking-wider m-0">
+                  {t('coordinator.vehicleFleetStatus', 'Đội Xe Chuyên Dụng')}
+                </h2>
+                <p className="text-[11px] text-[#5F6977] mt-0.5 m-0">
+                  {availableVehicles} {t('coordinator.vehicles.readyInline', isEn ? 'ready' : 'sẵn sàng')} · {vehicles.length}{' '}
+                  {t('coordinator.vehicles.totalInline', isEn ? 'total' : 'tổng')}
+                </p>
+              </div>
+              <Link
+                href="/coordinator/vehicles"
+                className="text-xs font-bold text-[#966516] hover:underline no-underline shrink-0"
+              >
+                {t('coordinator.viewAllVehicles', 'Xem tất cả →')}
+              </Link>
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px 0' }}>{t('nav.routePlanning', 'Plan Route')}</h4>
-            <p style={{ fontSize: '12px', color: '#bfdbfe', margin: 0, fontWeight: 500 }}>
-              {t('coordinator.quickActions.planRouteDesc', 'Create a new transport route')}
-            </p>
-          </div>
 
-          <div
-            onClick={() => router.push('/coordinator/vehicles')}
-            style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-              <Truck size={20} />
+            <div className="divide-y divide-[#F0ECE3]">
+              {vehicles.slice(0, 5).map((veh) => (
+                <div key={veh.id} className="px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-[#FAF8F4]/50 transition-colors">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-xs text-[#181A17]">{veh.code}</span>
+                      {veh.assignedTripCode && (
+                        <span className="text-[10px] font-bold text-[#966516] bg-[#FAF8F4] border border-[#D4C5A3] px-1.5 py-0.5 rounded">
+                          {veh.assignedTripCode}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[#5F6977] mt-0.5 m-0 truncate">
+                      {translateVehicleType(veh.type)} ({veh.capacity} {t('coordinator.stallsUnit', 'buồng')}) ·{' '}
+                      {veh.location || t('coordinator.depot', 'Depot')}
+                    </p>
+                  </div>
+                  <div className="shrink-0">{getVehicleStatusBadge(veh.status)}</div>
+                </div>
+              ))}
+              {vehicles.length === 0 && (
+                <div className="px-5 py-8 text-center text-xs text-[#5F6977]">
+                  {t('coordinator.noVehiclesFound', 'Chưa có phương tiện nào trong danh mục.')}
+                </div>
+              )}
             </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>
-              {t('coordinator.manageVehicles', 'Manage Vehicles')}
-            </h4>
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>
-              {t('coordinator.quickActions.manageVehiclesDesc', 'Update fleet assignments')}
-            </p>
-          </div>
-
-          <div
-            onClick={() => router.push('/coordinator/schedule')}
-            style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#f3e8ff', color: '#a855f7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-              <CalendarDays size={20} />
-            </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>
-              {t('coordinator.viewSchedule', 'View Schedule')}
-            </h4>
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>
-              {t('coordinator.quickActions.viewScheduleDesc', 'Check all upcoming trips')}
-            </p>
-          </div>
-
-          <div
-            onClick={() => {
-              toast.success(t('coordinator.quickActions.adjustTripDesc', 'Modify active trip details'));
-              router.push('/coordinator/schedule');
-            }}
-            style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '20px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
-              <Sliders size={20} />
-            </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: '0 0 2px 0' }}>
-              {t('coordinator.adjustTrip', 'Adjust Trip')}
-            </h4>
-            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0, fontWeight: 500 }}>
-              {t('coordinator.quickActions.adjustTripDesc', 'Modify active trip details')}
-            </p>
           </div>
         </div>
       </div>

@@ -1,13 +1,28 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Modal } from '@/components/ui/Modal';
-import { useCustomerStore } from '@/lib/customer-store';
+import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
-import { Check, Loader2, Camera } from 'lucide-react';
-import { apiClient } from '@/lib/api-client';
-import { getFullPhotoUrl } from '@/lib/customer-store';
 import { HORSE_COAT_COLORS, HORSE_MEDICAL_STATUSES } from '@/lib/horse-constants';
+import {
+  Award,
+  Camera,
+  ChevronRight,
+  Dna,
+  Loader2,
+  Plus,
+  QrCode,
+  Sparkles,
+  Tag,
+  X,
+  AlertCircle,
+  Calendar,
+  FileText,
+  Upload,
+} from 'lucide-react';
+import { apiClient } from '@/lib/api-client';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface AddHorseModalProps {
   isOpen: boolean;
@@ -15,18 +30,67 @@ interface AddHorseModalProps {
   onHorseAdded?: (newHorse: Horse) => void;
 }
 
+const CHAMPION_PRESETS = [
+  {
+    label: 'Bay Thoroughbred',
+    subVi: 'Nâu đỏ thuần chủng',
+    subEn: 'Purebred Bay',
+    url: 'https://images.unsplash.com/photo-1598974357801-cbca100e65d3?auto=format&fit=crop&w=800&q=80',
+  },
+  {
+    label: 'Black Arabian',
+    subVi: 'Ả Rập đen tuyền',
+    subEn: 'Pure Black Arabian',
+    url: 'https://images.unsplash.com/photo-1553284965-83fd3e82fa5a?auto=format&fit=crop&w=800&q=80',
+  },
+  {
+    label: 'Golden Chestnut',
+    subVi: 'Hạt dẻ hoàng gia',
+    subEn: 'Royal Chestnut',
+    url: 'https://images.unsplash.com/photo-1599818815152-da028c2323cc?auto=format&fit=crop&w=800&q=80',
+  },
+  {
+    label: 'Grey Warmblood',
+    subVi: 'Bạch mã thể thao',
+    subEn: 'Athletic Grey',
+    url: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=800&q=80',
+  },
+];
+
 export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   isOpen,
   onClose,
   onHorseAdded,
 }) => {
   const { addHorse, horses, refreshHorses, uploadStandalonePhoto } = useCustomerStore();
+  const { t, language, translateBreed, translateGender } = useLanguage();
 
+  const [activeTab, setActiveTab] = useState<'identity' | 'passport'>('identity');
   const [name, setName] = useState('');
   const [breed, setBreed] = useState('Thoroughbred');
   const defaultDob = new Date(Date.now() - 5 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const [dateOfBirth, setDateOfBirth] = useState<string>(defaultDob);
   const [age, setAge] = useState<number>(5);
+  const [gender, setGender] = useState<'Stallion' | 'Mare' | 'Gelding'>('Stallion');
+  const [color, setColor] = useState('Bay');
+  const [weight, setWeight] = useState('480 kg');
+  const [medicalStatus, setMedicalStatus] = useState<'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention'>('Healthy');
+  const [passportNumber, setPassportNumber] = useState('');
+  const [microchipNumber, setMicrochipNumber] = useState('');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(CHAMPION_PRESETS[0].url);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    return () => {
+      if (photoPreview && photoPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(photoPreview);
+      }
+    };
+  }, [photoPreview]);
 
   const handleDobChange = (dobStr: string) => {
     setDateOfBirth(dobStr);
@@ -38,35 +102,24 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
     if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
       calculated--;
     }
-    const finalAge = Math.max(0, calculated);
-    setAge(finalAge);
+    setAge(Math.max(1, calculated));
   };
-  const [gender, setGender] = useState<'Stallion' | 'Mare' | 'Gelding'>('Stallion');
-  const [passportNumber, setPassportNumber] = useState('');
-  const [microchipNumber, setMicrochipNumber] = useState('');
-  const [medicalStatus, setMedicalStatus] = useState<'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention'>('Healthy');
-  const [color, setColor] = useState('Bay');
-  const [weight, setWeight] = useState('480 kg');
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const [error, setError] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const resetForm = React.useCallback(() => {
     const freshDob = new Date(Date.now() - 5 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    setActiveTab('identity');
     setName('');
     setBreed('Thoroughbred');
     setDateOfBirth(freshDob);
     setAge(5);
     setGender('Stallion');
-    setPassportNumber('');
-    setMicrochipNumber('');
-    setMedicalStatus('Healthy');
     setColor('Bay');
     setWeight('480 kg');
+    setMedicalStatus('Healthy');
+    setPassportNumber('');
+    setMicrochipNumber('');
     setPhotoFile(null);
-    setPhotoPreview(null);
+    setPhotoPreview(CHAMPION_PRESETS[0].url);
     setError('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -80,27 +133,19 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   }, [isOpen, resetForm]);
 
   const handleClose = () => {
+    if (isSubmitting) return;
     resetForm();
     onClose();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setError('Vui lòng nhập tên con ngựa.');
-      return;
-    }
-
-    const trimmedPassport = passportNumber.trim();
-    if (!trimmedPassport) {
-      setError('Vui lòng nhập FEI Passport Number (Số hộ chiếu FEI).');
-      return;
-    }
-
-    const trimmedMicrochip = microchipNumber.trim();
-    if (!trimmedMicrochip) {
-      setError('Vui lòng nhập Microchip Number (Số vi mạch).');
+      setError(t('horses.nameRequired', 'Vui lòng nhập tên chiến mã.'));
+      setActiveTab('identity');
       return;
     }
 
@@ -110,7 +155,22 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         (h as any).status !== 'retired'
     );
     if (isDuplicate) {
-      setError(`Bạn đã có một con ngựa mang tên "${trimmedName}". Mỗi con ngựa phải có tên riêng biệt.`);
+      setError(t('horses.nameDuplicate', 'Bạn đã có một chiến mã mang tên này. Mỗi ngựa phải có tên phân biệt.'));
+      setActiveTab('identity');
+      return;
+    }
+
+    const trimmedPassport = passportNumber.trim();
+    if (!trimmedPassport) {
+      setError('Vui lòng nhập Số hộ chiếu FEI.');
+      setActiveTab('passport');
+      return;
+    }
+
+    const trimmedMicrochip = microchipNumber.trim();
+    if (!trimmedMicrochip) {
+      setError('Vui lòng nhập Số vi mạch (Microchip).');
+      setActiveTab('passport');
       return;
     }
 
@@ -118,18 +178,17 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
     setError('');
 
     try {
-      // 0. Upload ảnh nếu người dùng đã chọn
       let photoUrl: string | undefined = undefined;
       if (photoFile) {
         try {
-          const uploadRes = await uploadStandalonePhoto(photoFile);
-          photoUrl = uploadRes;
+          photoUrl = await uploadStandalonePhoto(photoFile);
         } catch (uploadErr) {
           console.warn('Upload horse photo error:', uploadErr);
         }
+      } else if (photoPreview && photoPreview.startsWith('http')) {
+        photoUrl = photoPreview;
       }
 
-      // 1. Lưu trực tiếp vào MySQL database thông qua API
       let backendHorseId: string | undefined = undefined;
       const res = await apiClient<any>('/horses', {
         method: 'POST',
@@ -154,8 +213,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         backendHorseId = String(res.id);
       }
 
-      // 2. Cập nhật local store và refresh từ DB
-      const resolvedPhoto = photoUrl ? getFullPhotoUrl(photoUrl) : undefined;
+      const resolvedPhoto = photoUrl ? getFullPhotoUrl(photoUrl) : photoPreview || undefined;
       const createdHorse = addHorse({
         id: backendHorseId,
         name: trimmedName,
@@ -179,11 +237,15 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         onHorseAdded(createdHorse);
       }
 
-      // Reset form
       resetForm();
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Không thể tạo hồ sơ ngựa. Vui lòng thử lại.');
+      setError(
+        err?.message ||
+          (language === 'en'
+            ? 'Failed to register horse profile. Please try again.'
+            : 'Không thể đăng ký hồ sơ chiến mã. Vui lòng thử lại.')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -193,374 +255,430 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Add New Racehorse"
-      subtitle="Register a new horse profile to include in transport shipments."
-      maxWidth="1000px"
+      closeDisabled={isSubmitting}
+      maxWidth="max-w-4xl"
+      hideHeader
+      bodyClassName="p-0 overflow-y-auto max-h-[92vh]"
     >
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px', paddingBottom: '30px' }}>
+      <form onSubmit={handleSubmit} className="flex flex-col bg-surface">
+        {/* Luxury Obsidian Header Banner */}
+        <div className="relative bg-gradient-to-r from-[#181A17] via-[#242722] to-[#181A17] px-6 sm:px-8 pt-7 pb-6 text-[#F7F7F4] overflow-hidden border-b border-[#2C2F2A]">
+          <div className="flex items-center justify-between gap-4 mb-4 relative z-10">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#B49A68]/20 text-[#E5C98E] border border-[#B49A68]/40">
+                <Sparkles size={13} className="text-[#B49A68]" aria-hidden="true" />
+                {t('horses.modal.addTitle', 'ĐĂNG KÝ CHIẾN MÃ MỚI')}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleClose}
+              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-50"
+              aria-label={t('common.close', 'Đóng')}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
+
+          <div className="relative z-10">
+            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
+              {name ? `${t('common.racehorse', 'Chiến Mã')}: ${name}` : t('horses.modal.addTitle', 'Thêm Chiến Mã Mới Vào Đội Đua')}
+              <span className="text-[#B49A68] text-lg sm:text-xl font-normal">✦</span>
+            </h2>
+          </div>
+
+          {/* Visual Tabs Bar */}
+          <div className="flex items-center gap-2 sm:gap-4 mt-6 pt-3 border-t border-white/10 relative z-10 overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setActiveTab('identity')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shrink-0 cursor-pointer ${
+                activeTab === 'identity'
+                  ? 'bg-[#181A17] text-white shadow-sm font-bold border border-[#B49A68]/40'
+                  : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <Award size={16} className={activeTab === 'identity' ? 'text-[#B49A68]' : 'text-slate-400'} />
+              <span>1. {t('horses.identityAndPedigree', 'Danh tính & Phả hệ')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('passport')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shrink-0 cursor-pointer ${
+                activeTab === 'passport'
+                  ? 'bg-[#181A17] text-white shadow-sm font-bold border border-[#B49A68]/40'
+                  : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <FileText size={16} className={activeTab === 'passport' ? 'text-[#B49A68]' : 'text-slate-400'} />
+              <span>2. {t('horses.passportAndChip', 'Hộ chiếu FEI & Vi mạch')}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Error Callout */}
         {error && (
-          <div
-            style={{
-              padding: '10px 14px',
-              borderRadius: '8px',
-              backgroundColor: '#fef2f2',
-              border: '1px solid #fecaca',
-              color: '#dc2626',
-              fontSize: '13px',
-              fontWeight: 500,
-            }}
-          >
-            {error}
+          <div className="mx-6 sm:mx-8 mt-5 p-3.5 bg-danger-bg border border-danger/30 rounded-xl text-danger text-sm flex items-center gap-3">
+            <AlertCircle size={18} className="shrink-0" />
+            <span className="font-medium">{error}</span>
           </div>
         )}
 
-        {/* Photo Upload Picker */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
-            padding: '12px 18px',
-            backgroundColor: '#f8fafc',
-            borderRadius: '12px',
-            border: '1px solid #e2e8f0',
-          }}
-        >
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) {
-                setPhotoFile(file);
-                setPhotoPreview(URL.createObjectURL(file));
-              }
-            }}
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            style={{ display: 'none' }}
-          />
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '50%',
-              backgroundColor: '#eff6ff',
-              border: '2px dashed #93c5fd',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              overflow: 'hidden',
-              flexShrink: 0,
-            }}
-          >
-            {photoPreview ? (
-              <img src={photoPreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <Camera size={24} color="#3b82f6" />
-            )}
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)' }}>
-              Ảnh đại diện con ngựa
+        {/* Tab Contents */}
+        <div className="p-6 sm:p-8 space-y-6">
+          {activeTab === 'identity' && (
+            <div className="space-y-6 animate-fade-in">
+              {/* Photo Studio Card */}
+              <div className="bg-surface-muted/70 border border-border rounded-2xl p-5 shadow-sm">
+                <div className="flex flex-col sm:flex-row items-center gap-6">
+                  <div className="relative group shrink-0">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setPhotoFile(file);
+                          setPhotoPreview((prev) => {
+                            if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                            return URL.createObjectURL(file);
+                          });
+                        }
+                      }}
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                    />
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden ring-4 ring-champagne/40 shadow-lg bg-brand-navy cursor-pointer relative"
+                    >
+                      {photoPreview ? (
+                        <img
+                          src={photoPreview}
+                          alt="Preview"
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 bg-brand-navy">
+                          <Camera size={32} className="text-champagne mb-1" />
+                          <span className="text-[11px] font-semibold">{t('horses.selectPhoto', 'Chọn ảnh')}</span>
+                        </div>
+                      )}
+
+                      <div className="absolute inset-0 bg-brand-navy/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-xs font-semibold gap-1">
+                        <Upload size={18} />
+                        <span>{t('horses.changePhoto', 'Đổi ảnh')}</span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="absolute -bottom-2 -right-2 p-2 bg-primary hover:bg-primary-hover text-white rounded-full shadow-sm border-2 border-white transition-transform active:scale-95"
+                      title={t('horses.uploadFromComputer', 'Tải ảnh mới từ máy tính')}
+                    >
+                      <Camera size={14} />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 w-full text-center sm:text-left">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                      <div>
+                        <h4 className="text-sm font-bold text-text-primary uppercase tracking-wide">
+                          {t('horses.portraitPhoto', 'Ảnh Chân Dung Chiến Mã')}
+                        </h4>
+                        <p className="text-xs text-text-secondary mt-0.5">
+                          {t('horses.portraitPhotoSubtitle', 'Tải ảnh thực tế từ thiết bị hoặc chọn nhanh ảnh mẫu')}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="self-center sm:self-auto px-3.5 py-1.5 rounded-xl border border-border bg-surface hover:bg-surface-muted text-text-primary text-xs font-bold transition-colors inline-flex items-center gap-1.5 shadow-sm"
+                      >
+                        <Upload size={13} />
+                        <span>{t('horses.uploadFromDevice', 'Tải từ thiết bị')}</span>
+                      </button>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-[11px] font-semibold text-text-muted mb-1.5 uppercase tracking-wider">
+                        {t('horses.selectSamplePhoto', 'Chọn nhanh ảnh mẫu chuẩn')}:
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {CHAMPION_PRESETS.map((p, idx) => {
+                          const isSelected = photoPreview === p.url;
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                setPhotoFile(null);
+                                setPhotoPreview(p.url);
+                              }}
+                              className={`flex items-center gap-2 p-1.5 rounded-xl border text-left transition-all ${
+                                isSelected
+                                  ? 'border-primary bg-primary-subtle shadow-sm'
+                                  : 'border-border bg-surface hover:border-border-beige-hover'
+                              }`}
+                            >
+                              <img src={p.url} alt={p.label} className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                              <div className="min-w-0">
+                                <div className="text-[11px] font-bold text-text-primary truncate">{p.label}</div>
+                                <div className="text-[10px] text-text-secondary truncate">{language === 'en' ? p.subEn : p.subVi}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Form Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.name', 'Tên Chiến Mã')} <span className="text-danger">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                      <Tag size={16} />
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder={language === 'en' ? 'e.g. Thunder Bolt, Pegasus Star...' : 'VD: Thunder Bolt, Pegasus Star...'}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.coatColor', 'Màu Lông')}
+                  </label>
+                  <select
+                    value={color}
+                    onChange={(e) => setColor(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary cursor-pointer"
+                  >
+                    {HORSE_COAT_COLORS.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.breed', 'Giống Ngựa')}
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                      <Dna size={16} />
+                    </div>
+                    <select
+                      value={breed}
+                      onChange={(e) => setBreed(e.target.value)}
+                      className="w-full pl-10 pr-8 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary appearance-none cursor-pointer"
+                    >
+                      <option value="Thoroughbred">{translateBreed('Thoroughbred')}</option>
+                      <option value="Arabian">{translateBreed('Arabian')}</option>
+                      <option value="Warmblood">{translateBreed('Warmblood')}</option>
+                      <option value="Standardbred">{translateBreed('Standardbred')}</option>
+                      <option value="Quarter Horse">{translateBreed('Quarter Horse')}</option>
+                      <option value="Akhal-Teke">Akhal-Teke</option>
+                    </select>
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-text-muted">
+                      <ChevronRight size={14} className="rotate-90" />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.gender', 'Giới Tính')}
+                  </label>
+                  <div className="grid grid-cols-3 gap-2 bg-surface-muted p-1.5 rounded-xl border border-border">
+                    {[
+                      { key: 'Stallion', label: translateGender('Stallion'), icon: '♂' },
+                      { key: 'Mare', label: translateGender('Mare'), icon: '♀' },
+                      { key: 'Gelding', label: translateGender('Gelding'), icon: '⚲' },
+                    ].map((g) => {
+                      const isSel = gender === g.key;
+                      return (
+                        <button
+                          key={g.key}
+                          type="button"
+                          onClick={() => setGender(g.key as any)}
+                          className={`py-2 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                            isSel
+                              ? 'bg-primary text-white shadow-sm'
+                              : 'text-text-secondary hover:text-text-primary hover:bg-white/70'
+                          }`}
+                        >
+                          <span className="text-sm font-extrabold">{g.icon}</span>
+                          <span>{g.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.dateOfBirth', 'Ngày Sinh')} <span className="text-danger">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                      <Calendar size={16} />
+                    </div>
+                    <input
+                      type="date"
+                      max={new Date().toISOString().split('T')[0]}
+                      value={dateOfBirth}
+                      onChange={(e) => handleDobChange(e.target.value)}
+                      required
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                      {t('horses.age', 'Số Tuổi')}
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={35}
+                      value={age}
+                      onChange={(e) => setAge(parseInt(e.target.value) || 1)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                      {t('horses.weight', 'Cân Nặng')}
+                    </label>
+                    <input
+                      type="text"
+                      value={weight}
+                      onChange={(e) => setWeight(e.target.value)}
+                      placeholder="480 kg"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.medicalStatus', 'Tình trạng sức khỏe / y tế')}
+                  </label>
+                  <select
+                    value={medicalStatus}
+                    onChange={(e) => setMedicalStatus(e.target.value as any)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary cursor-pointer"
+                  >
+                    {HORSE_MEDICAL_STATUSES.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
-            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-              Chọn ảnh trực tiếp từ máy tính (JPG, PNG, WEBP tối đa 10MB)
+          )}
+
+          {activeTab === 'passport' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.passportNumber', 'Số Hộ Chiếu FEI Quốc Tế')} <span className="text-danger">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                      <FileText size={16} />
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={passportNumber}
+                      onChange={(e) => setPassportNumber(e.target.value)}
+                      placeholder={language === 'en' ? 'e.g. FEI-VN-2026-999' : 'VD: FEI-VN-2026-999'}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-surface font-mono text-sm font-bold text-text-primary"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.microchipNumber', 'Mã Vi Mạch Cấy Dưới Da')} <span className="text-danger">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                      <QrCode size={16} />
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={microchipNumber}
+                      onChange={(e) => setMicrochipNumber(e.target.value)}
+                      placeholder={language === 'en' ? 'e.g. 985141001248999' : 'VD: 985141001248999'}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-surface font-mono text-sm font-bold text-text-primary"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              padding: '7px 16px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#ffffff',
-              fontSize: '13px',
-              fontWeight: 600,
-              color: '#334155',
-              cursor: 'pointer',
-            }}
-          >
-            {photoPreview ? 'Đổi ảnh' : 'Chọn ảnh'}
-          </button>
+          )}
         </div>
 
-        {/* Row 1: Name & Color (2 wide columns: gives Color ~440px width so it never spills horizontally) */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Horse Name <span style={{ color: '#dc2626' }}>*</span>
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Pegasus Star"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                outline: 'none',
-              }}
-            />
+        {/* Footer Actions */}
+        <div className="px-6 sm:px-8 py-4 bg-surface-muted border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-xs text-text-secondary">
+            <span className="w-2 h-2 rounded-full bg-success" />
+            <span>{t('horses.autoSyncNotice', 'Hồ sơ tự động cập nhật vào danh sách chuồng nuôi cá nhân')}</span>
           </div>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Màu lông (Color)
-            </label>
-            <select
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                backgroundColor: '#ffffff',
-                outline: 'none',
-              }}
+
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleClose}
+              className="px-5 py-2.5 rounded-xl border border-border bg-surface hover:bg-border/30 text-text-primary text-sm font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50"
             >
-              {HORSE_COAT_COLORS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Row 2: Medical Status, Breed, Gender (3 spacious columns) */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '20px' }}>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Tình trạng y tế (Medical)
-            </label>
-            <select
-              value={medicalStatus}
-              onChange={(e) => setMedicalStatus(e.target.value as any)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                backgroundColor: '#ffffff',
-                outline: 'none',
-              }}
+              {t('common.cancel', 'Hủy bỏ')}
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-6 py-2.5 rounded-xl bg-primary hover:bg-primary-hover active:bg-primary-active text-white text-sm font-bold shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 cursor-pointer"
             >
-              {HORSE_MEDICAL_STATUSES.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+              {isSubmitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>{t('common.loading', 'Đang khởi tạo...')}</span>
+                </>
+              ) : (
+                <>
+                  <Plus size={16} />
+                  <span>{t('horses.registerHorse', 'Đăng Ký Chiến Mã')}</span>
+                </>
+              )}
+            </button>
           </div>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Breed (Giống ngựa)
-            </label>
-            <select
-              value={breed}
-              onChange={(e) => setBreed(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                backgroundColor: '#ffffff',
-                outline: 'none',
-              }}
-            >
-              <option value="Thoroughbred">Thoroughbred</option>
-              <option value="Arabian">Arabian</option>
-              <option value="Standardbred">Standardbred</option>
-              <option value="Warmblood">Warmblood</option>
-              <option value="Quarter Horse">Quarter Horse</option>
-              <option value="Akhal-Teke">Akhal-Teke</option>
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Gender (Giới tính)
-            </label>
-            <select
-              value={gender}
-              onChange={(e) => setGender(e.target.value as any)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                backgroundColor: '#ffffff',
-                outline: 'none',
-              }}
-            >
-              <option value="Stallion">Stallion (Male)</option>
-              <option value="Mare">Mare (Female)</option>
-              <option value="Gelding">Gelding</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Row 3: Date of Birth & Weight */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)' }}>
-                Date of Birth (Ngày sinh) <span style={{ color: '#dc2626' }}>*</span>
-              </label>
-              <span
-                style={{
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  color: '#2563eb',
-                  backgroundColor: '#eff6ff',
-                  padding: '2px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #bfdbfe',
-                }}
-              >
-                {age} tuổi ({age} yrs)
-              </span>
-            </div>
-            <input
-              type="date"
-              max={new Date().toISOString().split('T')[0]}
-              value={dateOfBirth}
-              onChange={(e) => handleDobChange(e.target.value)}
-              required
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                outline: 'none',
-              }}
-            />
-            <p style={{ fontSize: '11px', color: '#64748b', margin: '4px 0 0 0' }}>
-              Hệ thống tự động tính số tuổi ({age} tuổi).
-            </p>
-          </div>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Cân nặng (Weight)
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. 480 kg"
-              value={weight}
-              onChange={(e) => setWeight(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                outline: 'none',
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Row 4: Passport & Microchip */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              FEI Passport Number <span style={{ color: '#dc2626' }}>*</span>
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. FEI-VN-2026-888"
-              value={passportNumber}
-              onChange={(e) => setPassportNumber(e.target.value)}
-              required
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                outline: 'none',
-              }}
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-              Microchip Number <span style={{ color: '#dc2626' }}>*</span>
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. 985141001248999"
-              value={microchipNumber}
-              onChange={(e) => setMicrochipNumber(e.target.value)}
-              required
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-                outline: 'none',
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Buttons */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px', paddingTop: '16px', borderTop: '1px solid #f1f5f9' }}>
-          <button
-            type="button"
-            onClick={handleClose}
-            style={{
-              padding: '9px 18px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#ffffff',
-              fontSize: '13.5px',
-              fontWeight: 600,
-              color: 'var(--text-body)',
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            style={{
-              padding: '9px 22px',
-              borderRadius: '8px',
-              backgroundColor: 'var(--primary)',
-              color: '#ffffff',
-              fontSize: '13.5px',
-              fontWeight: 600,
-              border: 'none',
-              cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 2px 8px rgba(37, 99, 235, 0.3)',
-            }}
-          >
-            {isSubmitting ? (
-              <>
-                Saving... <Loader2 size={15} className="animate-spin" />
-              </>
-            ) : (
-              <>
-                Save & Select Horse <Check size={16} />
-              </>
-            )}
-          </button>
         </div>
       </form>
     </Modal>

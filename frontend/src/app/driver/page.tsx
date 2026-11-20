@@ -1,751 +1,811 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import React, { useState, useEffect, useCallback } from 'react';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import {
   Truck,
   Crosshair,
-  Calendar,
   AlertTriangle,
-  Clock,
-  ArrowRight,
   ChevronRight,
-  Map,
   PhoneCall,
-  MapPin,
   Stethoscope,
-  PlayCircle,
-  FileEdit,
+  RefreshCw,
+  HeartPulse,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { apiClient } from '@/lib/api-client';
 import { getCurrentUser } from '@/lib/auth';
+import { trackingApi, AssignedTripSummary, TripTrackingDetails } from '@/features/tracking/api/tracking.api';
+import { routesApi } from '@/features/routes/api/routes.api';
+import { StatusBadge, BadgeVariant } from '@/components/ui/StatusBadge';
+import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 export default function DriverDashboardPage() {
-  const router = useRouter();
   const pathname = usePathname();
-  const [activeTrip, setActiveTrip] = useState<any>(null);
-  const [todayTripsCount, setTodayTripsCount] = useState(1);
-  const [assignedHorsesCount, setAssignedHorsesCount] = useState(1);
-  const [mounted, setMounted] = useState(false);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const { t, language, translateStatus, translateVehicleType, translateBreed } = useLanguage();
+  const [currentUser, setCurrentUser] = useState<ReturnType<typeof getCurrentUser> | null>(null);
+  const [trips, setTrips] = useState<AssignedTripSummary[]>([]);
+  const [activeTrip, setActiveTrip] = useState<AssignedTripSummary | null>(null);
+  const [trackingDetails, setTrackingDetails] = useState<TripTrackingDetails | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Emergency SOS Modal
+  const [emergencyModalOpen, setEmergencyModalOpen] = useState(false);
+  const [emergencyReason, setEmergencyReason] = useState('');
+  const [isSendingEmergency, setIsSendingEmergency] = useState(false);
 
   const isEscort =
     currentUser?.persona === 'escort' ||
     currentUser?.specialization === 'escort' ||
     currentUser?.email?.toLowerCase().includes('escort') ||
-    pathname?.startsWith('/escort');
+    Boolean(pathname?.startsWith('/escort'));
   const basePath = isEscort ? '/escort' : '/driver';
 
-  useEffect(() => {
-    setMounted(true);
-    const user = getCurrentUser();
-    setCurrentUser(user);
-    const loadDashboard = async () => {
+  const loadDashboard = useCallback(
+    async (silent = false) => {
+      if (!silent) setIsLoading(true);
+      else setIsRefreshing(true);
+      setLoadError(null);
+
       try {
-        const orders = await apiClient<any[]>('/orders');
-        if (Array.isArray(orders) && orders.length > 0) {
-          const userEmail = (user?.email || '').toLowerCase().trim();
-          const userId = String(user?.id || '');
+        const user = getCurrentUser();
+        setCurrentUser(user);
 
-          const enriched = await Promise.all(
-            orders.map(async (ord) => {
-              try {
-                const assignRes = await apiClient<any>(`/fleet/shipments/${ord.id}/assignments`);
-                const staffList = assignRes?.staff || [];
-                const isAssigned = staffList.some((s: any) => {
-                  const sUserId = String(s.userId || s.user?.id || '');
-                  const sEmail = (s.user?.email || '').toLowerCase().trim();
-                  return (userId && sUserId === userId) || (userEmail && sEmail === userEmail);
-                });
-                return { ...ord, isAssigned };
-              } catch {
-                return { ...ord, isAssigned: false };
-              }
-            })
-          );
+        const myTrips = await trackingApi.getMyTrips();
+        setTrips(myTrips || []);
 
-          const myTrips = enriched.filter((o) => o.isAssigned);
-          const targetList = myTrips.length > 0 ? myTrips : enriched;
-          const target = targetList.find((o) => o.status === 'in_transit' || o.status === 'planning' || o.status === 'approved') || targetList[0];
+        if (myTrips && myTrips.length > 0) {
+          const target =
+            myTrips.find((tr) => tr.shipment_status === 'in_transit') ||
+            myTrips.find((tr) => tr.shipment_status === 'ready_to_depart') ||
+            myTrips.find((tr) => tr.shipment_status === 'confirmed') ||
+            myTrips[0];
 
           setActiveTrip(target);
-          setTodayTripsCount(myTrips.length);
-          const totalHorses = targetList.reduce((sum, o) => sum + (Number(o.requestedHorseCount) || 1), 0);
-          setAssignedHorsesCount(totalHorses);
+
+          if (target?.shipment_id) {
+            try {
+              const details = await trackingApi.getTrackingDetails(target.shipment_id);
+              setTrackingDetails(details);
+            } catch (e) {
+              console.warn('Could not load tracking details for shipment', target.shipment_id, e);
+            }
+          }
+        } else {
+          setActiveTrip(null);
+          setTrackingDetails(null);
         }
-      } catch {
-        // ignore
+      } catch (err: any) {
+        const msg =
+          err?.message ||
+          t(
+            'driver.dashboard.loadFailed',
+            language === 'en'
+              ? 'Unable to sync assigned trips from server.'
+              : 'Không thể đồng bộ dữ liệu chuyến đi từ máy chủ.'
+          );
+        setLoadError(msg);
+        if (!silent) {
+          toast.error(msg);
+        }
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
       }
-    };
-    loadDashboard();
-  }, []);
+    },
+    [language, t]
+  );
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  const handleSelectTrip = async (trip: AssignedTripSummary) => {
+    setActiveTrip(trip);
+    if (trip.shipment_id) {
+      try {
+        const details = await trackingApi.getTrackingDetails(trip.shipment_id);
+        setTrackingDetails(details);
+      } catch (e) {
+        console.warn('Could not load tracking details for shipment', trip.shipment_id, e);
+      }
+    }
+  };
+
+  const openEmergencyModal = () => {
+    if (!activeTrip) return;
+    setEmergencyReason('');
+    setEmergencyModalOpen(true);
+  };
+
+  const closeEmergencyModal = () => {
+    if (isSendingEmergency) return;
+    setEmergencyModalOpen(false);
+    setEmergencyReason('');
+  };
+
+  const handleSendEmergency = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSendingEmergency) return;
+    if (!activeTrip) {
+      toast.error(
+        t(
+          'driver.dashboard.noActiveTripToAlert',
+          language === 'en' ? 'No active trip to report SOS.' : 'Không có chuyến đi đang kích hoạt để báo sự cố.'
+        )
+      );
+      setEmergencyModalOpen(false);
+      return;
+    }
+
+    setIsSendingEmergency(true);
+    try {
+      await routesApi.reportIncident(activeTrip.shipment_id, {
+        incidentType: 'emergency_sos',
+        description:
+          emergencyReason.trim() ||
+          (language === 'en'
+            ? 'Driver/Escort dispatched emergency SOS signal on route'
+            : 'Tài xế/Hộ tống phát tín hiệu cứu hộ khẩn cấp trên tuyến vận chuyển'),
+        severity: 'critical',
+      });
+      toast.success(
+        t(
+          'driver.dashboard.sosDispatched',
+          language === 'en'
+            ? 'Emergency SOS dispatched to Logistics Manager & Fleet Coordinator!'
+            : 'Tín hiệu khẩn cấp đã được gửi tới Logistics Manager & Fleet Coordinator! Đội cứu hộ đang liên lạc.'
+        ),
+        { duration: 8000 }
+      );
+      setEmergencyModalOpen(false);
+      setEmergencyReason('');
+      void loadDashboard(true);
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          t('driver.dashboard.sosFailed', language === 'en' ? 'Failed to dispatch SOS signal.' : 'Không thể phát tín hiệu khẩn cấp qua mạng.')
+      );
+    } finally {
+      setIsSendingEmergency(false);
+    }
+  };
+
+  const mapStatusToBadge = (status?: string): { label: string; variant: BadgeVariant } => {
+    const s = (status || '').toLowerCase();
+    const label = translateStatus(status || 'pending');
+    if (s.includes('transit')) return { label, variant: 'transit' };
+    if (s.includes('ready')) return { label, variant: 'info' };
+    if (s.includes('complete')) return { label, variant: 'success' };
+    if (s.includes('confirm')) return { label, variant: 'info' };
+    if (s.includes('plan')) return { label, variant: 'pending' };
+    return { label, variant: 'neutral' };
+  };
+
+  const totalAssignedHorses = trips.reduce(
+    (sum, tr) => sum + (Number(tr.requested_horse_count) || 1),
+    0
+  );
+
+  const completedMilestones =
+    trackingDetails?.milestones?.filter((m) => m.status === 'COMPLETED').length || 0;
+  const totalMilestones = trackingDetails?.milestones?.length || 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* 1. WELCOME BANNER */}
-      <div
-        style={{
-          backgroundColor: '#0f172a',
-          backgroundImage:
-            'linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px)',
-          backgroundSize: '20px 20px',
-          borderRadius: '16px',
-          padding: '24px 30px',
-          border: '1px solid rgba(15, 23, 42, 0.2)',
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '16px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-        }}
-      >
+    <div className="flex flex-col gap-6 pb-12">
+      {/* 1. EDITORIAL LIGHT HEADER */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-5 pb-5 border-b border-[#E5DDD0]">
         <div>
-          <p style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.12em', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '6px' }}>
-            Saturday, September 26
-          </p>
-          <h2
-            suppressHydrationWarning
-            style={{ fontSize: '26px', fontWeight: 700, color: '#ffffff', margin: '0 0 4px 0', lineHeight: 1.2 }}
-          >
-            Good morning, {mounted && currentUser?.name ? currentUser.name : (isEscort ? 'BS. Hoàng Văn Y' : 'Trần Văn Lái')}
-          </h2>
-          <p
-            suppressHydrationWarning
-            style={{ fontSize: '13.5px', color: '#94a3b8', margin: 0, fontWeight: 500 }}
-          >
-            {isEscort 
-              ? '🩺 Chuyên viên Hộ Tống / Bác Sĩ Thú Y — Theo dõi sinh hiệu và phúc lợi ngựa đua'
-              : '🚚 Tài Xế Vận Chuyển — Phụ trách hành trình đường bộ và an toàn phương tiện'}
-          </p>
-
-          {/* Chips */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px', marginTop: '16px' }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: isEscort ? 'rgba(16, 185, 129, 0.2)' : 'rgba(37, 99, 235, 0.2)',
-                border: isEscort ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(37, 99, 235, 0.3)',
-                fontSize: '12px',
-                fontWeight: 600,
-                color: isEscort ? '#34d399' : '#60a5fa',
-                backdropFilter: 'blur(4px)',
-              }}
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <span
+              className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider border ${
+                isEscort
+                  ? 'bg-[#E8F2EB] text-[#287653] border-[#B7DBC4]'
+                  : 'bg-[#FAF8F4] text-[#966516] border-[#D4C5A3]'
+              }`}
             >
-              {isEscort ? <Stethoscope size={14} /> : <Truck size={14} />}
-              <span>{isEscort ? 'Escort / Vet Active' : 'Driver Active'}</span>
-            </div>
-
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: '#ffffff',
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              <Truck size={14} color="#60a5fa" />
-              <span>01 active trip</span>
-            </div>
-
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '6px 12px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: '#ffffff',
-                backdropFilter: 'blur(4px)',
-              }}
-            >
-              <span style={{ fontSize: '14px' }}>♞</span>
-              <span>04 horses assigned</span>
-            </div>
+              {isEscort
+                ? t('role.escort', language === 'en' ? 'Equine Vet / Escort' : 'Bác sĩ Thú y / Hộ tống')
+                : t('driver.dashboard.driverRoleTitle', language === 'en' ? 'Vehicle Driver' : 'Tài xế Vận tải Chuyên nghiệp')}
+            </span>
+            <span className="text-xs text-[#5F6977] font-medium">
+              • {currentUser?.fullName || currentUser?.name || (language === 'en' ? 'Crew Member' : 'Nhân sự vận chuyển')}
+            </span>
           </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-[#181A17] m-0 tracking-tight">
+            {t('driver.dashboard.title', language === 'en' ? 'Field Operations & Trip Monitoring' : 'Bảng Điều Khiển Thực Địa & Giám Sát Chuyến Đi')}
+          </h1>
+          <p className="text-sm text-[#5F6977] mt-1.5 mb-0 max-w-2xl">
+            {t(
+              'driver.dashboard.subtitle',
+              language === 'en'
+                ? 'Track transit routes, check in at quarantine stops and borders, and monitor equine vitals.'
+                : 'Theo dõi lộ trình, cập nhật mốc qua các trạm dừng / cửa khẩu và ghi nhận sinh hiệu chiến mã.'
+            )}
+          </p>
         </div>
 
-        {isEscort ? (
-          <button
-            onClick={() => router.push(`${basePath}/health`)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              backgroundColor: '#059669',
-              color: '#ffffff',
-              padding: '14px 24px',
-              borderRadius: '12px',
-              fontSize: '14px',
-              fontWeight: 700,
-              border: '1px solid rgba(52, 211, 153, 0.3)',
-              boxShadow: '0 0 20px rgba(5, 150, 105, 0.4)',
-              cursor: 'pointer',
-              transition: 'background-color 0.15s',
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#047857')}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#059669')}
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void loadDashboard(true)}
+            disabled={isRefreshing}
+            className="min-h-[42px] px-4 bg-white hover:bg-[#FAF8F4] text-[#181A17] border-[#D8CEBE] text-xs font-bold"
           >
-            <Stethoscope size={16} /> Ghi Nhật Ký Sức Khỏe
-          </button>
-        ) : (
-          <button
-            onClick={() => router.push(`${basePath}/status`)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              backgroundColor: '#2563eb',
-              color: '#ffffff',
-              padding: '14px 24px',
-              borderRadius: '12px',
-              fontSize: '14px',
-              fontWeight: 700,
-              border: '1px solid rgba(96, 165, 250, 0.3)',
-              boxShadow: '0 0 20px rgba(37, 99, 235, 0.4)',
-              cursor: 'pointer',
-              transition: 'background-color 0.15s',
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#1d4ed8')}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#2563eb')}
+            <RefreshCw size={14} className={`mr-1.5 ${isRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+            {t('common.refresh', language === 'en' ? 'Refresh' : 'Làm mới')}
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={!activeTrip}
+            onClick={openEmergencyModal}
+            title={!activeTrip ? (language === 'en' ? 'No active trip assigned' : 'Chưa có chuyến đi để báo SOS') : undefined}
+            className="min-h-[42px] px-4 bg-[#B33E3E] hover:bg-[#932E2E] text-white font-extrabold text-xs shadow-sm border border-[#9E3B3B] cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
           >
-            <Crosshair size={16} /> Update Trip Status
-          </button>
-        )}
-      </div>
-
-      {/* 2. KPI CARDS (4 Columns) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '14px',
-        }}
-      >
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '16px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ color: '#9ca3af', marginBottom: '8px' }}><Calendar size={20} /></div>
-          <h3 style={{ fontSize: '26px', fontWeight: 800, color: '#111827', margin: '0 0 2px 0' }}>02</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', margin: 0 }}>Today&apos;s Trips</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '16px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ color: '#2563eb', marginBottom: '8px' }}><Truck size={20} /></div>
-          <h3 style={{ fontSize: '26px', fontWeight: 800, color: '#111827', margin: '0 0 2px 0' }}>01</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', margin: 0 }}>Active Trip</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '16px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ color: '#10b981', marginBottom: '8px', fontSize: '20px' }}>♞</div>
-          <h3 style={{ fontSize: '26px', fontWeight: 800, color: '#111827', margin: '0 0 2px 0' }}>04</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', margin: 0 }}>Horses Assigned</p>
-        </div>
-
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '16px', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}>
-          <div style={{ color: '#f59e0b', marginBottom: '8px' }}><FileEdit size={20} /></div>
-          <h3 style={{ fontSize: '26px', fontWeight: 800, color: '#111827', margin: '0 0 2px 0' }}>01</h3>
-          <p style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', margin: 0 }}>Pending Reports</p>
+            <AlertTriangle size={15} className="mr-1.5 stroke-[2.5]" aria-hidden="true" />
+            {t('driver.dashboard.reportIncident', language === 'en' ? 'Emergency SOS' : 'Báo Cứu Hộ SOS')}
+          </Button>
         </div>
       </div>
 
-      {/* 3. MAIN GRID (2 Cols Left, 1 Col Right) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-          gap: '20px',
-          alignItems: 'start',
-        }}
-      >
-        {/* LEFT COLUMN: Active Trip + Progress + Assigned Horses */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', gridColumn: 'span 2' }}>
-          {/* MY ACTIVE TRIP */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '14px',
-              border: '2px solid rgba(37, 99, 235, 0.25)',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
+      {loadError && (
+        <div
+          role="alert"
+          className="p-4 rounded-xl bg-rose-50 border border-[#9E3B3B]/35 text-xs font-semibold text-[#9E3B3B] flex flex-wrap items-center justify-between gap-3"
+        >
+          <span>{loadError}</span>
+          <button
+            type="button"
+            onClick={() => void loadDashboard()}
+            className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-[#181A17] text-[#C4B38E] font-bold cursor-pointer hover:bg-[#2C2F2A]"
           >
-            <div
-              style={{
-                padding: '16px 20px',
-                backgroundColor: 'rgba(239, 246, 255, 0.6)',
-                borderBottom: '1px solid rgba(37, 99, 235, 0.15)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
-                <PlayCircle size={18} color="#2563eb" /> My Active Trip
-              </h3>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '4px 10px',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  backgroundColor: '#eff6ff',
-                  color: '#1d4ed8',
-                  border: '1px solid #dbeafe',
-                }}
-              >
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} /> In Transit
-              </span>
-            </div>
-
-            <div style={{ padding: '24px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '18px', marginBottom: '24px' }}>
-                <div>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Trip ID</p>
-                  <p style={{ fontSize: '16px', fontWeight: 800, color: '#111827', margin: 0 }}>
-                    {activeTrip?.requestCode || 'REQ-027'}
-                  </p>
-                </div>
-                <div>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Route</p>
-                  <p style={{ fontSize: '15px', fontWeight: 800, color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {activeTrip?.originLocation?.split(',')[0] || 'Ho Chi Minh City'}{' '}
-                    <span style={{ color: '#9ca3af' }}>→</span>{' '}
-                    {activeTrip?.destinationLocation?.split(',')[0] || 'Singapore Turf Club'}
-                  </p>
-                </div>
-                <div>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Horse</p>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>
-                    {activeTrip?.horses?.[0]?.name || 'Chiến Mã'} ({activeTrip?.requestedHorseCount || 1} con)
-                  </p>
-                </div>
-                <div>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Vehicle</p>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>
-                    TRK-VN-089 (Climate 18°C)
-                  </p>
-                </div>
-                <div>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Departure</p>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>
-                    {activeTrip?.requestedDate ? new Date(activeTrip.requestedDate).toLocaleDateString('vi-VN', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Oct 16, 2026'}
-                  </p>
-                </div>
-                <div>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 2px 0' }}>Est. Arrival</p>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>
-                    Oct 18, 2026
-                  </p>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-                <button
-                  onClick={() => router.push(`${basePath}/status`)}
-                  style={{
-                    flex: '1 1 200px',
-                    padding: '14px 20px',
-                    borderRadius: '10px',
-                    backgroundColor: '#2563eb',
-                    color: '#ffffff',
-                    fontWeight: 700,
-                    fontSize: '15px',
-                    border: 'none',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 10px rgba(37, 99, 235, 0.3)',
-                  }}
-                >
-                  Update Status <ChevronRight size={16} />
-                </button>
-                <button
-                  onClick={() => router.push(`${basePath}/status`)}
-                  style={{
-                    padding: '14px 20px',
-                    borderRadius: '10px',
-                    backgroundColor: '#ffffff',
-                    color: '#374151',
-                    border: '1px solid #d1d5db',
-                    fontWeight: 600,
-                    fontSize: '13.5px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                  }}
-                >
-                  <Map size={16} /> View Route
-                </button>
-                <button
-                  onClick={() => router.push(`${basePath}/health`)}
-                  style={{
-                    padding: '14px 20px',
-                    borderRadius: '10px',
-                    backgroundColor: '#ffffff',
-                    color: '#374151',
-                    border: '1px solid #d1d5db',
-                    fontWeight: 600,
-                    fontSize: '13.5px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                  }}
-                >
-                  <span>♞</span> View Horses
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* TRIP PROGRESS (Vertical Timeline) */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
-          >
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: 0 }}>Trip Progress</h3>
-            </div>
-            <div style={{ padding: '24px 28px' }}>
-              <div style={{ position: 'relative', paddingLeft: '28px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
-                {/* Vertical background guide line */}
-                <div style={{ position: 'absolute', left: '8px', top: '10px', bottom: '10px', width: '2px', backgroundColor: '#e5e7eb' }} />
-                {/* Active progress segment */}
-                <div style={{ position: 'absolute', left: '8px', top: '10px', height: '48%', width: '2px', backgroundColor: '#2563eb' }} />
-
-                {/* Step 1 (Done) */}
-                <div style={{ position: 'relative' }}>
-                  <div style={{ position: 'absolute', left: '-25px', top: '4px', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#2563eb', border: '2px solid #ffffff', boxShadow: '0 0 0 2px #2563eb' }} />
-                  <p style={{ fontWeight: 700, color: '#111827', fontSize: '14px', margin: 0 }}>Trip Started</p>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Departed Dubai Depot</p>
-                </div>
-
-                {/* Step 2 (Done) */}
-                <div style={{ position: 'relative' }}>
-                  <div style={{ position: 'absolute', left: '-25px', top: '4px', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#2563eb', border: '2px solid #ffffff', boxShadow: '0 0 0 2px #2563eb' }} />
-                  <p style={{ fontWeight: 700, color: '#111827', fontSize: '14px', margin: 0 }}>Checkpoint Reached</p>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Border crossing complete</p>
-                </div>
-
-                {/* Step 3 (Current Active) */}
-                <div style={{ position: 'relative' }}>
-                  <div style={{ position: 'absolute', left: '-29px', top: '2px', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#ffffff', border: '4px solid #2563eb', boxShadow: '0 0 0 2px rgba(37, 99, 235, 0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
-                  </div>
-                  <p style={{ fontWeight: 700, color: '#2563eb', fontSize: '15px', margin: 0 }}>Rest Stop</p>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0', fontWeight: 500 }}>Currently at Mumbai Transit Hub</p>
-                </div>
-
-                {/* Step 4 (Future) */}
-                <div style={{ position: 'relative', opacity: 0.5 }}>
-                  <div style={{ position: 'absolute', left: '-25px', top: '4px', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#ffffff', border: '2px solid #d1d5db' }} />
-                  <p style={{ fontWeight: 700, color: '#111827', fontSize: '14px', margin: 0 }}>Quarantine</p>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Singapore</p>
-                </div>
-
-                {/* Step 5 (Future) */}
-                <div style={{ position: 'relative', opacity: 0.5 }}>
-                  <div style={{ position: 'absolute', left: '-25px', top: '4px', width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#ffffff', border: '2px solid #d1d5db' }} />
-                  <p style={{ fontWeight: 700, color: '#111827', fontSize: '14px', margin: 0 }}>Destination &amp; Handover</p>
-                  <p style={{ fontSize: '12px', color: '#6b7280', margin: '2px 0 0 0' }}>Ho Chi Minh City</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ASSIGNED HORSES */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
-          >
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: 0 }}>Assigned Horses</h3>
-            </div>
-            <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-              {/* Horse 1 */}
-              <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
-                  <div
-                    style={{
-                      width: '44px',
-                      height: '44px',
-                      borderRadius: '50%',
-                      backgroundColor: '#f3f4f6',
-                      border: '1px solid #e5e7eb',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 800,
-                      fontSize: '16px',
-                      color: '#475569',
-                    }}
-                  >
-                    TH
-                  </div>
-                  <div>
-                    <p style={{ fontWeight: 700, color: '#111827', fontSize: '15px', margin: 0 }}>Thunder</p>
-                    <span style={{ display: 'inline-flex', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, backgroundColor: '#ecfdf5', color: '#047857', border: '1px solid #d1fae5', marginTop: '2px' }}>
-                      Healthy
-                    </span>
-                  </div>
-                </div>
-                <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 14px 0', flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Clock size={13} /> Last Check: 08:40
-                </p>
-                <button
-                  onClick={() => router.push(`${basePath}/health`)}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: '1px solid #2563eb',
-                    backgroundColor: '#ffffff',
-                    color: '#2563eb',
-                    fontWeight: 700,
-                    fontSize: '13px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Update Health
-                </button>
-              </div>
-
-              {/* Horse 2 */}
-              <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
-                  <div
-                    style={{
-                      width: '44px',
-                      height: '44px',
-                      borderRadius: '50%',
-                      backgroundColor: '#f3f4f6',
-                      border: '1px solid #e5e7eb',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 800,
-                      fontSize: '16px',
-                      color: '#475569',
-                    }}
-                  >
-                    RS
-                  </div>
-                  <div>
-                    <p style={{ fontWeight: 700, color: '#111827', fontSize: '15px', margin: 0 }}>Royal Star</p>
-                    <span style={{ display: 'inline-flex', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, backgroundColor: '#fffbeb', color: '#b45309', border: '1px solid #fef3c7', marginTop: '2px' }}>
-                      Monitoring
-                    </span>
-                  </div>
-                </div>
-                <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 14px 0', flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Clock size={13} /> Last Check: 09:15
-                </p>
-                <button
-                  onClick={() => router.push(`${basePath}/health`)}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: isEscort ? '1px solid #059669' : '1px solid #cbd5e1',
-                    backgroundColor: isEscort ? '#ecfdf5' : '#ffffff',
-                    color: isEscort ? '#059669' : '#475569',
-                    fontWeight: 700,
-                    fontSize: '13px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {isEscort ? '🩺 Ghi Khám Sức Khỏe' : '👁️ Xem Nhật Ký Sức Khỏe'}
-                </button>
-              </div>
-            </div>
-          </div>
+            {t('common.retry', language === 'en' ? 'Retry' : 'Thử lại')}
+          </button>
         </div>
+      )}
 
-        {/* RIGHT COLUMN: Emergency Assistance + Recent Updates */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* EMERGENCY CARD */}
-          <div
-            style={{
-              backgroundColor: '#fef2f2',
-              borderRadius: '12px',
-              border: '1px solid #fecaca',
-              padding: '22px',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-            }}
-          >
-            <h3 style={{ fontSize: '17px', fontWeight: 800, color: '#dc2626', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <AlertTriangle size={20} /> Emergency Assistance
-            </h3>
-            <p style={{ fontSize: '13px', color: '#991b1b', lineHeight: 1.5, margin: '0 0 18px 0', fontWeight: 500 }}>
-              Report an incident immediately if a horse or vehicle requires urgent attention.
+      {/* 2. STATS KPI CARDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="p-4 rounded-2xl bg-white border border-[#E5DDD0] shadow-sm flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#5F6977] m-0">
+              {t('driver.dashboard.assignedTrips', language === 'en' ? 'Assigned Trips' : 'Chuyến được phân công')}
             </p>
-            <button
-              onClick={() => toast.error('Emergency dispatch initiated: Logistics Manager and Vet alerted!')}
-              style={{
-                width: '100%',
-                padding: '14px',
-                borderRadius: '10px',
-                backgroundColor: '#dc2626',
-                color: '#ffffff',
-                fontWeight: 800,
-                fontSize: '15px',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 10px rgba(220, 38, 38, 0.35)',
-              }}
+            <p className="text-2xl font-black text-[#181A17] m-0 mt-1">{trips.length}</p>
+            <span className="text-[11px] text-[#747D88] mt-0.5 block">
+              {t('driver.dashboard.inTransitTrips', '{count} chuyến đang di chuyển', {
+                count: trips.filter((tr) => tr.shipment_status === 'in_transit').length,
+              })}
+            </span>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-[#FAF8F4] text-[#181A17] flex items-center justify-center shrink-0 border border-[#EAE5DA]">
+            <Truck size={22} aria-hidden="true" />
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white border border-[#E5DDD0] shadow-sm flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#5F6977] m-0">
+              {t('dashboard.totalHorses', language === 'en' ? 'Assigned Horses' : 'Chiến mã phụ trách')}
+            </p>
+            <p className="text-2xl font-black text-[#181A17] m-0 mt-1">{totalAssignedHorses}</p>
+            <span className="text-[11px] text-[#747D88] mt-0.5 block">
+              {language === 'en'
+                ? `Across ${trips.length} trip(s)`
+                : `Trên ${trips.length} chuyến phân công`}
+            </span>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-[#E8F2EB] text-[#287653] flex items-center justify-center shrink-0 border border-[#B7DBC4]">
+            <HeartPulse size={22} aria-hidden="true" />
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white border border-[#D8CEBE] shadow-sm flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#57564E] m-0">
+              {t('driver.status.milestonesTitle', language === 'en' ? 'Current Progress' : 'Tiến độ mốc hiện tại')}
+            </p>
+            <p className="text-2xl font-black text-[#181A17] m-0 mt-1">
+              {totalMilestones > 0 ? `${completedMilestones}/${totalMilestones}` : '0/0'}
+            </p>
+            <span className="text-[11px] text-[#747D88] mt-0.5 block">
+              {totalMilestones > 0
+                ? `${Math.round((completedMilestones / totalMilestones) * 100)}%`
+                : t('common.pending', language === 'en' ? 'Pending activation' : 'Chưa kích hoạt')}
+            </span>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-[#FAF5EB] text-[#A67C2E] flex items-center justify-center shrink-0 border border-[#D4C5A3]">
+            <Crosshair size={22} aria-hidden="true" />
+          </div>
+        </div>
+
+        <a
+          href="tel:19006868"
+          className="p-4 rounded-2xl bg-white border border-[#D8CEBE] hover:border-[#9E3B3B]/45 shadow-sm flex items-center justify-between gap-3 no-underline transition-colors min-h-[44px]"
+        >
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#57564E] m-0">
+              {t('driver.emergencyHotline', language === 'en' ? '24/7 Rescue Hotline' : 'Đường dây cứu hộ 24/7')}
+            </p>
+            <p className="text-xl font-black text-[#9E3B3B] m-0 mt-1">1900-6868</p>
+            <span className="text-[11px] text-[#747D88] mt-0.5 block">
+              {language === 'en' ? 'Tap to call Emergency Dispatch' : 'Chạm để gọi cứu hộ trực tiếp'}
+            </span>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-rose-50 text-[#9E3B3B] flex items-center justify-center shrink-0 border border-rose-200">
+            <PhoneCall size={22} aria-hidden="true" />
+          </div>
+        </a>
+      </div>
+
+      {/* 3. ACTIVE TRIP SECTION */}
+      {isLoading ? (
+        <div className="p-12 text-center bg-white rounded-2xl border border-[#D8CEBE] shadow-sm flex flex-col items-center justify-center gap-3">
+          <RefreshCw size={28} className="animate-spin text-[#A67C2E]" aria-hidden="true" />
+          <p className="text-sm font-semibold text-[#57564E] m-0">
+            {t('driver.dashboard.loadingTrip', language === 'en' ? 'Loading your field trip data...' : 'Đang tải dữ liệu chuyến đi thực địa của bạn...')}
+          </p>
+        </div>
+      ) : !activeTrip ? (
+        <div className="p-10 sm:p-14 text-center bg-white rounded-2xl border border-[#D8CEBE] shadow-sm flex flex-col items-center justify-center gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-[#FAF8F4] text-[#8A8478] flex items-center justify-center border border-[#D8CEBE]">
+            <Truck size={32} aria-hidden="true" />
+          </div>
+          <div className="max-w-md">
+            <h2 className="text-lg font-bold text-[#181A17] m-0">
+              {t('driver.noTripsTitle', language === 'en' ? 'No Trips Assigned Right Now' : 'Hiện Tại Chưa Có Chuyến Đi Nào Được Phân Công')}
+            </h2>
+            <p className="text-xs sm:text-sm text-[#57564E] mt-2 leading-relaxed m-0">
+              {t(
+                'driver.noTripsDesc',
+                language === 'en'
+                  ? 'You are on standby. Once assigned to an approved itinerary, trip routes, vehicle details, and equine dossiers will appear here.'
+                  : 'Bạn đang ở trạng thái sẵn sàng. Khi Quản lý Logistics hoặc Điều phối viên chỉ định bạn vào lịch trình vận chuyển, toàn bộ tuyến đường, thông tin xe và hồ sơ sức khỏe ngựa sẽ tự động xuất hiện tại đây.'
+              )}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
+            <Link
+              href={`${basePath}/trips`}
+              className="inline-flex items-center justify-center min-h-[44px] px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2C2F2A] text-[#F7F7F4] font-bold text-xs no-underline shadow-sm transition-colors"
             >
-              <PhoneCall size={18} /> Report Emergency
-            </button>
+              <Truck size={14} className="mr-1.5 text-[#C4B38E]" aria-hidden="true" />
+              {t('driver.dashboard.viewAllTrips', language === 'en' ? 'View All Trips' : 'Xem Tất Cả Chuyến Đi')}
+            </Link>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void loadDashboard(true)}
+              className="min-h-[44px] px-4 font-bold text-xs border-[#D8CEBE]"
+            >
+              <RefreshCw size={14} className="mr-1.5" aria-hidden="true" />
+              {t('common.refresh', language === 'en' ? 'Check again' : 'Kiểm tra lại')}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Trip Card (Left 2 cols) */}
+          <div className="lg:col-span-2 flex flex-col gap-6">
+            {trips.length > 1 && (
+              <div className="bg-white rounded-2xl border border-[#E5DDD0] px-4 py-3 shadow-xs flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#5F6977] mr-1">
+                  {t('driver.dashboard.selectTrip', language === 'en' ? 'Assigned trips:' : 'Chọn chuyến:')}
+                </span>
+                {trips.map((tr) => {
+                  const isSelected = tr.shipment_id === activeTrip.shipment_id;
+                  const code = tr.customer_request_code || tr.request_code || `#${tr.shipment_id}`;
+                  return (
+                    <button
+                      key={tr.shipment_id}
+                      type="button"
+                      onClick={() => void handleSelectTrip(tr)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#181A17] text-white border-[#181A17]'
+                          : 'bg-[#FAF8F4] text-[#181A17] border-[#D8CEBE] hover:border-[#A67C2E]'
+                      }`}
+                    >
+                      #{code}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 sm:p-6 shadow-sm flex flex-col gap-5">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#EAE5DA] pb-4">
+                <div>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <span className="font-black text-[#181A17] text-base">
+                      #{activeTrip.customer_request_code || activeTrip.request_code}
+                    </span>
+                    <span className="text-xs text-[#8A8478]">•</span>
+                    <span className="text-xs font-semibold text-[#57564E]">
+                      {t('coordinator.routes.customerLabel', language === 'en' ? 'Customer:' : 'Khách hàng:')}{' '}
+                      {activeTrip.contact_name || (language === 'en' ? 'Client' : 'Khách hàng')}
+                    </span>
+                    <StatusBadge
+                      label={translateStatus(activeTrip.shipment_status)}
+                      variant={mapStatusToBadge(activeTrip.shipment_status).variant}
+                      hasDot
+                    />
+                  </div>
+                  <h2 className="text-lg font-bold text-[#181A17] m-0 mt-1.5 break-words">
+                    {activeTrip.route_name ||
+                      `${(activeTrip.origin_location || '').split(',')[0]} → ${(activeTrip.destination_location || '').split(',')[0]}`}
+                  </h2>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Link
+                    href={`${basePath}/status?shipmentId=${activeTrip.shipment_id}`}
+                    className="inline-flex items-center justify-center min-h-[42px] px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2C2F2A] text-[#F7F7F4] font-bold text-xs no-underline shadow-sm transition-colors"
+                  >
+                    <Crosshair size={14} className="mr-1.5 text-[#C4B38E]" aria-hidden="true" />
+                    {t('driver.updateMilestoneBtn', language === 'en' ? 'Update Milestone' : 'Cập nhật mốc')}
+                  </Link>
+                </div>
+              </div>
+
+              {/* Specs Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-[#FAF8F4] p-4 rounded-xl border border-[#EAE5DA] text-xs">
+                <div>
+                  <span className="text-[11px] font-bold text-[#747D88] uppercase block">
+                    {t('common.origin', language === 'en' ? 'Origin' : 'Điểm đón')}
+                  </span>
+                  <span className="font-bold text-[#181A17] block mt-0.5 truncate" title={activeTrip.origin_location}>
+                    {(activeTrip.origin_location || '').split(',')[0] || '—'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[11px] font-bold text-[#747D88] uppercase block">
+                    {t('common.destination', language === 'en' ? 'Destination' : 'Điểm đến')}
+                  </span>
+                  <span className="font-bold text-[#181A17] block mt-0.5 truncate" title={activeTrip.destination_location}>
+                    {(activeTrip.destination_location || '').split(',')[0] || '—'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[11px] font-bold text-[#747D88] uppercase block">
+                    {t('fleet.vehicle', language === 'en' ? 'Vehicle' : 'Phương tiện')}
+                  </span>
+                  <span className="font-bold text-[#181A17] block mt-0.5 truncate">
+                    {translateVehicleType(trackingDetails?.assignedVehicle) ||
+                      trackingDetails?.assignedVehicle ||
+                      (language === 'en' ? 'Specialized Vehicle' : 'Xe chuyên dụng')}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[11px] font-bold text-[#747D88] uppercase block">
+                    {t('coordinator.assignEscort', language === 'en' ? 'Vet / Escort' : 'Hộ tống y tế')}
+                  </span>
+                  <span className="font-bold text-[#181A17] block mt-0.5 truncate">
+                    {trackingDetails?.assignedEscort || t('driver.status.unassigned', language === 'en' ? 'Unassigned' : 'Chưa gán')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Milestone Timeline Progress */}
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <h3 className="text-xs font-bold text-[#181A17] uppercase tracking-wider m-0 flex items-center gap-1.5">
+                    <Crosshair size={14} className="text-[#A67C2E]" aria-hidden="true" />
+                    {t('driver.dashboard.timelineTitle', language === 'en' ? 'Route Progress & Live Stops' : 'Tiến độ chặng & Trạm dừng thực tế')}
+                  </h3>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-[#747D88] font-semibold">
+                      {completedMilestones} / {totalMilestones}{' '}
+                      {t('driver.dashboard.milestonesCompleted', language === 'en' ? 'milestones completed' : 'mốc hoàn tất')}
+                    </span>
+                    <Link
+                      href={`${basePath}/status?shipmentId=${activeTrip.shipment_id}`}
+                      className="text-xs font-bold text-[#A67C2E] hover:underline whitespace-nowrap"
+                    >
+                      {t('driver.dashboard.viewAllMilestonesLink', language === 'en' ? 'View full timeline →' : 'Xem tất cả mốc →')}
+                    </Link>
+                  </div>
+                </div>
+
+                {trackingDetails?.milestones && trackingDetails.milestones.length > 0 ? (
+                  <div className="relative border-l-2 border-[#D8CEBE] ml-3 pl-5 flex flex-col gap-4 py-2">
+                    {trackingDetails.milestones.slice(0, 5).map((m) => {
+                      const isCompleted = m.status === 'COMPLETED';
+                      const isCurrent = m.status === 'CURRENT';
+
+                      return (
+                        <div key={m.id} className="relative text-xs">
+                          <div
+                            className={`absolute -left-[27px] top-0.5 w-4 h-4 rounded-full border-2 bg-white flex items-center justify-center ${
+                              isCompleted
+                                ? 'border-[#2D5A3F] text-[#2D5A3F]'
+                                : isCurrent
+                                ? 'border-[#181A17] text-[#A67C2E] animate-pulse'
+                                : 'border-[#D8CEBE] text-[#D8CEBE]'
+                            }`}
+                          >
+                            {isCompleted && <div className="w-2 h-2 rounded-full bg-[#2D5A3F]" />}
+                            {isCurrent && <div className="w-2 h-2 rounded-full bg-[#181A17]" />}
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className={`font-bold m-0 ${isCurrent ? 'text-[#181A17]' : isCompleted ? 'text-[#3C403A]' : 'text-[#747D88]'}`}>
+                                #{m.seq} - {m.title}
+                              </p>
+                              <span className="text-[11px] text-[#747D88] block mt-0.5">
+                                {m.location}{' '}
+                                {m.isCustomsBorder &&
+                                  `• [${t('driver.status.customsQuarantineBadge', language === 'en' ? 'Customs / Quarantine' : 'Hải quan / Kiểm dịch')}]`}
+                              </span>
+                            </div>
+
+                            {isCurrent ? (
+                              <Link
+                                href={`${basePath}/status?shipmentId=${activeTrip.shipment_id}`}
+                                className="no-underline px-2.5 py-1 rounded-lg bg-[#181A17] hover:bg-[#2C2F2A] text-[#FAF8F4] text-[11px] font-bold inline-flex items-center gap-1 shadow-xs transition-colors"
+                              >
+                                <span>{t('driver.dashboard.checkinAction', 'Check-in →')}</span>
+                              </Link>
+                            ) : (
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  isCompleted
+                                    ? 'bg-[#E8F2EB] text-[#2D5A3F] border border-[#2D5A3F]/20'
+                                    : 'bg-[#F4F1E9] text-[#747D88]'
+                                }`}
+                              >
+                                {isCompleted
+                                  ? t('common.completed', language === 'en' ? 'Done' : 'Đã xong')
+                                  : t('common.pending', language === 'en' ? 'Pending' : 'Chờ xử lý')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#747D88] py-3 italic m-0">
+                    {t('driver.dashboard.noMilestonesAssigned', language === 'en' ? 'No milestones configured yet.' : 'Chưa có danh sách mốc hành trình từ Điều phối viên.')}
+                  </p>
+                )}
+              </div>
+
+              {/* Assigned Horses List */}
+              <div className="border-t border-[#EAE5DA] pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <h3 className="text-xs font-bold text-[#181A17] uppercase tracking-wider m-0 flex items-center gap-1.5">
+                    <HeartPulse size={14} className="text-[#2D5A3F]" aria-hidden="true" />
+                    {t('driver.dashboard.assignedHorsesListTitle', language === 'en' ? 'Assigned Horses' : 'Danh sách ngựa đua phụ trách')}
+                  </h3>
+                  <Link href={`${basePath}/health`} className="text-xs text-[#A67C2E] hover:underline font-semibold">
+                    {t('driver.dashboard.viewHealthDossierLink', language === 'en' ? 'View health dossier →' : 'Xem hồ sơ sức khỏe →')}
+                  </Link>
+                </div>
+
+                {trackingDetails?.assignedHorses && trackingDetails.assignedHorses.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {trackingDetails.assignedHorses.map((horse) => (
+                      <div
+                        key={horse.id}
+                        className="p-3 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#A67C2E] transition-all flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-full bg-[#E8F2EB] text-[#2D5A3F] border border-[#2D5A3F]/20 font-black text-xs flex items-center justify-center shrink-0">
+                            {(horse.name || 'H').substring(0, 2).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-[#181A17] m-0 truncate">{horse.name}</p>
+                            <span className="text-[11px] text-[#747D88] block mt-0.5 truncate">
+                              {translateBreed(horse.breed) || (language === 'en' ? 'Racehorse' : 'Ngựa đua thuần chủng')}{' '}
+                              {horse.microchipNo ? `• Chip: ${horse.microchipNo}` : ''}
+                            </span>
+                          </div>
+                        </div>
+
+                        {isEscort && (
+                          <Link
+                            href={`${basePath}/health`}
+                            className="inline-flex items-center justify-center min-h-[38px] px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-[#FAF8F4] hover:border-[#A67C2E] text-[11px] font-bold text-[#181A17] no-underline shrink-0 transition-colors"
+                          >
+                            {t('driver.dashboard.recordVitalsBtn', language === 'en' ? 'Log vitals' : 'Ghi sinh hiệu')}
+                          </Link>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#747D88] py-2 italic m-0">
+                    {t('driver.dashboard.noHorsesAssigned', language === 'en' ? 'No horses assigned to this shipment yet.' : 'Chưa có hồ sơ ngựa đua được gán cho chuyến này.')}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* RECENT TRIP UPDATES */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '12px',
-              border: '1px solid #e5e7eb',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)',
-              overflow: 'hidden',
-            }}
-          >
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', margin: 0 }}>Recent Trip Updates</h3>
-            </div>
-            <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ padding: '10px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <MapPin size={14} />
-                </div>
-                <div>
-                  <p style={{ fontSize: '13.5px', fontWeight: 700, color: '#111827', margin: 0 }}>Status Update</p>
-                  <p style={{ fontSize: '12.5px', color: '#4b5563', margin: '2px 0 0 0' }}>Checkpoint reached</p>
-                  <p style={{ fontSize: '11px', color: '#9ca3af', margin: '4px 0 0 0' }}>10 minutes ago</p>
-                </div>
-              </div>
+          {/* Right Sidebar: Quick Actions */}
+          <div className="flex flex-col gap-6">
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 shadow-sm flex flex-col gap-3">
+              <h2 className="text-xs font-bold text-[#5F6977] uppercase tracking-wider m-0">
+                {t('driver.dashboard.quickActionsTitle', language === 'en' ? 'Quick Actions' : 'Thao Tác Nhanh')}
+              </h2>
 
-              <div style={{ padding: '10px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Stethoscope size={14} />
-                </div>
-                <div>
-                  <p style={{ fontSize: '13.5px', fontWeight: 700, color: '#111827', margin: 0 }}>Health Log</p>
-                  <p style={{ fontSize: '12.5px', color: '#4b5563', margin: '2px 0 0 0' }}>Thunder checked</p>
-                  <p style={{ fontSize: '11px', color: '#9ca3af', margin: '4px 0 0 0' }}>30 minutes ago</p>
-                </div>
-              </div>
+              <div className="flex flex-col gap-2.5">
+                <Link
+                  href={`${basePath}/status`}
+                  className="p-3.5 min-h-[52px] rounded-xl border border-[#D8CEBE] hover:border-[#A67C2E] hover:bg-[#FAF5EB] transition-all flex items-center justify-between text-xs no-underline group"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-lg bg-[#FAF8F4] text-[#A67C2E] flex items-center justify-center shrink-0 border border-[#EAE5DA]">
+                      <Crosshair size={16} aria-hidden="true" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-[#181A17] block">
+                        {t('driver.status.updateMilestones', language === 'en' ? 'Update Route Milestones' : 'Cập nhật mốc hành trình')}
+                      </span>
+                      <span className="text-[11px] text-[#747D88]">
+                        {t('driver.dashboard.milestonesLinkDesc', language === 'en' ? 'Rest stops / Airports / Borders' : 'Đến trạm nghỉ / Sân bay / Biên giới')}
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="text-[#8A8478] group-hover:text-[#A67C2E]" aria-hidden="true" />
+                </Link>
 
-              <div style={{ padding: '10px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Clock size={14} />
-                </div>
-                <div>
-                  <p style={{ fontSize: '13.5px', fontWeight: 700, color: '#111827', margin: 0 }}>Schedule Update</p>
-                  <p style={{ fontSize: '12.5px', color: '#4b5563', margin: '2px 0 0 0' }}>Quarantine checkpoint updated</p>
-                  <p style={{ fontSize: '11px', color: '#9ca3af', margin: '4px 0 0 0' }}>1 hour ago</p>
-                </div>
+                {isEscort && (
+                  <Link
+                    href={`${basePath}/health`}
+                    className="p-3.5 min-h-[52px] rounded-xl border border-[#D8CEBE] hover:border-[#2D5A3F] hover:bg-[#E8F2EB]/60 transition-all flex items-center justify-between text-xs no-underline group"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-lg bg-[#E8F2EB] text-[#2D5A3F] flex items-center justify-center shrink-0">
+                        <Stethoscope size={16} aria-hidden="true" />
+                      </div>
+                      <div>
+                        <span className="font-bold text-[#181A17] block group-hover:text-[#2D5A3F]">
+                          {t('driver.status.healthLog', language === 'en' ? 'Equine Health Log' : 'Nhật ký sức khỏe ngựa')}
+                        </span>
+                        <span className="text-[11px] text-[#747D88]">
+                          {t('driver.status.healthLogDesc', language === 'en' ? 'Log vitals & photos' : 'Ghi thân nhiệt, nhịp tim & ảnh chụp')}
+                        </span>
+                      </div>
+                    </div>
+                    <ChevronRight size={16} className="text-[#8A8478] group-hover:text-[#2D5A3F]" aria-hidden="true" />
+                  </Link>
+                )}
+
+                <Link
+                  href={`${basePath}/trips`}
+                  className="p-3.5 min-h-[52px] rounded-xl border border-[#D8CEBE] hover:border-[#181A17] hover:bg-[#FAF8F4] transition-all flex items-center justify-between text-xs no-underline group"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-lg bg-[#F4F1E9] text-[#181A17] flex items-center justify-center shrink-0">
+                      <Truck size={16} aria-hidden="true" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-[#181A17] block">
+                        {t('driver.status.myTrips', language === 'en' ? 'My Assigned Trips' : 'Danh sách chuyến đi')}
+                      </span>
+                      <span className="text-[11px] text-[#747D88]">
+                        {t('driver.status.myTripsDesc', language === 'en' ? 'Accept or decline dispatch' : 'Xác nhận hoặc từ chối lệnh điều phối')}
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="text-[#8A8478] group-hover:text-[#181A17]" aria-hidden="true" />
+                </Link>
+
+                <Link
+                  href={`${basePath}/incidents`}
+                  className="p-3.5 min-h-[52px] rounded-xl border border-[#D8CEBE] hover:border-[#9E3B3B]/45 hover:bg-rose-50/50 transition-all flex items-center justify-between text-xs no-underline group"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-lg bg-rose-50 text-[#9E3B3B] flex items-center justify-center shrink-0">
+                      <AlertTriangle size={16} aria-hidden="true" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-[#181A17] block group-hover:text-[#9E3B3B]">
+                        {t('driver.status.reportIncident', language === 'en' ? 'Report Route Incident' : 'Báo cáo sự cố tuyến đường')}
+                      </span>
+                      <span className="text-[11px] text-[#747D88]">
+                        {t('driver.status.reportIncidentDesc', language === 'en' ? 'Traffic, customs, vehicle issue' : 'Tắc đường, thủ tục hải quan, hư xe')}
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="text-[#8A8478] group-hover:text-[#9E3B3B]" aria-hidden="true" />
+                </Link>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* 4. QUICK ACTIONS */}
-      <div>
-        <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#111827', marginBottom: '12px' }}>Quick Actions</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
-          {/* Action 1: Status for Driver, Health for Escort */}
-          {isEscort ? (
-            <div
-              onClick={() => router.push(`${basePath}/health`)}
-              style={{ backgroundColor: '#059669', color: '#ffffff', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(5, 150, 105, 0.2)' }}
+      {/* EMERGENCY SOS CONFIRMATION MODAL */}
+      <Modal
+        isOpen={emergencyModalOpen}
+        onClose={closeEmergencyModal}
+        closeDisabled={isSendingEmergency}
+        title={`🚨 ${t('driver.dashboard.sosModalTitle', language === 'en' ? 'CONFIRM EMERGENCY SOS SIGNAL' : 'XÁC NHẬN PHÁT TÍN HIỆU CỨU HỘ KHẨN CẤP (SOS)')}`}
+        maxWidth="500px"
+      >
+        <form onSubmit={handleSendEmergency} className="flex flex-col gap-4 text-xs">
+          <div className="p-3.5 bg-rose-50 border border-[#9E3B3B]/30 rounded-xl text-rose-900 leading-relaxed">
+            <strong className="block text-sm mb-1 text-rose-950">
+              {t('driver.dashboard.sosNoticeTitle', language === 'en' ? 'Urgent Alert to Dispatch & Vet Rescue' : 'Cảnh báo khẩn cấp tới Phòng Điều Hành & Bác Sĩ Cứu Hộ')}
+            </strong>
+            {t(
+              'driver.dashboard.sosNoticeDesc',
+              language === 'en'
+                ? 'Immediately notifies Logistics Manager and Fleet Coordinator to arrange backup transport or emergency veterinary support.'
+                : 'Hệ thống sẽ lập tức gửi thông báo ưu tiên cao nhất tới Logistics Manager và Điều phối viên Tuyến để tổ chức xe thay thế, liên hệ trạm thú y gần nhất hoặc chuyển hướng lộ trình khẩn cấp.'
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="driver-sos-reason" className="font-bold text-[#181A17] block mb-1.5">
+              {t('driver.dashboard.sosReasonLabel', language === 'en' ? 'Short description of emergency:' : 'Mô tả ngắn tình trạng sự cố:')}
+            </label>
+            <textarea
+              id="driver-sos-reason"
+              rows={3}
+              value={emergencyReason}
+              onChange={(e) => setEmergencyReason(e.target.value)}
+              placeholder={t(
+                'driver.dashboard.sosReasonPlaceholder',
+                language === 'en'
+                  ? 'e.g. Tire blowout / Horse showing signs of colic, temp 39.5°C...'
+                  : 'Ví dụ: Xe bị nổ lốp trên đèo Hải Vân / Ngựa Thunder có dấu hiệu đau bụng co giật, thân nhiệt 39.5°C...'
+              )}
+              className="w-full p-3 rounded-xl border border-[#D8CEBE] text-xs outline-none focus:border-[#9E3B3B] font-medium"
+            />
+          </div>
+
+          <a
+            href="tel:19006868"
+            className="p-3 bg-[#FAF8F4] border border-[#D8CEBE] hover:border-[#9E3B3B]/45 rounded-xl no-underline block"
+          >
+            <span className="font-bold text-[#181A17] block mb-0.5">
+              {t('driver.dashboard.hotline247', language === 'en' ? '24/7 Operations Hotline:' : 'Hotline Điều Hành Trực Tiếp 24/7:')}
+            </span>
+            <span className="text-sm font-black text-[#9E3B3B] block">
+              1900-6868 ({t('driver.dashboard.hotlineBranch', language === 'en' ? 'Ext. 1 for Rescue Team' : 'Bấm nhánh 1 cho Đội Cứu Hộ')})
+            </span>
+          </a>
+
+          <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-[#EAE5DA]">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={closeEmergencyModal}
+              disabled={isSendingEmergency}
+              className="min-h-[44px] px-4 border-[#D8CEBE]"
             >
-              <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-                <Stethoscope size={18} />
-              </div>
-              <h4 style={{ fontSize: '14px', fontWeight: 700, margin: 0 }}>Ghi Sức Khỏe Ngựa</h4>
-            </div>
-          ) : (
-            <div
-              onClick={() => router.push(`${basePath}/status`)}
-              style={{ backgroundColor: '#2563eb', color: '#ffffff', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(37, 99, 235, 0.2)' }}
+              {t('common.cancel', language === 'en' ? 'Cancel' : 'Hủy bỏ')}
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={isSendingEmergency || !activeTrip}
+              className="min-h-[44px] px-5 bg-[#9E3B3B] hover:bg-[#7F2E2E] text-white font-bold cursor-pointer"
             >
-              <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-                <Crosshair size={18} />
-              </div>
-              <h4 style={{ fontSize: '14px', fontWeight: 700, margin: 0 }}>Cập Nhật Mốc Hành Trình</h4>
-            </div>
-          )}
-
-          {/* Action 2: Trips list */}
-          <div
-            onClick={() => router.push(`${basePath}/trips`)}
-            style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-              <Truck size={18} />
-            </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>My Trips (Lịch Trình)</h4>
+              {isSendingEmergency
+                ? t('driver.dashboard.sendingSos', language === 'en' ? 'Sending SOS...' : 'Đang phát tín hiệu...')
+                : t('driver.dashboard.confirmSosBtn', language === 'en' ? 'Confirm & Send SOS' : 'Xác nhận gửi SOS')}
+            </Button>
           </div>
-
-          {/* Action 3: Route map or check */}
-          <div
-            onClick={() => router.push(`${basePath}/status`)}
-            style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-              <Map size={18} />
-            </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#111827', margin: 0 }}>Xem Bản Đồ Tuyến</h4>
-          </div>
-
-          <div
-            onClick={() => toast.error('Emergency assistance triggered: Dispatcher notified.')}
-            style={{ backgroundColor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '12px', padding: '18px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
-          >
-            <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#dc2626', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-              <PhoneCall size={18} />
-            </div>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#dc2626', margin: 0 }}>Emergency</h4>
-          </div>
-        </div>
-      </div>
+        </form>
+      </Modal>
     </div>
   );
 }

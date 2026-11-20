@@ -26,7 +26,7 @@ function printInvoice(invoice: Invoice) {
   doc.documentElement.lang = 'vi';
   doc.title = `Hóa đơn ${invoice.code}`;
   const style = doc.createElement('style');
-  style.textContent = 'body{font:15px Arial,sans-serif;color:#17243b;max-width:800px;margin:40px auto;padding:24px}h1{font-size:26px}p{line-height:1.6}table{width:100%;border-collapse:collapse;margin:24px 0}td,th{text-align:left;border:1px solid #ccd3dc;padding:12px}button{padding:12px}@media print{button{display:none}body{margin:0}}';
+  style.textContent = 'body{font:15px Arial,sans-serif;color:#181A17;max-width:800px;margin:40px auto;padding:24px}h1{font-size:26px;color:#181A17}p{line-height:1.6}table{width:100%;border-collapse:collapse;margin:24px 0}td,th{text-align:left;border:1px solid #D8CEBE;padding:12px}th{background:#FAF8F4}button{padding:12px;cursor:pointer}@media print{button{display:none}body{margin:0}}';
   doc.head.append(style);
   const add = (tag: string, text: string) => { const el = doc.createElement(tag); el.textContent = text; doc.body.append(el); return el; };
   add('h1', `HÓA ĐƠN VẬN CHUYỂN ${invoice.code}`);
@@ -61,8 +61,8 @@ function printInvoice(invoice: Invoice) {
 }
 
 export function InvoiceSummary({ invoice }: { invoice: Invoice }) {
-  return <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
-    <div><p className="font-semibold text-slate-900">Hóa đơn chính thức {invoice.code}</p><p className="mt-1 text-sm text-slate-600">Phát hành {new Date(invoice.issuedAt).toLocaleString('vi-VN')} · {invoice.amount.toLocaleString('vi-VN')} VND</p></div>
-    <button type="button" onClick={() => printInvoice(invoice)} className="min-h-11 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">In / lưu hóa đơn PDF</button>
+  return <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E8E2D8] pb-4">
+    <div><p className="font-semibold text-[#181A17]">Hóa đơn chính thức {invoice.code}</p><p className="mt-1 text-sm text-[#5B6779]">Phát hành {new Date(invoice.issuedAt).toLocaleString('vi-VN')} · {invoice.amount.toLocaleString('vi-VN')} VND</p></div>
+    <button type="button" onClick={() => printInvoice(invoice)} className="min-h-11 rounded-lg border border-[#D8CEBE] bg-white px-4 text-sm font-semibold text-[#A67C2E] hover:bg-[#FAF8F4] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C4B38E]">In / lưu hóa đơn PDF</button>
   </div>;
 }

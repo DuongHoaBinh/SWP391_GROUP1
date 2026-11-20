@@ -10,7 +10,19 @@ const { renderToStaticMarkup } = require('react-dom/server');
 function load(file) {
   const filename = path.resolve(__dirname, '../src/features/orders', file);
   const compiled = new Module(filename, module); compiled.filename = filename; compiled.paths = module.paths;
-  compiled.require = name => name.startsWith('.') ? load(path.relative(path.resolve(__dirname, '../src/features/orders'), path.resolve(path.dirname(filename), name + '.tsx')).replace(/insurance-policy\.tsx$/, 'insurance-policy.ts')) : require(name);
+  compiled.require = name => {
+    if (name === '@/lib/i18n/LanguageContext') return {
+      useLanguage: () => ({
+        language: 'vi',
+        t: (_k, fb, p) => {
+          let s = fb || _k;
+          if (p) Object.entries(p).forEach(([k, v]) => { s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), String(v)); });
+          return s;
+        },
+      }),
+    };
+    return name.startsWith('.') ? load(path.relative(path.resolve(__dirname, '../src/features/orders'), path.resolve(path.dirname(filename), name + '.tsx')).replace(/insurance-policy\.tsx$/, 'insurance-policy.ts')) : require(name);
+  };
   compiled._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename);
   return compiled.exports;
 }

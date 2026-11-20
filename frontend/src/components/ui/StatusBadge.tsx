@@ -1,4 +1,8 @@
+'use client';
+
 import React from 'react';
+import { cn } from '@/lib/utils';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 export type BadgeVariant =
   | 'transit'
@@ -12,55 +16,66 @@ interface StatusBadgeProps {
   label: string;
   variant?: BadgeVariant;
   hasDot?: boolean;
+  className?: string;
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
   label,
   variant = 'neutral',
   hasDot = false,
+  className,
 }) => {
-  const getBadgeStyle = (): { bg: string; color: string; dotColor: string } => {
+  const lang = useLanguage() as { translateStatus?: (s?: string | null) => string } | null;
+  const displayLabel = lang?.translateStatus ? lang.translateStatus(label) : label;
+
+  const getVariantClasses = (): { wrapper: string; dot: string } => {
     switch (variant) {
       case 'transit':
-        return { bg: '#fff7ed', color: '#c2410c', dotColor: '#ea580c' }; // amber/orange
-      case 'pending':
-        return { bg: '#fef3c7', color: '#b45309', dotColor: '#f59e0b' }; // yellow
+        return {
+          wrapper: 'bg-primary-subtle text-primary border border-primary/30',
+          dot: 'bg-primary',
+        };
       case 'success':
-        return { bg: '#dcfce7', color: '#15803d', dotColor: '#16a34a' }; // green
+        return {
+          wrapper: 'bg-success-bg text-success border border-success/25',
+          dot: 'bg-success',
+        };
+      case 'pending':
+        return {
+          wrapper: 'bg-warning-bg text-warning border border-warning/25',
+          dot: 'bg-warning',
+        };
       case 'danger':
-        return { bg: '#fee2e2', color: '#b91c1c', dotColor: '#ef4444' }; // red
+        return {
+          wrapper: 'bg-danger-bg text-danger border border-danger/25',
+          dot: 'bg-danger',
+        };
       case 'info':
-        return { bg: '#e0f2fe', color: '#0369a1', dotColor: '#0284c7' }; // light blue
+        return {
+          wrapper: 'bg-[#F0EEE8] text-[#273244] border border-[#D8CEBE]',
+          dot: 'bg-[#A67C2E]',
+        };
       case 'neutral':
       default:
-        return { bg: '#f1f5f9', color: '#475569', dotColor: '#64748b' };
+        return {
+          wrapper: 'bg-surface-muted text-text-secondary border border-border',
+          dot: 'bg-text-muted',
+        };
     }
   };
 
-  const { bg, color, dotColor } = getBadgeStyle();
+  const { wrapper, dot } = getVariantClasses();
 
   return (
     <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '3px 10px',
-        borderRadius: '999px',
-        fontSize: '12px',
-        fontWeight: 600,
-        backgroundColor: bg,
-        color: color,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {hasDot && (
-        <span
-          className="pulsing-dot"
-          style={{ backgroundColor: dotColor }}
-        />
+      className={cn(
+        'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap max-w-full truncate',
+        wrapper,
+        className
       )}
-      {label}
+    >
+      {hasDot && <span aria-hidden="true" className={cn('pulsing-dot w-2 h-2 rounded-full shrink-0', dot)} />}
+      <span className="truncate">{displayLabel}</span>
     </span>
   );
 };

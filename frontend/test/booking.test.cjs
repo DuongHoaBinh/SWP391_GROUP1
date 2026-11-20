@@ -11,6 +11,17 @@ function load(file) {
   const filename = path.resolve(__dirname, '../src/features/orders', file);
   const compiled = new Module(filename, module); compiled.filename = filename; compiled.paths = module.paths;
   compiled.require = name => {
+    if (name === 'lucide-react') return new Proxy({}, { get: () => (props) => React.createElement('svg', props) });
+    if (name === '@/lib/i18n/LanguageContext') return {
+      useLanguage: () => ({
+        language: 'vi',
+        t: (_k, fb, p) => {
+          let s = fb || _k;
+          if (p) Object.entries(p).forEach(([k, v]) => { s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), String(v)); });
+          return s;
+        },
+      }),
+    };
     if (!name.startsWith('.')) return require(name);
     const base = path.resolve(path.dirname(filename), name);
     const resolved = ['.ts', '.tsx'].map(extension => base + extension).find(file => fs.existsSync(file));
@@ -19,9 +30,9 @@ function load(file) {
   compiled._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, filename);
   return compiled.exports;
 }
-const { previewBookingQuote, bookingQuotePayload } = load('booking-policy.ts');
+const { previewBookingQuote, bookingQuotePayload, suggestManagerFreightQuote } = load('booking-policy.ts');
 const { BookingChoice } = load('components/BookingChoice.tsx');
-const { BookingSummary, BookingQuoteSummary } = load('components/BookingSummary.tsx');
+const { BookingSummary, BookingQuoteSummary, ManagerFreightSuggestionCard } = load('components/BookingSummary.tsx');
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
 
 test('shared quote multiplies total quantity; charter remains flat with separate insurance', () => {
@@ -51,4 +62,27 @@ test('saved legacy totals never invent a unit price; charter summary describes f
   assert.match(legacy, /2 ô chuồng/); assert.doesNotMatch(legacy, /0 VNĐ/);
   const charter = render(BookingSummary, { bookingType: 'dedicated_charter', horseCount: 4 });
   assert.match(charter, /Giá trọn gói riêng cho đoàn 4 ngựa/);
+});
+test('manager freight suggestion differentiates road vs air and shared stall vs dedicated charter', () => {
+  const roadShared1 = suggestManagerFreightQuote({ transportMode: 'road', bookingType: 'shared_stall', horseCount: 1, distanceKm: 1000, customsCount: 1 });
+  const roadCharter1 = suggestManagerFreightQuote({ transportMode: 'road', bookingType: 'dedicated_charter', horseCount: 1, distanceKm: 1000, customsCount: 1 });
+  const airShared1 = suggestManagerFreightQuote({ transportMode: 'air', bookingType: 'shared_stall', horseCount: 1, distanceKm: 1000, customsCount: 1 });
+  const airCharter1 = suggestManagerFreightQuote({ transportMode: 'air', bookingType: 'dedicated_charter', horseCount: 1, distanceKm: 1000, customsCount: 1 });
+
+  assert.ok(roadCharter1.suggestedTotalFreightVnd > roadShared1.suggestedTotalFreightVnd * 2);
+  assert.ok(airShared1.suggestedTotalFreightVnd > roadShared1.suggestedTotalFreightVnd * 2);
+  assert.ok(airCharter1.suggestedTotalFreightVnd > airShared1.suggestedTotalFreightVnd * 2);
+  assert.equal(roadShared1.alternateBookingFreightVnd, roadCharter1.suggestedTotalFreightVnd);
+  assert.equal(airShared1.alternateBookingFreightVnd, airCharter1.suggestedTotalFreightVnd);
+
+  const cardHtml = render(ManagerFreightSuggestionCard, {
+    transportMode: 'air',
+    bookingType: 'dedicated_charter',
+    horseCount: 2,
+    distanceKm: 1200,
+    customsCount: 2,
+    currentInput: '0',
+  });
+  assert.match(cardHtml, /Hàng không · Bao trọn chuyến/);
+  assert.match(cardHtml, /Air Pallet Jet Stall/);
 });

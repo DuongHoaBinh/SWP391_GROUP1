@@ -1,153 +1,557 @@
 'use client';
 
-import React, { useState } from 'react';
-import { AlertTriangle, Plus, ShieldAlert, CheckCircle, Clock, MapPin, X } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  AlertTriangle,
+  Clock,
+  ExternalLink,
+  MapPin,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
-
-interface Incident {
-  id: string;
-  tripCode: string;
-  type: 'Vehicle Breakdown' | 'Traffic Delay' | 'Equine Medical Emergency' | 'Severe Weather' | 'Border Issue';
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-  status: 'OPEN' | 'IN_REVIEW' | 'RESOLVED';
-  description: string;
-  reportedAt: string;
-}
-
-const INITIAL_INCIDENTS: Incident[] = [
-  { id: 'inc-01', tripCode: 'REQ-002', type: 'Border Issue', severity: 'HIGH', status: 'IN_REVIEW', description: 'Scanner delay at customs checkpoint. Vehicle held for manual papers verification.', reportedAt: '1h ago' },
-  { id: 'inc-02', tripCode: 'REQ-001', type: 'Traffic Delay', severity: 'MEDIUM', status: 'RESOLVED', description: 'Heavy congestion on highway 1A due to overturned truck. Delay +35m.', reportedAt: 'Yesterday' },
-];
+import { openAuthenticatedApiFile } from '@/lib/api-client';
+import { trackingApi, AssignedTripSummary } from '@/features/tracking/api/tracking.api';
+import { ChangeRequestItem, incidentsApi, IncidentDetailItem } from '@/features/incidents/api/incidents.api';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 export default function DriverIncidentsPage() {
-  const [incidents, setIncidents] = useState<Incident[]>(INITIAL_INCIDENTS);
+  const { t, language, translateStatus, translateIncident, translateSeverity } = useLanguage();
+  const isEn = language === 'en';
+
+  const [trips, setTrips] = useState<AssignedTripSummary[]>([]);
+  const [incidents, setIncidents] = useState<IncidentDetailItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [form, setForm] = useState({
-    type: 'Vehicle Breakdown',
-    severity: 'HIGH',
+    shipmentId: 0,
+    type: 'traffic_delay',
+    severity: 'HIGH' as 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW',
+    location: '',
+    affectedBorderGate: '',
     description: '',
   });
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
 
-  const handleReport = (e: React.FormEvent) => {
+  const loadData = useCallback(
+    async (silent = false) => {
+      if (!silent) setIsLoading(true);
+      else setIsRefreshing(true);
+      setLoadError(null);
+
+      try {
+        const [myTripsRes, incRes] = await Promise.all([
+          trackingApi.getMyTrips(),
+          incidentsApi.listIncidents(),
+        ]);
+        const safeTrips = Array.isArray(myTripsRes) ? myTripsRes : [];
+        const safeIncidents = Array.isArray(incRes) ? incRes : [];
+        setTrips(safeTrips);
+        setIncidents(safeIncidents);
+
+        if (safeTrips.length > 0) {
+          setForm((prev) =>
+            prev.shipmentId === 0
+              ? { ...prev, shipmentId: safeTrips[0].shipment_id }
+              : prev,
+          );
+        }
+      } catch (err: any) {
+        const msg =
+          err?.message ||
+          t(
+            'incidents.loadFailed',
+            isEn ? 'Unable to load incident reports from server.' : 'Không thể tải dữ liệu sự cố từ hệ thống.',
+          );
+        setLoadError(msg);
+        if (!silent) {
+          toast.error(msg);
+        }
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+    },
+    [isEn, t],
+  );
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const openAddModal = () => {
+    if (trips.length === 0) return;
+    setForm({
+      shipmentId: trips[0]?.shipment_id || 0,
+      type: 'traffic_delay',
+      severity: 'HIGH',
+      location: '',
+      affectedBorderGate: '',
+      description: '',
+    });
+    setEvidenceFiles([]);
+    setIsAddOpen(true);
+  };
+
+  const closeAddModal = () => {
+    if (isSubmitting) return;
+    setIsAddOpen(false);
+    setEvidenceFiles([]);
+  };
+
+  const handleReport = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.description) {
-      toast.error('Please describe the incident situation.');
+    if (isSubmitting) return;
+    if (!form.description.trim()) {
+      toast.error(
+        t('incidents.descRequired', isEn ? 'Please describe the incident.' : 'Vui lòng nhập mô tả chi tiết sự cố gặp phải.'),
+      );
       return;
     }
-    const newInc: Incident = {
-      id: `inc-${Date.now()}`,
-      tripCode: 'REQ-002',
-      type: form.type as any,
-      severity: form.severity as any,
-      status: 'OPEN',
-      description: form.description,
-      reportedAt: 'Just now',
-    };
-    setIncidents([newInc, ...incidents]);
-    toast.success('Emergency incident reported to Dispatch & Manager!');
-    setIsAddOpen(false);
-    setForm({ type: 'Vehicle Breakdown', severity: 'HIGH', description: '' });
+    if (!form.shipmentId) {
+      toast.error(
+        t('incidents.shipmentRequired', isEn ? 'Please select the affected trip.' : 'Vui lòng chọn chuyến đi gặp sự cố.'),
+      );
+      return;
+    }
+    if (evidenceFiles.some((f) => f.size > 5 * 1024 * 1024)) {
+      toast.error(isEn ? 'Each evidence file must be <= 5MB.' : 'Mỗi tệp bằng chứng phải nhỏ hơn hoặc bằng 5MB.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const selectedTrip = trips.find((tr) => tr.shipment_id === Number(form.shipmentId));
+      const loc =
+        form.location.trim() ||
+        selectedTrip?.origin_location ||
+        (isEn ? 'Field Location' : 'Vị trí thực địa');
+
+      await incidentsApi.createIncident(Number(form.shipmentId), {
+        incidentType: form.type,
+        description: form.description.trim(),
+        severity: form.severity.toLowerCase() as 'low' | 'medium' | 'high' | 'critical',
+        locationText: loc,
+        affectedBorderGate: form.affectedBorderGate.trim() || undefined,
+        files: evidenceFiles.slice(0, 5),
+      });
+
+      toast.success(
+        t(
+          'incidents.reportSuccess',
+          isEn
+            ? 'Incident report submitted to Coordinator & Logistics Manager!'
+            : 'Báo cáo sự cố thực địa đã gửi tới Điều phối viên Tuyến & Quản lý Logistics!',
+        ),
+      );
+
+      setIsAddOpen(false);
+      setEvidenceFiles([]);
+      await loadData(true);
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          t('incidents.reportFailed', isEn ? 'Failed to send incident report.' : 'Không thể gửi báo cáo sự cố qua mạng.'),
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  const getIncidentIcon = (type: string) => {
+    switch (type) {
+      case 'traffic_delay':
+        return '🚧 ';
+      case 'vehicle_breakdown':
+        return '🚚 ';
+      case 'weather':
+        return '🌧️ ';
+      case 'border_issue':
+        return '🛂 ';
+      case 'horse_medical':
+        return '🩺 ';
+      default:
+        return '⚠️ ';
+    }
+  };
+
+  const renderChangeRequestSummary = (cr: ChangeRequestItem) => (
+    <span
+      key={cr.id}
+      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+        cr.status === 'approved'
+          ? 'bg-[#E8F2EB] text-[#287653] border-[#B7DBC4]'
+          : cr.status === 'rejected'
+          ? 'bg-[#F8EAEA] text-[#B33E3E] border-[#E5B8B8]'
+          : 'bg-[#FAF5EB] text-[#966516] border-[#D4C5A3]'
+      }`}
+    >
+      #{cr.id} ({cr.changeType}) — {cr.status}
+      {cr.publishedAt ? (isEn ? ' • Published' : ' • Đã xuất bản') : ''}
+    </span>
+  );
 
   return (
     <div className="flex flex-col gap-6 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 m-0">Emergency Incident Reports</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Report breakdowns, border delays, and equine medical emergencies directly to Operations.
+          <h1 className="text-2xl font-bold text-[#181A17] m-0">
+            {t('driver.incidents.title', isEn ? 'Route & Emergency Incident Reports' : 'Báo Cáo Sự Cố Tuyến Đường & Khẩn Cấp')}
+          </h1>
+          <p className="text-sm text-[#57564E] mt-1 mb-0">
+            {t(
+              'driver.incidents.subtitle',
+              isEn
+                ? 'Report vehicle breakdowns, border congestion, severe weather, or equine emergencies with field evidence.'
+                : 'Báo cáo hỏng hóc xe, ách tắc cửa khẩu, thời tiết xấu hoặc cấp cứu thú y kèm ảnh bằng chứng tới Điều phối viên & Quản lý.',
+            )}
           </p>
         </div>
-        <Button 
-          variant="primary" 
-          onClick={() => setIsAddOpen(true)}
-          className="bg-red-600 hover:bg-red-700 shadow-sm"
+
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void loadData(true)}
+            disabled={isRefreshing}
+            className="min-h-[44px] px-4 rounded-xl border-[#D8CEBE] font-bold"
+          >
+            <RefreshCw size={15} className={`mr-1.5 text-[#A67C2E] ${isRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+            {t('common.refresh', isEn ? 'Refresh' : 'Làm mới')}
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            disabled={isLoading || trips.length === 0}
+            onClick={openAddModal}
+            title={trips.length === 0 ? (isEn ? 'No assigned trips to report' : 'Chưa có chuyến đi nào được gán') : undefined}
+            className="min-h-[44px] px-5 rounded-xl bg-[#9E3B3B] hover:bg-[#7F2E2E] text-white font-bold shadow-sm disabled:opacity-45 disabled:cursor-not-allowed"
+          >
+            <AlertTriangle size={17} className="mr-1.5" aria-hidden="true" />
+            {t('driver.incidents.newIncidentBtn', isEn ? 'Report New Incident' : 'Báo Cáo Sự Cố Mới')}
+          </Button>
+        </div>
+      </div>
+
+      {loadError && (
+        <div
+          role="alert"
+          className="p-4 rounded-xl bg-rose-50 border border-[#9E3B3B]/35 text-xs font-semibold text-[#9E3B3B] flex flex-wrap items-center justify-between gap-3"
         >
-          <AlertTriangle size={18} className="mr-1.5" /> Report New Incident
-        </Button>
-      </div>
+          <span>{loadError}</span>
+          <button
+            type="button"
+            onClick={() => void loadData()}
+            className="min-h-[40px] px-3.5 py-1.5 rounded-lg bg-[#181A17] text-[#C4B38E] font-bold cursor-pointer hover:bg-[#2C2F2A]"
+          >
+            {t('common.retry', isEn ? 'Retry' : 'Thử lại')}
+          </button>
+        </div>
+      )}
 
-      <div className="flex flex-col gap-4">
-        {incidents.map((inc) => (
-          <div key={inc.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-blue-600 text-sm">{inc.tripCode}</span>
-                <span className="font-bold text-slate-900 text-sm">• {inc.type}</span>
-                <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                  inc.severity === 'CRITICAL' ? 'bg-red-100 text-red-700' :
-                  inc.severity === 'HIGH' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                }`}>
-                  {inc.severity}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400 font-medium">{inc.reportedAt}</span>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                  inc.status === 'RESOLVED' ? 'bg-emerald-100 text-emerald-800' :
-                  inc.status === 'IN_REVIEW' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'
-                }`}>
-                  {inc.status}
-                </span>
-              </div>
-            </div>
-            <p className="text-sm text-slate-700 mt-3 m-0 leading-relaxed font-medium">
-              {inc.description}
-            </p>
+      {isLoading ? (
+        <div className="p-12 text-center bg-white rounded-2xl border border-[#D8CEBE] shadow-sm flex flex-col items-center justify-center gap-3">
+          <RefreshCw size={26} className="animate-spin text-[#A67C2E]" aria-hidden="true" />
+          <p className="text-xs font-semibold text-[#57564E] m-0">
+            {t('driver.incidents.loading', isEn ? 'Loading field incident reports...' : 'Đang tải danh sách sự cố trên các chuyến đi được phân công...')}
+          </p>
+        </div>
+      ) : incidents.length === 0 ? (
+        <div className="p-12 text-center bg-white rounded-2xl border border-[#D8CEBE] shadow-sm flex flex-col items-center justify-center gap-3">
+          <div className="w-14 h-14 rounded-2xl bg-[#E8F2EB] text-[#2D5A3F] flex items-center justify-center border border-[#2D5A3F]/20">
+            <ShieldCheck size={28} aria-hidden="true" />
           </div>
-        ))}
-      </div>
+          <h2 className="text-base font-bold text-[#181A17] m-0">
+            {t('driver.incidents.noIncidentsTitle', isEn ? 'No Incidents Recorded' : 'Chưa Có Sự Cố Nào Được Ghi Nhận')}
+          </h2>
+          <p className="text-xs text-[#57564E] max-w-md m-0 leading-relaxed">
+            {trips.length === 0
+              ? isEn
+                ? 'You have no assigned shipments yet. Incident reporting unlocks automatically when a trip is assigned.'
+                : 'Bạn hiện chưa có chuyến đi nào được phân công. Chức năng báo cáo sự cố sẽ mở khi có chuyến được giao.'
+              : t(
+                  'driver.incidents.noIncidentsDesc',
+                  isEn
+                    ? 'All your assigned shipments are operating safely. Tap "Report New Incident" if obstacles occur on the road.'
+                    : 'Tất cả các chuyến đi được phân công của bạn hiện đang vận hành bình thường. Bấm "Báo Cáo Sự Cố Mới" nếu phát sinh trở ngại thực địa.',
+                )}
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {incidents.map((inc) => {
+            const sevUpper = String(inc.severity || 'HIGH').toUpperCase();
+            return (
+              <div
+                key={inc.id}
+                className="bg-white rounded-2xl border border-[#D8CEBE] p-5 shadow-sm flex flex-col gap-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#EAE5DA] pb-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono font-black text-[#181A17] text-sm">
+                      {inc.requestCode || `REQ-${String(inc.shipmentId).padStart(3, '0')}`}
+                    </span>
+                    <span className="font-bold text-[#181A17] text-sm">
+                      • {getIncidentIcon(inc.incidentType)}
+                      {translateIncident(inc.incidentType)}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[11px] font-extrabold ${
+                        sevUpper === 'CRITICAL'
+                          ? 'bg-rose-100 text-[#9E3B3B] border border-[#9E3B3B]/30'
+                          : sevUpper === 'HIGH'
+                          ? 'bg-[#FAF5EB] text-[#966516] border border-[#D4C5A3]'
+                          : 'bg-[#F3EFE4] text-[#181A17] border border-[#D8CEBE]'
+                      }`}
+                    >
+                      {translateSeverity(inc.severity)}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                        inc.status === 'resolved' || inc.status === 'closed'
+                          ? 'bg-[#E8F2EB] text-[#2D5A3F] border border-[#2D5A3F]/25'
+                          : 'bg-[#FAF5EB] text-[#966516] border border-[#D4C5A3]'
+                      }`}
+                    >
+                      {translateStatus(inc.status)}
+                    </span>
+                  </div>
 
-      {/* Report Modal */}
-      {isAddOpen && (
-        <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Report Transport Incident" maxWidth="500px">
-          <form onSubmit={handleReport} className="flex flex-col gap-4">
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Incident Category</label>
+                  <div className="flex items-center gap-1.5 text-xs text-[#747D88]">
+                    <Clock size={13} aria-hidden="true" />
+                    <span>
+                      {inc.reportedAt
+                        ? new Date(inc.reportedAt).toLocaleString(isEn ? 'en-US' : 'vi-VN')
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-xs sm:text-sm text-[#3C403A] m-0 leading-relaxed font-medium break-words">
+                  {inc.description}
+                </p>
+
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#57564E]">
+                  {inc.locationText && (
+                    <span className="inline-flex items-center gap-1">
+                      <MapPin size={13} className="text-[#8A8478]" aria-hidden="true" />
+                      {inc.locationText}
+                    </span>
+                  )}
+                  {inc.affectedBorderGate && (
+                    <span className="font-semibold text-[#966516]">
+                      {isEn ? 'Border Gate:' : 'Cửa khẩu:'} {inc.affectedBorderGate}
+                    </span>
+                  )}
+                </div>
+
+                {inc.evidenceUrls && inc.evidenceUrls.length > 0 && (
+                  <div className="flex flex-wrap gap-3 text-xs">
+                    {inc.evidenceUrls.map((u, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => void openAuthenticatedApiFile(u)}
+                        className="inline-flex items-center gap-1 text-[#A67C2E] font-bold hover:underline bg-transparent border-0 p-0 cursor-pointer"
+                      >
+                        <ExternalLink size={12} aria-hidden="true" />
+                        {isEn ? `Evidence #${idx + 1}` : `Bằng chứng #${idx + 1}`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {inc.changeRequests && inc.changeRequests.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-2 border-t border-[#EAE5DA]">
+                    {inc.changeRequests.map(renderChangeRequestSummary)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* REPORT NEW INCIDENT MODAL */}
+      <Modal
+        isOpen={isAddOpen}
+        onClose={closeAddModal}
+        closeDisabled={isSubmitting}
+        title={t('driver.incidents.modalTitle', isEn ? 'Report New Route Incident' : 'Báo Cáo Sự Cố Tuyến Đường Mới')}
+        maxWidth="540px"
+      >
+        <form onSubmit={handleReport} className="flex flex-col gap-4 text-xs">
+          <div className="p-3.5 bg-rose-50 border border-[#9E3B3B]/30 rounded-xl text-rose-900 leading-relaxed">
+            <strong className="block text-xs uppercase font-extrabold text-[#9E3B3B] mb-0.5">
+              {t('driver.incidents.rescueProcessTitle', isEn ? 'Emergency Rescue & Change Request Flow 5' : 'Quy trình Cứu hộ & Điều chỉnh Lộ trình (Flow 5)')}
+            </strong>
+            {t(
+              'driver.incidents.rescueProcessDesc',
+              isEn
+                ? 'Triggers a real-time incident report to Route Coordinator and Logistics Manager for 2-step detour/cost approval.'
+                : 'Tạo hồ sơ sự cố thực địa gửi Điều phối viên Tuyến lập phương án thay đổi và trình Quản lý Logistics duyệt 2 bước.',
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="inc-trip-select" className="font-bold text-[#181A17] block mb-1.5">
+              {t('driver.incidents.affectedTripLabel', isEn ? 'Affected Trip *' : 'Chuyến đi gặp sự cố *')}
+            </label>
+            <select
+              id="inc-trip-select"
+              value={form.shipmentId}
+              onChange={(e) => setForm({ ...form, shipmentId: Number(e.target.value) })}
+              required
+              className="w-full min-h-[44px] px-3 rounded-xl border border-[#D8CEBE] text-xs font-semibold bg-white outline-none focus:border-[#181A17]"
+            >
+              {trips.length === 0 ? (
+                <option value={0}>
+                  {t('driver.incidents.noTripsAssignedOption', isEn ? 'No assigned trips' : 'Chưa có chuyến đi nào được gán')}
+                </option>
+              ) : (
+                trips.map((tr) => (
+                  <option key={tr.shipment_id} value={tr.shipment_id}>
+                    #{tr.customer_request_code || tr.request_code} — {tr.origin_location} → {tr.destination_location}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col justify-between">
+              <label htmlFor="inc-type-select" className="font-bold text-[#181A17] block mb-1.5">
+                {t('driver.incidents.classificationLabel', isEn ? 'Incident Type *' : 'Phân loại sự cố *')}
+              </label>
               <select
+                id="inc-type-select"
                 value={form.type}
                 onChange={(e) => setForm({ ...form, type: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 bg-white"
+                className="w-full min-h-[44px] px-3 rounded-xl border border-[#D8CEBE] text-xs font-semibold bg-white outline-none focus:border-[#181A17]"
               >
-                <option value="Vehicle Breakdown">Vehicle Breakdown / Engine Trouble</option>
-                <option value="Traffic Delay">Traffic / Route Congestion</option>
-                <option value="Equine Medical Emergency">Equine Medical Emergency (Colic, Fever, Injury)</option>
-                <option value="Border Issue">Border Gate / Customs Inspection Delay</option>
-                <option value="Severe Weather">Severe Weather (Flooding, Storms)</option>
+                <option value="traffic_delay">{translateIncident('traffic_delay')}</option>
+                <option value="vehicle_breakdown">{translateIncident('vehicle_breakdown')}</option>
+                <option value="weather">{translateIncident('weather')}</option>
+                <option value="border_issue">{translateIncident('border_issue')}</option>
+                <option value="horse_medical">{translateIncident('horse_medical')}</option>
+                <option value="other">{translateIncident('other')}</option>
               </select>
             </div>
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Severity Level</label>
+
+            <div className="flex flex-col justify-between">
+              <label htmlFor="inc-severity-select" className="font-bold text-[#181A17] block mb-1.5">
+                {t('incidents.severity', isEn ? 'Severity' : 'Mức độ nghiêm trọng')} <span className="text-[#9E3B3B]">*</span>
+              </label>
               <select
+                id="inc-severity-select"
                 value={form.severity}
-                onChange={(e) => setForm({ ...form, severity: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500 bg-white font-semibold text-red-600"
+                onChange={(e) => setForm({ ...form, severity: e.target.value as any })}
+                className="w-full min-h-[44px] px-3 rounded-xl border border-[#D8CEBE] text-xs font-semibold bg-white outline-none focus:border-[#181A17]"
               >
-                <option value="CRITICAL">CRITICAL (Requires immediate emergency response)</option>
-                <option value="HIGH">HIGH (Major route or schedule disruption)</option>
-                <option value="MEDIUM">MEDIUM (Moderate delay)</option>
-                <option value="LOW">LOW (Informational)</option>
+                <option value="CRITICAL">{translateSeverity('critical')}</option>
+                <option value="HIGH">{translateSeverity('high')}</option>
+                <option value="MEDIUM">{translateSeverity('medium')}</option>
+                <option value="LOW">{translateSeverity('low')}</option>
               </select>
             </div>
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Situation Description *</label>
-              <textarea 
-                rows={4}
-                placeholder="Provide location, symptoms, vehicle condition, and immediate assistance needed..."
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm outline-none focus:border-blue-500"
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col justify-between">
+              <label htmlFor="inc-location-input" className="font-bold text-[#181A17] block mb-1.5">
+                {t('driver.incidents.currentLocationLabel', isEn ? 'Field Location (Km / Highway)' : 'Vị trí thực địa (Km / Quốc lộ)')}
+              </label>
+              <input
+                id="inc-location-input"
+                type="text"
+                placeholder={isEn ? 'e.g. Km 84+200 Highway 1A' : 'VD: Km 84+200 Quốc lộ 1A'}
+                value={form.location}
+                onChange={(e) => setForm({ ...form, location: e.target.value })}
+                className="w-full min-h-[44px] px-3.5 rounded-xl border border-[#D8CEBE] text-xs outline-none focus:border-[#181A17]"
               />
             </div>
-            <div className="flex justify-end gap-3 mt-2">
-              <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
-              <Button type="submit" variant="primary" className="bg-red-600 hover:bg-red-700">Submit Emergency Report</Button>
+
+            <div className="flex flex-col justify-between">
+              <label htmlFor="inc-border-input" className="font-bold text-[#181A17] block mb-1.5">
+                {isEn ? 'Affected Border Gate (if detouring)' : 'Cửa khẩu ảnh hưởng (nếu có)'}
+              </label>
+              <input
+                id="inc-border-input"
+                type="text"
+                placeholder={isEn ? 'e.g. Moc Bai / Lao Bao Gate' : 'VD: Cửa khẩu Mộc Bài / Lao Bảo'}
+                value={form.affectedBorderGate}
+                onChange={(e) => setForm({ ...form, affectedBorderGate: e.target.value })}
+                className="w-full min-h-[44px] px-3.5 rounded-xl border border-[#D8CEBE] text-xs outline-none focus:border-[#181A17]"
+              />
             </div>
-          </form>
-        </Modal>
-      )}
+          </div>
+
+          <div>
+            <label htmlFor="inc-desc-textarea" className="font-bold text-[#181A17] block mb-1.5">
+              {t('driver.incidents.situationDescLabel', isEn ? 'Detailed Situation *' : 'Mô tả chi tiết tình huống *')}
+            </label>
+            <textarea
+              id="inc-desc-textarea"
+              rows={3}
+              required
+              placeholder={t(
+                'driver.incidents.situationPlaceholder',
+                isEn
+                  ? 'Describe vehicle condition, congestion cause, or horse symptoms...'
+                  : 'Nêu rõ tình trạng xe, nguyên nhân ùn tắc hoặc biểu hiện bất thường của ngựa để Điều phối viên lên phương án...',
+              )}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              className="w-full p-3 rounded-xl border border-[#D8CEBE] text-xs outline-none focus:border-[#181A17] font-medium leading-relaxed"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="inc-files-input" className="font-bold text-[#181A17] block mb-1.5">
+              {isEn ? 'Field Evidence Photos / Reports (Max 5, <= 5MB each)' : 'Ảnh / Biên bản bằng chứng thực địa (Tối đa 5 tệp, <= 5MB/tệp)'}
+            </label>
+            <input
+              id="inc-files-input"
+              type="file"
+              multiple
+              accept=".jpg,.jpeg,.png,.pdf"
+              onChange={(e) => setEvidenceFiles(Array.from(e.target.files || []).slice(0, 5))}
+              className="block w-full text-xs text-[#57564E]"
+            />
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-[#EAE5DA]">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={closeAddModal}
+              disabled={isSubmitting}
+              className="min-h-[44px] px-4 rounded-xl border-[#D8CEBE]"
+            >
+              {t('common.cancel', isEn ? 'Cancel' : 'Hủy')}
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={isSubmitting || !form.shipmentId}
+              className="min-h-[44px] px-5 rounded-xl bg-[#9E3B3B] hover:bg-[#7F2E2E] text-white font-bold cursor-pointer"
+            >
+              {isSubmitting
+                ? t('common.sending', isEn ? 'Sending...' : 'Đang gửi...')
+                : t('driver.incidents.sendReportBtn', isEn ? 'Submit Incident Report' : 'Gửi Báo Cáo Sự Cố')}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

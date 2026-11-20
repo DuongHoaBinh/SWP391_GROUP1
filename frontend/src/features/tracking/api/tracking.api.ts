@@ -32,9 +32,29 @@ export interface HorseHealthLogItem {
   conditionStatusVi?: string;
   temperatureC: number | null;
   heartRateBpm: number | null;
+  alertTier?: 'green' | 'amber_observational' | 'amber_escalatable' | 'red';
+  alertReason?: string | null;
   notes: string | null;
   attachments: string[];
   recordedAt: string;
+}
+
+export interface EquineVitalConfigItem {
+  configId?: number;
+  configName: string;
+  tempGreenMin: number;
+  tempGreenMax: number;
+  tempAmberLowMin: number;
+  tempAmberHighMax: number;
+  hrGreenMin: number;
+  hrGreenMax: number;
+  hrAmberLowMin: number;
+  hrAmberHighMax: number;
+  consecutiveAlertWindowHours: number;
+  escalatableConditions: string[];
+  observationalConditions: string[];
+  calibratedBy?: string | null;
+  updatedAt?: string;
 }
 
 export interface TripStatusLogItem {
@@ -71,11 +91,53 @@ export interface TripTrackingDetails {
   assignedVehicle: string | null;
   assignedDriver: string | null;
   assignedEscort: string | null;
-  assignedHorses: Array<{ id: number; name: string; breed?: string; microchipNo?: string }>;
+  assignedHorses: Array<{
+    id: number;
+    shipmentHorseId?: number;
+    name: string;
+    breed?: string;
+    microchipNo?: string;
+    passportNo?: string;
+  }>;
   milestones: TrackingMilestoneItem[];
   healthLogs: HorseHealthLogItem[];
   statusLogs: TripStatusLogItem[];
   lastUpdated: string;
+}
+
+export interface DeliveryHandoverItem {
+  id: number;
+  shipmentId: number;
+  requestCode: string;
+  shipmentHorseId: number;
+  horseId: number | null;
+  horseName: string;
+  microchipNo: string | null;
+  passportNo: string | null;
+  insurancePackage: string;
+  maxCompensation: number;
+  emergencyVetCovered: boolean;
+  handedOverBy: number;
+  handedOverByName?: string;
+  receivedByName: string;
+  handoverLocation: string | null;
+  handoverDatetime: string;
+  deliveredQuantity: number;
+  horseConditionAtHandover: 'healthy' | 'minor_issue' | 'needs_attention';
+  identityVerified: boolean;
+  documentsHandedOver: boolean;
+  customerSignatureUrl: string | null;
+  evidenceUrls: string[];
+  notes: string | null;
+  disputeReason: string | null;
+  status: 'pending' | 'confirmed' | 'disputed';
+  confirmedBy: number | null;
+  confirmedAt: string | null;
+  resolutionNotes: string | null;
+  compensationAmount: number;
+  resolvedBy: number | null;
+  resolvedAt: string | null;
+  createdAt: string;
 }
 
 export interface AssignedTripSummary {
@@ -150,6 +212,28 @@ export const trackingApi = {
     });
   },
 
+  getVitalConfig: async (): Promise<EquineVitalConfigItem> => {
+    return apiClient<EquineVitalConfigItem>('/tracking/vital-config');
+  },
+
+  updateVitalConfig: async (data: Partial<EquineVitalConfigItem>): Promise<EquineVitalConfigItem> => {
+    return apiClient<EquineVitalConfigItem>('/tracking/vital-config', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  uploadHealthPhotos: async (shipmentId: number, files: File[]): Promise<{ files: string[] }> => {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+    return apiClient<{ files: string[] }>(`/tracking/shipments/${shipmentId}/health-logs/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+
   createHealthLog: async (
     shipmentId: number,
     data: {
@@ -161,6 +245,7 @@ export const trackingApi = {
       heartRateBpm?: number;
       notes?: string;
       attachments?: string[];
+      recordedAt?: string;
     },
   ): Promise<HorseHealthLogItem> => {
     return apiClient<HorseHealthLogItem>(`/tracking/shipments/${shipmentId}/health-logs`, {
@@ -176,6 +261,79 @@ export const trackingApi = {
     return apiClient<{ success: boolean; message: string }>(`/tracking/shipments/${shipmentId}/complete`, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
+    });
+  },
+
+  getShipmentHandovers: async (shipmentId: number): Promise<DeliveryHandoverItem[]> => {
+    return apiClient<DeliveryHandoverItem[]>(`/tracking/shipments/${shipmentId}/handovers`);
+  },
+
+  listHandovers: async (status?: string): Promise<DeliveryHandoverItem[]> => {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    return apiClient<DeliveryHandoverItem[]>(`/tracking/handovers${qs}`);
+  },
+
+  createHandover: async (
+    shipmentId: number,
+    payload: {
+      shipmentHorseId: number;
+      receivedByName: string;
+      handoverLocation?: string;
+      deliveredQuantity?: number;
+      horseConditionAtHandover?: 'healthy' | 'minor_issue' | 'needs_attention';
+      identityVerified?: boolean;
+      documentsHandedOver?: boolean;
+      notes?: string;
+      files?: File[];
+    },
+  ): Promise<DeliveryHandoverItem> => {
+    const fd = new FormData();
+    fd.append('shipmentHorseId', String(payload.shipmentHorseId));
+    fd.append('receivedByName', payload.receivedByName);
+    if (payload.handoverLocation) fd.append('handoverLocation', payload.handoverLocation);
+    if (payload.deliveredQuantity) fd.append('deliveredQuantity', String(payload.deliveredQuantity));
+    if (payload.horseConditionAtHandover) fd.append('horseConditionAtHandover', payload.horseConditionAtHandover);
+    if (payload.identityVerified !== undefined) fd.append('identityVerified', String(payload.identityVerified));
+    if (payload.documentsHandedOver !== undefined) fd.append('documentsHandedOver', String(payload.documentsHandedOver));
+    if (payload.notes) fd.append('notes', payload.notes);
+    for (const file of payload.files || []) {
+      fd.append('files', file);
+    }
+    return apiClient<DeliveryHandoverItem>(`/tracking/shipments/${shipmentId}/handovers`, {
+      method: 'POST',
+      body: fd,
+    });
+  },
+
+  respondHandover: async (
+    handoverId: number,
+    payload: {
+      action: 'confirm' | 'dispute';
+      disputeReason?: string;
+      notes?: string;
+      files?: File[];
+    },
+  ): Promise<DeliveryHandoverItem> => {
+    const fd = new FormData();
+    fd.append('action', payload.action);
+    if (payload.disputeReason) fd.append('disputeReason', payload.disputeReason);
+    if (payload.notes) fd.append('notes', payload.notes);
+    for (const file of payload.files || []) {
+      fd.append('files', file);
+    }
+    return apiClient<DeliveryHandoverItem>(`/tracking/handovers/${handoverId}/respond`, {
+      method: 'POST',
+      body: fd,
+    });
+  },
+
+  resolveHandoverDispute: async (
+    handoverId: number,
+    data: { resolutionNotes: string; compensationAmount?: number },
+  ): Promise<DeliveryHandoverItem> => {
+    return apiClient<DeliveryHandoverItem>(`/tracking/handovers/${handoverId}/resolve-dispute`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   },
 };

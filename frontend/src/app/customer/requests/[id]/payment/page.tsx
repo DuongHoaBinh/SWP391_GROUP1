@@ -1,29 +1,108 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import useSWR from 'swr';
 import { ArrowLeft } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { getCurrentUser } from '@/lib/auth';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { SepayPayment } from '@/features/orders/components/SepayPayment';
 
-interface Order { id: number; requestCode: string; totalCost: number; status: string }
+interface Order {
+  id: number;
+  requestCode: string;
+  totalCost: number;
+  status: string;
+}
+
 const payableStatuses = ['planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'];
 
 export default function PaymentPage() {
   const params = useParams<{ id: string }>();
-  const shipmentId = Number(params.id);
-  const validId = /^\d+$/.test(params.id) && Number.isSafeInteger(shipmentId) && shipmentId > 0;
+  const { language, t } = useLanguage();
+  const [userId, setUserId] = useState<string | number | null>(null);
+
+  useEffect(() => {
+    const user = getCurrentUser();
+    setUserId(user?.id ?? 'guest');
+  }, []);
+
+  const rawId = params?.id ?? '';
+  const shipmentId = Number(rawId);
+  const validId = /^\d+$/.test(rawId) && Number.isSafeInteger(shipmentId) && shipmentId > 0;
+
   const { data: order, error, isLoading, mutate } = useSWR<Order>(
-    validId ? ['sepay-order', getCurrentUser().id, shipmentId] : null,
+    validId && userId !== null ? ['sepay-order', userId, shipmentId] : null,
     () => apiClient<Order>(`/orders/${shipmentId}`, { cache: 'no-store' }),
     { shouldRetryOnError: false, refreshInterval: 10000 },
   );
 
-  return <div className="mx-auto max-w-3xl space-y-6">
-    <Link href={validId ? `/customer/requests/${shipmentId}#sepay-payment` : '/customer/requests'} className="inline-flex min-h-11 items-center gap-2 rounded-lg text-sm font-semibold text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><ArrowLeft size={16} aria-hidden="true" />Quay lại đơn hàng</Link>
-    <header><h1 className="text-2xl font-bold tracking-tight text-slate-900">Thanh toán {order?.requestCode ? `đơn ${order.requestCode}` : 'đơn hàng'}</h1><p className="mt-2 text-sm text-slate-600">Kết quả được xác nhận từ ngân hàng qua SePay. Bạn có thể quay lại đơn để theo dõi.</p></header>
-    {!validId || error ? <div role="alert" className="space-y-3 rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-800"><p>{error?.message || 'Mã đơn hàng không hợp lệ.'}</p>{validId && <button type="button" onClick={() => void mutate()} className="min-h-11 rounded-lg px-3 font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500">Thử tải lại</button>}</div> : isLoading || !order ? <p role="status" className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500">Đang tải thông tin đơn hàng…</p> : <SepayPayment key={order.id} shipmentId={order.id} requestCode={order.requestCode} amount={Number(order.totalCost)} checkout eligible={payableStatuses.includes(order.status) && Number.isSafeInteger(Number(order.totalCost)) && Number(order.totalCost) > 0} />}
-  </div>;
+  const isLoadingOrder = validId && (userId === null || isLoading);
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6 pb-10">
+      <header className="border-b border-[#E5DDD0] pb-5">
+        <Link
+          href={validId ? `/customer/requests/${shipmentId}#sepay-payment` : '/customer/requests'}
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5F6977] hover:text-[#181A17] mb-2 no-underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E] rounded"
+        >
+          <ArrowLeft size={14} aria-hidden="true" />
+          <span>{t('payment.backToOrder', language === 'en' ? 'Back to Order' : 'Quay lại đơn hàng')}</span>
+        </Link>
+
+        <h1 className="text-2xl font-extrabold tracking-tight text-[#181A17] m-0">
+          {order?.requestCode
+            ? t('payment.headerWithCode', language === 'en' ? 'Payment for {code}' : 'Thanh toán đơn {code}', { code: order.requestCode })
+            : t('payment.headerDefault', language === 'en' ? 'Order Payment' : 'Thanh toán đơn hàng')}
+        </h1>
+        <p className="mt-1 mb-0 text-sm text-[#5F6977]">
+          {t(
+            'payment.sepayBankNote',
+            language === 'en'
+              ? 'Transfer confirmation is verified directly from the bank via SePay. You can return to your order at any time to track progress.'
+              : 'Kết quả được xác nhận trực tiếp từ ngân hàng qua SePay. Bạn có thể quay lại đơn để theo dõi tiến trình.',
+          )}
+        </p>
+      </header>
+
+      {!validId || error ? (
+        <div role="alert" className="space-y-3 rounded-2xl border border-[#B33E3E]/30 bg-[#F8EAEA] p-5 text-sm text-[#B33E3E]">
+          <p>{error?.message || t('payment.invalidOrderId', language === 'en' ? 'Invalid transport order ID.' : 'Mã đơn hàng không hợp lệ.')}</p>
+          {validId && (
+            <button
+              type="button"
+              onClick={() => void mutate()}
+              className="min-h-[44px] rounded-lg px-3 font-semibold underline cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B33E3E]"
+            >
+              {t('common.retry', language === 'en' ? 'Retry' : 'Thử tải lại')}
+            </button>
+          )}
+        </div>
+      ) : isLoadingOrder || !order ? (
+        <div role="status" className="space-y-4 rounded-2xl border border-[#E5DDD0] bg-white p-6">
+          <div className="h-5 w-48 animate-pulse rounded bg-[#F0EEE8] motion-reduce:animate-none" />
+          <div className="h-28 w-full animate-pulse rounded-xl bg-[#F0EEE8] motion-reduce:animate-none" />
+          <div className="h-12 w-40 animate-pulse rounded-lg bg-[#F0EEE8] motion-reduce:animate-none" />
+          <span className="sr-only">
+            {t('payment.loadingOrder', language === 'en' ? 'Loading order payment details...' : 'Đang tải thông tin thanh toán đơn hàng...')}
+          </span>
+        </div>
+      ) : (
+        <SepayPayment
+          key={order.id}
+          shipmentId={order.id}
+          requestCode={order.requestCode}
+          amount={Number(order.totalCost)}
+          checkout
+          eligible={
+            payableStatuses.includes(order.status) &&
+            Number.isSafeInteger(Number(order.totalCost)) &&
+            Number(order.totalCost) > 0
+          }
+        />
+      )}
+    </div>
+  );
 }

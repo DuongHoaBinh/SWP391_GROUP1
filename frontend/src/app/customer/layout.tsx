@@ -1,11 +1,14 @@
 'use client';
 
-import React, { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
+import { AmbientCanvas } from '@/components/layout/AmbientCanvas';
+import { PortalLoadingSkeleton } from '@/components/layout/PortalLoadingSkeleton';
 import { CustomerStoreProvider } from '@/lib/customer-store';
-import { getAuthToken } from '@/lib/auth';
+import { getAuthToken, getCurrentUser } from '@/lib/auth';
+import { getDashboardRouteForRole } from '@/lib/auth-redirect';
 
 export default function CustomerLayout({
   children,
@@ -13,31 +16,62 @@ export default function CustomerLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
-    if (!getAuthToken()) {
-      router.replace('/login?redirect=/customer');
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!token) {
+      const target = pathname ? `?redirect=${encodeURIComponent(pathname)}` : '';
+      router.replace(`/login${target}`);
+      return;
     }
-  }, [router]);
+
+    const user = getCurrentUser();
+    if (user?.role && user.role !== 'CUSTOMER' && user.role !== 'ADMIN') {
+      const target =
+        user.role === 'DRIVER_ESCORT'
+          ? user.persona === 'escort' ||
+            String(user.specialization || '').toLowerCase() === 'escort'
+            ? '/escort'
+            : '/driver'
+          : getDashboardRouteForRole(user.role);
+      router.replace(target);
+      return;
+    }
+
+    setIsAuthorized(true);
+  }, [router, pathname]);
+
+  if (!isAuthorized) {
+    return (
+      <div
+        className="min-h-screen p-6 sm:p-10"
+        style={{ backgroundColor: 'var(--color-page-bg, #F4F1E9)' }}
+      >
+        <PortalLoadingSkeleton />
+      </div>
+    );
+  }
 
   return (
     <CustomerStoreProvider>
-      <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--bg-page)' }}>
-        {/* Sidebar Navigation */}
-        <Sidebar />
+      <div
+        className="flex min-h-screen relative"
+        style={{ backgroundColor: 'var(--color-page-bg, #F4F1E9)' }}
+      >
+        <AmbientCanvas />
 
-        {/* Main Content Area */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, backgroundColor: '#f8fafc' }}>
-          <Header />
-          <main
-            style={{
-              flex: 1,
-              padding: '28px 32px 48px 32px',
-              maxWidth: '1600px',
-              width: '100%',
-              margin: '0 auto',
-            }}
-          >
+        <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
+
+        <div className="flex-1 flex flex-col min-w-0">
+          <Header onMenuClick={() => setMobileOpen(true)} />
+          <main className="flex-1 w-full max-w-[1600px] mx-auto px-4 sm:px-8 pt-6 pb-12">
             {children}
           </main>
         </div>

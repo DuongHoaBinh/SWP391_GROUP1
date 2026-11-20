@@ -1,21 +1,22 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Eye, EyeOff, AlertCircle, CheckCircle2, ArrowLeft, KeyRound, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, CheckCircle2, ArrowLeft, KeyRound, Loader2, RotateCcw } from 'lucide-react';
 import { AuthShowcasePanel } from '@/components/layout/AuthShowcasePanel';
 import { setAuthSession } from '@/lib/auth';
-import { mockCurrentUser } from '@/lib/mock-data';
 import { GoogleAuthButton } from '@/components/auth/GoogleAuthButton';
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { t, language } = useLanguage();
+  const isEn = language === 'en';
 
-  // Step 1: Register, Step 2: Verify OTP
   const [step, setStep] = useState<'REGISTER' | 'VERIFY_OTP'>('REGISTER');
 
-  // Form states
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -25,29 +26,43 @@ export default function RegisterPage() {
   const [otp, setOtp] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Handle Step 1: Submit Registration
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((prev) => prev - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
     if (!agreeTerms) {
-      setError('Please agree to the Terms of Service and Privacy Policy.');
+      setError(t('auth.termsAgreeError', 'Vui lòng đồng ý với Điều khoản Dịch vụ và Chính sách Bảo mật.'));
       return;
     }
 
     if (password.length < 8) {
-      setError('Password must be at least 8 characters long.');
+      setError(t('auth.passwordLengthError', 'Mật khẩu phải có độ dài tối thiểu 8 ký tự.'));
       return;
     }
     if (!/^(?=.*[A-Za-z])(?=.*\d).+$/.test(password)) {
-      setError('Password must contain at least one letter and one number.');
+      setError(t('auth.passwordComplexityError', 'Mật khẩu phải bao gồm cả chữ cái và chữ số.'));
       return;
     }
     if (password !== confirmPassword) {
-      setError('Password confirmation does not match.');
+      setError(t('auth.passwordMismatchError', 'Mật khẩu xác nhận không khớp.'));
       return;
     }
 
@@ -68,30 +83,60 @@ export default function RegisterPage() {
       const data = await response.json().catch(() => null);
 
       if (response.ok) {
-        setSuccessMessage('Registration initiated! A verification code was sent to your email.');
+        const devHint = data?.developmentOtp ? ` (Dev OTP: ${data.developmentOtp})` : '';
+        setSuccessMessage(
+          t('auth.otpSentSuccess', 'Đăng ký thành công! Mã xác thực đã được gửi về email của bạn.') + devHint,
+        );
+        setResendCooldown(60);
         setStep('VERIFY_OTP');
-        setIsLoading(false);
-        return;
       } else {
-        setError(data?.message || 'Registration failed. Please try again.');
-        setIsLoading(false);
-        return;
+        const msg = Array.isArray(data?.message) ? data.message.join('. ') : data?.message;
+        setError(msg || t('auth.registerFailed', 'Đăng ký thất bại. Vui lòng thử lại.'));
       }
     } catch {
-      // Backend offline fallback for preview / demo testing
-      setSuccessMessage('Demo Mode: Verification OTP sent! Use code 123456 to verify.');
-      setStep('VERIFY_OTP');
+      setError(t('auth.networkError', 'Không thể kết nối tới máy chủ. Vui lòng thử lại sau.'));
+    } finally {
       setIsLoading(false);
     }
   };
 
-  // Handle Step 2: Verify OTP
+  const handleResendOtp = async () => {
+    if (isResending || resendCooldown > 0) return;
+    setIsResending(true);
+    setError(null);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${apiUrl}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+          confirmPassword,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok) {
+        const devHint = data?.developmentOtp ? ` (Dev OTP: ${data.developmentOtp})` : '';
+        setSuccessMessage(t('auth.resetOtpResent', 'Mã OTP mới đã được gửi lại thành công!') + devHint);
+        setResendCooldown(60);
+      } else {
+        const msg = Array.isArray(data?.message) ? data.message.join('. ') : data?.message;
+        setError(msg || t('auth.resetResendFailed', 'Không thể gửi lại mã OTP. Vui lòng thử lại sau.'));
+      }
+    } catch {
+      setError(t('auth.networkError', 'Không thể kết nối tới máy chủ. Vui lòng thử lại sau.'));
+    } finally {
+      setIsResending(false);
+    }
+  };
+
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
     if (!otp || otp.trim().length < 6) {
-      setError('Please enter a valid 6-digit OTP code.');
+      setError(t('auth.otpInvalidLength', 'Vui lòng nhập mã OTP gồm 6 chữ số hợp lệ.'));
       return;
     }
 
@@ -110,315 +155,312 @@ export default function RegisterPage() {
 
       const data = await response.json().catch(() => null);
 
-      if (response.ok) {
-        setSuccessMessage('Account verified successfully! Logging you in...');
-        setAuthSession(data.accessToken || 'mock-token-registered', {
-          id: data.user?.id || 'usr-reg-new',
+      if (response.ok && data?.accessToken) {
+        setSuccessMessage(t('auth.verifySuccessRedirect', 'Xác thực tài khoản thành công! Đang chuyển hướng...'));
+        setAuthSession(data.accessToken, {
+          id: data.user?.id || '',
           name: data.user?.fullName || data.user?.name || email.split('@')[0],
           email: email.trim().toLowerCase(),
-          role: 'CUSTOMER',
+          role: data.user?.role || 'CUSTOMER',
         });
-        setTimeout(() => {
+        redirectTimerRef.current = setTimeout(() => {
           router.push('/customer');
         }, 1200);
-        return;
       } else {
-        setError(data?.message || 'Invalid or expired OTP code.');
-        setIsLoading(false);
-        return;
+        const msg = Array.isArray(data?.message) ? data.message.join('. ') : data?.message;
+        setError(msg || t('auth.otpInvalidOrExpired', 'Mã OTP không đúng hoặc đã hết hạn.'));
       }
     } catch {
-      // Demo fallback if backend is offline
-      if (otp.trim() === '123456') {
-        setSuccessMessage('Account verified successfully! Logging you in...');
-        setAuthSession('mock-token-registered', {
-          ...mockCurrentUser,
-          name: email.split('@')[0],
-          email: email.trim().toLowerCase(),
-        });
-        setTimeout(() => {
-          router.push('/customer');
-        }, 1200);
-      } else {
-        setError('Invalid OTP code. For demo mode, please enter 123456.');
-        setIsLoading(false);
-      }
+      setError(t('auth.networkError', 'Không thể kết nối tới máy chủ. Vui lòng thử lại sau.'));
+    } finally {
+      setIsLoading(false);
     }
   };
+
+  const passwordToggleLabel = showPassword
+    ? t('auth.hidePassword', 'Ẩn mật khẩu')
+    : t('auth.showPassword', 'Hiện mật khẩu');
+  const confirmToggleLabel = showConfirmPassword
+    ? t('auth.hidePassword', 'Ẩn mật khẩu')
+    : t('auth.showPassword', 'Hiện mật khẩu');
 
   return (
     <div
       style={{
         display: 'flex',
-        minHeight: '100vh',
+        minHeight: '100dvh',
         width: '100%',
-        backgroundColor: '#0c0e12',
-        color: '#f8fafc',
+        backgroundColor: '#181A17',
+        color: '#F7F7F4',
         fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif",
       }}
     >
-      {/* LEFT: Brand & Live Trip Showcase */}
       <AuthShowcasePanel />
 
-      {/* RIGHT: Register Form Panel */}
       <div
+        className="px-4 py-6 sm:px-6 sm:py-8"
         style={{
           flex: '1 1 50%',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '40px 24px',
-          minHeight: '100vh',
-          backgroundColor: '#0d0f12',
+          minHeight: '100dvh',
+          backgroundColor: '#181A17',
           overflowY: 'auto',
         }}
       >
-        {/* Mobile Header */}
         <div
           style={{
             width: '100%',
             maxWidth: '430px',
-            marginBottom: '20px',
             display: 'flex',
             alignItems: 'center',
-            gap: '10px',
+            justifyContent: 'space-between',
+            marginBottom: '16px',
           }}
-          className="md:hidden"
         >
-          <div
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
-              backgroundColor: '#0c1a2e',
-              flexShrink: 0,
-            }}
-          >
-            <img src="/logo.png" alt="RaceHorse Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          </div>
-          <div>
-            <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>RaceHorse</div>
-            <div style={{ fontSize: '9px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: '2px' }}>
-              LOGISTICS MANAGEMENT
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }} className="lg:hidden">
+            <div
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '10px',
+                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(180, 154, 104, 0.45)',
+                backgroundColor: '#242722',
+                flexShrink: 0,
+              }}
+            >
+              <img src="/logo.png" alt="EquiTransit" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: '17px', fontWeight: 800, color: '#F7F7F4', lineHeight: 1.1 }}>EquiTransit</div>
+              <div style={{ fontSize: '9px', fontWeight: 700, color: '#B49A68', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                EQUINE LOGISTICS
+              </div>
             </div>
           </div>
+          <div className="hidden lg:block" />
+          <LanguageSwitcher tone="dark" />
         </div>
 
-        {/* Center Card */}
         <div
+          className="p-6 sm:p-9"
           style={{
             width: '100%',
             maxWidth: '430px',
             margin: 'auto 0',
-            backgroundColor: '#16171a',
-            border: '1px solid #26282d',
+            backgroundColor: '#242722',
+            border: '1px solid #353830',
             borderRadius: '24px',
-            padding: '38px',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
+            boxShadow: '0 18px 40px rgba(0, 0, 0, 0.28)',
           }}
         >
           {step === 'REGISTER' ? (
             <>
-              {/* Card Title */}
-              <h2
+              <div
                 style={{
-                  fontSize: '30px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '3px 10px',
+                  borderRadius: '9999px',
+                  backgroundColor: 'rgba(180, 154, 104, 0.14)',
+                  border: '1px solid rgba(180, 154, 104, 0.35)',
+                  color: '#B49A68',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  marginBottom: '12px',
+                }}
+              >
+                {t('auth.customerPortal', 'Tài khoản Chủ ngựa / Khách hàng')}
+              </div>
+
+              <h1
+                style={{
+                  fontSize: '28px',
                   fontWeight: 800,
-                  color: '#ffffff',
+                  color: '#F7F7F4',
                   letterSpacing: '-0.02em',
                   lineHeight: 1.2,
                   marginBottom: '6px',
                 }}
               >
-                Create account
-              </h2>
+                {t('auth.registerTitle', 'Tạo tài khoản')}
+              </h1>
               <p
                 style={{
                   fontSize: '13.5px',
-                  color: '#94a3b8',
-                  marginBottom: '28px',
+                  color: '#CBD5E1',
+                  marginBottom: '24px',
                 }}
               >
-                Start managing cross-border equine shipments.
+                {t('auth.registerSubtitle', 'Bắt đầu quản lý hành trình vận chuyển ngựa đua quốc tế.')}
               </p>
 
-              {/* Error Banner */}
               {error && (
                 <div
+                  role="alert"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '10px',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    backgroundColor: '#F8EAEA',
+                    border: '1px solid #B33E3E',
                     borderRadius: '10px',
                     padding: '12px 14px',
                     marginBottom: '20px',
-                    color: '#f87171',
+                    color: '#B33E3E',
                     fontSize: '13px',
+                    fontWeight: 600,
                   }}
                 >
-                  <AlertCircle size={17} style={{ flexShrink: 0 }} />
+                  <AlertCircle size={17} style={{ flexShrink: 0 }} aria-hidden="true" />
                   <span>{error}</span>
                 </div>
               )}
 
-              {/* Register Form */}
-              <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-                {/* Email Field */}
+              <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div>
-                  <label
-                    style={{
-                      display: 'block',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      color: '#cbd5e1',
-                      marginBottom: '8px',
-                    }}
-                  >
-                    Email address
+                  <label htmlFor="reg-email" style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#F7F7F4', marginBottom: '7px' }}>
+                    {t('auth.email', 'Địa chỉ Email')}
                   </label>
                   <input
+                    id="reg-email"
                     type="email"
+                    autoComplete="email"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"
                     style={{
                       width: '100%',
-                      backgroundColor: '#111215',
-                      border: '1px solid #272a30',
+                      backgroundColor: '#181A17',
+                      border: '1px solid #353830',
                       borderRadius: '10px',
                       padding: '12px 14px',
-                      color: '#f8fafc',
+                      color: '#F7F7F4',
                       fontSize: '14px',
                       outline: 'none',
-                      transition: 'border-color 0.2s',
                     }}
-                    onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
-                    onBlur={(e) => (e.target.style.borderColor = '#272a30')}
+                    onFocus={(e) => (e.target.style.borderColor = '#B49A68')}
+                    onBlur={(e) => (e.target.style.borderColor = '#353830')}
                   />
                 </div>
 
-                {/* Password Field */}
                 <div>
-                  <label
-                    style={{
-                      display: 'block',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      color: '#cbd5e1',
-                      marginBottom: '8px',
-                    }}
-                  >
-                    Password
+                  <label htmlFor="reg-password" style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#F7F7F4', marginBottom: '7px' }}>
+                    {t('auth.password', 'Mật khẩu')}
                   </label>
                   <div style={{ position: 'relative' }}>
                     <input
+                      id="reg-password"
                       type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="At least 8 characters with numbers"
+                      placeholder={t('auth.passwordRequirementHint', 'Tối thiểu 8 ký tự gồm chữ và số')}
                       style={{
                         width: '100%',
-                        backgroundColor: '#111215',
-                        border: '1px solid #272a30',
+                        backgroundColor: '#181A17',
+                        border: '1px solid #353830',
                         borderRadius: '10px',
-                        padding: '12px 42px 12px 14px',
-                        color: '#f8fafc',
+                        padding: '12px 44px 12px 14px',
+                        color: '#F7F7F4',
                         fontSize: '14px',
                         outline: 'none',
-                        transition: 'border-color 0.2s',
                       }}
-                      onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
-                      onBlur={(e) => (e.target.style.borderColor = '#272a30')}
+                      onFocus={(e) => (e.target.style.borderColor = '#B49A68')}
+                      onBlur={(e) => (e.target.style.borderColor = '#353830')}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
+                      aria-label={passwordToggleLabel}
+                      aria-pressed={showPassword}
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B49A68] rounded-lg"
                       style={{
                         position: 'absolute',
-                        right: '12px',
+                        right: '4px',
                         top: '50%',
                         transform: 'translateY(-50%)',
-                        color: '#64748b',
+                        width: '38px',
+                        height: '38px',
+                        color: '#94A3B8',
                         background: 'none',
                         border: 'none',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                     </button>
                   </div>
                 </div>
 
-                {/* Confirm Password Field */}
                 <div>
-                  <label
-                    style={{
-                      display: 'block',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      color: '#cbd5e1',
-                      marginBottom: '8px',
-                    }}
-                  >
-                    Confirm password
+                  <label htmlFor="reg-confirm-password" style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#F7F7F4', marginBottom: '7px' }}>
+                    {t('auth.confirmPassword', 'Xác nhận mật khẩu')}
                   </label>
                   <div style={{ position: 'relative' }}>
                     <input
+                      id="reg-confirm-password"
                       type={showConfirmPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
                       required
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="Repeat your password"
+                      placeholder={t('auth.confirmPasswordPlaceholder', 'Nhập lại mật khẩu')}
                       style={{
                         width: '100%',
-                        backgroundColor: '#111215',
-                        border: '1px solid #272a30',
+                        backgroundColor: '#181A17',
+                        border: '1px solid #353830',
                         borderRadius: '10px',
-                        padding: '12px 42px 12px 14px',
-                        color: '#f8fafc',
+                        padding: '12px 44px 12px 14px',
+                        color: '#F7F7F4',
                         fontSize: '14px',
                         outline: 'none',
-                        transition: 'border-color 0.2s',
                       }}
-                      onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
-                      onBlur={(e) => (e.target.style.borderColor = '#272a30')}
+                      onFocus={(e) => (e.target.style.borderColor = '#B49A68')}
+                      onBlur={(e) => (e.target.style.borderColor = '#353830')}
                     />
                     <button
                       type="button"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      aria-label={confirmToggleLabel}
+                      aria-pressed={showConfirmPassword}
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B49A68] rounded-lg"
                       style={{
                         position: 'absolute',
-                        right: '12px',
+                        right: '4px',
                         top: '50%',
                         transform: 'translateY(-50%)',
-                        color: '#64748b',
+                        width: '38px',
+                        height: '38px',
+                        color: '#94A3B8',
                         background: 'none',
                         border: 'none',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
-                      {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showConfirmPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                     </button>
                   </div>
                 </div>
 
-                {/* Terms Agreement Checkbox */}
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginTop: '2px' }}>
                   <input
                     type="checkbox"
                     id="agreeTerms"
@@ -429,7 +471,7 @@ export default function RegisterPage() {
                       height: '16px',
                       marginTop: '3px',
                       borderRadius: '4px',
-                      accentColor: '#2563eb',
+                      accentColor: '#A67C2E',
                       cursor: 'pointer',
                     }}
                   />
@@ -437,18 +479,19 @@ export default function RegisterPage() {
                     htmlFor="agreeTerms"
                     style={{
                       fontSize: '12.5px',
-                      color: '#94a3b8',
+                      color: '#CBD5E1',
                       cursor: 'pointer',
                       lineHeight: 1.4,
                       userSelect: 'none',
                     }}
                   >
-                    I agree to the <span style={{ color: '#ffffff', fontWeight: 600 }}>Terms of Service</span> and{' '}
-                    <span style={{ color: '#ffffff', fontWeight: 600 }}>Privacy Policy</span>
+                    {t('auth.agreeTerms', 'Tôi đồng ý với')}{' '}
+                    <span style={{ color: '#F7F7F4', fontWeight: 600 }}>{t('auth.terms', 'Điều khoản Dịch vụ')}</span>{' '}
+                    {t('common.and', 'và')}{' '}
+                    <span style={{ color: '#F7F7F4', fontWeight: 600 }}>{t('auth.privacy', 'Chính sách Bảo mật')}</span>
                   </label>
                 </div>
 
-                {/* Submit Button */}
                 <button
                   type="submit"
                   disabled={isLoading}
@@ -456,214 +499,187 @@ export default function RegisterPage() {
                     width: '100%',
                     padding: '13px',
                     borderRadius: '11px',
-                    background: 'linear-gradient(135deg, #172554 0%, #1e3a8a 50%, #1e40af 100%)',
-                    border: '1px solid rgba(59, 130, 246, 0.35)',
-                    color: '#ffffff',
+                    backgroundColor: '#A67C2E',
+                    border: '1px solid rgba(180, 154, 104, 0.5)',
+                    color: '#FFFFFF',
                     fontSize: '14.5px',
                     fontWeight: 700,
                     cursor: isLoading ? 'not-allowed' : 'pointer',
+                    opacity: isLoading ? 0.65 : 1,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '8px',
-                    boxShadow: '0 4px 16px rgba(30, 58, 138, 0.45)',
+                    boxShadow: '0 4px 14px rgba(166, 124, 46, 0.32)',
                     transition: 'all 0.2s',
-                    marginTop: '6px',
+                    marginTop: '4px',
                   }}
                   onMouseEnter={(e) => {
-                    if (!isLoading) {
-                      (e.currentTarget as HTMLElement).style.background =
-                        'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 50%, #2563eb 100%)';
-                    }
+                    if (!isLoading) (e.currentTarget as HTMLElement).style.backgroundColor = '#8C6621';
                   }}
                   onMouseLeave={(e) => {
-                    if (!isLoading) {
-                      (e.currentTarget as HTMLElement).style.background =
-                        'linear-gradient(135deg, #172554 0%, #1e3a8a 50%, #1e40af 100%)';
-                    }
+                    if (!isLoading) (e.currentTarget as HTMLElement).style.backgroundColor = '#A67C2E';
                   }}
                 >
                   {isLoading ? (
                     <>
-                      <Loader2 size={17} style={{ animation: 'spin 1s linear infinite' }} />
-                      Creating Account...
+                      <Loader2 size={17} className="animate-spin" aria-hidden="true" />
+                      {t('auth.creatingAccount', 'Đang tạo tài khoản...')}
                     </>
                   ) : (
-                    'Create account'
+                    t('auth.createAccountBtn', 'Tạo tài khoản')
                   )}
                 </button>
               </form>
 
-              {/* OR CONTINUE WITH Divider */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  margin: '24px 0 18px 0',
-                  gap: '12px',
-                }}
-              >
-                <div style={{ flex: 1, height: '1px', backgroundColor: '#26282d' }} />
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
-                    color: '#64748b',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  Or continue with
+              <div style={{ display: 'flex', alignItems: 'center', margin: '22px 0 16px 0', gap: '12px' }}>
+                <div style={{ flex: 1, height: '1px', backgroundColor: '#353830' }} />
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', color: '#94A3B8', textTransform: 'uppercase' }}>
+                  {t('auth.orContinueWith', 'Hoặc tiếp tục với')}
                 </span>
-                <div style={{ flex: 1, height: '1px', backgroundColor: '#26282d' }} />
+                <div style={{ flex: 1, height: '1px', backgroundColor: '#353830' }} />
               </div>
 
-              {/* Social Logins */}
               <div style={{ width: '100%' }}>
-                <GoogleAuthButton onError={(msg) => setError(msg)} disabled={isLoading} />
+                <GoogleAuthButton tone="dark" onError={(msg) => setError(msg)} disabled={isLoading} />
               </div>
 
-              {/* Switch to Login */}
-              <div
-                style={{
-                  textAlign: 'center',
-                  marginTop: '26px',
-                  fontSize: '13.5px',
-                  color: '#94a3b8',
-                }}
-              >
-                Already have an account?{' '}
-                <Link
-                  href="/login"
-                  style={{
-                    color: '#ffffff',
-                    fontWeight: 700,
-                    textDecoration: 'none',
-                  }}
-                >
-                  Sign In
+              <div style={{ textAlign: 'center', marginTop: '24px', fontSize: '13.5px', color: '#CBD5E1' }}>
+                {t('auth.alreadyhaveAccount', 'Đã có tài khoản?')}{' '}
+                <Link href="/login" style={{ color: '#B49A68', fontWeight: 700, textDecoration: 'none' }}>
+                  {t('auth.signInBtn', 'Đăng nhập')}
                 </Link>
               </div>
             </>
           ) : (
-            /* STEP 2: VERIFY OTP */
             <div>
               <div
+                aria-hidden="true"
                 style={{
-                  width: '52px',
-                  height: '52px',
+                  width: '54px',
+                  height: '54px',
                   borderRadius: '50%',
-                  backgroundColor: 'rgba(37, 99, 235, 0.15)',
-                  border: '1px solid rgba(59, 130, 246, 0.35)',
+                  backgroundColor: 'rgba(180, 154, 104, 0.16)',
+                  border: '1px solid #B49A68',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   margin: '0 auto 16px auto',
-                  color: '#60a5fa',
+                  color: '#B49A68',
                 }}
               >
-                <KeyRound size={26} />
+                <KeyRound size={25} />
               </div>
 
-              <h2
-                style={{
-                  fontSize: '24px',
-                  fontWeight: 800,
-                  color: '#ffffff',
-                  textAlign: 'center',
-                  marginBottom: '8px',
-                }}
-              >
-                Verify Email Code
-              </h2>
-              <p
-                style={{
-                  fontSize: '13.5px',
-                  color: '#94a3b8',
-                  textAlign: 'center',
-                  marginBottom: '24px',
-                  lineHeight: 1.5,
-                }}
-              >
-                Enter the 6-digit verification code sent to <br />
-                <strong style={{ color: '#ffffff' }}>{email}</strong>
+              <h1 style={{ fontSize: '24px', fontWeight: 800, color: '#F7F7F4', textAlign: 'center', marginBottom: '8px' }}>
+                {t('auth.verifyEmailCode', 'Xác Thực Mã Email')}
+              </h1>
+              <p style={{ fontSize: '13.5px', color: '#CBD5E1', textAlign: 'center', marginBottom: '22px', lineHeight: 1.5 }}>
+                {t('auth.enterOtpDesc', 'Nhập mã xác thực gồm 6 chữ số đã được gửi tới')}
+                <br />
+                <strong style={{ color: '#F7F7F4' }}>{email}</strong>
               </p>
 
               {successMessage && (
                 <div
+                  role="status"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '10px',
-                    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                    border: '1px solid rgba(16, 185, 129, 0.35)',
+                    backgroundColor: '#E8F2EB',
+                    border: '1px solid #287653',
                     borderRadius: '10px',
                     padding: '12px 14px',
-                    marginBottom: '20px',
-                    color: '#34d399',
+                    marginBottom: '18px',
+                    color: '#287653',
                     fontSize: '13px',
+                    fontWeight: 600,
                   }}
                 >
-                  <CheckCircle2 size={17} style={{ flexShrink: 0 }} />
+                  <CheckCircle2 size={17} style={{ flexShrink: 0 }} aria-hidden="true" />
                   <span>{successMessage}</span>
                 </div>
               )}
 
               {error && (
                 <div
+                  role="alert"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '10px',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    backgroundColor: '#F8EAEA',
+                    border: '1px solid #B33E3E',
                     borderRadius: '10px',
                     padding: '12px 14px',
-                    marginBottom: '20px',
-                    color: '#f87171',
+                    marginBottom: '18px',
+                    color: '#B33E3E',
                     fontSize: '13px',
+                    fontWeight: 600,
                   }}
                 >
-                  <AlertCircle size={17} style={{ flexShrink: 0 }} />
+                  <AlertCircle size={17} style={{ flexShrink: 0 }} aria-hidden="true" />
                   <span>{error}</span>
                 </div>
               )}
 
-              <form onSubmit={handleVerifyOtp} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <form onSubmit={handleVerifyOtp} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                 <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
+                    <label htmlFor="reg-otp" style={{ fontSize: '13px', fontWeight: 600, color: '#F7F7F4' }}>
+                      {t('auth.otpLabel', isEn ? '6-digit Verification Code (OTP)' : 'Mã xác thực OTP (6 chữ số)')}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      disabled={isResending || resendCooldown > 0}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: resendCooldown > 0 ? '#94A3B8' : '#B49A68',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        cursor: isResending || resendCooldown > 0 ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <RotateCcw size={12} className={isResending ? 'animate-spin' : ''} aria-hidden="true" />
+                      {resendCooldown > 0
+                        ? t('auth.resendIn', isEn ? `Resend in ${resendCooldown}s` : `Gửi lại sau ${resendCooldown}s`, {
+                            seconds: resendCooldown,
+                          })
+                        : t('auth.resendOtp', isEn ? 'Resend code' : 'Gửi lại mã')}
+                    </button>
+                  </div>
                   <input
+                    id="reg-otp"
                     type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
                     required
                     maxLength={6}
                     value={otp}
                     onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                    placeholder="Enter 6-digit code"
+                    placeholder="000000"
                     style={{
                       width: '100%',
-                      backgroundColor: '#111215',
-                      border: '1px solid #272a30',
+                      backgroundColor: '#181A17',
+                      border: '1px solid #353830',
                       borderRadius: '10px',
                       padding: '14px',
-                      color: '#ffffff',
-                      fontSize: '20px',
+                      color: '#F7F7F4',
+                      fontSize: '22px',
                       fontWeight: 700,
-                      letterSpacing: '0.25em',
+                      letterSpacing: '0.28em',
                       textAlign: 'center',
                       outline: 'none',
                     }}
-                    onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
-                    onBlur={(e) => (e.target.style.borderColor = '#272a30')}
+                    onFocus={(e) => (e.target.style.borderColor = '#B49A68')}
+                    onBlur={(e) => (e.target.style.borderColor = '#353830')}
                   />
-                  <div
-                    style={{
-                      fontSize: '12px',
-                      color: '#64748b',
-                      textAlign: 'center',
-                      marginTop: '8px',
-                    }}
-                  >
-                    Demo OTP code: <span style={{ color: '#60a5fa', fontWeight: 600 }}>123456</span>
-                  </div>
                 </div>
 
                 <button
@@ -673,26 +689,34 @@ export default function RegisterPage() {
                     width: '100%',
                     padding: '13px',
                     borderRadius: '11px',
-                    background: 'linear-gradient(135deg, #172554 0%, #1e3a8a 50%, #1e40af 100%)',
-                    border: '1px solid rgba(59, 130, 246, 0.35)',
-                    color: '#ffffff',
+                    backgroundColor: '#A67C2E',
+                    border: '1px solid rgba(180, 154, 104, 0.5)',
+                    color: '#FFFFFF',
                     fontSize: '14.5px',
                     fontWeight: 700,
                     cursor: isLoading ? 'not-allowed' : 'pointer',
+                    opacity: isLoading ? 0.65 : 1,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '8px',
-                    boxShadow: '0 4px 16px rgba(30, 58, 138, 0.45)',
+                    boxShadow: '0 4px 14px rgba(166, 124, 46, 0.32)',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isLoading) (e.currentTarget as HTMLElement).style.backgroundColor = '#8C6621';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isLoading) (e.currentTarget as HTMLElement).style.backgroundColor = '#A67C2E';
                   }}
                 >
                   {isLoading ? (
                     <>
-                      <Loader2 size={17} style={{ animation: 'spin 1s linear infinite' }} />
-                      Verifying...
+                      <Loader2 size={17} className="animate-spin" aria-hidden="true" />
+                      {t('auth.verifying', 'Đang xác thực...')}
                     </>
                   ) : (
-                    'Verify & Enter Dashboard'
+                    t('auth.verifyAndEnter', 'Xác Thực & Vào Hệ Thống')
                   )}
                 </button>
               </form>
@@ -710,35 +734,38 @@ export default function RegisterPage() {
                     alignItems: 'center',
                     gap: '6px',
                     fontSize: '13px',
-                    color: '#94a3b8',
+                    color: '#B49A68',
+                    fontWeight: 600,
                     cursor: 'pointer',
+                    background: 'none',
+                    border: 'none',
                   }}
                 >
-                  <ArrowLeft size={14} /> Back to edit information
+                  <ArrowLeft size={14} aria-hidden="true" /> {t('auth.backToEdit', 'Quay lại chỉnh sửa thông tin')}
                 </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Footer info */}
         <div
           style={{
             width: '100%',
             maxWidth: '430px',
             display: 'flex',
+            flexWrap: 'wrap',
             justifyContent: 'space-between',
             alignItems: 'center',
+            gap: '8px',
             fontSize: '12px',
-            color: '#64748b',
+            color: '#94A3B8',
             marginTop: '24px',
           }}
         >
-          <div>© 2026 RaceHorse Logistics Ltd.</div>
+          <div>© 2026 EquiTransit Logistics Ltd.</div>
           <div style={{ display: 'flex', gap: '16px' }}>
-            <span style={{ cursor: 'pointer' }}>Privacy</span>
-            <span style={{ cursor: 'pointer' }}>Terms</span>
-            <span style={{ cursor: 'pointer' }}>Support</span>
+            <span>{t('auth.privacy', 'Bảo mật')}</span>
+            <span>{t('auth.terms', 'Điều khoản')}</span>
           </div>
         </div>
       </div>

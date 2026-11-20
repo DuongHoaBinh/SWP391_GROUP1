@@ -1,459 +1,1104 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  FileSignature, AlertTriangle, Clock, ArrowRight, Search, FileX, ShieldCheck, 
-  TrendingUp, Filter, Syringe, Stethoscope, Building2, FolderOpen, Scale,
-  CheckCircle, XCircle, FileText
+  AlertTriangle,
+  Search,
+  FolderOpen,
+  Scale,
+  XCircle,
+  Download,
+  Eye,
+  CheckCircle2,
+  ChevronRight,
+  Loader2,
+  Clock,
+  FileCheck2,
+  ShieldCheck,
+  RotateCcw,
+  FileText,
 } from 'lucide-react';
+import { Modal } from '@/components/ui/Modal';
 import { DocumentReviewModal } from '@/features/documents/components/DocumentReviewModal';
-import { useDocumentStore } from '@/lib/document-store';
+import { useDocumentStore, SpecialistPendingDoc } from '@/lib/document-store';
+import { documentsApi, ComplianceOrderSummary } from '@/features/documents/api/documents.api';
+import {
+  openAuthenticatedDocument,
+  fetchAuthenticatedDocumentBlobUrl,
+  resolveAssetUrl,
+} from '@/lib/api-client';
 import toast from 'react-hot-toast';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
-const getDocIcon = (type: string) => {
-  const t = type.toLowerCase();
-  if (t.includes('vaccin')) return Syringe;
-  if (t.includes('medic') || t.includes('health')) return Stethoscope;
-  return FileText;
-};
+function parseNumericDocId(doc: { id: string; numericDocId?: number }): number {
+  if (typeof doc.numericDocId === 'number' && !isNaN(doc.numericDocId)) {
+    return doc.numericDocId;
+  }
+  return doc.id.startsWith('DOC-') && !isNaN(Number(doc.id.slice(4)))
+    ? parseInt(doc.id.slice(4), 10)
+    : parseInt(doc.id.replace(/\D/g, ''), 10);
+}
 
 export default function SpecialistDashboardPage() {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true);
-  const { pendingDocs, missingDocs } = useDocumentStore();
-  const [filterType, setFilterType] = useState('ALL');
-  const [showFilterMenu, setShowFilterMenu] = useState(false);
-  
-  // Modal State
+  const { t, language, translateDocType } = useLanguage();
+  const isEn = language === 'en';
+  const { pendingDocs, missingDocs, isLoaded, reviewDocument } = useDocumentStore();
+
+  const [filterCorridor, setFilterCorridor] = useState<string>('ALL');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedDocId, setSelectedDocId] = useState<string>('');
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
-  const [selectedDoc, setSelectedDoc] = useState<any>(null);
+  const [modalDoc, setModalDoc] = useState<SpecialistPendingDoc | null>(null);
+  const [auditNote, setAuditNote] = useState('');
+  const [submittingAction, setSubmittingAction] = useState<'approve' | 'revision' | 'reject' | null>(null);
+  const [countryByReqCode, setCountryByReqCode] = useState<Record<string, string>>({});
+  const [complianceOrders, setComplianceOrders] = useState<ComplianceOrderSummary[]>([]);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
 
-  const displayedDocs = pendingDocs.filter(doc => filterType === 'ALL' || doc.type.toLowerCase().includes(filterType.toLowerCase()));
+  // Inline preview state
+  const [authorizedPreviewUrl, setAuthorizedPreviewUrl] = useState<string | null>(null);
+  const [detectedMime, setDetectedMime] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
+  // Dynamic expiry date - defaults to 1 year from current date
+  const [expiryDate, setExpiryDate] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 1);
+    return d.toISOString().split('T')[0];
+  });
+
+  // Rejection modal state
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectError, setRejectError] = useState('');
+
+  // Revision confirmation modal state
+  const [revisionModalOpen, setRevisionModalOpen] = useState(false);
+  const [revisionReason, setRevisionReason] = useState('');
+  const [revisionError, setRevisionError] = useState('');
+
+  const loadCorridors = useCallback(async () => {
+    try {
+      setIsLoadingOrders(true);
+      const orders = await documentsApi.getComplianceOrders();
+      if (Array.isArray(orders)) {
+        setComplianceOrders(orders);
+        const map: Record<string, string> = {};
+        orders.forEach((o) => {
+          if (o.requestCode && o.destinationCountry) {
+            map[o.requestCode] = o.destinationCountry;
+          }
+        });
+        setCountryByReqCode(map);
+      }
+    } catch {
+      // non-blocking enrichment
+    } finally {
+      setIsLoadingOrders(false);
+    }
   }, []);
 
-  const openReviewModal = (doc: any) => {
-    setSelectedDoc(doc);
-    setReviewModalOpen(true);
+  useEffect(() => {
+    void loadCorridors();
+  }, [loadCorridors]);
+
+  const availableCountries = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const doc of pendingDocs) {
+      const country = ((doc as any).destinationCountry || countryByReqCode[doc.reqCode] || '').trim();
+      if (country) {
+        counts.set(country, (counts.get(country) || 0) + 1);
+      }
+    }
+    return Array.from(counts.keys()).sort((a, b) => a.localeCompare(b));
+  }, [pendingDocs, countryByReqCode]);
+
+  const filteredDocs = useMemo(() => {
+    const term = searchTerm.toLowerCase().trim();
+    return pendingDocs.filter((doc) => {
+      const matchesSearch =
+        !term ||
+        (doc.reqCode ?? '').toLowerCase().includes(term) ||
+        (doc.horseName ?? '').toLowerCase().includes(term) ||
+        (doc.type ?? '').toLowerCase().includes(term) ||
+        (doc.customerName ?? '').toLowerCase().includes(term);
+
+      if (!matchesSearch) return false;
+      if (filterCorridor === 'ALL') return true;
+
+      const destCountry = (
+        (doc as any).destinationCountry ||
+        countryByReqCode[doc.reqCode] ||
+        ''
+      )
+        .trim()
+        .toLowerCase();
+
+      return destCountry === filterCorridor.toLowerCase();
+    });
+  }, [pendingDocs, searchTerm, filterCorridor, countryByReqCode]);
+
+  const groupedQueue = useMemo(() => {
+    const groups: {
+      reqCode: string;
+      customerName: string;
+      destCountry: string;
+      docs: SpecialistPendingDoc[];
+    }[] = [];
+    const map = new Map<string, number>();
+    for (const doc of filteredDocs) {
+      const key = doc.reqCode || 'UNASSIGNED';
+      const existingIdx = map.get(key);
+      if (existingIdx !== undefined) {
+        groups[existingIdx].docs.push(doc);
+      } else {
+        map.set(key, groups.length);
+        groups.push({
+          reqCode: key,
+          customerName: doc.customerName,
+          destCountry: (doc as any).destinationCountry || countryByReqCode[key] || '',
+          docs: [doc],
+        });
+      }
+    }
+    return groups;
+  }, [filteredDocs, countryByReqCode]);
+
+  const activeDoc: SpecialistPendingDoc | undefined = useMemo(
+    () => filteredDocs.find((d) => d.id === selectedDocId) || filteredDocs[0],
+    [filteredDocs, selectedDocId]
+  );
+
+  // Sync selectedDocId when filteredDocs changes
+  useEffect(() => {
+    if (filteredDocs.length > 0 && !filteredDocs.some((d) => d.id === selectedDocId)) {
+      setSelectedDocId(filteredDocs[0].id);
+    }
+  }, [filteredDocs, selectedDocId]);
+
+  // Reset auditNote when switching active document so notes don't leak across dossiers
+  useEffect(() => {
+    setAuditNote('');
+  }, [activeDoc?.id]);
+
+  // Fetch authenticated preview for inline inspection panel
+  const activeDocId = activeDoc?.id;
+  const activeNumericDocId = (activeDoc as (SpecialistPendingDoc & { numericDocId?: number }) | undefined)?.numericDocId;
+  const activeDocFileUrl = activeDoc?.fileUrl;
+
+  useEffect(() => {
+    setAuthorizedPreviewUrl(null);
+    setDetectedMime(null);
+    if (!activeDocFileUrl) {
+      setIsPreviewLoading(false);
+      return;
+    }
+
+    let active = true;
+    let createdBlob: string | null = null;
+    setIsPreviewLoading(true);
+
+    const numericId = activeDocId
+      ? parseNumericDocId({ id: activeDocId, numericDocId: activeNumericDocId })
+      : NaN;
+    const resolvedDocId = !isNaN(numericId) && numericId > 0 ? numericId : undefined;
+    const fallbackUrl = resolveAssetUrl(activeDocFileUrl);
+
+    fetchAuthenticatedDocumentBlobUrl(resolvedDocId, activeDocFileUrl)
+      .then(async (url) => {
+        if (!active) {
+          if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+          return;
+        }
+        if (url?.startsWith('blob:')) {
+          createdBlob = url;
+          try {
+            const blobRes = await fetch(url);
+            const blobData = await blobRes.blob();
+            if (active && blobData?.type) {
+              setDetectedMime(blobData.type.toLowerCase());
+            }
+          } catch {
+            // fallback to URL extension check
+          }
+        }
+        if (active) {
+          setAuthorizedPreviewUrl(url || fallbackUrl || null);
+        }
+      })
+      .finally(() => {
+        if (active) setIsPreviewLoading(false);
+      });
+
+    return () => {
+      active = false;
+      if (createdBlob) URL.revokeObjectURL(createdBlob);
+    };
+  }, [activeDocId, activeNumericDocId, activeDocFileUrl]);
+
+  const activeFallbackUrl = activeDoc?.fileUrl ? resolveAssetUrl(activeDoc.fileUrl) : '';
+  const inlinePreviewSrc = authorizedPreviewUrl || activeFallbackUrl;
+  const cleanPreviewLower = activeFallbackUrl ? activeFallbackUrl.split('?')[0].toLowerCase() : '';
+  const isInlinePdf = detectedMime ? detectedMime.includes('pdf') : cleanPreviewLower.endsWith('.pdf');
+  const isInlineImage = detectedMime
+    ? detectedMime.startsWith('image/')
+    : /\.(jpg|jpeg|png|webp|gif)$/i.test(cleanPreviewLower);
+
+  const compliantOrderCount = useMemo(
+    () => complianceOrders.filter((o) => o.isFullyCompliant).length,
+    [complianceOrders]
+  );
+
+  const isBusy = submittingAction !== null;
+
+  const handleQuickApprove = async (doc: SpecialistPendingDoc) => {
+    if (isBusy) return;
+    setSubmittingAction('approve');
+    try {
+      const validUntil =
+        expiryDate && !isNaN(Date.parse(expiryDate))
+          ? expiryDate
+          : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const numericId = parseNumericDocId(doc);
+      if (!isNaN(numericId) && numericId > 0) {
+        await documentsApi.reviewDocument(numericId, {
+          status: 'approved',
+          expiryDate: validUntil,
+          notes:
+            auditNote.trim() ||
+            (isEn
+              ? 'Approved as quarantine-compliant through specialist verification desk.'
+              : 'Đã phê duyệt đạt chuẩn hồ sơ kiểm dịch đối ngoại qua cổng thẩm định chuyên viên.'),
+        });
+      }
+
+      reviewDocument(doc.id, 'APPROVED', validUntil);
+      toast.success(
+        isEn
+          ? `Approved dossier: ${doc.type} (${doc.horseName})`
+          : `Đã phê duyệt đạt chuẩn hồ sơ: ${doc.type} (${doc.horseName})`
+      );
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          (isEn ? 'Failed to approve document on server.' : 'Lỗi khi phê duyệt hồ sơ lên máy chủ.')
+      );
+    } finally {
+      setSubmittingAction(null);
+    }
   };
 
-  const handleReviewSuccess = (id: string, status: 'APPROVED' | 'REJECTED') => {
-    setSelectedDoc(null);
+  const openRevisionModal = () => {
+    if (!activeDoc) return;
+    setRevisionReason(
+      auditNote.trim() ||
+        (isEn
+          ? 'Please upload supplementary/updated quarantine certificate information per transit requirements.'
+          : 'Yêu cầu bổ sung, hoàn thiện thông tin hồ sơ kiểm dịch theo chuẩn vận chuyển.')
+    );
+    setRevisionError('');
+    setRevisionModalOpen(true);
+  };
+
+  const handleConfirmRevision = async () => {
+    if (!activeDoc || isBusy) return;
+    const reason = revisionReason.trim();
+    if (reason.length < 5) {
+      setRevisionError(
+        t('specialist.rejectMinCharsError', 'Vui lòng nêu rõ nội dung cần bổ sung (tối thiểu 5 ký tự).')
+      );
+      return;
+    }
+
+    setSubmittingAction('revision');
+    try {
+      const numericId = parseNumericDocId(activeDoc);
+      if (!isNaN(numericId) && numericId > 0) {
+        await documentsApi.reviewDocument(numericId, {
+          status: 'rejected',
+          notes: reason,
+        });
+      }
+
+      reviewDocument(activeDoc.id, 'REJECTED', undefined, reason);
+      toast.success(
+        isEn
+          ? `Sent document revision request to ${activeDoc.customerName || 'owner'}`
+          : `Đã gửi yêu cầu bổ sung thông tin tới khách hàng ${activeDoc.customerName ?? 'chủ ngựa'}`
+      );
+      setRevisionModalOpen(false);
+      setRevisionReason('');
+      setRevisionError('');
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          (isEn ? 'Failed to send revision request.' : 'Lỗi khi gửi yêu cầu bổ sung lên máy chủ.')
+      );
+    } finally {
+      setSubmittingAction(null);
+    }
+  };
+
+  const openRejectModal = () => {
+    setRejectReason(auditNote.trim());
+    setRejectError('');
+    setRejectModalOpen(true);
+  };
+
+  const handleConfirmReject = async () => {
+    if (!activeDoc || isBusy) return;
+    const trimmedReason = rejectReason.trim();
+    if (trimmedReason.length < 5) {
+      setRejectError(
+        t('specialist.rejectMinCharsError', 'Vui lòng nêu rõ lý do từ chối (tối thiểu 5 ký tự).')
+      );
+      return;
+    }
+
+    setSubmittingAction('reject');
+    try {
+      const numericId = parseNumericDocId(activeDoc);
+      if (!isNaN(numericId) && numericId > 0) {
+        await documentsApi.reviewDocument(numericId, {
+          status: 'rejected',
+          notes: trimmedReason,
+        });
+      }
+
+      reviewDocument(activeDoc.id, 'REJECTED', undefined, trimmedReason);
+      toast.success(
+        isEn
+          ? `Rejected document: ${activeDoc.type}. Replacement requested.`
+          : `Đã từ chối hồ sơ: ${activeDoc.type}. Yêu cầu bổ sung/sửa đổi.`
+      );
+      setRejectModalOpen(false);
+      setRejectReason('');
+      setRejectError('');
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          (isEn ? 'Failed to update rejection status.' : 'Lỗi khi cập nhật trạng thái từ chối lên máy chủ.')
+      );
+    } finally {
+      setSubmittingAction(null);
+    }
   };
 
   return (
-    <div className="flex flex-col gap-6 pb-12">
-      {/* 1. WELCOME BANNER */}
-      <div className="bg-slate-900 rounded-2xl p-8 border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl relative overflow-hidden">
-        {/* Decorative pattern */}
-        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'linear-gradient(#ffffff 1px, transparent 1px), linear-gradient(90deg, #ffffff 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
-        
-        <div className="relative z-10 w-full md:w-auto">
-          <p className="text-[11px] font-bold tracking-widest text-slate-400 uppercase mb-2">Saturday, September 26</p>
-          <h2 className="text-3xl font-bold text-white mb-1">Good morning, Sarah</h2>
-          <p className="text-sm font-medium text-slate-400 m-0">Here is an overview of your compliance activities.</p>
-
-          {/* Chips */}
-          <div className="flex flex-wrap items-center gap-3 mt-5">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 text-xs font-medium text-white backdrop-blur-sm">
-              <FileSignature size={14} className="text-blue-400" />
-              <span>{pendingDocs.length} documents pending</span>
-            </div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/30 text-xs font-medium text-white backdrop-blur-sm">
-              <AlertTriangle size={14} className="text-red-400" />
-              <span>{missingDocs.length.toString().padStart(2, '0')} missing documents</span>
-            </div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-xs font-medium text-white backdrop-blur-sm">
-              <Clock size={14} className="text-amber-400" />
-              <span>03 documents expiring soon</span>
-            </div>
-          </div>
+    <div className="flex flex-col gap-6 max-w-[1440px] mx-auto pb-10 font-sans">
+      {/* 1. EDITORIAL LIGHT HEADER */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-5 border-b border-[#E5DDD0]">
+        <div className="flex flex-col gap-1 min-w-0">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#966516] m-0">
+            {t('specialist.headerTag', isEn ? 'Quarantine & Compliance Desk' : 'Thẩm Định Pháp Lý & Kiểm Dịch')}
+          </p>
+          <h1 className="text-2xl sm:text-3xl font-extrabold m-0 text-[#181A17] tracking-tight">
+            {t('specialist.workbenchTitle', 'Bàn Thẩm Định Hồ Sơ Kiểm Dịch')}
+          </h1>
+          <p className="text-sm text-[#5F6977] m-0">
+            {t(
+              'specialist.workbenchSubtitle',
+              'Đối soát chứng từ y tế, hộ chiếu và cấp phép vận chuyển cho từng đơn.'
+            )}
+          </p>
         </div>
 
+        {/* Quick Actions */}
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => void loadCorridors()}
+            disabled={isLoadingOrders}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE] text-xs font-bold cursor-pointer transition-colors disabled:opacity-60"
+          >
+            <RotateCcw size={13} className={isLoadingOrders ? 'animate-spin' : ''} />
+            <span>{t('common.refresh', isEn ? 'Refresh' : 'Làm mới')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.push('/specialist/regulations')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE] text-xs font-bold cursor-pointer transition-colors"
+          >
+            <Scale size={14} className="text-[#966516]" />
+            <span>{t('specialist.lookupRegulations', 'Tra Cứu Quy Chuẩn')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.push('/specialist/documents')}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D28] text-white text-xs font-bold cursor-pointer shadow-sm transition-colors"
+          >
+            <FolderOpen size={14} className="text-[#D4C5A3]" />
+            <span>{t('specialist.viewAllDocs', 'Túi Hồ Sơ Vận Chuyển')}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 1.5 COMPLIANCE KPI SUMMARY (4 Clickable Cards) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <button
+          type="button"
           onClick={() => {
-            document.getElementById('review-queue-table')?.scrollIntoView({ behavior: 'smooth' });
+            setFilterCorridor('ALL');
+            setSearchTerm('');
           }}
-          className="relative z-10 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-colors border border-blue-500 w-full md:w-auto justify-center"
+          className={`text-left rounded-2xl p-4 sm:p-5 border shadow-sm flex flex-col justify-between transition-all hover:shadow-md cursor-pointer ${
+            pendingDocs.length > 0 ? 'bg-[#FAF8F4] border-[#C4B38E]' : 'bg-white border-[#E5DDD0]'
+          }`}
         >
-          Review Documents <ArrowRight size={16} />
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[11px] font-bold tracking-wider uppercase text-[#966516]">
+              {t('specialist.kpi.pendingReview', isEn ? 'Pending Review' : 'Chờ Thẩm Định')}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-[#F3ECE0] flex items-center justify-center text-[#966516]">
+              <Clock size={15} />
+            </div>
+          </div>
+          <div className="text-2xl sm:text-3xl font-black text-[#181A17] tracking-tight tabular-nums">
+            {String(pendingDocs.length).padStart(2, '0')}
+          </div>
+          <div className="mt-1.5 text-xs text-[#966516] font-semibold">
+            {groupedQueue.length} {t('specialist.kpi.ordersQueued', isEn ? 'orders in queue' : 'đơn hàng trong hàng đợi')}
+          </div>
         </button>
+
+        <Link
+          href="/specialist/compliance-orders"
+          className="no-underline bg-white rounded-2xl p-4 sm:p-5 border border-[#E5DDD0] hover:border-[#C4B38E] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
+        >
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[11px] font-bold tracking-wider uppercase text-[#5F6977]">
+              {t('specialist.kpi.complianceOrders', isEn ? 'Compliance Orders' : 'Đơn Kiểm Dịch')}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-[#F4F1EA] flex items-center justify-center text-[#181A17]">
+              <FileCheck2 size={15} />
+            </div>
+          </div>
+          <div className="text-2xl sm:text-3xl font-black text-[#181A17] tracking-tight tabular-nums">
+            {String(complianceOrders.length).padStart(2, '0')}
+          </div>
+          <div className="mt-1.5 flex items-center justify-between text-xs text-[#5F6977] font-medium">
+            <span>{t('specialist.kpi.complianceOrdersSub', isEn ? 'Manage requirements' : 'Quản lý yêu cầu hồ sơ')}</span>
+            <ChevronRight size={13} className="text-[#966516]" />
+          </div>
+        </Link>
+
+        <Link
+          href="/specialist/missing"
+          className={`no-underline rounded-2xl p-4 sm:p-5 border shadow-sm flex flex-col justify-between transition-all hover:shadow-md ${
+            missingDocs.length > 0
+              ? 'bg-[#FDF6F6] border-[#E5B8B8]'
+              : 'bg-white border-[#E5DDD0] hover:border-[#C4B38E]'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2.5">
+            <span
+              className={`text-[11px] font-bold tracking-wider uppercase ${
+                missingDocs.length > 0 ? 'text-[#B33E3E]' : 'text-[#5F6977]'
+              }`}
+            >
+              {t('specialist.kpi.missingRejected', isEn ? 'Missing / Rejected' : 'Thiếu / Từ Chối')}
+            </span>
+            <div
+              className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                missingDocs.length > 0 ? 'bg-[#F8EAEA] text-[#B33E3E]' : 'bg-[#F4F1EA] text-[#5F6977]'
+              }`}
+            >
+              <AlertTriangle size={15} />
+            </div>
+          </div>
+          <div className="text-2xl sm:text-3xl font-black text-[#181A17] tracking-tight tabular-nums">
+            {String(missingDocs.length).padStart(2, '0')}
+          </div>
+          <div
+            className={`mt-1.5 flex items-center justify-between text-xs font-semibold ${
+              missingDocs.length > 0 ? 'text-[#B33E3E]' : 'text-[#5F6977]'
+            }`}
+          >
+            <span>{t('specialist.kpi.missingSub', isEn ? 'Follow up with owners' : 'Nhắc khách bổ sung')}</span>
+            <ChevronRight size={13} />
+          </div>
+        </Link>
+
+        <Link
+          href="/specialist/approval"
+          className="no-underline bg-white rounded-2xl p-4 sm:p-5 border border-[#E5DDD0] hover:border-[#B7DBC4] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
+        >
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[11px] font-bold tracking-wider uppercase text-[#287653]">
+              {t('specialist.kpi.compliantOrders', isEn ? 'Fully Compliant' : 'Đơn Đạt Chuẩn')}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-[#E8F2EB] flex items-center justify-center text-[#287653]">
+              <ShieldCheck size={15} />
+            </div>
+          </div>
+          <div className="text-2xl sm:text-3xl font-black text-[#287653] tracking-tight tabular-nums">
+            {String(compliantOrderCount).padStart(2, '0')}
+          </div>
+          <div className="mt-1.5 flex items-center justify-between text-xs text-[#287653] font-semibold">
+            <span>{t('specialist.kpi.compliantSub', isEn ? 'Final clearance desk' : 'Cấp phép thông quan')}</span>
+            <ChevronRight size={13} />
+          </div>
+        </Link>
       </div>
 
-      {/* 2. KPI CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {[
-          { title: 'Pending Documents', val: pendingDocs.length.toString().padStart(2, '0'), icon: FileSignature, bg: 'bg-amber-50 text-amber-600', tag: 'Today', tagBg: 'bg-slate-100 text-slate-500' },
-          { title: 'Under Review', val: '07', icon: Search, bg: 'bg-blue-50 text-blue-600', tag: 'In Progress', tagBg: 'bg-blue-50 text-blue-600' },
-          { title: 'Missing Documents', val: missingDocs.length.toString().padStart(2, '0'), icon: FileX, bg: 'bg-red-50 text-red-600', tag: 'Needs Action', tagBg: 'bg-red-50 text-red-600' },
-          { title: 'Expiring Soon', val: '03', icon: Clock, bg: 'bg-orange-50 text-orange-600', tag: 'Next 7 Days', tagBg: 'bg-amber-50 text-amber-600' },
-        ].map((card, idx) => (
-          <div key={idx} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex justify-between items-start mb-3">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${card.bg}`}>
-                <card.icon size={20} />
-              </div>
-              <span className={`text-[11px] font-bold px-2 py-1 rounded-md ${card.tagBg}`}>{card.tag}</span>
-            </div>
-            <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">{card.val}</h3>
-            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider m-0">{card.title}</p>
-          </div>
-        ))}
-        {/* Compliance Rate Card */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex justify-between items-start mb-3">
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-emerald-50 text-emerald-600">
-              <ShieldCheck size={20} />
-            </div>
-            <div className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md">
-              <TrendingUp size={12} /> +0.5%
-            </div>
-          </div>
-          <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">92%</h3>
-          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider m-0">Compliance Rate</p>
-        </div>
-      </div>
-
-      {/* 3. MAIN GRID (2 Cols Left, 1 Col Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* LEFT COLUMN: Queue + Missing */}
-        <div className="flex flex-col gap-6 lg:col-span-2">
-          
-          {/* DOCUMENT REVIEW QUEUE */}
-          <div id="review-queue-table" className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-slate-200 flex justify-between items-center bg-white">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 m-0">Document Review Queue</h3>
-                <p className="text-xs font-medium text-slate-500 mt-1">Documents submitted by customers awaiting approval</p>
-              </div>
-              <div className="relative">
-                <button
-                  onClick={() => setShowFilterMenu(!showFilterMenu)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm font-semibold transition-colors ${
-                    filterType !== 'ALL'
-                      ? 'border-blue-500 text-blue-600 bg-blue-50'
-                      : 'border-slate-300 text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <Filter size={14} className={filterType !== 'ALL' ? 'text-blue-500' : 'text-slate-400'} />
-                  {filterType === 'ALL' ? 'Filter' : filterType}
-                </button>
-                {showFilterMenu && (
-                  <div className="absolute right-0 mt-2 w-44 bg-white border border-slate-200 rounded-xl shadow-lg p-2 z-20">
-                    <button
-                      onClick={() => { setFilterType('ALL'); setShowFilterMenu(false); }}
-                      className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${filterType === 'ALL' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-50'}`}
-                    >
-                      All Types
-                    </button>
-                    <button
-                      onClick={() => { setFilterType('Vaccination'); setShowFilterMenu(false); }}
-                      className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${filterType === 'Vaccination' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-50'}`}
-                    >
-                      Vaccination
-                    </button>
-                    <button
-                      onClick={() => { setFilterType('Medical'); setShowFilterMenu(false); }}
-                      className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold ${filterType === 'Medical' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-50'}`}
-                    >
-                      Medical
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="p-4">Document ID</th>
-                    <th className="p-4">Horse / Request</th>
-                    <th className="p-4">Document Type</th>
-                    <th className="p-4">Submitted</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {isLoading ? (
-                    <tr>
-                      <td colSpan={6} className="p-0">
-                        {[1, 2].map(i => (
-                          <div key={i} className="flex px-4 py-5 gap-4">
-                            <div className="w-20 h-5 bg-slate-100 rounded animate-pulse" />
-                            <div className="w-32 h-8 bg-slate-100 rounded animate-pulse" />
-                            <div className="w-40 h-5 bg-slate-100 rounded animate-pulse" />
-                            <div className="w-20 h-5 bg-slate-100 rounded animate-pulse" />
-                            <div className="w-24 h-6 bg-slate-100 rounded-full animate-pulse" />
-                            <div className="ml-auto w-20 h-8 bg-slate-100 rounded-lg animate-pulse" />
-                          </div>
-                        ))}
-                      </td>
-                    </tr>
-                  ) : displayedDocs.map((doc) => (
-                    <tr key={doc.id} className="hover:bg-slate-50/50">
-                      <td className="p-4 font-bold text-slate-900">{doc.id}</td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-sm">♞</div>
-                          <div>
-                            <p className="font-bold text-slate-900 m-0">{doc.horseName}</p>
-                            <p className="text-xs text-blue-600 font-semibold cursor-pointer m-0 hover:underline">{doc.reqCode}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4 text-slate-700">
-                        <span className="inline-flex items-center gap-1.5 font-medium">
-                          {React.createElement(getDocIcon(doc.type), { size: 16, className: 'text-slate-400 shrink-0' })} {doc.type}
-                        </span>
-                      </td>
-                      <td className="p-4 text-slate-600 font-medium">{doc.date}</td>
-                      <td className="p-4">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-100">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Pending Review
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <button
-                          onClick={() => openReviewModal(doc)}
-                          className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-sm transition-colors"
-                        >
-                          Review
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {!isLoading && pendingDocs.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-slate-500 font-medium">
-                        <CheckCircle size={32} className="mx-auto text-green-500 mb-2" />
-                        All caught up! No pending documents in the queue.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* MISSING DOCUMENTS TABLE */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-slate-200 bg-red-50/50">
-              <h3 className="text-base font-bold text-slate-900 m-0 flex items-center gap-2">
-                <AlertTriangle size={18} className="text-red-500" /> Documents Requiring Attention
-              </h3>
-              <p className="text-xs font-medium text-slate-600 mt-1">Missing or rejected documents that block transport approval</p>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="p-4">Horse / Request</th>
-                    <th className="p-4">Missing Document</th>
-                    <th className="p-4">Due Date</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {isLoading ? (
-                    <tr>
-                      <td colSpan={5} className="p-4 text-center">
-                        <div className="h-6 bg-slate-100 rounded w-1/2 mx-auto animate-pulse"></div>
-                      </td>
-                    </tr>
-                  ) : missingDocs.map((doc) => (
-                    <tr key={doc.id} className="hover:bg-slate-50/50">
-                      <td className="p-4">
-                        <p className="font-bold text-slate-900 m-0">{doc.horseName}</p>
-                        <p className="text-xs text-blue-600 font-semibold cursor-pointer m-0 hover:underline">{doc.reqCode}</p>
-                      </td>
-                      <td className="p-4 text-slate-800 font-medium">
-                        <span className="inline-flex items-center gap-1.5">
-                          {doc.status === 'MISSING' ? <FileX size={16} className="text-red-500" /> : <FolderOpen size={16} className="text-slate-400" />} 
-                          {doc.type}
-                        </span>
-                        {doc.rejectionReason && (
-                          <span className="block text-[11px] text-red-600 mt-0.5 font-normal">
-                            Reason: {doc.rejectionReason}
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4 text-red-600 font-bold">{doc.due}</td>
-                      <td className="p-4">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-red-50 text-red-700 border border-red-100">
-                          <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> {doc.status}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <button
-                          onClick={() => toast.success(`Reminder sent to ${doc.customer} for ${doc.type}`)}
-                          className="px-4 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 shadow-sm transition-colors"
-                        >
-                          Request
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {!isLoading && missingDocs.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="p-6 text-center text-slate-500 font-medium">
-                        No missing documents!
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: Compliance Overview + Expiring Docs + Regulations */}
-        <div className="flex flex-col gap-6">
-          
-          {/* COMPLIANCE OVERVIEW */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <h3 className="text-base font-bold text-slate-900 mb-5">Compliance Overview</h3>
-            <div className="flex flex-col gap-5">
-              {[
-                { label: 'Medical Compliance', icon: Stethoscope, pct: 92, color: 'bg-emerald-500' },
-                { label: 'Quarantine Compliance', icon: ShieldCheck, pct: 96, color: 'bg-emerald-500' },
-                { label: 'Customs Compliance', icon: Building2, pct: 89, color: 'bg-amber-500' },
-              ].map((item, idx) => (
-                <div key={idx}>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                      <item.icon size={16} className="text-slate-400" /> {item.label}
-                    </span>
-                    <span className={`text-sm font-bold ${item.pct >= 90 ? 'text-emerald-600' : 'text-amber-600'}`}>{item.pct}%</span>
-                  </div>
-                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${item.color}`} style={{ width: `${item.pct}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* DOCUMENT EXPIRATION */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-base font-bold text-slate-900 m-0">Expiring Documents</h3>
-              <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-100">
-                3 Soon
+      {/* 2. SPLIT-SCREEN INSPECTION WORKBENCH */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* LEFT COLUMN: ORDER-GROUPED DOSSIER QUEUE */}
+        <div className="lg:col-span-4 xl:col-span-4 bg-white rounded-2xl border border-[#E5DDD0] shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-[#E5DDD0]">
+            <div className="flex items-center justify-between gap-2 mb-3.5">
+              <h2 className="text-[15px] font-extrabold text-[#181A17] m-0">
+                {t('specialist.queueTitle', 'Hàng đợi chờ thẩm định')} ({filteredDocs.length})
+              </h2>
+              <span className="text-[11px] px-2 py-0.5 rounded-md bg-[#F8F0DF] text-[#966516] font-bold shrink-0">
+                {groupedQueue.length} {t('common.ordersUnit', isEn ? 'orders' : 'đơn')}
               </span>
             </div>
 
-            <div className="flex flex-col gap-3">
-              <div 
-                onClick={() => toast('Viewing EIA Certificate', { icon: '📄' })}
-                className="p-3 border border-slate-100 bg-slate-50 rounded-lg flex justify-between items-center cursor-pointer hover:border-slate-200 hover:shadow-sm transition-all"
-              >
-                <div>
-                  <p className="font-bold text-sm text-slate-900 m-0">EIA Certificate</p>
-                  <p className="text-xs text-slate-500 mt-1">Thunder (TR-2026-001)</p>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#D8CEBE] bg-[#FAF8F4] focus-within:border-[#A67C2E] focus-within:bg-white transition-colors">
+              <Search size={14} className="text-[#5F6977] shrink-0" />
+              <input
+                type="text"
+                aria-label={t('specialist.searchPlaceholder', 'Tìm mã đơn, tên ngựa, chủ ngựa...')}
+                placeholder={t('specialist.searchPlaceholder', 'Tìm mã đơn, tên ngựa, chủ ngựa...')}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="border-none bg-transparent outline-none text-[12.5px] w-full text-[#181A17] placeholder:text-[#7E867B]"
+              />
+            </div>
+
+            {/* Dynamic Country Filter Tabs */}
+            {availableCountries.length > 1 && (
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {[
+                  { key: 'ALL', label: t('common.all', 'Tất cả') },
+                  ...availableCountries.map((country) => ({ key: country, label: country })),
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setFilterCorridor(tab.key)}
+                    className={`px-2.5 py-1 rounded-md text-[11.5px] font-bold cursor-pointer transition-colors ${
+                      filterCorridor === tab.key
+                        ? 'border border-[#A67C2E] bg-[#FAF8F4] text-[#7A591C]'
+                        : 'border border-[#D8CEBE] bg-white text-[#5F6977] hover:bg-[#FAF9F5]'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Order-Grouped Dossier List */}
+          <div className="max-h-[680px] overflow-y-auto p-3 flex flex-col gap-3">
+            {!isLoaded ? (
+              <div className="py-10 px-4 text-center text-[#5F6977] text-xs flex flex-col items-center gap-2">
+                <Loader2 size={22} className="animate-spin text-[#A67C2E]" />
+                <span>{t('common.loading', 'Đang tải danh sách hồ sơ...')}</span>
+              </div>
+            ) : groupedQueue.length === 0 ? (
+              <div className="py-8 px-4 text-center text-[#5F6977] text-[13px]">
+                {t('specialist.noMatchingDocs', 'Không tìm thấy hồ sơ phù hợp')}
+              </div>
+            ) : (
+              groupedQueue.map((group) => (
+                <div
+                  key={group.reqCode}
+                  className="rounded-2xl border border-[#E5DDD0] bg-[#FAF8F4]/50 overflow-hidden"
+                >
+                  <div className="px-3.5 py-2.5 bg-[#FAF8F4] border-b border-[#E5DDD0] flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[11px] font-extrabold text-[#7A591C] bg-[#F8F0DF] border border-[#DFCA9A] px-2 py-0.5 rounded-md shrink-0">
+                        {group.reqCode}
+                      </span>
+                      <span className="text-[11px] font-semibold text-[#5F6977] truncate">
+                        {group.customerName}
+                        {group.destCountry ? ` · ${group.destCountry}` : ''}
+                      </span>
+                    </div>
+                    <span className="text-[10.5px] font-bold text-[#966516] shrink-0">
+                      {group.docs.length} {t('specialist.docsUnit', isEn ? 'docs' : 'hồ sơ')}
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-[#EFEAE0]">
+                    {group.docs.map((doc) => {
+                      const isSelected = doc.id === activeDoc?.id;
+                      return (
+                        <button
+                          key={doc.id}
+                          type="button"
+                          onClick={() => setSelectedDocId(doc.id)}
+                          aria-pressed={isSelected}
+                          className={`w-full text-left px-3.5 py-3 cursor-pointer transition-all flex items-center justify-between gap-2.5 border-0 border-l-4 ${
+                            isSelected
+                              ? 'border-l-[#A67C2E] bg-white shadow-xs'
+                              : 'border-l-transparent bg-white/70 hover:bg-white'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[13px] font-bold text-[#181A17] truncate">
+                              {translateDocType(doc.type)}
+                            </div>
+                            <div className="text-[11.5px] text-[#5F6977] mt-0.5 truncate">
+                              <strong className="text-[#181A17]">{doc.horseName}</strong> · {doc.date}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#E8F2EB] text-[#287653] font-bold">
+                              {doc.status === 'PENDING'
+                                ? t('specialist.awaitingQuarantine', 'Chờ duyệt')
+                                : t('specialist.processing', 'Đang xử lý')}
+                            </span>
+                            <ChevronRight
+                              size={15}
+                              className={isSelected ? 'text-[#A67C2E]' : 'text-[#7E867B]'}
+                            />
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded inline-block mb-1">
-                    Expires in 3 days
-                  </span>
-                  <p className="text-[10px] text-slate-500 m-0 font-medium">Sep 29, 2026</p>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: ACTIVE DOSSIER INSPECTION & REVIEW WORKBENCH */}
+        <div className="lg:col-span-8 xl:col-span-8 bg-white rounded-2xl border border-[#E5DDD0] shadow-sm overflow-hidden">
+          {!isLoaded ? (
+            <div className="p-16 text-center text-[#5F6977] flex flex-col items-center gap-2">
+              <Loader2 size={24} className="animate-spin text-[#A67C2E]" />
+              <span className="text-sm">{t('common.loading', 'Đang tải dữ liệu thẩm định...')}</span>
+            </div>
+          ) : activeDoc ? (
+            <div>
+              {/* Active Dossier Header */}
+              <div className="p-6 sm:px-7 bg-[#FAF8F4] border-b border-[#E5DDD0] flex flex-wrap items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-extrabold text-[#7A591C] bg-[#F8F0DF] px-2 py-0.5 rounded-md border border-[#DFCA9A]">
+                      {activeDoc.reqCode}
+                    </span>
+                    <span className="text-xs text-[#5F6977]">
+                      {t('specialist.docId', 'Mã tài liệu')}: {activeDoc.id}
+                    </span>
+                  </div>
+
+                  <h2 className="text-xl font-extrabold text-[#181A17] mt-2 mb-0.5">
+                    {translateDocType(activeDoc.type)}
+                  </h2>
+                  <div className="text-[13px] text-[#5F6977]">
+                    {t('common.racehorse', 'Ngựa đua')}:{' '}
+                    <strong className="text-[#181A17]">{activeDoc.horseName}</strong> ·{' '}
+                    {t('common.owner', 'Chủ sở hữu')}:{' '}
+                    <strong className="text-[#181A17]">{activeDoc.customerName}</strong>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalDoc(activeDoc);
+                      setReviewModalOpen(true);
+                    }}
+                    className="px-3.5 py-2 rounded-lg border border-[#D8CEBE] bg-white hover:bg-[#FAF8F4] text-[#181A17] text-[12.5px] font-bold cursor-pointer inline-flex items-center gap-1.5 shadow-sm transition-colors"
+                  >
+                    <Eye size={14} />
+                    <span>{t('specialist.inspectDossier', 'Xem Bản Đầy Đủ')}</span>
+                  </button>
                 </div>
               </div>
 
-              <div 
-                onClick={() => toast('Viewing Import Permit', { icon: '⚠️' })}
-                className="p-3 border border-red-100 bg-red-50/50 rounded-lg flex justify-between items-center cursor-pointer hover:border-red-200 hover:bg-red-50 transition-all"
-              >
-                <div>
-                  <p className="font-bold text-sm text-slate-900 m-0">Import Permit (SG)</p>
-                  <p className="text-xs text-slate-500 mt-1">Starlight (TR-2026-015)</p>
-                </div>
-                <div className="text-right">
-                  <span className="text-[10px] font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded inline-block mb-1">
-                    Expired
-                  </span>
-                  <p className="text-[10px] text-red-600 m-0 font-bold">Yesterday</p>
-                </div>
-              </div>
-            </div>
-          </div>
+              {/* Dynamic Document Verification, Inline Preview & Attached File */}
+              <div className="p-6 sm:px-7">
+                <h3 className="text-[13px] font-extrabold text-[#181A17] mb-3.5 uppercase tracking-wider mt-0">
+                  {t('specialist.dossierDetailsTitle', 'Thông Tin Thẩm Định & Tệp Hồ Sơ Đính Kèm')}
+                </h3>
 
-          {/* REGULATIONS COMPACT */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 bg-slate-50">
-              <h3 className="text-sm font-bold text-slate-900 m-0">Regulations Watchlist</h3>
-            </div>
-            <div className="p-3 flex flex-col gap-2">
-              <div 
-                onClick={() => toast.success('Fetching Singapore protocols')}
-                className="p-3 flex justify-between items-center cursor-pointer rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                <div>
-                  <p className="font-bold text-sm text-slate-900 m-0 flex items-center gap-1.5">🇸🇬 Singapore</p>
-                  <p className="text-xs text-slate-500 mt-1">Quarantine Protocol Update</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div className="p-4 rounded-xl bg-white border border-[#E5DDD0]">
+                    <div className="text-xs text-[#5F6977] font-semibold">
+                      {t('documents.docType', 'Loại Chứng Từ / Hồ Sơ')}
+                    </div>
+                    <div className="text-base font-bold text-[#181A17] mt-0.5">
+                      {translateDocType(activeDoc.type)}
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-white border border-[#E5DDD0]">
+                    <div className="text-xs text-[#5F6977] font-semibold">
+                      {t('documents.attachment', 'Tệp Đính Kèm Thực Tế')}
+                    </div>
+                    {activeDoc.fileUrl ? (
+                      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-mono font-bold text-[#287653] truncate max-w-[180px]">
+                          {activeDoc.fileUrl.split('/').pop() || 'document.pdf'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openAuthenticatedDocument(activeDoc.id, activeDoc.fileUrl)}
+                          className="px-2.5 py-1 rounded-lg bg-[#181A17] text-[#FAF8F4] hover:bg-[#2C2F2A] text-xs font-bold inline-flex items-center gap-1 border border-[#B49A68]/40 cursor-pointer"
+                        >
+                          <Download size={12} className="text-[#B49A68]" />
+                          <span>{t('documents.openFile', 'Mở tệp')}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-[#966516] font-bold mt-1.5 flex items-center gap-1">
+                        <AlertTriangle size={14} />
+                        <span>{t('documents.noAttachment', 'Chưa có tệp scan đính kèm')}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded">Active</span>
-              </div>
-              <div 
-                onClick={() => toast.success('Fetching UAE regulations')}
-                className="p-3 flex justify-between items-center cursor-pointer rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                <div>
-                  <p className="font-bold text-sm text-slate-900 m-0 flex items-center gap-1.5">🇦🇪 UAE</p>
-                  <p className="text-xs text-slate-500 mt-1">Equine Import Regulations</p>
+
+                {/* Inline Document Preview Viewport */}
+                {activeDoc.fileUrl && (
+                  <div className="mb-6 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] overflow-hidden">
+                    <div className="px-4 py-2 border-b border-[#E5DDD0] flex items-center justify-between gap-2 bg-[#F4F1E9]">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#5F6977] flex items-center gap-1.5">
+                        <FileText size={13} className="text-[#966516]" />
+                        {t('specialist.inlinePreviewLabel', isEn ? 'Quick Preview' : 'Xem Trước Nhanh')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalDoc(activeDoc);
+                          setReviewModalOpen(true);
+                        }}
+                        className="text-[11px] font-bold text-[#966516] hover:underline bg-transparent border-0 cursor-pointer p-0"
+                      >
+                        {t('specialist.expandPreview', isEn ? 'Expand viewer →' : 'Phóng to →')}
+                      </button>
+                    </div>
+                    <div className="h-[240px] w-full flex items-center justify-center bg-[#F4F1E9]/50 overflow-hidden">
+                      {isPreviewLoading ? (
+                        <div className="flex flex-col items-center gap-2 text-xs text-[#5F6977]">
+                          <Loader2 size={20} className="animate-spin text-[#A67C2E]" />
+                          <span>{t('specialist.loadingPreview', isEn ? 'Loading document preview...' : 'Đang tải bản xem trước...')}</span>
+                        </div>
+                      ) : inlinePreviewSrc && isInlineImage ? (
+                        <img
+                          src={inlinePreviewSrc}
+                          alt={translateDocType(activeDoc.type)}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      ) : inlinePreviewSrc && isInlinePdf ? (
+                        <iframe
+                          src={inlinePreviewSrc}
+                          title={translateDocType(activeDoc.type)}
+                          className="w-full h-full border-0 bg-white"
+                        />
+                      ) : (
+                        <div className="text-center px-4">
+                          <FileText size={26} className="text-[#966516] mx-auto mb-1.5" />
+                          <p className="text-xs text-[#5F6977] m-0 mb-2">
+                            {t('specialist.previewFallback', isEn ? 'Inline preview unavailable for this file format.' : 'Định dạng tệp không hỗ trợ xem trực tiếp tại đây.')}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => openAuthenticatedDocument(activeDoc.id, activeDoc.fileUrl)}
+                            className="px-3 py-1.5 rounded-lg bg-[#181A17] text-white text-xs font-bold cursor-pointer border-0"
+                          >
+                            {t('documents.openFile', 'Mở tệp')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Expiry Date & Auditor Notes Fields */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label
+                      htmlFor="specialist-expiry-date"
+                      className="block text-xs font-bold text-[#242722] mb-1.5 uppercase tracking-wider"
+                    >
+                      {t('specialist.validityPeriod', 'Thời hạn hiệu lực hồ sơ kiểm dịch')}:
+                    </label>
+                    <input
+                      id="specialist-expiry-date"
+                      type="date"
+                      value={expiryDate}
+                      onChange={(e) => setExpiryDate(e.target.value)}
+                      className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] bg-white text-sm text-[#181A17] focus:outline-none focus:ring-2 focus:ring-[#C4B38E]/25 focus:border-[#A67C2E] transition-all"
+                    />
+                    <p className="text-[11px] text-[#5F6977] mt-1 mb-0">
+                      {t('specialist.autoExpiryDesc', 'Tự động tính toán theo quy chuẩn cửa khẩu quốc tế.')}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="specialist-audit-note"
+                      className="block text-xs font-bold text-[#242722] mb-1.5 uppercase tracking-wider"
+                    >
+                      {t('specialist.auditNotesLabel', 'Ghi chú thẩm định & Yêu cầu pháp lý')}:
+                    </label>
+                    <textarea
+                      id="specialist-audit-note"
+                      rows={2}
+                      placeholder={t('specialist.notesPlaceholder', 'Nhập nhận xét kiểm dịch hoặc ghi chú thẩm định...')}
+                      value={auditNote}
+                      onChange={(e) => setAuditNote(e.target.value)}
+                      className="w-full p-2.5 text-sm rounded-xl border border-[#D8CEBE] bg-white text-[#181A17] placeholder:text-[#7E867B] focus:outline-none focus:ring-2 focus:ring-[#C4B38E]/25 focus:border-[#A67C2E] transition-all resize-none"
+                    />
+                  </div>
                 </div>
-                <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1 rounded">Review Req.</span>
+
+                {/* Action Decision Buttons */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-[#E5DDD0]">
+                  <button
+                    type="button"
+                    onClick={() => handleQuickApprove(activeDoc)}
+                    disabled={isBusy}
+                    className="py-3 px-4 rounded-xl bg-[#287653] hover:bg-[#1E5C40] text-white text-sm font-bold flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border-0"
+                  >
+                    {submittingAction === 'approve' ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <CheckCircle2 size={18} />
+                    )}
+                    <span>{t('specialist.quickApprove', 'PHÊ DUYỆT ĐẠT CHUẨN')}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={openRevisionModal}
+                    disabled={isBusy}
+                    className="py-3 px-4 rounded-xl bg-[#F8F0DF] hover:bg-[#EFE3CB] text-[#966516] border border-[#DFCA9A] text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {submittingAction === 'revision' ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <AlertTriangle size={18} />
+                    )}
+                    <span>{t('specialist.requestRevision', 'YÊU CẦU BỔ SUNG')}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={openRejectModal}
+                    disabled={isBusy}
+                    className="py-3 px-4 rounded-xl bg-[#F8EAEA] hover:bg-[#F1D5D5] text-[#B33E3E] border border-[#B33E3E]/30 text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {submittingAction === 'reject' ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <XCircle size={18} />
+                    )}
+                    <span>{t('common.reject', 'TỪ CHỐI HỒ SƠ...')}</span>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="py-16 px-5 text-center text-[#5F6977]">
+              {t('specialist.selectPrompt', 'Vui lòng chọn một bộ hồ sơ bên trái để tiến hành thẩm định.')}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 4. QUICK ACTIONS */}
-      <div className="mt-2">
-        <h3 className="text-base font-bold text-slate-900 mb-4">Quick Actions</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { title: 'Review Documents', desc: 'Process pending submissions', icon: Search, bg: 'bg-blue-600 text-white hover:bg-blue-700', iconBg: 'bg-white/20', descColor: 'text-blue-100', route: '/specialist/approval' },
-            { title: 'Transport Dossiers', desc: 'View & export transport dossiers', icon: FolderOpen, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-blue-50 text-blue-600', descColor: 'text-slate-500', route: '/specialist/documents' },
-            { title: 'Request Missing', desc: 'Notify clients of missing docs', icon: FileX, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-red-50 text-red-600', descColor: 'text-slate-500', route: '/specialist/missing' },
-            { title: 'View Regulations', desc: 'Check border compliance', icon: Scale, bg: 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50', iconBg: 'bg-emerald-50 text-emerald-600', descColor: 'text-slate-500', route: '/specialist/regulations' },
-          ].map((action, idx) => (
-            <div 
-              key={idx}
-              onClick={() => router.push(action.route)}
-              className={`rounded-xl p-5 cursor-pointer shadow-sm transition-all duration-200 hover:shadow-md ${action.bg}`}
-            >
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-4 ${action.iconBg}`}>
-                <action.icon size={20} />
-              </div>
-              <h4 className="text-sm font-bold m-0 mb-1">{action.title}</h4>
-              <p className={`text-xs font-medium m-0 ${action.descColor}`}>{action.desc}</p>
+      {/* Revision Confirmation Modal */}
+      <Modal
+        isOpen={revisionModalOpen && Boolean(activeDoc)}
+        onClose={() => { if (!isBusy) setRevisionModalOpen(false); }}
+        closeDisabled={isBusy}
+        title={t('specialist.revisionModalTitle', 'Xác Nhận Yêu Cầu Bổ Sung Hồ Sơ')}
+        subtitle={activeDoc ? `${activeDoc.reqCode} · ${translateDocType(activeDoc.type)}` : ''}
+        maxWidth="max-w-lg"
+      >
+        {activeDoc && (
+          <div className="flex flex-col gap-4 text-sm">
+            <div className="p-3.5 rounded-xl bg-[#FAF8F4] border border-[#D8CEBE] text-xs text-[#5C6658]">
+              {t('common.racehorse', 'Chiến mã')}:{' '}
+              <strong className="text-[#181A17]">{activeDoc.horseName}</strong> ·{' '}
+              {t('common.owner', 'Chủ sở hữu')}:{' '}
+              <strong className="text-[#181A17]">{activeDoc.customerName}</strong>
             </div>
-          ))}
-        </div>
-      </div>
+
+            <div className="p-3 rounded-xl bg-[#F8F0DF] border border-[#DFCA9A] text-xs text-[#7A591C]">
+              {t(
+                'specialist.revisionConfirmWarning',
+                'Hồ sơ sẽ được chuyển sang trạng thái cần bổ sung và thông báo trực tiếp đến khách hàng tải lại tệp đúng quy chuẩn.'
+              )}
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label
+                  htmlFor="specialist-revision-reason"
+                  className="text-xs font-bold text-[#242722] uppercase tracking-wider"
+                >
+                  {t('specialist.revisionReasonLabel', 'Nội dung yêu cầu bổ sung')} <span className="text-[#B33E3E]">*</span>
+                </label>
+                <span className="text-[11px] text-[#7E867B]">{revisionReason.trim().length} / 5+</span>
+              </div>
+              <textarea
+                id="specialist-revision-reason"
+                rows={4}
+                value={revisionReason}
+                onChange={(e) => {
+                  setRevisionReason(e.target.value);
+                  if (e.target.value.trim().length >= 5) setRevisionError('');
+                }}
+                disabled={isBusy}
+                className="w-full p-3 text-sm rounded-xl border border-[#D8CEBE] focus:outline-none focus:ring-2 focus:ring-[#A67C2E]/25 focus:border-[#A67C2E] text-[#181A17] bg-white resize-none"
+              />
+              {revisionError && (
+                <p role="alert" className="text-xs text-[#B33E3E] font-semibold mt-1 mb-0 flex items-center gap-1">
+                  <AlertTriangle size={13} /> {revisionError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-3 border-t border-[#EAE5DA]">
+              <button
+                type="button"
+                onClick={() => setRevisionModalOpen(false)}
+                disabled={isBusy}
+                className="px-4 py-2.5 rounded-xl border border-[#D8CEBE] text-sm font-semibold text-[#5C6658] hover:bg-[#FAF9F5] disabled:opacity-50 cursor-pointer bg-white"
+              >
+                {t('common.cancel', 'Hủy Bỏ')}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRevision}
+                disabled={isBusy || revisionReason.trim().length < 5}
+                className="px-5 py-2.5 rounded-xl text-sm font-bold bg-[#A67C2E] hover:bg-[#8E6823] text-white shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border-0"
+              >
+                {submittingAction === 'revision' && <Loader2 size={15} className="animate-spin" />}
+                <span>{t('specialist.confirmRevisionBtn', 'Xác Nhận Yêu Cầu Bổ Sung')}</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Reject Reason Modal */}
+      <Modal
+        isOpen={rejectModalOpen && Boolean(activeDoc)}
+        onClose={() => { if (!isBusy) setRejectModalOpen(false); }}
+        closeDisabled={isBusy}
+        title={t('specialist.rejectModalTitle', 'Từ Chối Hồ Sơ Kiểm Dịch')}
+        subtitle={activeDoc ? `${activeDoc.reqCode} · ${translateDocType(activeDoc.type)}` : ''}
+        maxWidth="max-w-lg"
+      >
+        {activeDoc && (
+          <div className="flex flex-col gap-4 text-sm">
+            <div className="p-3.5 rounded-xl bg-[#F0EEE8] border border-[#D8CEBE] text-xs text-[#5C6658]">
+              {t('common.racehorse', 'Chiến mã')}:{' '}
+              <strong className="text-[#181A17]">{activeDoc.horseName}</strong> ·{' '}
+              {t('common.owner', 'Chủ sở hữu')}:{' '}
+              <strong className="text-[#181A17]">{activeDoc.customerName}</strong>
+            </div>
+
+            <div>
+              <label
+                htmlFor="specialist-reject-reason"
+                className="block text-xs font-bold text-[#242722] mb-1.5 uppercase tracking-wider"
+              >
+                {t('specialist.rejectReasonLabel', 'Lý do từ chối chính thức')}{' '}
+                <span className="text-[#B33E3E]">*</span>
+              </label>
+              <textarea
+                id="specialist-reject-reason"
+                rows={4}
+                value={rejectReason}
+                onChange={(e) => {
+                  setRejectReason(e.target.value);
+                  if (e.target.value.trim().length >= 5) setRejectError('');
+                }}
+                placeholder={t(
+                  'specialist.rejectReasonPlaceholder',
+                  'Nhập chi tiết lý do từ chối (bắt buộc tối thiểu 5 ký tự)...'
+                )}
+                className="w-full p-3 text-sm rounded-xl border border-[#D8CEBE] focus:outline-none focus:ring-2 focus:ring-[#B33E3E]/30 focus:border-[#B33E3E] text-[#181A17] placeholder:text-[#7E867B] bg-white resize-none"
+                disabled={isBusy}
+              />
+              <div className="flex justify-between items-center mt-1">
+                <span className={`text-xs ${rejectReason.trim().length < 5 ? 'text-[#B33E3E]' : 'text-[#287653]'}`}>
+                  {rejectReason.trim().length < 5
+                    ? isEn
+                      ? `Minimum 5 characters (current: ${rejectReason.trim().length})`
+                      : `Tối thiểu 5 ký tự (hiện có: ${rejectReason.trim().length})`
+                    : isEn
+                    ? '✓ Valid length'
+                    : '✓ Độ dài hợp lệ'}
+                </span>
+                <span className="text-[11px] text-[#7E867B]">
+                  {rejectReason.length} {isEn ? 'chars' : 'ký tự'}
+                </span>
+              </div>
+              {rejectError && (
+                <p role="alert" className="text-xs text-[#B33E3E] font-semibold mt-1 mb-0 flex items-center gap-1">
+                  <AlertTriangle size={13} /> {rejectError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-3 border-t border-[#EAE5DA]">
+              <button
+                type="button"
+                onClick={() => setRejectModalOpen(false)}
+                disabled={isBusy}
+                className="px-4 py-2.5 rounded-xl border border-[#D8CEBE] text-sm font-semibold text-[#5C6658] hover:bg-[#FAF9F5] transition-colors disabled:opacity-50 cursor-pointer bg-white"
+              >
+                {t('common.cancel', 'Hủy Bỏ')}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReject}
+                disabled={isBusy || rejectReason.trim().length < 5}
+                className="px-5 py-2.5 rounded-xl text-sm font-bold bg-[#B33E3E] hover:bg-[#8F2B2B] text-white shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border-0"
+              >
+                {submittingAction === 'reject' ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>{t('common.processing', 'Đang Xử Lý...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <XCircle size={16} />
+                    <span>{t('specialist.confirmRejectBtn', 'Xác Nhận Từ Chối Hồ Sơ')}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Review Modal */}
-      {selectedDoc && (
+      {modalDoc && (
         <DocumentReviewModal
           isOpen={reviewModalOpen}
           onClose={() => setReviewModalOpen(false)}
-          documentId={selectedDoc.id}
-          horseName={selectedDoc.horseName}
-          docTitle={selectedDoc.type}
-          fileUrl={selectedDoc.fileUrl}
-          onSuccess={handleReviewSuccess}
+          documentId={modalDoc.id}
+          numericDocId={parseNumericDocId(modalDoc)}
+          horseName={modalDoc.horseName}
+          docTitle={modalDoc.type}
+          fileUrl={modalDoc.fileUrl}
+          onSuccess={(id, status, expiry, reason) => {
+            if (status === 'APPROVED' || status === 'REJECTED') {
+              reviewDocument(id, status, expiry, reason);
+            }
+            setReviewModalOpen(false);
+          }}
         />
       )}
     </div>

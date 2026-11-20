@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { documentsApi } from '@/features/documents/api/documents.api';
+import { getAuthToken, getCurrentUser } from '@/lib/auth';
 
 export type DocIconType = 'vaccination' | 'medical' | 'quarantine' | 'permit' | 'passport' | 'other';
 
@@ -72,84 +73,19 @@ interface DocumentStoreContextType {
   resetToDefaults: () => void;
 }
 
-const INITIAL_PENDING_DOCS: SpecialistPendingDoc[] = [
-  {
-    id: 'DOC-2026-041',
-    reqCode: 'TR-2026-001',
-    horseName: 'Thunder',
-    type: 'Vaccination Certificate',
-    iconType: 'vaccination',
-    date: 'Sep 24, 2026',
-    status: 'PENDING',
-    customerName: 'John Doe',
-    submittedAt: '2026-09-24T10:00:00Z',
-  },
-  {
-    id: 'DOC-2026-042',
-    reqCode: 'TR-2026-002',
-    horseName: 'Silver Star',
-    type: 'Medical Certificate',
-    iconType: 'medical',
-    date: 'Sep 25, 2026',
-    status: 'PENDING',
-    customerName: 'Alex Morgan',
-    submittedAt: '2026-09-25T14:30:00Z',
-  },
-  {
-    id: 'DOC-2026-043',
-    reqCode: 'TR-2026-003',
-    horseName: 'Golden Mile',
-    type: 'Export Quarantine Permit',
-    iconType: 'quarantine',
-    date: 'Sep 26, 2026',
-    status: 'PENDING',
-    customerName: 'Emily Chen',
-    submittedAt: '2026-09-26T08:15:00Z',
-  },
-];
+const INITIAL_PENDING_DOCS: SpecialistPendingDoc[] = [];
 
-const INITIAL_DOSSIERS: SpecialistDossier[] = [
-  {
-    id: 'DOS-TR-001',
-    reqCode: 'TR-2026-001',
-    horse: 'Thunder',
-    destination: 'SGN',
-    status: 'In Progress',
-    approvedDocs: 4,
-    totalDocs: 6,
-    docs: '4/6',
-    lastUpdated: 'Sep 24, 2026',
-  },
-  {
-    id: 'DOS-TR-002',
-    reqCode: 'TR-2026-002',
-    horse: 'Silver Star',
-    destination: 'DXB',
-    status: 'In Progress',
-    approvedDocs: 3,
-    totalDocs: 6,
-    docs: '3/6',
-    lastUpdated: 'Sep 25, 2026',
-  },
-  {
-    id: 'DOS-TR-003',
-    reqCode: 'TR-2026-003',
-    horse: 'Golden Mile',
-    destination: 'SIN',
-    status: 'Complete',
-    approvedDocs: 8,
-    totalDocs: 8,
-    docs: '8/8',
-    lastUpdated: 'Sep 26, 2026',
-  },
-];
+const INITIAL_DOSSIERS: SpecialistDossier[] = [];
 
 const INITIAL_MISSING_DOCS: SpecialistMissingDoc[] = [];
 
-const STORAGE_KEYS = {
-  PENDING: 'equitransit_spec_pending_docs_v1',
-  DOSSIERS: 'equitransit_spec_dossiers_v1',
-  MISSING: 'equitransit_spec_missing_docs_v1',
+const getDocStorageKeys = () => {
+  const userId = getCurrentUser()?.id || 'anon';
+  return {
+    PENDING: `equitransit_spec_u${userId}_pending_docs_v1`,
+    DOSSIERS: `equitransit_spec_u${userId}_dossiers_v1`,
+    MISSING: `equitransit_spec_u${userId}_missing_docs_v1`,
+  };
 };
 
 const DocumentStoreContext = createContext<DocumentStoreContextType | null>(null);
@@ -160,42 +96,44 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
   const [missingDocs, setMissingDocs] = useState<SpecialistMissingDoc[]>(INITIAL_MISSING_DOCS);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Initialize from LocalStorage
+  // Initialize from user-scoped LocalStorage & Backend (only for authenticated specialist/admin)
   useEffect(() => {
-    try {
-      const savedPending = localStorage.getItem(STORAGE_KEYS.PENDING);
-      const savedDossiers = localStorage.getItem(STORAGE_KEYS.DOSSIERS);
-      const savedMissing = localStorage.getItem(STORAGE_KEYS.MISSING);
+    const keys = getDocStorageKeys();
+    const token = getAuthToken();
+    const user = getCurrentUser();
+    const role = String(user?.role || '').toUpperCase();
 
-      if (savedPending) {
-        setPendingDocs(JSON.parse(savedPending));
+    if (token) {
+      try {
+        const savedPending = localStorage.getItem(keys.PENDING);
+        const savedDossiers = localStorage.getItem(keys.DOSSIERS);
+        const savedMissing = localStorage.getItem(keys.MISSING);
+
+        if (savedPending) {
+          setPendingDocs(JSON.parse(savedPending));
+        }
+        if (savedDossiers) {
+          setDossiers(JSON.parse(savedDossiers));
+        }
+        if (savedMissing) {
+          const parsed = JSON.parse(savedMissing);
+          setMissingDocs(Array.isArray(parsed) ? parsed : []);
+        }
+      } catch (e) {
+        console.error('Error loading documents from localStorage:', e);
       }
-      if (savedDossiers) {
-        setDossiers(JSON.parse(savedDossiers));
-      }
-      if (savedMissing) {
-        const parsed = JSON.parse(savedMissing);
-        const cleaned = Array.isArray(parsed)
-          ? parsed.filter(
-              (d: any) =>
-                d.id !== 'MISS-1' &&
-                d.id !== 'MISS-2' &&
-                d.horseName !== 'Royal Star' &&
-                d.horseName !== 'Midnight'
-            )
-          : [];
-        setMissingDocs(cleaned);
-      }
-    } catch (e) {
-      console.error('Error loading documents from localStorage:', e);
     }
     setIsLoaded(true);
 
-    // Fetch real pending documents from backend API if available
+    if (!token || (role !== 'TRANSPORT_SPECIALIST' && role !== 'ADMIN')) {
+      return;
+    }
+
+    // Fetch real pending documents from backend API
     const syncFromApi = async () => {
       try {
         const apiDocs = await documentsApi.getDocuments({ status: 'submitted' });
-        if (apiDocs && apiDocs.length > 0) {
+        if (Array.isArray(apiDocs)) {
           const mapped: SpecialistPendingDoc[] = apiDocs.map((d) => {
             const typeLower = (d.regulationDocType || d.docType).toLowerCase();
             let iconType: DocIconType = 'other';
@@ -207,7 +145,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
 
             return {
               id: `DOC-${d.id}`,
-              reqCode: `TR-HORSE-${d.horseId}`,
+              reqCode: d.requestCode || `TR-HORSE-${d.horseId}`,
               horseName: d.horseName || `Horse #${d.horseId}`,
               type: d.regulationDocType || d.docType,
               iconType,
@@ -219,25 +157,13 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
             };
           });
 
-          setPendingDocs((prev) => {
-            const mappedMap = new Map(mapped.map((m) => [m.id, m]));
-            const updatedExisting = prev.map((p) => {
-              const apiMatch = mappedMap.get(p.id);
-              if (apiMatch) {
-                mappedMap.delete(p.id);
-                return {
-                  ...p,
-                  ...apiMatch,
-                  fileUrl: apiMatch.fileUrl || p.fileUrl,
-                };
-              }
-              return p;
-            });
-            return [...Array.from(mappedMap.values()), ...updatedExisting];
-          });
+          setPendingDocs(mapped);
+          try {
+            localStorage.setItem(keys.PENDING, JSON.stringify(mapped));
+          } catch {}
         }
-      } catch (err) {
-        // Backend offline or non-specialist role
+      } catch {
+        // Backend offline or unprivileged role
       }
     };
     syncFromApi();
@@ -247,7 +173,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
   const savePending = useCallback((docs: SpecialistPendingDoc[]) => {
     setPendingDocs(docs);
     try {
-      localStorage.setItem(STORAGE_KEYS.PENDING, JSON.stringify(docs));
+      localStorage.setItem(getDocStorageKeys().PENDING, JSON.stringify(docs));
     } catch (e) {
       console.error('Error saving pending docs to localStorage:', e);
     }
@@ -256,7 +182,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
   const saveDossiers = useCallback((items: SpecialistDossier[]) => {
     setDossiers(items);
     try {
-      localStorage.setItem(STORAGE_KEYS.DOSSIERS, JSON.stringify(items));
+      localStorage.setItem(getDocStorageKeys().DOSSIERS, JSON.stringify(items));
     } catch (e) {
       console.error('Error saving dossiers to localStorage:', e);
     }
@@ -265,7 +191,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
   const saveMissing = useCallback((items: SpecialistMissingDoc[]) => {
     setMissingDocs(items);
     try {
-      localStorage.setItem(STORAGE_KEYS.MISSING, JSON.stringify(items));
+      localStorage.setItem(getDocStorageKeys().MISSING, JSON.stringify(items));
     } catch (e) {
       console.error('Error saving missing docs to localStorage:', e);
     }
@@ -353,7 +279,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
                       id: `act-${Date.now()}`,
                       timestamp: 'Just now',
                       description: `${doc.type} approved by Transport Specialist (Valid until ${expiryDate || 'N/A'}).`,
-                      actor: 'Specialist Sarah Jenkins',
+                      actor: getCurrentUser()?.fullName || getCurrentUser()?.name || 'Transport Specialist',
                       type: 'system',
                     },
                     ...(req.activities || []),
@@ -417,7 +343,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
                       id: `act-${Date.now()}`,
                       timestamp: 'Just now',
                       description: `${doc.type} rejected: ${rejectionReason}. Action required by customer.`,
-                      actor: 'Specialist Sarah Jenkins',
+                      actor: getCurrentUser()?.fullName || getCurrentUser()?.name || 'Transport Specialist',
                       type: 'system',
                     },
                     ...(req.activities || []),
@@ -515,22 +441,9 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     [pendingDocs, missingDocs, savePending, saveMissing]
   );
 
-  // Send Reminder to Customer
+  // Update local reminder metadata only (API notification is dispatched explicitly by caller with verified numeric orderId)
   const sendReminder = useCallback(
     (id: string) => {
-      const targetDoc = missingDocs.find((m) => m.id === id);
-      if (targetDoc) {
-        const orderIdMatch = targetDoc.reqCode.match(/\d+/);
-        if (orderIdMatch) {
-          const orderId = parseInt(orderIdMatch[0], 10);
-          documentsApi
-            .notifyMissingDocuments(orderId, {
-              message: `Urgent: Missing/Rejected ${targetDoc.type} for horse ${targetDoc.horseName}. Please upload the revised certificate to prevent shipment delay.`,
-            })
-            .catch((e) => console.warn('Notification API info:', e));
-        }
-      }
-
       const updated = missingDocs.map((m) => {
         if (m.id === id) {
           return {
@@ -550,7 +463,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     [missingDocs, saveMissing]
   );
 
-  // Reset to initial seeds
+  // Reset to initial empty state
   const resetToDefaults = useCallback(() => {
     savePending(INITIAL_PENDING_DOCS);
     saveDossiers(INITIAL_DOSSIERS);
@@ -574,6 +487,10 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
       {children}
     </DocumentStoreContext.Provider>
   );
+};
+
+export const useOptionalDocumentStore = () => {
+  return useContext(DocumentStoreContext);
 };
 
 export const useDocumentStore = () => {

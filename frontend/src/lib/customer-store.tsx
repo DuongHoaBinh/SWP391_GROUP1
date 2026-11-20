@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useState, useEffect } from 'react';
 import {
   DashboardMetrics,
   DocumentItem,
@@ -60,31 +60,7 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from localStorage on client mount (user-scoped)
-  useEffect(() => {
-    try {
-      const user = getCurrentUser();
-      if (!user) {
-        setIsLoaded(true);
-        return;
-      }
-      const savedRequests = localStorage.getItem(getStorageKey('requests'));
-      const savedHorses = localStorage.getItem(getStorageKey('horses'));
-      const savedNotifs = localStorage.getItem(getStorageKey('notifs'));
-      const savedDocs = localStorage.getItem(getStorageKey('docs'));
-
-      if (savedRequests) setRequests(JSON.parse(savedRequests));
-      if (savedHorses) setHorses(JSON.parse(savedHorses));
-      if (savedNotifs) setNotifications(JSON.parse(savedNotifs));
-      if (savedDocs) setDocuments(JSON.parse(savedDocs));
-    } catch {
-      // Ignore parse errors
-    }
-    setIsLoaded(true);
-    refreshHorses();
-  }, []);
-
-  const refreshHorses = async () => {
+  const refreshHorses = useCallback(async () => {
     try {
       const data = await apiClient<any[]>('/horses');
       if (Array.isArray(data)) {
@@ -133,7 +109,31 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch {
       // Unauthenticated or network issue
     }
-  };
+  }, []);
+
+  // Load from localStorage on client mount (user-scoped)
+  useEffect(() => {
+    try {
+      const user = getCurrentUser();
+      if (!user) {
+        setIsLoaded(true);
+        return;
+      }
+      const savedRequests = localStorage.getItem(getStorageKey('requests'));
+      const savedHorses = localStorage.getItem(getStorageKey('horses'));
+      const savedNotifs = localStorage.getItem(getStorageKey('notifs'));
+      const savedDocs = localStorage.getItem(getStorageKey('docs'));
+
+      if (savedRequests) setRequests(JSON.parse(savedRequests));
+      if (savedHorses) setHorses(JSON.parse(savedHorses));
+      if (savedNotifs) setNotifications(JSON.parse(savedNotifs));
+      if (savedDocs) setDocuments(JSON.parse(savedDocs));
+    } catch {
+      // Ignore parse errors
+    }
+    setIsLoaded(true);
+    void refreshHorses();
+  }, [refreshHorses]);
 
   // Save to localStorage whenever state changes (user-scoped)
   useEffect(() => {

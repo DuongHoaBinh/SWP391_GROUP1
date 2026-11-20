@@ -4,10 +4,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft,
   Plus,
   Search,
-  Filter,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -17,11 +15,11 @@ import {
   Eye,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { StatusBadge } from '@/components/ui/StatusBadge';
 import { apiClient } from '@/lib/api-client';
 import { escapeQuotationText } from '@/features/orders/quotation-html';
 import { bookingName, type BookingType } from '@/features/orders/booking-policy';
-import { useCustomerStore } from '@/lib/customer-store';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
+import toast from 'react-hot-toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ShipmentStatus =
@@ -111,17 +109,17 @@ const STATUS_VARIANT: Record<ShipmentStatus, string> = {
 };
 
 const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border: string }> = {
-  requested: { bg: '#fef3c7', color: '#b45309', border: '#fde68a' },
-  under_review: { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
-  change_requested: { bg: '#fff7ed', color: '#c2410c', border: '#ffedd5' },
-  approved: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
-  rejected: { bg: '#fee2e2', color: '#b91c1c', border: '#fecaca' },
-  planning: { bg: '#f3e8ff', color: '#7c3aed', border: '#ddd6fe' },
-  confirmed: { bg: '#dbeafe', color: '#1d4ed8', border: '#bfdbfe' },
-  ready_to_depart: { bg: '#ccfbf1', color: '#0f766e', border: '#99f6e4' },
-  in_transit: { bg: '#e0f2fe', color: '#0369a1', border: '#bae6fd' },
-  completed: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
-  cancelled: { bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0' },
+  requested: { bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
+  under_review: { bg: '#FAF8F4', color: '#A67C2E', border: '#D4C5A3' },
+  change_requested: { bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
+  approved: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
+  rejected: { bg: '#F8EAEA', color: '#B33E3E', border: '#E5B8B8' },
+  planning: { bg: '#FAF8F4', color: '#A67C2E', border: '#D4C5A3' },
+  confirmed: { bg: '#FAF8F4', color: '#181A17', border: '#D4C5A3' },
+  ready_to_depart: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
+  in_transit: { bg: '#FAF8F4', color: '#A67C2E', border: '#D4C5A3' },
+  completed: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
+  cancelled: { bg: '#F0EEE8', color: '#5B6779', border: '#D8CEBE' },
 };
 
 function formatDate(iso: string | null) {
@@ -150,24 +148,21 @@ function formatCurrency(n: number) {
 
 // ─── PDF Export ───────────────────────────────────────────────────────────────
 function exportQuotationPDF(order: TransportOrder) {
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) return;
-
-  const statusColor = STATUS_COLORS[order.status] || STATUS_COLORS.cancelled;
+  const statusColor = STATUS_COLORS[order.status] || { bg: '#F0EEE8', color: '#5B6779', border: '#D8CEBE' };
 
   const horsesRows =
     order.horses
       ?.map(
         (h) => `
     <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.name)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.breed || '—')}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.gender || '—')}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.age ?? '—')} yrs</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.name)}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.breed || '—')}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.gender || '—')}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.age ?? '—')} yrs</td>
     </tr>`,
       )
       .join('') ||
-    '<tr><td colspan="4" style="padding:12px;color:#94a3b8;text-align:center;">Không có thông tin ngựa</td></tr>';
+    '<tr><td colspan="4" style="padding:12px;color:#787770;text-align:center;">Không có thông tin ngựa</td></tr>';
 
   const html = `<!DOCTYPE html>
 <html lang="vi">
@@ -176,31 +171,31 @@ function exportQuotationPDF(order: TransportOrder) {
   <title>Báo Giá Dự Kiến - ${escapeQuotationText(order.requestCode || `#${order.id}`)}</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff}
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#181A17;background:#fff}
     .page{max-width:800px;margin:0 auto;padding:40px}
-    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:24px;border-bottom:3px solid #1e40af;margin-bottom:28px}
-    .brand-name{font-size:22px;font-weight:800;color:#1e40af}
-    .brand-sub{font-size:12px;color:#64748b;margin-top:3px}
-    .doc-title{font-size:24px;font-weight:800;color:#0f172a;text-align:right}
-    .doc-id{font-size:13px;color:#64748b;text-align:right;margin-top:4px}
-    .doc-date{font-size:12px;color:#94a3b8;text-align:right;margin-top:2px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:24px;border-bottom:3px solid #A67C2E;margin-bottom:28px}
+    .brand-name{font-size:22px;font-weight:800;color:#181A17;letter-spacing:0.02em}
+    .brand-sub{font-size:12px;color:#5F6977;margin-top:3px}
+    .doc-title{font-size:24px;font-weight:800;color:#A67C2E;text-align:right}
+    .doc-id{font-size:13px;color:#57564E;text-align:right;margin-top:4px}
+    .doc-date{font-size:12px;color:#787770;text-align:right;margin-top:2px}
     .status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;background:${statusColor.bg};color:${statusColor.color};border:1px solid ${statusColor.border};margin-top:6px}
     .section{margin-bottom:24px}
-    .section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #e2e8f0}
+    .section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#5F6977;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #EAE5DA}
     .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
     .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
-    .info-box{background:#f8fafc;padding:14px 16px;border-radius:8px;border:1px solid #e2e8f0}
-    .info-label{font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:600;margin-bottom:4px}
-    .info-value{font-size:14px;font-weight:600;color:#0f172a}
-    table{width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}
-    thead{background:#1e40af}
-    thead th{padding:10px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#fff;text-align:left}
-    .cost-section{background:linear-gradient(135deg,#1e40af,#1d4ed8);border-radius:12px;padding:24px;margin:24px 0;color:#fff}
-    .cost-label{font-size:13px;opacity:.8;margin-bottom:4px}
-    .cost-value{font-size:30px;font-weight:800}
-    .cost-sub{font-size:11px;opacity:.6;margin-top:4px}
-    .note-box{background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;font-size:12px;color:#92400e}
-    .footer{margin-top:32px;padding-top:20px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;font-size:11px;color:#94a3b8}
+    .info-box{background:#FAF8F4;padding:14px 16px;border-radius:8px;border:1px solid #D8CEBE}
+    .info-label{font-size:11px;color:#5F6977;text-transform:uppercase;font-weight:600;margin-bottom:4px}
+    .info-value{font-size:14px;font-weight:600;color:#181A17}
+    table{width:100%;border-collapse:collapse;border:1px solid #D8CEBE;border-radius:8px;overflow:hidden}
+    thead{background:#181A17}
+    thead th{padding:10px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#F5EFE2;text-align:left}
+    .cost-section{background:linear-gradient(135deg,#181A17,#242722);border:1px solid #A67C2E;border-radius:12px;padding:24px;margin:24px 0;color:#FAF8F4}
+    .cost-label{font-size:13px;color:#D4C5A3;margin-bottom:4px}
+    .cost-value{font-size:30px;font-weight:800;color:#FFFFFF}
+    .cost-sub{font-size:11px;color:rgba(247,247,244,0.72);margin-top:4px}
+    .note-box{background:#F8F0DF;border:1px solid #DFCA9A;border-radius:8px;padding:12px 16px;font-size:12px;color:#73521A}
+    .footer{margin-top:32px;padding-top:20px;border-top:1px solid #EAE5DA;display:flex;justify-content:space-between;font-size:11px;color:#5F6977}
     @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
   </style>
 </head>
@@ -208,15 +203,15 @@ function exportQuotationPDF(order: TransportOrder) {
 <div class="page">
   <div class="header">
     <div>
-      <div class="brand-name">🏇 RaceHorse Logistics</div>
-      <div class="brand-sub">Cross-Border Racehorse Transport System</div>
-      <div class="brand-sub" style="margin-top:8px">Hotline: +84 28 3456 7890 | info@racehorse-logistics.vn</div>
+      <div class="brand-name">EquiTransit Logistics</div>
+      <div class="brand-sub">Cross-Border Equine Logistics System</div>
+      <div class="brand-sub" style="margin-top:8px">Hotline: +84 28 3899 6688 | operations@equitransit.logistics</div>
     </div>
     <div>
-      <div class="doc-title">BÁO GIÁ DỰ KIẾN</div><p style="font-size:12px;margin-top:8px">Chưa yêu cầu thanh toán. Hóa đơn được phát hành sau khi lộ trình được xác nhận.</p>
+      <div class="doc-title">BÁO GIÁ DỰ KIẾN</div><p style="font-size:12px;margin-top:8px;color:#5F6977">Chưa yêu cầu thanh toán. Hóa đơn được phát hành sau khi lộ trình được xác nhận.</p>
       <div class="doc-id">Mã yêu cầu: ${escapeQuotationText(order.requestCode || `#${order.id}`)}</div>
       <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
-      <div style="text-align:right"><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
+      <div style="text-align:right"><span class="status-badge">${escapeQuotationText(STATUS_LABELS[order.status] || order.status)}</span></div>
     </div>
   </div>
 
@@ -282,7 +277,7 @@ function exportQuotationPDF(order: TransportOrder) {
 
   <div class="footer">
     <div>
-      <div>RaceHorse Logistics Co., Ltd.</div>
+      <div>EquiTransit Logistics</div>
       <div>MST: 0315678901 | Số 123 Đường Nguyễn Huệ, Q.1, TP.HCM</div>
     </div>
     <div style="text-align:right">
@@ -295,6 +290,19 @@ function exportQuotationPDF(order: TransportOrder) {
 </body>
 </html>`;
 
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    toast.error('Trình duyệt đã chặn pop-up. Hệ thống đang tự động tải tệp Báo giá về máy...');
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = `BaoGia_${order.requestCode || order.id}.html`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    return;
+  }
+
   printWindow.document.write(html);
   printWindow.document.close();
 }
@@ -302,7 +310,10 @@ function exportQuotationPDF(order: TransportOrder) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function RequestsPage() {
   const router = useRouter();
-  const { requests: storeRequests } = useCustomerStore();
+  const lang = useLanguage?.() || ({} as any);
+  const language = lang?.language || 'vi';
+  const t = lang?.t || ((_k: string, fb?: string) => fb || _k);
+  const translateStatus = lang?.translateStatus || ((s: string) => STATUS_LABELS[s as ShipmentStatus] || s);
 
   // Filter & sort state
   const [search, setSearch] = useState('');
@@ -421,181 +432,129 @@ export default function RequestsPage() {
     );
   });
 
+  const hasActiveFilters = Boolean(search.trim() || filterStatus !== 'all' || departureDateFrom || departureDateTo);
+
+  const clearFilters = () => {
+    setSearch('');
+    setFilterStatus('all');
+    setDepartureDateFrom('');
+    setDepartureDateTo('');
+    setPage(1);
+  };
+
+  const statusFilterOptions: ReadonlyArray<ShipmentStatus | 'all'> = [
+    'all',
+    'requested',
+    'under_review',
+    'change_requested',
+    'approved',
+    'planning',
+    'confirmed',
+    'ready_to_depart',
+    'in_transit',
+    'completed',
+    'rejected',
+    'cancelled',
+  ];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Top Breadcrumb & Action */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <Link
-            href="/customer"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '36px',
-              height: '36px',
-              borderRadius: '8px',
-              backgroundColor: '#ffffff',
-              border: '1px solid #e2e8f0',
-              color: '#64748b',
-            }}
-          >
-            <ArrowLeft size={18} />
-          </Link>
-          <div>
-            <h2 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-              Transport Requests
-            </h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-              Track the approval and execution status of your racehorse shipments.
-            </p>
-          </div>
+    <div className="flex flex-col gap-6 pb-10">
+      {/* Editorial Header */}
+      <header className="border-b border-[#E5DDD0] pb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
+            {t('customer.requests.title', 'Danh Sách Yêu Cầu Vận Chuyển')}
+          </h1>
+          <p className="text-sm text-[#5F6977] mt-1 mb-0 max-w-3xl">
+            {t('customer.requests.subtitle', 'Theo dõi tiến trình phê duyệt, hồ sơ kiểm dịch và trạng thái hành trình ngựa đua.')}
+          </p>
         </div>
 
         <Button
           variant="primary"
-          icon={<Plus size={16} />}
+          icon={<Plus size={15} className="text-[#C4B38E]" />}
           onClick={() => router.push('/customer/requests/new')}
+          className="bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] font-bold border-0 shadow-sm text-xs px-4 py-2.5 self-start sm:self-auto"
         >
-          New Transport Request
+          {t('customer.requests.createNew', 'Tạo Yêu Cầu Mới')}
         </Button>
-      </div>
+      </header>
 
       {/* Filter Bar */}
-      <div
-        style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '14px',
-          border: '1px solid var(--border-card)',
-          padding: '16px 20px',
-          boxShadow: 'var(--shadow-sm)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '14px',
-        }}
-      >
-        {/* Row 1: Search + Status tabs */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          {/* Search input */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              backgroundColor: '#f8fafc',
-              border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              padding: '8px 14px',
-              minWidth: '280px',
-            }}
-          >
-            <Search size={16} color="#94a3b8" />
-            <input
-              type="text"
-              placeholder="Search by ID, horse, location..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{
-                border: 'none',
-                backgroundColor: 'transparent',
-                outline: 'none',
-                fontSize: '13.5px',
-                width: '100%',
-              }}
-            />
-          </div>
-
-          {/* Status filter tabs */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <Filter size={14} color="#64748b" />
-            {(
-              [
-                'all',
-                'requested',
-                'approved',
-                'rejected',
-                'planning',
-                'in_transit',
-                'completed',
-                'cancelled',
-              ] as const
-            ).map((s) => (
-              <button
-                key={s}
-                onClick={() => setFilterStatus(s)}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: '6px',
-                  fontSize: '12.5px',
-                  fontWeight: 600,
-                  border:
-                    filterStatus === s
-                      ? '1px solid var(--primary)'
-                      : '1px solid #e2e8f0',
-                  backgroundColor:
-                    filterStatus === s ? 'var(--primary-light)' : '#ffffff',
-                  color:
-                    filterStatus === s ? 'var(--primary)' : 'var(--text-muted)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {s === 'all' ? 'All' : STATUS_LABELS[s]}
-              </button>
-            ))}
-          </div>
+      <div className="bg-white rounded-2xl border border-[#E5DDD0] p-3.5 shadow-sm flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#747D88]" aria-hidden="true" />
+          <input
+            type="text"
+            aria-label={t('customer.requests.searchPlaceholder', 'Tìm theo mã đơn, tên ngựa, địa điểm...')}
+            placeholder={t('customer.requests.searchPlaceholder', 'Tìm theo mã đơn, tên ngựa, địa điểm...')}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] focus:bg-white text-xs font-medium text-[#181A17] placeholder:text-[#747D88] outline-none focus:border-[#A67C2E] transition-colors"
+          />
         </div>
 
-        {/* Row 2: Date range + Rows per page */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>
-            Departure date:
-          </span>
+        <select
+          aria-label={t('customer.table.status', 'Trạng thái')}
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value as ShipmentStatus | 'all')}
+          className="px-3 py-2 rounded-xl border border-[#D8CEBE] bg-white text-xs font-semibold text-[#181A17] outline-none focus:border-[#A67C2E] cursor-pointer"
+        >
+          {statusFilterOptions.map((s) => (
+            <option key={s} value={s}>
+              {s === 'all'
+                ? `${t('customer.table.status', 'Trạng thái')}: ${t('common.all', 'Tất cả')}`
+                : translateStatus(s)}
+            </option>
+          ))}
+        </select>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <label htmlFor="req-date-from" className="text-xs font-semibold text-[#5F6977] hidden md:inline">
+            {t('customer.requests.departureDate', 'Khởi hành:')}
+          </label>
           <input
+            id="req-date-from"
             type="date"
+            aria-label={language === 'en' ? 'Departure date from' : 'Từ ngày khởi hành'}
             value={departureDateFrom}
             onChange={(e) => setDepartureDateFrom(e.target.value)}
-            style={{
-              padding: '6px 10px',
-              borderRadius: '6px',
-              border: '1px solid #e2e8f0',
-              fontSize: '13px',
-              backgroundColor: '#f8fafc',
-            }}
+            className="px-2.5 py-2 rounded-xl border border-[#D8CEBE] bg-white text-xs text-[#181A17] outline-none focus:border-[#A67C2E]"
           />
-          <span style={{ fontSize: '12px', color: '#94a3b8' }}>to</span>
+          <span className="text-xs text-[#747D88]" aria-hidden="true">→</span>
           <input
+            id="req-date-to"
             type="date"
+            aria-label={language === 'en' ? 'Departure date to' : 'Đến ngày khởi hành'}
             value={departureDateTo}
             min={departureDateFrom}
             onChange={(e) => setDepartureDateTo(e.target.value)}
-            style={{
-              padding: '6px 10px',
-              borderRadius: '6px',
-              border: '1px solid #e2e8f0',
-              fontSize: '13px',
-              backgroundColor: '#f8fafc',
-            }}
+            className="px-2.5 py-2 rounded-xl border border-[#D8CEBE] bg-white text-xs text-[#181A17] outline-none focus:border-[#A67C2E]"
           />
+        </div>
 
-          {/* Rows per page */}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Rows:</span>
+        {hasActiveFilters && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="px-3 py-2 rounded-xl border border-[#D4C5A3] bg-[#FAF8F4] text-[#8C6621] hover:bg-[#F5EFE2] text-xs font-semibold cursor-pointer transition-colors"
+          >
+            {t('common.clearFilter', language === 'en' ? 'Clear Filters' : 'Xóa lọc')}
+          </button>
+        )}
+
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className="text-xs text-[#5F6977] font-semibold">{t('common.rows', 'Hiển thị:')}</span>
+          <div className="inline-flex p-0.5 rounded-lg bg-[#F0EEE8] border border-[#E5DDD0]">
             {([10, 20] as const).map((n) => (
               <button
                 key={n}
+                type="button"
+                aria-pressed={limit === n}
                 onClick={() => setLimit(n)}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: '6px',
-                  fontSize: '12.5px',
-                  fontWeight: 700,
-                  border:
-                    limit === n ? '1px solid var(--primary)' : '1px solid #e2e8f0',
-                  backgroundColor: limit === n ? 'var(--primary-light)' : '#ffffff',
-                  color: limit === n ? 'var(--primary)' : '#64748b',
-                  cursor: 'pointer',
-                }}
+                className={`px-2.5 py-1 rounded-md text-xs font-bold transition-colors cursor-pointer ${
+                  limit === n ? 'bg-white text-[#181A17] shadow-sm' : 'text-[#5F6977] hover:text-[#181A17]'
+                }`}
               >
                 {n}
               </button>
@@ -605,325 +564,196 @@ export default function RequestsPage() {
       </div>
 
       {/* Table Card */}
-      <div
-        style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          border: '1px solid var(--border-card)',
-          overflow: 'hidden',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
+      <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
         {loading ? (
-          <div
-            style={{
-              padding: '60px',
-              textAlign: 'center',
-              color: '#94a3b8',
-              fontSize: '14px',
-            }}
-          >
-            Loading...
+          <div role="status" className="p-6 space-y-3">
+            {Array.from({ length: 5 }).map((_, idx) => (
+              <div key={idx} className="h-12 w-full rounded-xl bg-[#FAF8F4] animate-pulse motion-reduce:animate-none" />
+            ))}
+            <span className="sr-only">{t('common.loading', 'Đang tải...')}</span>
           </div>
         ) : error ? (
           <div
-            style={{
-              padding: '40px',
-              textAlign: 'center',
-              color: '#dc2626',
-              fontSize: '14px',
-            }}
+            role="alert"
+            className="p-8 text-center text-[#B33E3E] bg-[#F8EAEA] text-sm font-semibold flex flex-col items-center gap-3"
           >
-            {error}
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={() => void fetchOrders()}
+              className="px-4 py-2 rounded-xl border border-[#E5B8B8] bg-white text-[#B33E3E] text-xs font-bold cursor-pointer hover:bg-[#FAF8F4]"
+            >
+              {t('common.retry', language === 'en' ? 'Retry' : 'Thử lại')}
+            </button>
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[880px] border-collapse text-left">
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-light)' }}>
-                <th
-                  style={{
-                    padding: '12px 14px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  REQ-ID
+              <tr className="bg-[#FAF8F4] border-b border-[#E5DDD0]">
+                <th className="py-3 px-4 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                  {t('customer.orderCode', language === 'en' ? 'Order Code' : 'Mã đơn hàng')}
+                </th>
+                <th className="py-3 px-4 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                  {t('customer.table.horse', 'Chiến mã')}
+                </th>
+                <th className="py-3 px-4 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                  {t('customer.table.route', 'Tuyến đường')}
                 </th>
                 <th
-                  style={{
-                    padding: '12px 14px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                  }}
+                  className="py-3 px-4 whitespace-nowrap"
+                  aria-sort={sortBy === 'requestedDate' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                 >
-                  Horse(s)
-                </th>
-                <th
-                  style={{
-                    padding: '12px 14px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  Route
-                </th>
-                <th style={{ padding: '12px 14px' }}>
                   <button
+                    type="button"
                     onClick={() => handleSort('requestedDate')}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      border: 'none',
-                      background: 'none',
-                      cursor: 'pointer',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      color: 'var(--text-muted)',
-                    }}
+                    className="inline-flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer text-[11px] font-bold uppercase tracking-wider text-[#5F6977]"
                   >
-                    Departure <SortIcon field="requestedDate" />
+                    {t('customer.table.departure', 'Khởi hành')} <SortIcon field="requestedDate" />
                   </button>
                 </th>
-                <th style={{ padding: '12px 14px' }}>
+                <th
+                  className="py-3 px-4 whitespace-nowrap"
+                  aria-sort={sortBy === 'totalCost' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                >
                   <button
+                    type="button"
                     onClick={() => handleSort('totalCost')}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      border: 'none',
-                      background: 'none',
-                      cursor: 'pointer',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      color: 'var(--text-muted)',
-                    }}
+                    className="inline-flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer text-[11px] font-bold uppercase tracking-wider text-[#5F6977]"
                   >
-                    Cost <SortIcon field="totalCost" />
+                    {t('customer.table.cost', 'Tổng chi phí')} <SortIcon field="totalCost" />
                   </button>
                 </th>
-                <th
-                  style={{
-                    padding: '12px 14px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  Status
+                <th className="py-3 px-4 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                  {t('customer.table.status', 'Trạng thái')}
                 </th>
-                <th style={{ padding: '12px 14px' }}>
+                <th
+                  className="py-3 px-4 whitespace-nowrap"
+                  aria-sort={sortBy === 'createdAt' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                >
                   <button
+                    type="button"
                     onClick={() => handleSort('createdAt')}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      border: 'none',
-                      background: 'none',
-                      cursor: 'pointer',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      color: 'var(--text-muted)',
-                    }}
+                    className="inline-flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer text-[11px] font-bold uppercase tracking-wider text-[#5F6977]"
                   >
-                    Submitted <SortIcon field="createdAt" />
+                    {t('customer.table.submitted', 'Ngày tạo')} <SortIcon field="createdAt" />
                   </button>
                 </th>
-                <th
-                  style={{
-                    padding: '12px 14px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                    textAlign: 'right',
-                  }}
-                >
-                  Actions
+                <th className="py-3 px-4 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] text-right whitespace-nowrap">
+                  {t('customer.table.action', 'Thao tác')}
                 </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[#EFEAE0]">
               {displayedOrders.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={8}
-                    style={{
-                      padding: '48px',
-                      textAlign: 'center',
-                      color: '#94a3b8',
-                      fontSize: '14px',
-                    }}
-                  >
-                    No transport requests found.
+                  <td colSpan={8} className="py-12 px-6 text-center text-[#5F6977] text-sm">
+                    <div className="flex flex-col items-center gap-3">
+                      <span>
+                        {hasActiveFilters
+                          ? t('common.noResults', language === 'en' ? 'No matching results found' : 'Không tìm thấy đơn phù hợp bộ lọc')
+                          : t('customer.requests.empty', 'Chưa có yêu cầu vận chuyển nào.')}
+                      </span>
+                      {hasActiveFilters ? (
+                        <button
+                          type="button"
+                          onClick={clearFilters}
+                          className="px-3.5 py-2 rounded-xl border border-[#D4C5A3] bg-[#FAF8F4] text-[#8C6621] text-xs font-semibold cursor-pointer"
+                        >
+                          {t('common.clearFilter', language === 'en' ? 'Clear Filters' : 'Xóa bộ lọc')}
+                        </button>
+                      ) : (
+                        <Link
+                          href="/customer/requests/new"
+                          className="px-4 py-2 rounded-xl bg-[#181A17] text-[#FAF8F4] text-xs font-bold no-underline"
+                        >
+                          {t('customer.requests.createNew', 'Tạo Yêu Cầu Mới')}
+                        </Link>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (
                 displayedOrders.map((order) => {
-                  const sc =
-                    STATUS_COLORS[order.status] || STATUS_COLORS.cancelled;
+                  const sc = STATUS_COLORS[order.status] || STATUS_COLORS.cancelled;
                   return (
-                    <tr
-                      key={order.id}
-                      style={{ borderBottom: '1px solid var(--border-light)' }}
-                    >
-                      {/* ID */}
-                      <td style={{ padding: '14px 14px' }}>
+                    <tr key={order.id} className="hover:bg-[#FAF8F4] transition-colors">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
                         <Link
                           href={`/customer/requests/${order.id}`}
-                          style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '13px' }}
+                          className="font-mono font-bold text-[#A67C2E] hover:underline text-xs"
                         >
                           {order.requestCode || order.customerRequestCode || `REQ-${String(order.id).padStart(3, '0')}`}
                         </Link>
                       </td>
 
-                      {/* Horses */}
-                      <td style={{ padding: '14px 14px' }}>
+                      <td className="py-3.5 px-4">
                         {order.horses && order.horses.length > 0 ? (
-                          <div>
-                            <span style={{ fontWeight: 600, color: 'var(--text-heading)', fontSize: '13px' }}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-[#181A17] text-xs">
                               {order.horses[0].name}
                             </span>
                             {order.horses.length > 1 && (
-                              <span
-                                style={{
-                                  marginLeft: '6px',
-                                  fontSize: '11px',
-                                  color: '#94a3b8',
-                                  background: '#f1f5f9',
-                                  padding: '1px 6px',
-                                  borderRadius: '4px',
-                                }}
-                              >
+                              <span className="text-[11px] text-[#5F6977] bg-[#FAF8F4] px-1.5 py-0.5 rounded border border-[#E5DDD0]">
                                 +{order.horses.length - 1}
                               </span>
                             )}
                           </div>
                         ) : (
-                          <span style={{ color: '#94a3b8', fontSize: '13px' }}>—</span>
+                          <span className="text-[#5F6977] text-xs">—</span>
                         )}
                       </td>
 
-                      {/* Route */}
-                      <td
-                        style={{
-                          padding: '14px 14px',
-                          fontSize: '13px',
-                          color: 'var(--text-body)',
-                          maxWidth: '200px',
-                        }}
-                      >
+                      <td className="py-3.5 px-4 text-xs text-[#181A17] max-w-[260px]">
                         {order.originLocation} → {order.destinationLocation}
                       </td>
 
-                      {/* Departure Date */}
-                      <td
-                        style={{
-                          padding: '14px 14px',
-                          fontSize: '13px',
-                          color: 'var(--text-body)',
-                        }}
-                      >
+                      <td className="py-3.5 px-4 text-xs text-[#5F6977] whitespace-nowrap">
                         {formatDate(order.requestedDate)}
                       </td>
 
-                      {/* Cost */}
                       <td
-                        style={{
-                          padding: '14px 14px',
-                          fontSize: '13px',
-                          fontWeight: 700,
-                          color: order.totalCost > 0 ? '#15803d' : '#94a3b8',
-                        }}
+                        className={`py-3.5 px-4 text-xs font-bold whitespace-nowrap ${
+                          order.totalCost > 0 ? 'text-[#287653]' : 'text-[#5F6977]'
+                        }`}
                       >
                         {formatCurrency(order.totalCost)}
                       </td>
 
-                      {/* Status */}
-                      <td style={{ padding: '14px 14px' }}>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
                         <span
+                          className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap"
                           style={{
-                            padding: '3px 10px',
-                            borderRadius: '6px',
-                            fontSize: '12px',
-                            fontWeight: 600,
                             backgroundColor: sc.bg,
                             color: sc.color,
                             border: `1px solid ${sc.border}`,
                           }}
                         >
-                          {STATUS_LABELS[order.status] || order.status}
+                          {translateStatus(order.status)}
                         </span>
                       </td>
 
-                      {/* Submitted Date */}
-                      <td
-                        style={{
-                          padding: '14px 14px',
-                          fontSize: '12px',
-                          color: '#64748b',
-                        }}
-                      >
+                      <td className="py-3.5 px-4 text-xs text-[#5F6977] whitespace-nowrap">
                         {formatDate(order.createdAt)}
                       </td>
 
-                      {/* Actions */}
-                      <td style={{ padding: '14px 14px', textAlign: 'right' }}>
-                        <div
-                          style={{
-                            display: 'flex',
-                            gap: '6px',
-                            justifyContent: 'flex-end',
-                          }}
-                        >
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-2">
                           <button
+                            type="button"
                             onClick={() => router.push(`/customer/requests/${order.id}`)}
-                            style={{
-                              padding: '6px 10px',
-                              borderRadius: '6px',
-                              border: '1px solid #e2e8f0',
-                              background: '#f8fafc',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '12px',
-                              color: '#475569',
-                              fontWeight: 600,
-                            }}
+                            className="px-2.5 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:bg-[#FAF8F4] text-xs text-[#181A17] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors"
                           >
-                            <Eye size={13} /> View
+                            <Eye size={13} aria-hidden="true" /> {t('common.view', 'Xem')}
                           </button>
                           <button
+                            type="button"
                             onClick={() => exportQuotationPDF(order)}
-                            title="Export Quotation PDF"
-                            style={{
-                              padding: '6px 10px',
-                              borderRadius: '6px',
-                              border: '1px solid #dbeafe',
-                              background: '#eff6ff',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '12px',
-                              color: 'var(--primary)',
-                              fontWeight: 600,
-                            }}
+                            title={language === 'en' ? 'Export Quotation PDF' : 'Xuất báo giá PDF'}
+                            aria-label={`${language === 'en' ? 'Export Quotation PDF' : 'Xuất báo giá PDF'} ${order.requestCode || `#${order.id}`}`}
+                            className="px-2.5 py-1.5 rounded-lg border border-[#D4C5A3] bg-[#FAF8F4] hover:bg-[#F5EFE2] text-xs text-[#A67C2E] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors"
                           >
-                            <Download size={13} /> PDF
+                            <Download size={13} aria-hidden="true" /> PDF
                           </button>
                         </div>
                       </td>
@@ -933,90 +763,66 @@ export default function RequestsPage() {
               )}
             </tbody>
           </table>
+          </div>
         )}
 
         {/* Pagination Footer */}
         {!loading && pagination.totalPages >= 1 && (
-          <div
-            style={{
-              padding: '14px 20px',
-              borderTop: '1px solid var(--border-light)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <div style={{ fontSize: '13px', color: '#64748b' }}>
+          <div className="px-5 py-3.5 border-t border-[#EFEAE0] bg-[#FAF8F4] flex items-center justify-between flex-wrap gap-3">
+            <div className="text-xs text-[#5F6977]">
               {pagination.total === 0
-                ? 'No results'
-                : `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, pagination.total)} of ${pagination.total} requests`}
+                ? t('common.noResults', 'Không có kết quả')
+                : `${t('common.showing', 'Hiển thị')} ${(page - 1) * limit + 1}–${Math.min(page * limit, pagination.total)} / ${pagination.total} ${t('common.requestsUnit', 'đơn')}`}
             </div>
 
             {pagination.totalPages > 1 && (
-              <div style={{ display: 'flex', gap: '6px' }}>
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
+                  type="button"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page === 1}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #e2e8f0',
-                    background: page === 1 ? '#f8fafc' : '#fff',
-                    cursor: page === 1 ? 'not-allowed' : 'pointer',
-                    color: page === 1 ? '#cbd5e1' : '#475569',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '13px',
-                  }}
+                  className="px-2.5 py-1.5 rounded-lg border border-[#D8CEBE] bg-white text-xs font-semibold text-[#181A17] hover:bg-[#FAF8F4] disabled:opacity-45 disabled:cursor-not-allowed inline-flex items-center gap-1 cursor-pointer"
                 >
-                  <ChevronLeft size={14} /> Prev
+                  <ChevronLeft size={14} aria-hidden="true" /> {t('common.prev', 'Trước')}
                 </button>
 
-                {Array.from({ length: Math.min(pagination.totalPages, 5) }, (_, i) => {
-                  const pageNum = i + 1;
-                  return (
-                    <button
-                      key={pageNum}
-                      onClick={() => setPage(pageNum)}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        border:
-                          page === pageNum
-                            ? '1px solid var(--primary)'
-                            : '1px solid #e2e8f0',
-                        background:
-                          page === pageNum ? 'var(--primary-light)' : '#fff',
-                        cursor: 'pointer',
-                        fontWeight: page === pageNum ? 700 : 400,
-                        color:
-                          page === pageNum ? 'var(--primary)' : '#475569',
-                        fontSize: '13px',
-                      }}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
+                {(() => {
+                  const maxButtons = 5;
+                  const total = pagination.totalPages;
+                  let startPage = Math.max(1, page - Math.floor(maxButtons / 2));
+                  let endPage = startPage + maxButtons - 1;
+                  if (endPage > total) {
+                    endPage = total;
+                    startPage = Math.max(1, endPage - maxButtons + 1);
+                  }
+                  const pages: number[] = [];
+                  for (let i = startPage; i <= endPage; i++) {
+                    pages.push(i);
+                  }
+                  return pages;
+                })().map((pageNum) => (
+                  <button
+                    key={pageNum}
+                    type="button"
+                    aria-current={page === pageNum ? 'page' : undefined}
+                    onClick={() => setPage(pageNum)}
+                    className={`px-3 py-1.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                      page === pageNum
+                        ? 'border-[#181A17] bg-[#181A17] text-white font-bold'
+                        : 'border-[#D8CEBE] bg-white text-[#181A17] font-medium hover:bg-[#FAF8F4]'
+                    }`}
+                  >
+                    {pageNum}
+                  </button>
+                ))}
 
                 <button
+                  type="button"
                   onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
                   disabled={page === pagination.totalPages}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #e2e8f0',
-                    background: page === pagination.totalPages ? '#f8fafc' : '#fff',
-                    cursor: page === pagination.totalPages ? 'not-allowed' : 'pointer',
-                    color: page === pagination.totalPages ? '#cbd5e1' : '#475569',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '13px',
-                  }}
+                  className="px-2.5 py-1.5 rounded-lg border border-[#D8CEBE] bg-white text-xs font-semibold text-[#181A17] hover:bg-[#FAF8F4] disabled:opacity-45 disabled:cursor-not-allowed inline-flex items-center gap-1 cursor-pointer"
                 >
-                  Next <ChevronRight size={14} />
+                  {t('common.next', 'Sau')} <ChevronRight size={14} aria-hidden="true" />
                 </button>
               </div>
             )}

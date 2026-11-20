@@ -1,12 +1,20 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { 
-  Truck, MapPin, Calendar, Clock, ChevronRight, CheckCircle2, Navigation, 
-  ShieldCheck, AlertCircle, RefreshCw, Send, Check, Plane, Info, Stethoscope,
-  UserCheck, Layers, X
+import {
+  Truck,
+  MapPin,
+  CheckCircle2,
+  Navigation,
+  ShieldCheck,
+  AlertCircle,
+  RefreshCw,
+  Stethoscope,
+  UserCheck,
+  Layers,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -14,6 +22,7 @@ import toast from 'react-hot-toast';
 import { apiClient } from '@/lib/api-client';
 import { routesApi, RouteDetail } from '@/features/routes/api/routes.api';
 import { getCurrentUser } from '@/lib/auth';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface DriverTripItem {
   id: number;
@@ -38,166 +47,223 @@ interface DriverTripItem {
 
 export default function DriverTripsPage() {
   const pathname = usePathname();
+  const { t, language, translateStatus, translateVehicleType, translateStopType } = useLanguage();
   const [trips, setTrips] = useState<DriverTripItem[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'assigned' | 'all'>('assigned');
-  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+  const [currentUser, setCurrentUser] = useState<ReturnType<typeof getCurrentUser> | null>(null);
 
   const isEscort =
     currentUser?.persona === 'escort' ||
     currentUser?.specialization === 'escort' ||
     currentUser?.email?.toLowerCase().includes('escort') ||
-    pathname?.startsWith('/escort');
+    Boolean(pathname?.startsWith('/escort'));
   const basePath = isEscort ? '/escort' : '/driver';
 
   // Confirmation Modal
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [selectedTripToConfirm, setSelectedTripToConfirm] = useState<DriverTripItem | null>(null);
-  const [confirmationNotes, setConfirmationNotes] = useState('Đã nhận lệnh vận chuyển, kiểm tra xe hoàn tất và sẵn sàng xuất phát.');
+  const [confirmationNotes, setConfirmationNotes] = useState('');
   const [isConfirming, setIsConfirming] = useState(false);
 
   // Decline Modal
   const [declineModalOpen, setDeclineModalOpen] = useState(false);
   const [selectedTripToDecline, setSelectedTripToDecline] = useState<DriverTripItem | null>(null);
-  const [declineReason, setDeclineReason] = useState('Sốt cao đột xuất / Sức khỏe không đảm bảo');
+  const [declineReasonKey, setDeclineReasonKey] = useState('medical_issue');
   const [customDeclineReason, setCustomDeclineReason] = useState('');
   const [isDeclining, setIsDeclining] = useState(false);
 
-  const loadDriverTrips = async () => {
+  const declineOptions = [
+    { key: 'medical_issue', label: t('driver.trips.reasonMedical', language === 'en' ? 'Sudden illness / Unfit for duty' : 'Sốt cao đột xuất / Sức khỏe không đảm bảo') },
+    { key: 'vehicle_issue', label: t('driver.trips.reasonVehicle', language === 'en' ? 'Vehicle technical inspection pending' : 'Xe gặp sự cố kỹ thuật chưa kiểm định kịp') },
+    { key: 'family_issue', label: t('driver.trips.reasonFamily', language === 'en' ? 'Urgent family emergency' : 'Bận việc gia đình đột xuất') },
+    { key: 'vet_exam_clash', label: t('driver.trips.reasonVetClash', language === 'en' ? 'Veterinary schedule conflict' : 'Trùng lịch kiểm tra thú y định kỳ') },
+    { key: 'other', label: t('driver.trips.reasonOther', language === 'en' ? 'Other' : 'Khác') },
+  ];
+
+  const loadDriverTrips = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
+    const activeUser = getCurrentUser();
+    setCurrentUser(activeUser);
+
+    const escortFromUser =
+      activeUser?.persona === 'escort' ||
+      activeUser?.specialization === 'escort' ||
+      activeUser?.email?.toLowerCase().includes('escort') ||
+      Boolean(pathname?.startsWith('/escort'));
+
     try {
       const orders = await apiClient<any[]>('/orders');
       if (Array.isArray(orders)) {
         const enriched: DriverTripItem[] = [];
-
-        const activeUser = getCurrentUser();
         const userEmail = (activeUser?.email || '').toLowerCase().trim();
         const userId = String(activeUser?.id || '');
-        const userName = (activeUser?.name || '').toLowerCase().trim();
 
-        for (const ord of orders) {
-          try {
-            // Get route and assignments
-            const [routeRes, assignRes] = await Promise.allSettled([
-              routesApi.getRouteByShipmentId(ord.id),
-              apiClient<any>(`/fleet/shipments/${ord.id}/assignments`),
-            ]);
+        const chunkSize = 5;
+        for (let i = 0; i < orders.length; i += chunkSize) {
+          const chunk = orders.slice(i, i + chunkSize);
+          await Promise.allSettled(
+            chunk.map(async (ord) => {
+              try {
+                const [routeRes, assignRes] = await Promise.allSettled([
+                  routesApi.findRouteByShipmentId(ord.id),
+                  apiClient<any>(`/fleet/shipments/${ord.id}/assignments`),
+                ]);
 
-            const routeDetail = routeRes.status === 'fulfilled' ? routeRes.value : undefined;
-            const staffList = assignRes.status === 'fulfilled' && assignRes.value?.staff ? assignRes.value.staff : [];
-            const vehicleList = assignRes.status === 'fulfilled' && assignRes.value?.vehicles ? assignRes.value.vehicles : [];
+                const routeDetail = routeRes.status === 'fulfilled' ? (routeRes.value ?? undefined) : undefined;
+                const staffList =
+                  assignRes.status === 'fulfilled' && assignRes.value?.staff
+                    ? assignRes.value.staff
+                    : [];
+                const vehicleList =
+                  assignRes.status === 'fulfilled' && assignRes.value?.vehicles
+                    ? assignRes.value.vehicles
+                    : [];
 
-            // Match if logged-in driver/escort is assigned to this shipment
-            const myAssignment = staffList.find((s: any) => {
-              const sUserId = String(s.userId || s.user?.id || '');
-              const sEmail = (s.user?.email || '').toLowerCase().trim();
-              const sName = (s.user?.fullName || '').toLowerCase().trim();
+                const myAssignment = staffList.find((s: any) => {
+                  const sUserId = String(s.userId || s.user?.id || '');
+                  const sEmail = (s.user?.email || '').toLowerCase().trim();
 
-              return (
-                (userId && sUserId && sUserId === userId) ||
-                (userEmail && sEmail && sEmail === userEmail) ||
-                (userName && sName && (sName.includes(userName) || userName.includes(sName)))
-              );
-            });
+                  return (
+                    (Boolean(userId) && Boolean(sUserId) && sUserId === userId) ||
+                    (Boolean(userEmail) && Boolean(sEmail) && sEmail === userEmail)
+                  );
+                });
 
-            const isAssignedToMe = Boolean(myAssignment);
-            const generalAssignment = staffList.find(
-              (s: any) => s.roleInShipment === 'driver' || s.roleInShipment === 'escort'
-            );
-            const assignmentToUse = myAssignment || generalAssignment;
-            const isConfirmed = Boolean(assignmentToUse?.isConfirmed);
+                const isAssignedToMe = Boolean(myAssignment);
+                const isConfirmed = Boolean(myAssignment?.isConfirmed);
 
-            enriched.push({
-              id: ord.id,
-              orderCode: ord.requestCode || `REQ-${String(ord.id).padStart(3, '0')}`,
-              customerName: ord.customer?.fullName || ord.customerName || 'Khách hàng VIP',
-              horseName: ord.horses?.[0]?.name || 'Chiến Mã',
-              horses: ord.horses || [],
-              horseCount: Number(ord.requestedHorseCount || ord.horses?.length || 1),
-              origin: ord.originLocation || 'Cu Chi Stables, HCMC',
-              destination: ord.destinationLocation || 'Singapore Turf Club',
-              departureDate: ord.requestedDate
-                ? new Date(ord.requestedDate).toLocaleDateString('vi-VN', { year: 'numeric', month: 'short', day: 'numeric' })
-                : 'Oct 20, 2026',
-              shipmentStatus: ord.status,
-              planStatus: routeDetail?.planStatus || 'draft',
-              routeDetail,
-              assignedStaff: staffList,
-              assignedVehicles: vehicleList,
-              isCurrentDriverConfirmed: isConfirmed,
-              confirmedAt: assignmentToUse?.confirmedAt,
-              driverRoleInTrip: assignmentToUse?.roleInShipment || (isEscort ? 'escort' : 'driver'),
-              isAssignedToMe,
-            });
-          } catch (e) {
-            console.warn(`Could not load details for order #${ord.id}`, e);
-          }
+                enriched.push({
+                  id: ord.id,
+                  orderCode: ord.requestCode || `REQ-${String(ord.id).padStart(3, '0')}`,
+                  customerName:
+                    ord.customer?.fullName ||
+                    ord.customerName ||
+                    (language === 'en' ? 'VIP Client' : 'Khách hàng VIP'),
+                  horseName: ord.horses?.[0]?.name || (language === 'en' ? 'Racehorse' : 'Chiến Mã'),
+                  horses: ord.horses || [],
+                  horseCount: Number(ord.requestedHorseCount || ord.horses?.length || 1),
+                  origin: ord.originLocation || '—',
+                  destination: ord.destinationLocation || '—',
+                  departureDate: ord.requestedDate
+                    ? new Date(ord.requestedDate).toLocaleDateString(
+                        language === 'en' ? 'en-US' : 'vi-VN',
+                        { year: 'numeric', month: 'short', day: 'numeric' }
+                      )
+                    : '—',
+                  shipmentStatus: ord.status,
+                  planStatus: routeDetail?.planStatus || 'draft',
+                  routeDetail,
+                  assignedStaff: staffList,
+                  assignedVehicles: vehicleList,
+                  isCurrentDriverConfirmed: isConfirmed,
+                  confirmedAt: myAssignment?.confirmedAt,
+                  driverRoleInTrip:
+                    myAssignment?.roleInShipment || (escortFromUser ? 'escort' : 'driver'),
+                  isAssignedToMe,
+                });
+              } catch (e) {
+                console.warn(`Could not load details for order #${ord.id}`, e);
+              }
+            })
+          );
         }
 
-        // Only show orders that have plan or assignments or are in transit/planning/completed
         const relevantTrips = enriched.filter(
-          (t) =>
-            t.planStatus !== 'draft' ||
-            Boolean(t.assignedStaff?.length) ||
-            t.shipmentStatus === 'in_transit' ||
-            t.shipmentStatus === 'planning' ||
-            t.shipmentStatus === 'completed'
+          (tr) =>
+            tr.planStatus !== 'draft' ||
+            Boolean(tr.assignedStaff?.length) ||
+            tr.shipmentStatus === 'in_transit' ||
+            tr.shipmentStatus === 'planning' ||
+            tr.shipmentStatus === 'completed'
         );
 
         setTrips(relevantTrips.length > 0 ? relevantTrips : enriched);
         return;
       }
-    } catch (err) {
-      console.warn('Backend orders load error:', err);
-      toast.error('Không thể tải danh sách chuyến đi từ hệ thống.');
+    } catch (err: any) {
+      const msg =
+        err?.message ||
+        t(
+          'driver.trips.loadFailed',
+          language === 'en'
+            ? 'Unable to load assigned trips from server.'
+            : 'Không thể tải danh sách chuyến đi từ hệ thống.'
+        );
+      setLoadError(msg);
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
 
     setTrips([]);
-  };
+  }, [language, pathname, t]);
 
   useEffect(() => {
-    setCurrentUser(getCurrentUser());
-    loadDriverTrips();
-  }, []);
+    void loadDriverTrips();
+  }, [loadDriverTrips]);
 
   const handleOpenConfirmModal = (trip: DriverTripItem) => {
     setSelectedTripToConfirm(trip);
-    setConfirmationNotes('Đã nhận lệnh vận chuyển, kiểm tra xe hoàn tất và sẵn sàng xuất phát.');
+    setConfirmationNotes(
+      t(
+        'driver.trips.defaultConfirmNote',
+        language === 'en'
+          ? 'Assignment acknowledged, vehicle pre-trip inspection complete.'
+          : 'Đã nhận lệnh vận chuyển, kiểm tra xe hoàn tất và sẵn sàng xuất phát.'
+      )
+    );
     setConfirmModalOpen(true);
   };
 
+  const closeConfirmModal = () => {
+    if (isConfirming) return;
+    setConfirmModalOpen(false);
+    setSelectedTripToConfirm(null);
+    setConfirmationNotes('');
+  };
+
   const handleConfirmAssignment = async () => {
-    if (!selectedTripToConfirm) return;
+    if (!selectedTripToConfirm || isConfirming) return;
     setIsConfirming(true);
 
     try {
       const res = await routesApi.confirmTripAssignment(selectedTripToConfirm.id, {
-        confirmationNotes,
+        confirmationNotes:
+          confirmationNotes.trim() ||
+          t(
+            'driver.trips.defaultConfirmNote',
+            language === 'en'
+              ? 'Assignment acknowledged, ready for departure.'
+              : 'Đã nhận lệnh vận chuyển, kiểm tra xe hoàn tất và sẵn sàng xuất phát.'
+          ),
       });
 
       toast.success(
         res.isFullyConfirmed
-          ? 'Đã xác nhận chuyến đi! Toàn bộ tổ lái đã sẵn sàng, kế hoạch chuyển sang Confirmed.'
-          : 'Bạn đã xác nhận nhận chuyến thành công!'
+          ? t(
+              'driver.trips.fullyConfirmedSuccess',
+              language === 'en'
+                ? 'Trip confirmed! Full crew ready.'
+                : 'Đã xác nhận chuyến đi! Toàn bộ tổ lái đã sẵn sàng, kế hoạch chuyển sang Đã xác nhận.'
+            )
+          : t(
+              'driver.trips.confirmedSuccess',
+              language === 'en' ? 'Trip assignment confirmed!' : 'Bạn đã xác nhận nhận chuyến thành công!'
+            )
       );
 
       setConfirmModalOpen(false);
+      setSelectedTripToConfirm(null);
       await loadDriverTrips();
     } catch (err: any) {
-      console.warn('Confirmation fallback error:', err);
-      // Soft update in UI if backend throws assignment missing
-      setTrips((prev) =>
-        prev.map((t) =>
-          t.id === selectedTripToConfirm.id
-            ? { ...t, isCurrentDriverConfirmed: true, planStatus: 'confirmed' }
-            : t
-        )
+      toast.error(
+        err?.message ||
+          t('driver.trips.confirmFailed', language === 'en' ? 'Unable to confirm trip.' : 'Không thể xác nhận chuyến đi')
       );
-      toast.success('Đã ghi nhận xác nhận nhận chuyến của bạn!');
-      setConfirmModalOpen(false);
     } finally {
       setIsConfirming(false);
     }
@@ -205,16 +271,32 @@ export default function DriverTripsPage() {
 
   const handleOpenDeclineModal = (trip: DriverTripItem) => {
     setSelectedTripToDecline(trip);
-    setDeclineReason('Sốt cao đột xuất / Sức khỏe không đảm bảo');
+    setDeclineReasonKey('medical_issue');
     setCustomDeclineReason('');
     setDeclineModalOpen(true);
   };
 
+  const closeDeclineModal = () => {
+    if (isDeclining) return;
+    setDeclineModalOpen(false);
+    setSelectedTripToDecline(null);
+    setCustomDeclineReason('');
+  };
+
   const handleDeclineAssignment = async () => {
-    if (!selectedTripToDecline) return;
-    const finalReason = declineReason === 'Khác' ? customDeclineReason.trim() : declineReason;
+    if (!selectedTripToDecline || isDeclining) return;
+    const matched = declineOptions.find((o) => o.key === declineReasonKey);
+    const finalReason =
+      declineReasonKey === 'other'
+        ? customDeclineReason.trim()
+        : matched?.label || declineReasonKey;
     if (!finalReason) {
-      toast.error('Vui lòng cung cấp lý do từ chối chuyến đi');
+      toast.error(
+        t(
+          'driver.trips.declineReasonRequired',
+          language === 'en' ? 'Please provide a reason for declining.' : 'Vui lòng cung cấp lý do từ chối chuyến đi'
+        )
+      );
       return;
     }
     setIsDeclining(true);
@@ -224,29 +306,40 @@ export default function DriverTripsPage() {
         reason: finalReason,
       });
 
-      toast.success('Đã gửi thông báo từ chối nhận chuyến đến Quản lý vận hành!');
+      toast.success(
+        t(
+          'driver.trips.declinedSuccess',
+          language === 'en'
+            ? 'Decline reason sent to Operations Manager!'
+            : 'Đã gửi thông báo từ chối nhận chuyến đến Quản lý vận hành!'
+        )
+      );
       setDeclineModalOpen(false);
+      setSelectedTripToDecline(null);
       await loadDriverTrips();
     } catch (err: any) {
-      toast.error(err?.message || 'Không thể gửi phản hồi từ chối');
+      toast.error(
+        err?.message ||
+          t('driver.trips.declineFailed', language === 'en' ? 'Unable to submit decline response.' : 'Không thể gửi phản hồi từ chối')
+      );
     } finally {
       setIsDeclining(false);
     }
   };
 
   const filteredTrips = trips
-    .filter((t) => {
+    .filter((tr) => {
       if (viewMode === 'assigned') {
-        return Boolean(t.isAssignedToMe);
+        return Boolean(tr.isAssignedToMe);
       }
       return true;
     })
     .filter(
-      (t) =>
-        t.orderCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.horseName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.destination.toLowerCase().includes(searchTerm.toLowerCase())
+      (tr) =>
+        tr.orderCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        tr.horseName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        tr.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        tr.destination.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
   return (
@@ -254,104 +347,175 @@ export default function DriverTripsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-slate-900 m-0">Nhiệm Vụ Vận Chuyển Của Tôi (My Trips)</h1>
-            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800">
-              Nhiệm Vụ Vận Chuyển &amp; Tiếp Nhận Lộ Trình
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-2xl font-bold text-[#181A17] m-0">
+              {t('driver.trips.title', language === 'en' ? 'My Transport Assignments' : 'Nhiệm Vụ Vận Chuyển Của Tôi')}
+            </h1>
+            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#F3EFE4] text-[#181A17] border border-[#D4C5A3]">
+              {t('driver.trips.badge', language === 'en' ? 'Dispatch & Route Acceptance' : 'Nhiệm Vụ Vận Chuyển & Tiếp Nhận Lộ Trình')}
             </span>
           </div>
-          <p className="text-sm text-slate-500 mt-1">
-            Xem lịch trình điều phối, manifest ngựa, lộ trình các chặng đường bộ &amp; xác nhận tiếp nhận chuyến đi.
+          <p className="text-sm text-[#57564E] mt-1 mb-0">
+            {t(
+              'driver.trips.subtitle',
+              language === 'en'
+                ? 'Review dispatch schedule, horse manifest, transit legs, and confirm duty acceptance.'
+                : 'Xem lịch trình điều phối, manifest ngựa, lộ trình các chặng đường bộ & xác nhận tiếp nhận chuyến đi.'
+            )}
           </p>
         </div>
 
         <Button
+          type="button"
           variant="outline"
-          onClick={loadDriverTrips}
+          onClick={() => void loadDriverTrips()}
           disabled={isLoading}
-          className="shadow-sm"
+          className="min-h-[44px] px-4 shadow-sm border-[#D8CEBE] self-start sm:self-auto"
         >
-          <RefreshCw size={15} className={`mr-1.5 text-blue-600 ${isLoading ? 'animate-spin' : ''}`} />
-          Làm mới danh sách
+          <RefreshCw size={15} className={`mr-1.5 text-[#A67C2E] ${isLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
+          {t('common.refreshList', language === 'en' ? 'Refresh list' : 'Làm mới danh sách')}
         </Button>
       </div>
 
       {/* Role Context Notification Banner */}
       <div
-        className={`p-3.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+        className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs transition-all ${
           isEscort
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-            : 'bg-blue-50 border-blue-200 text-blue-900'
+            ? 'bg-[#E8F2EB] border-[#2D5A3F]/25 text-[#1E402C]'
+            : 'bg-[#FAF8F4] border-[#D8CEBE] text-[#181A17]'
         }`}
       >
-        <div className="flex items-center gap-2 font-bold">
+        <div className="flex items-start sm:items-center gap-2.5 font-bold">
           {isEscort ? (
-            <Stethoscope size={18} className="text-emerald-600 shrink-0" />
+            <Stethoscope size={18} className="text-[#2D5A3F] shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
           ) : (
-            <Truck size={18} className="text-blue-600 shrink-0" />
+            <Truck size={18} className="text-[#A67C2E] shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
           )}
           <span>
             {isEscort
-              ? 'Vai trò: Bác Sĩ Thú Y / Chuyên Viên Hộ Tống (Escort/Vet) — Bạn được phân quyền theo dõi lâm sàng & ghi nhật ký sức khỏe ngựa.'
-              : 'Vai trò: Tài Xế Lái Xe Chuyên Dụng (Driver) — Bạn phụ trách lái xe an toàn, cập nhật mốc hành trình và kiểm soát trạm dừng.'}
+              ? t(
+                  'driver.trips.escortRoleBanner',
+                  language === 'en'
+                    ? 'Role: Equine Vet / Escort — Authorized for clinical monitoring and horse health logging.'
+                    : 'Vai trò: Bác Sĩ Thú Y / Chuyên Viên Hộ Tống — Bạn được phân quyền theo dõi lâm sàng & ghi nhật ký sức khỏe ngựa.'
+                )
+              : t(
+                  'driver.trips.driverRoleBanner',
+                  language === 'en'
+                    ? 'Role: Specialized Vehicle Driver — Responsible for safe transit and milestone check-ins.'
+                    : 'Vai trò: Tài Xế Lái Xe Chuyên Dụng — Bạn phụ trách lái xe an toàn, cập nhật mốc hành trình và kiểm soát trạm dừng.'
+                )}
           </span>
         </div>
-        <span className="font-semibold text-[11px] opacity-80">
-          Đăng nhập: {currentUser?.name || (isEscort ? 'BS. Hoàng Văn Y' : 'Trần Văn Lái')}
+        <span className="font-semibold text-[11px] opacity-85 shrink-0">
+          {t('driver.trips.loggedInAs', language === 'en' ? 'Signed in as:' : 'Đăng nhập:')}{' '}
+          {currentUser?.fullName ||
+            currentUser?.name ||
+            (isEscort
+              ? language === 'en'
+                ? 'Vet Specialist'
+                : 'BS. Thú Y'
+              : language === 'en'
+              ? 'Driver'
+              : 'Tài Xế')}
         </span>
       </div>
 
       {/* View Filter Mode Tabs & Search */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-[#D8CEBE] shadow-sm">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
+            aria-pressed={viewMode === 'assigned'}
             onClick={() => setViewMode('assigned')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+            className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               viewMode === 'assigned'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'bg-[#181A17] text-[#F7F7F4] shadow-sm'
+                : 'bg-[#FAF8F4] text-[#57564E] border border-[#EAE5DA] hover:bg-[#F3EFE4]'
             }`}
           >
-            <UserCheck size={14} /> Chuyến được phân công cho tôi ({trips.filter(t => t.isAssignedToMe).length})
+            <UserCheck size={14} aria-hidden="true" />{' '}
+            {t('driver.trips.assignedToMe', language === 'en' ? 'Assigned to me' : 'Chuyến được phân công cho tôi')} (
+            {trips.filter((tr) => tr.isAssignedToMe).length})
           </button>
           <button
             type="button"
+            aria-pressed={viewMode === 'all'}
             onClick={() => setViewMode('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+            className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               viewMode === 'all'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'bg-[#181A17] text-[#F7F7F4] shadow-sm'
+                : 'bg-[#FAF8F4] text-[#57564E] border border-[#EAE5DA] hover:bg-[#F3EFE4]'
             }`}
           >
-            <Layers size={14} /> Tất cả chuyến ({trips.length})
+            <Layers size={14} aria-hidden="true" />{' '}
+            {t('driver.trips.allTrips', language === 'en' ? 'All trips' : 'Tất cả chuyến')} ({trips.length})
           </button>
         </div>
 
         <input
           type="text"
-          placeholder="Tìm theo mã đơn, điểm đi, điểm đến..."
+          aria-label={t('driver.trips.searchPlaceholder', language === 'en' ? 'Search trips...' : 'Tìm chuyến đi...')}
+          placeholder={t('driver.trips.searchPlaceholder', language === 'en' ? 'Search by code, horse, route...' : 'Tìm theo mã đơn, điểm đi, điểm đến...')}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs outline-none focus:border-blue-500 w-full sm:w-64"
+          className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#D8CEBE] text-xs outline-none focus:border-[#A67C2E] w-full sm:w-72"
         />
       </div>
 
-      {/* Trips list or Empty State */}
-      {filteredTrips.length === 0 ? (
-        <div className="p-12 text-center bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center">
-            <Truck size={24} />
+      {loadError && (
+        <div
+          role="alert"
+          className="p-4 rounded-xl bg-rose-50 border border-[#9E3B3B]/35 text-xs font-semibold text-[#9E3B3B] flex flex-wrap items-center justify-between gap-3"
+        >
+          <span>{loadError}</span>
+          <button
+            type="button"
+            onClick={() => void loadDriverTrips()}
+            className="min-h-[40px] px-3.5 py-1.5 rounded-lg bg-[#181A17] text-[#C4B38E] font-bold cursor-pointer hover:bg-[#2C2F2A]"
+          >
+            {t('common.retry', language === 'en' ? 'Retry' : 'Thử lại')}
+          </button>
+        </div>
+      )}
+
+      {/* Trips list / Loading / Empty State */}
+      {isLoading ? (
+        <div className="p-12 text-center bg-white rounded-2xl border border-[#D8CEBE] shadow-sm flex flex-col items-center justify-center gap-3">
+          <RefreshCw size={28} className="animate-spin text-[#A67C2E]" aria-hidden="true" />
+          <p className="text-sm font-semibold text-[#57564E] m-0">
+            {t('common.loading', language === 'en' ? 'Loading transport assignments...' : 'Đang tải danh sách nhiệm vụ vận chuyển...')}
+          </p>
+        </div>
+      ) : filteredTrips.length === 0 ? (
+        <div className="p-12 text-center bg-white rounded-2xl border border-[#D8CEBE] shadow-sm flex flex-col items-center justify-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-[#FAF8F4] border border-[#D8CEBE] text-[#8A8478] flex items-center justify-center">
+            <Truck size={24} aria-hidden="true" />
           </div>
-          <h3 className="text-base font-bold text-slate-800 m-0">Không có chuyến đi nào</h3>
-          <p className="text-xs text-slate-500 m-0 max-w-md">
+          <h2 className="text-base font-bold text-[#181A17] m-0">
+            {t('driver.trips.noTrips', language === 'en' ? 'No trips found' : 'Không có chuyến đi nào')}
+          </h2>
+          <p className="text-xs text-[#57564E] m-0 max-w-md leading-relaxed">
             {viewMode === 'assigned'
-              ? `Hiện tại chưa có chuyến đi nào được phân công cho bạn (${currentUser?.name || 'Tài xế'}). Khi Logistics Manager phân công bạn vào chuyến xe, chuyến đi sẽ xuất hiện tại đây.`
-              : 'Không tìm thấy chuyến đi nào trong hệ thống.'}
+              ? t(
+                  'driver.trips.noAssignedTripsDesc',
+                  'Hiện tại chưa có chuyến đi nào được phân công cho bạn ({name}). Khi Quản lý phân công bạn vào chuyến xe, chuyến đi sẽ xuất hiện tại đây.',
+                  { name: currentUser?.fullName || currentUser?.name || (language === 'en' ? 'Crew Member' : 'Nhân sự') }
+                )
+              : t(
+                  'driver.trips.noTripsInSystem',
+                  language === 'en' ? 'No matching trips found in system.' : 'Không tìm thấy chuyến đi nào trong hệ thống.'
+                )}
           </p>
           {viewMode === 'assigned' && trips.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setViewMode('all')}>
-              Xem tất cả {trips.length} chuyến trong hệ thống
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setViewMode('all')}
+              className="min-h-[44px] border-[#D8CEBE]"
+            >
+              {t('driver.trips.viewAllInSystem', 'Xem tất cả {count} chuyến trong hệ thống', { count: trips.length })}
             </Button>
           )}
         </div>
@@ -370,211 +534,247 @@ export default function DriverTripsPage() {
               (trip.shipmentStatus === 'in_transit' ||
                 trip.planStatus === 'in_transit' ||
                 (legs.length > 0 && legs.some((l) => l.status === 'in_progress' || l.status === 'in_transit')));
-            const isAwaitingConfirmation = !isCompleted && !isInTransit && !trip.isCurrentDriverConfirmed;
+            const isAwaitingConfirmation =
+              Boolean(trip.isAssignedToMe) && !isCompleted && !isInTransit && !trip.isCurrentDriverConfirmed;
 
-          return (
-            <div
-              key={trip.id}
-              className={`bg-white rounded-xl border p-6 flex flex-col gap-5 shadow-sm transition-all ${
-                isAwaitingConfirmation
-                  ? 'border-amber-300 ring-2 ring-amber-100'
-                  : isCompleted
-                  ? 'border-emerald-200'
-                  : 'border-slate-200'
-              }`}
-            >
-              {/* Top Banner */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-extrabold text-blue-600 text-base">{trip.orderCode}</span>
-                    <span className="text-xs text-slate-400">• Khách hàng: {trip.customerName}</span>
+            return (
+              <div
+                key={trip.id}
+                className={`bg-white rounded-2xl border p-5 sm:p-6 flex flex-col gap-5 shadow-sm transition-all ${
+                  isAwaitingConfirmation
+                    ? 'border-[#A67C2E] ring-2 ring-[#F8F0DF]'
+                    : isCompleted
+                    ? 'border-[#2D5A3F]/30'
+                    : 'border-[#D8CEBE]'
+                }`}
+              >
+                {/* Top Banner */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#EAE5DA] pb-4">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-extrabold text-[#A67C2E] text-base">{trip.orderCode}</span>
+                      <span className="text-xs text-[#747D88]">
+                        • {t('coordinator.routes.customerLabel', language === 'en' ? 'Customer:' : 'Khách hàng:')} {trip.customerName}
+                      </span>
 
-                    {/* Single Status Badge: Chỉ hiển thị duy nhất 1 trạng thái */}
-                    {isCompleted ? (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-xs">
-                        <CheckCircle2 size={13} className="text-emerald-600" /> Đã hoàn thành (Completed)
-                      </span>
-                    ) : isInTransit ? (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1 shadow-xs">
-                        🚚 Đang di chuyển (In Transit)
-                      </span>
-                    ) : trip.planStatus === 'ready_to_depart' ? (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1 shadow-xs">
-                        🚀 Sẵn sàng xuất phát
-                      </span>
-                    ) : trip.isCurrentDriverConfirmed ? (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1 shadow-xs">
-                        <CheckCircle2 size={13} className="text-emerald-600" /> Đã xác nhận nhận chuyến (Confirmed)
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 animate-pulse">
-                        <AlertCircle size={13} className="text-amber-700" /> Cần xác nhận nhận chuyến
-                      </span>
-                    )}
+                      {isCompleted ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#E8F2EB] text-[#2D5A3F] border border-[#2D5A3F]/25 flex items-center gap-1 shadow-sm">
+                          <CheckCircle2 size={13} className="text-[#2D5A3F]" aria-hidden="true" /> {translateStatus('completed')}
+                        </span>
+                      ) : isInTransit ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#F3EFE4] text-[#181A17] border border-[#D4C5A3] flex items-center gap-1 shadow-sm">
+                          🚚 {translateStatus('in_transit')}
+                        </span>
+                      ) : trip.planStatus === 'ready_to_depart' ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#FAF5EB] text-[#A67C2E] border border-[#D4C5A3] flex items-center gap-1 shadow-sm">
+                          🚀 {translateStatus('ready_to_depart')}
+                        </span>
+                      ) : trip.isCurrentDriverConfirmed ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#E8F2EB] text-[#2D5A3F] border border-[#2D5A3F]/25 flex items-center gap-1 shadow-sm">
+                          <CheckCircle2 size={13} className="text-[#2D5A3F]" aria-hidden="true" /> {translateStatus('confirmed')}
+                        </span>
+                      ) : trip.isAssignedToMe ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#FAF5EB] text-[#966516] border border-[#D4C5A3] flex items-center gap-1 animate-pulse">
+                          <AlertCircle size={13} className="text-[#A67C2E]" aria-hidden="true" />{' '}
+                          {t('driver.needsConfirmation', language === 'en' ? 'Needs Confirmation' : 'Cần xác nhận nhận chuyến')}
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#F4F1E9] text-[#57564E] border border-[#D8CEBE] flex items-center gap-1">
+                          {t('driver.waitingAssignment', language === 'en' ? 'Pending assignment' : 'Chờ phân công')}
+                        </span>
+                      )}
+                    </div>
+
+                    <h2 className="text-lg font-bold text-[#181A17] mt-1.5 mb-0 break-words">
+                      {trip.routeDetail?.routeName || `${trip.origin} → ${trip.destination}`}
+                    </h2>
                   </div>
 
-                  <h3 className="text-lg font-bold text-slate-900 mt-1 m-0">
-                    {trip.routeDetail?.routeName || `${trip.origin} → ${trip.destination}`}
-                  </h3>
-                </div>
+                  {/* Main Action Buttons */}
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    {isAwaitingConfirmation && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          onClick={() => handleOpenConfirmModal(trip)}
+                          className="min-h-[44px] bg-[#2D5A3F] hover:bg-[#234731] text-white font-bold shadow-sm text-xs py-2 px-4"
+                        >
+                          <CheckCircle2 size={15} className="mr-1.5" aria-hidden="true" />
+                          {isEscort
+                            ? t('driver.trips.confirmEscortBtn', language === 'en' ? 'Confirm Escort Duty' : 'Xác Nhận Hộ Tống Chuyến Đi')
+                            : t('driver.trips.confirmDriverBtn', language === 'en' ? 'Confirm Driver Duty' : 'Xác Nhận Lái Xe Chuyến Đi')}
+                        </Button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDeclineModal(trip)}
+                          className="min-h-[44px] inline-flex items-center justify-center bg-[#9E3B3B] hover:bg-[#7F2E2E] text-white font-bold text-xs py-2 px-3.5 rounded-xl border border-[#7F2E2E] shadow-sm transition-all cursor-pointer"
+                        >
+                          <X size={14} className="mr-1 stroke-[2.5]" aria-hidden="true" />
+                          {t('driver.trips.declineBtn', language === 'en' ? 'Decline' : 'Từ chối')}
+                        </button>
+                      </>
+                    )}
 
-                {/* Main Action Buttons: ROLE-BASED VISIBILITY */}
-                <div className="flex items-center gap-2.5">
-                  {/* CONFIRMATION & DECLINE BUTTONS */}
-                  {isAwaitingConfirmation && (
-                    <>
-                      <Button
-                        variant="primary"
-                        onClick={() => handleOpenConfirmModal(trip)}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md text-xs py-2 px-3.5"
-                      >
-                        <CheckCircle2 size={15} className="mr-1.5" />
-                        {isEscort ? 'Xác Nhận Hộ Tống Chuyến Đi' : 'Xác Nhận Lái Xe Chuyến Đi'}
-                      </Button>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenDeclineModal(trip)}
-                        className="inline-flex items-center justify-center bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-2 px-3.5 rounded-lg border border-rose-700 shadow-sm transition-all"
-                      >
-                        <X size={14} className="mr-1 stroke-[2.5]" />
-                        Từ chối
-                      </button>
-                    </>
-                  )}
-
-                  {/* Driver gets prominent Journey Update; Escort gets outline view button */}
-                  <Link href={`${basePath}/status?shipmentId=${trip.id}`}>
-                    <Button
-                      variant={!isEscort ? 'primary' : 'outline'}
-                      size="sm"
-                      className={`text-xs ${
+                    <Link
+                      href={`${basePath}/status?shipmentId=${trip.id}`}
+                      className={`min-h-[44px] inline-flex items-center justify-center px-3.5 py-2 rounded-xl text-xs font-bold no-underline transition-colors ${
                         isCompleted
-                          ? 'bg-slate-700 hover:bg-slate-800 text-white font-bold'
+                          ? 'bg-[#3C403A] hover:bg-[#181A17] text-white'
                           : !isEscort
-                          ? 'bg-blue-600 hover:bg-blue-700 text-white font-bold'
-                          : ''
+                          ? 'bg-[#181A17] hover:bg-[#2C2F2A] text-[#F7F7F4] shadow-sm'
+                          : 'bg-white border border-[#D8CEBE] hover:bg-[#FAF8F4] text-[#181A17]'
                       }`}
                     >
                       {isCompleted ? (
-                        <CheckCircle2 size={13} className="mr-1 text-emerald-400" />
+                        <CheckCircle2 size={14} className="mr-1.5 text-emerald-300" aria-hidden="true" />
                       ) : (
-                        <Navigation size={13} className="mr-1 text-blue-500" />
+                        <Navigation size={14} className="mr-1.5 text-[#C4B38E]" aria-hidden="true" />
                       )}
                       {isCompleted
-                        ? (!isEscort ? 'Xem lại hành trình đã hoàn thành' : 'Xem lại lộ trình đã hoàn thành')
-                        : (!isEscort ? 'Cập nhật hành trình & đến trạm' : 'Xem lộ trình di chuyển')}
-                    </Button>
-                  </Link>
-
-                  {/* ONLY Escort sees the Health Observation button; Driver does NOT see it! */}
-                  {isEscort && (
-                    <Link href={`${basePath}/health`}>
-                      <Button
-                        variant={isCompleted ? 'outline' : 'primary'}
-                        size="sm"
-                        className={
-                          isCompleted
-                            ? 'border-emerald-600 text-emerald-700 hover:bg-emerald-50 font-bold text-xs shadow-xs'
-                            : 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm'
-                        }
-                      >
-                        <Stethoscope size={13} className="mr-1" />
-                        {isCompleted ? 'Xem hồ sơ sức khỏe ngựa' : 'Ghi nhật ký sức khỏe ngựa'}
-                      </Button>
+                        ? !isEscort
+                          ? t('driver.trips.viewCompletedJourney', language === 'en' ? 'Review completed trip' : 'Xem lại hành trình đã hoàn thành')
+                          : t('driver.trips.viewCompletedRoute', language === 'en' ? 'Review completed route' : 'Xem lại lộ trình đã hoàn thành')
+                        : !isEscort
+                        ? t('driver.trips.updateJourneyBtn', language === 'en' ? 'Update journey & stops' : 'Cập nhật hành trình & đến trạm')
+                        : t('driver.trips.viewRouteBtn', language === 'en' ? 'View route status' : 'Xem lộ trình di chuyển')}
                     </Link>
-                  )}
-                </div>
-              </div>
 
-              {/* Origin -> Destination Flow */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl text-sm border border-slate-100">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
-                    <MapPin size={16} />
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-slate-400 font-bold uppercase m-0">Điểm đón ngựa (Pickup Point)</p>
-                    <p className="font-semibold text-slate-800 m-0 mt-0.5">{trip.origin}</p>
-                    <p className="text-xs text-slate-500 m-0 mt-0.5">Khởi hành dự kiến: <strong>{trip.departureDate}</strong></p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 mt-0.5">
-                    <MapPin size={16} />
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-slate-400 font-bold uppercase m-0">Điểm bàn giao cuối (Final Delivery)</p>
-                    <p className="font-semibold text-slate-800 m-0 mt-0.5">{trip.destination}</p>
-                    <p className="text-xs text-slate-500 m-0 mt-0.5">
-                      Chiến mã: <strong className="text-slate-900">{trip.horses && trip.horses.length > 0 ? trip.horses.map((h: any) => h.name).filter(Boolean).join(', ') : trip.horseName}</strong> ({trip.horseCount} con)
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Multi-modal Legs Details */}
-              {legs.length > 0 && (
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                    Lộ trình các chặng vận chuyển ({legs.length} chặng):
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {legs.map((leg) => (
-                      <div
-                        key={leg.sequenceNo}
-                        className={`p-3 rounded-lg border text-xs flex flex-col gap-1.5 ${
-                          leg.legType === 'flight'
-                            ? 'bg-purple-50/50 border-purple-200'
-                            : 'bg-emerald-50/50 border-emerald-200'
+                    {isEscort && (
+                      <Link
+                        href={`${basePath}/health`}
+                        className={`min-h-[44px] inline-flex items-center justify-center px-3.5 py-2 rounded-xl text-xs font-bold no-underline shadow-sm transition-colors ${
+                          isCompleted
+                            ? 'bg-white border border-[#2D5A3F] text-[#2D5A3F] hover:bg-[#E8F2EB]'
+                            : 'bg-[#2D5A3F] hover:bg-[#234731] text-white'
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-700">Chặng {leg.sequenceNo}</span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-white border">
-                            {leg.legType === 'flight' ? '✈️ Chặng Bay' : '🚚 Đường bộ'}
-                          </span>
-                        </div>
-                        <p className="font-semibold text-slate-900 m-0 line-clamp-1">
-                          {leg.originLocation.split(',')[0]} → {leg.destinationLocation.split(',')[0]}
-                        </p>
-                        {leg.legType === 'flight' ? (
-                          <div className="text-[11px] text-purple-900 font-medium">
-                            {leg.airlineName || 'Airline'} • Chuyến: {leg.flightNumber || 'SQ711'}
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-emerald-900 font-medium">
-                            Phương tiện: {leg.vehiclePlate || 'Xe chuyên dụng'}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                        <Stethoscope size={14} className="mr-1.5" aria-hidden="true" />
+                        {isCompleted
+                          ? t('driver.trips.viewHealthDossier', language === 'en' ? 'View health dossier' : 'Xem hồ sơ sức khỏe ngựa')
+                          : t('driver.trips.recordHealthLog', language === 'en' ? 'Log horse health' : 'Ghi nhật ký sức khỏe ngựa')}
+                      </Link>
+                    )}
                   </div>
                 </div>
-              )}
 
-              {/* Stops & Rest stations */}
-              {stops.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-xs text-slate-600">
-                  <span className="font-bold text-slate-700">Trạm dừng &amp; Kiểm dịch:</span>
-                  {stops.map((st) => (
-                    <span key={st.sequenceNo} className="bg-slate-100 px-2 py-0.5 rounded text-[11px] text-slate-700">
-                      #{st.sequenceNo} {st.locationName} ({st.stopType})
+                {/* Origin -> Destination Flow */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-[#FAF8F4] p-4 rounded-xl text-sm border border-[#EAE5DA]">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-8 h-8 rounded-full bg-[#E8F2EB] text-[#2D5A3F] flex items-center justify-center shrink-0 mt-0.5">
+                      <MapPin size={16} aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[11px] text-[#747D88] font-bold uppercase m-0">
+                        {t('driver.trips.pickupPoint', language === 'en' ? 'Pickup location' : 'Điểm đón ngựa')}
+                      </p>
+                      <p className="font-semibold text-[#181A17] m-0 mt-0.5 break-words">{trip.origin}</p>
+                      <p className="text-xs text-[#57564E] m-0 mt-0.5">
+                        {t('driver.trips.estDeparture', language === 'en' ? 'Planned departure:' : 'Khởi hành dự kiến:')}{' '}
+                        <strong>{trip.departureDate}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-8 h-8 rounded-full bg-[#F3EFE4] text-[#181A17] flex items-center justify-center shrink-0 mt-0.5 border border-[#D4C5A3]">
+                      <MapPin size={16} aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[11px] text-[#747D88] font-bold uppercase m-0">
+                        {t('driver.trips.deliveryPoint', language === 'en' ? 'Final destination' : 'Điểm bàn giao cuối')}
+                      </p>
+                      <p className="font-semibold text-[#181A17] m-0 mt-0.5 break-words">{trip.destination}</p>
+                      <p className="text-xs text-[#57564E] m-0 mt-0.5 break-words">
+                        {t('common.horsesUnit', language === 'en' ? 'Horses' : 'Chiến mã')}:{' '}
+                        <strong className="text-[#181A17]">
+                          {trip.horses && trip.horses.length > 0
+                            ? trip.horses.map((h: any) => h.name).filter(Boolean).join(', ')
+                            : trip.horseName}
+                        </strong>{' '}
+                        ({t('common.horsesCount', '{count} ngựa', { count: trip.horseCount })})
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Multi-modal Legs Details */}
+                {legs.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-[#57564E] mb-2">
+                      {t('driver.trips.legsListTitle', 'Lộ trình các chặng vận chuyển ({count} chặng):', {
+                        count: legs.length,
+                      })}
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {legs.map((leg) => (
+                        <div
+                          key={leg.sequenceNo}
+                          className={`p-3 rounded-xl border text-xs flex flex-col gap-1.5 ${
+                            leg.legType === 'flight'
+                              ? 'bg-[#FAF5EB] border-[#D4C5A3]'
+                              : 'bg-[#E8F2EB]/60 border-[#2D5A3F]/25'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-[#181A17]">
+                              {t('driver.trips.legSeq', 'Chặng {seq}', { seq: leg.sequenceNo })}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-white border border-[#D8CEBE]">
+                              {leg.legType === 'flight'
+                                ? t('driver.trips.flightLeg', language === 'en' ? '✈️ Flight' : '✈️ Chặng Bay')
+                                : t('driver.trips.roadLeg', language === 'en' ? '🚚 Road' : '🚚 Đường bộ')}
+                            </span>
+                          </div>
+                          <p className="font-semibold text-[#181A17] m-0 truncate">
+                            {(leg.originLocation || '').split(',')[0] || '—'} →{' '}
+                            {(leg.destinationLocation || '').split(',')[0] || '—'}
+                          </p>
+                          {leg.legType === 'flight' ? (
+                            <div className="text-[11px] text-[#181A17] font-medium">
+                              {leg.airlineName || 'Airline'} • {t('driver.trips.flightCode', language === 'en' ? 'Flight:' : 'Chuyến:')}{' '}
+                              {leg.flightNumber || 'TBD'}
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-[#2D5A3F] font-medium">
+                              {t('driver.trips.vehicle', language === 'en' ? 'Vehicle:' : 'Phương tiện:')}{' '}
+                              {translateVehicleType(leg.vehiclePlate) ||
+                                leg.vehiclePlate ||
+                                (language === 'en' ? 'Specialized Vehicle' : 'Xe chuyên dụng')}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Stops & Rest stations */}
+                {stops.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#EAE5DA] text-xs text-[#57564E]">
+                    <span className="font-bold text-[#181A17]">
+                      {t('driver.trips.stopsQuarantine', language === 'en' ? 'Rest & Quarantine Stops:' : 'Trạm dừng & Kiểm dịch:')}
                     </span>
-                  ))}
-                </div>
-              )}
+                    {stops.map((st) => (
+                      <span
+                        key={st.sequenceNo}
+                        className="bg-[#FAF8F4] border border-[#EAE5DA] px-2.5 py-0.5 rounded-md text-[11px] text-[#181A17]"
+                      >
+                        #{st.sequenceNo} {st.locationName} • {translateStopType(st.stopType)}
+                      </span>
+                    ))}
+                  </div>
+                )}
 
-              {/* Instructions and confirmation notes */}
-              {trip.routeDetail?.strategicNotes && (
-                <div className="text-xs bg-blue-50/50 border border-blue-100 p-2.5 rounded-lg text-blue-900 italic">
-                  Chỉ đạo vận hành từ điều phối viên: &quot;{trip.routeDetail.strategicNotes}&quot;
-                </div>
-              )}
-            </div>
-          );
-        })}
+                {trip.routeDetail?.strategicNotes && (
+                  <div className="text-xs bg-[#FAF5EB] border border-[#D4C5A3] p-3 rounded-xl text-[#181A17] italic break-words">
+                    {t('driver.trips.coordinatorNotes', language === 'en' ? 'Coordinator instructions:' : 'Chỉ đạo vận hành từ điều phối viên:')}{' '}
+                    &quot;{trip.routeDetail.strategicNotes}&quot;
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -582,62 +782,82 @@ export default function DriverTripsPage() {
       {confirmModalOpen && selectedTripToConfirm && (
         <Modal
           isOpen={confirmModalOpen}
-          onClose={() => setConfirmModalOpen(false)}
-          title="Xác Nhận Tiếp Nhận Nhiệm Vụ Chuyến Đi"
-          subtitle={`Đơn hàng: ${selectedTripToConfirm.orderCode} • Mã số chuyến đi: #${selectedTripToConfirm.id}`}
+          onClose={closeConfirmModal}
+          closeDisabled={isConfirming}
+          title={t('driver.trips.confirmModalTitle', language === 'en' ? 'Confirm Trip Assignment' : 'Xác Nhận Tiếp Nhận Nhiệm Vụ Chuyến Đi')}
+          subtitle={`${t('common.orderCode', language === 'en' ? 'Order:' : 'Đơn hàng:')} ${selectedTripToConfirm.orderCode} • ${t('common.tripCode', language === 'en' ? 'Trip ID:' : 'Mã số chuyến đi:')} #${selectedTripToConfirm.id}`}
           maxWidth="560px"
         >
           <div className="flex flex-col gap-4">
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900">
+            <div className="p-3 bg-[#E8F2EB] border border-[#2D5A3F]/25 rounded-xl text-xs text-[#1E402C]">
               <p className="font-bold m-0 flex items-center gap-1.5">
-                <ShieldCheck size={16} className="text-emerald-700" />
-                Cam kết tuân thủ quy chuẩn an toàn vận chuyển ngựa đua
+                <ShieldCheck size={16} className="text-[#2D5A3F]" aria-hidden="true" />
+                {t('driver.trips.safetyCommitmentTitle', language === 'en' ? 'Equine Transport Safety Commitment' : 'Cam kết tuân thủ quy chuẩn an toàn vận chuyển ngựa đua')}
               </p>
-              <p className="m-0 mt-1">
-                Bằng việc bấm xác nhận, tài xế cam kết đã kiểm tra hệ thống điều hòa khoang xe, camera giám sát, bồn nước uống và các thiết bị giảm sốc trên xe.
+              <p className="m-0 mt-1 leading-relaxed">
+                {t(
+                  'driver.trips.safetyCommitmentDesc',
+                  language === 'en'
+                    ? 'By confirming, you verify cabin climate control, surveillance camera, water tanks, and shock absorbers are ready.'
+                    : 'Bằng việc bấm xác nhận, tài xế cam kết đã kiểm tra hệ thống điều hòa khoang xe, camera giám sát, bồn nước uống và các thiết bị giảm sốc trên xe.'
+                )}
               </p>
             </div>
 
-            <div className="text-xs text-slate-700 flex flex-col gap-1">
+            <div className="text-xs text-[#57564E] flex flex-col gap-1">
               <div>
-                Chiến mã: <strong className="text-slate-900">{selectedTripToConfirm.horseName}</strong> ({selectedTripToConfirm.horseCount} con)
+                {t('common.horsesUnit', language === 'en' ? 'Horses' : 'Chiến mã')}:{' '}
+                <strong className="text-[#181A17]">{selectedTripToConfirm.horseName}</strong> (
+                {t('common.horsesCount', '{count} ngựa', { count: selectedTripToConfirm.horseCount })})
               </div>
               <div>
-                Lộ trình: <strong className="text-slate-900">{selectedTripToConfirm.origin} → {selectedTripToConfirm.destination}</strong>
+                {t('driver.trips.itineraryLabel', language === 'en' ? 'Route:' : 'Lộ trình:')}{' '}
+                <strong className="text-[#181A17]">
+                  {selectedTripToConfirm.origin} → {selectedTripToConfirm.destination}
+                </strong>
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                Ghi chú hoặc lời nhắn xác nhận của Tài xế / Hộ tống viên
+              <label htmlFor="confirm-notes-input" className="text-xs font-bold text-[#181A17] uppercase tracking-wider block mb-1.5">
+                {t('driver.trips.confirmationNotesLabel', language === 'en' ? 'Crew Confirmation Notes' : 'Ghi chú hoặc lời nhắn xác nhận của Tài xế / Hộ tống viên')}
               </label>
               <textarea
+                id="confirm-notes-input"
                 rows={3}
                 value={confirmationNotes}
                 onChange={(e) => setConfirmationNotes(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:border-blue-500 outline-none resize-none font-medium"
-                placeholder="Nhập ghi chú tình trạng kiểm tra xe và sức khỏe ngựa trước khi khởi hành..."
+                className="w-full px-3 py-2.5 rounded-xl border border-[#D8CEBE] text-xs focus:border-[#A67C2E] outline-none resize-none font-medium"
+                placeholder={t(
+                  'driver.trips.confirmationNotesPlaceholder',
+                  language === 'en'
+                    ? 'Enter pre-trip inspection or equine readiness remarks...'
+                    : 'Nhập ghi chú tình trạng kiểm tra xe và sức khỏe ngựa trước khi khởi hành...'
+                )}
               />
             </div>
 
-            <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <div className="flex flex-wrap justify-end gap-3 pt-3 border-t border-[#EAE5DA]">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setConfirmModalOpen(false)}
+                onClick={closeConfirmModal}
                 disabled={isConfirming}
+                className="min-h-[44px] border-[#D8CEBE]"
               >
-                Hủy bỏ
+                {t('common.cancel', language === 'en' ? 'Cancel' : 'Hủy bỏ')}
               </Button>
               <Button
                 type="button"
                 variant="primary"
-                onClick={handleConfirmAssignment}
+                onClick={() => void handleConfirmAssignment()}
                 disabled={isConfirming}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm"
+                className="min-h-[44px] bg-[#2D5A3F] hover:bg-[#234731] text-white font-bold shadow-sm"
               >
-                <CheckCircle2 size={16} className="mr-1.5" />
-                {isConfirming ? 'Đang xác nhận...' : 'Tôi Xác Nhận Nhận Chuyến'}
+                <CheckCircle2 size={16} className="mr-1.5" aria-hidden="true" />
+                {isConfirming
+                  ? t('common.confirming', language === 'en' ? 'Confirming...' : 'Đang xác nhận...')
+                  : t('driver.trips.confirmSubmitBtn', language === 'en' ? 'Confirm Duty Acceptance' : 'Tôi Xác Nhận Nhận Chuyến')}
               </Button>
             </div>
           </div>
@@ -648,84 +868,93 @@ export default function DriverTripsPage() {
       {declineModalOpen && selectedTripToDecline && (
         <Modal
           isOpen={declineModalOpen}
-          onClose={() => setDeclineModalOpen(false)}
-          title="Từ Chối Nhận Nhiệm Vụ Chuyến Đi"
-          subtitle={`Đơn hàng: ${selectedTripToDecline.orderCode} • Tuyến: ${selectedTripToDecline.origin} → ${selectedTripToDecline.destination}`}
+          onClose={closeDeclineModal}
+          closeDisabled={isDeclining}
+          title={t('driver.trips.declineModalTitle', language === 'en' ? 'Decline Trip Assignment' : 'Từ Chối Nhận Nhiệm Vụ Chuyến Đi')}
+          subtitle={`${t('common.orderCode', language === 'en' ? 'Order:' : 'Đơn hàng:')} ${selectedTripToDecline.orderCode} • ${t('driver.trips.route', language === 'en' ? 'Route:' : 'Tuyến:')} ${selectedTripToDecline.origin} → ${selectedTripToDecline.destination}`}
           maxWidth="560px"
         >
           <div className="flex flex-col gap-4 text-xs">
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 leading-relaxed">
-              <p className="font-bold m-0 flex items-center gap-1.5 text-rose-800">
-                <AlertCircle size={16} className="text-rose-600 shrink-0" />
-                Lưu ý quan trọng khi từ chối nhận chuyến
+            <div className="p-3 bg-rose-50 border border-[#9E3B3B]/30 rounded-xl text-rose-900 leading-relaxed">
+              <p className="font-bold m-0 flex items-center gap-1.5 text-[#9E3B3B]">
+                <AlertCircle size={16} className="text-[#9E3B3B] shrink-0" aria-hidden="true" />
+                {t('driver.trips.declineNoticeTitle', language === 'en' ? 'Important Notice When Declining' : 'Lưu ý quan trọng khi từ chối nhận chuyến')}
               </p>
               <p className="m-0 mt-1">
-                Khi bạn từ chối, hệ thống sẽ gỡ bạn khỏi nhiệm vụ chuyến đi này và tự động gửi thông báo khẩn cấp tới <strong>Logistics Manager</strong> để phân công nhân sự thay thế kịp thời.
+                {t(
+                  'driver.trips.declineNoticeDesc',
+                  language === 'en'
+                    ? 'Declining unassigns you from this trip and alerts the Operations Manager to assign replacement crew.'
+                    : 'Khi bạn từ chối, hệ thống sẽ gỡ bạn khỏi nhiệm vụ chuyến đi này và tự động gửi thông báo khẩn cấp tới Quản lý Logistics để phân công nhân sự thay thế kịp thời.'
+                )}
               </p>
             </div>
 
             <div>
-              <label className="font-bold text-slate-700 block mb-1.5 uppercase tracking-wider text-[11px]">
-                Chọn lý do từ chối nhanh:
-              </label>
+              <p className="font-bold text-[#181A17] block mb-2 uppercase tracking-wider text-[11px] m-0">
+                {t('driver.trips.quickDeclineReasonsLabel', language === 'en' ? 'Select reason for declining:' : 'Chọn lý do từ chối nhanh:')}
+              </p>
               <div className="flex flex-wrap gap-2">
-                {[
-                  'Sốt cao đột xuất / Sức khỏe không đảm bảo',
-                  'Xe gặp sự cố kỹ thuật chưa kiểm định kịp',
-                  'Bận việc gia đình đột xuất',
-                  'Trùng lịch kiểm tra thú y định kỳ',
-                  'Khác',
-                ].map((reason) => (
+                {declineOptions.map((opt) => (
                   <button
-                    key={reason}
+                    key={opt.key}
                     type="button"
-                    onClick={() => setDeclineReason(reason)}
-                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
-                      declineReason === reason
-                        ? 'border-rose-500 bg-rose-50 text-rose-800'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    aria-pressed={declineReasonKey === opt.key}
+                    onClick={() => setDeclineReasonKey(opt.key)}
+                    className={`min-h-[40px] px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
+                      declineReasonKey === opt.key
+                        ? 'border-[#9E3B3B] bg-rose-50 text-[#9E3B3B]'
+                        : 'border-[#D8CEBE] bg-white text-[#181A17] hover:bg-[#FAF8F4]'
                     }`}
                   >
-                    {reason}
+                    {opt.label}
                   </button>
                 ))}
               </div>
             </div>
 
-            {declineReason === 'Khác' && (
+            {declineReasonKey === 'other' && (
               <div>
-                <label className="font-bold text-slate-700 block mb-1">
-                  Nhập lý do chi tiết <span className="text-rose-500">*</span>
+                <label htmlFor="decline-custom-reason" className="font-bold text-[#181A17] block mb-1.5">
+                  {t('driver.trips.detailReasonLabel', language === 'en' ? 'Detailed reason' : 'Nhập lý do chi tiết')}{' '}
+                  <span className="text-[#9E3B3B]">*</span>
                 </label>
                 <textarea
+                  id="decline-custom-reason"
                   rows={3}
                   required
                   value={customDeclineReason}
                   onChange={(e) => setCustomDeclineReason(e.target.value)}
-                  placeholder="Ghi rõ lý do không thể nhận chuyến..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:border-rose-500 text-xs font-medium"
+                  placeholder={t(
+                    'driver.trips.detailReasonPlaceholder',
+                    language === 'en' ? 'Explain why you cannot take this assignment...' : 'Ghi rõ lý do không thể nhận chuyến...'
+                  )}
+                  className="w-full px-3 py-2.5 border border-[#D8CEBE] rounded-xl outline-none focus:border-[#9E3B3B] text-xs font-medium"
                 />
               </div>
             )}
 
-            <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 mt-2">
+            <div className="flex flex-wrap justify-end gap-3 pt-3 border-t border-[#EAE5DA] mt-2">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setDeclineModalOpen(false)}
+                onClick={closeDeclineModal}
                 disabled={isDeclining}
+                className="min-h-[44px] border-[#D8CEBE]"
               >
-                Quay lại
+                {t('common.back', language === 'en' ? 'Back' : 'Quay lại')}
               </Button>
               <Button
                 type="button"
                 variant="primary"
-                onClick={handleDeclineAssignment}
+                onClick={() => void handleDeclineAssignment()}
                 disabled={isDeclining}
-                className="bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-sm"
+                className="min-h-[44px] bg-[#9E3B3B] hover:bg-[#7F2E2E] text-white font-bold shadow-sm"
               >
-                <X size={15} className="mr-1.5" />
-                {isDeclining ? 'Đang gửi từ chối...' : 'Xác Nhận Từ Chối Chuyến Đi'}
+                <X size={15} className="mr-1.5" aria-hidden="true" />
+                {isDeclining
+                  ? t('driver.trips.declining', language === 'en' ? 'Sending...' : 'Đang gửi từ chối...')
+                  : t('driver.trips.confirmDeclineBtn', language === 'en' ? 'Confirm Decline' : 'Xác Nhận Từ Chối Chuyến Đi')}
               </Button>
             </div>
           </div>

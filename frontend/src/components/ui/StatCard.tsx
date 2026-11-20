@@ -1,4 +1,5 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 
 interface StatCardProps {
   title: string;
@@ -11,6 +12,7 @@ interface StatCardProps {
   borderColor?: string;
   icon?: React.ReactNode;
   iconBg?: string;
+  className?: string;
 }
 
 export const StatCard: React.FC<StatCardProps> = ({
@@ -18,30 +20,49 @@ export const StatCard: React.FC<StatCardProps> = ({
   value,
   subtext,
   subtextAction,
-  subtextColor = '#64748b',
-  valueColor = 'var(--text-heading)',
-  titleColor = '#64748b',
-  borderColor = 'var(--border-card)',
+  subtextColor = '#5F6977',
+  valueColor = '#273244',
+  titleColor = '#5F6977',
+  borderColor = '#D8CEBE',
   icon,
-  iconBg = '#eff6ff',
+  iconBg = '#FAF8F4',
+  className,
 }) => {
+  const isInteractive = typeof subtextAction === 'function';
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isInteractive) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      subtextAction();
+    }
+  };
+
   return (
     <div
+      role={isInteractive ? 'button' : undefined}
+      tabIndex={isInteractive ? 0 : undefined}
+      onKeyDown={isInteractive ? handleKeyDown : undefined}
+      onClick={subtextAction}
+      className={cn(
+        'kpi-card-luxury focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+        className
+      )}
       style={{
-        backgroundColor: '#ffffff',
+        backgroundColor: '#FFFFFF',
         borderRadius: '16px',
         border: `1px solid ${borderColor}`,
         padding: '20px 22px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        boxShadow: 'var(--shadow-sm)',
-        transition: 'transform 0.18s ease, box-shadow 0.18s ease',
-        cursor: subtextAction ? 'pointer' : 'default',
+        gap: '12px',
+        boxShadow: '0 1px 3px rgba(24, 26, 23, 0.04)',
+        transition: 'border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease',
+        cursor: isInteractive ? 'pointer' : 'default',
       }}
-      onClick={subtextAction}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0, flex: 1 }}>
         <span
           style={{
             fontSize: '11px',
@@ -55,11 +76,12 @@ export const StatCard: React.FC<StatCardProps> = ({
         </span>
         <span
           style={{
-            fontSize: '32px',
+            fontSize: '30px',
             fontWeight: 800,
-            lineHeight: 1.1,
+            lineHeight: 1.15,
             color: valueColor,
             fontFeatureSettings: '"tnum"',
+            wordBreak: 'break-word',
           }}
         >
           {value}
@@ -78,6 +100,7 @@ export const StatCard: React.FC<StatCardProps> = ({
 
       {icon && (
         <div
+          aria-hidden="true"
           style={{
             width: '42px',
             height: '42px',

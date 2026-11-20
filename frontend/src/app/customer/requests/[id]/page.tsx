@@ -11,39 +11,40 @@ import {
   ThumbsUp,
   CalendarCheck,
   Plane,
-  Truck,
   Flag,
-  MoreVertical,
   ArrowRight,
   AlertTriangle,
   Upload,
   Eye,
   FileText,
   Building,
-  ExternalLink,
   ShieldCheck,
   CheckCircle2,
-  CheckCircle,
-  XCircle,
-  Info,
   Sparkles,
   RefreshCw,
   Loader2,
+  Download,
+  CreditCard,
+  Route,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { BatchDocumentUploadModal } from '@/features/documents/components/BatchDocumentUploadModal';
 import { TripTrackingModal } from '@/features/tracking/components/TripTrackingModal';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, openAuthenticatedDocument } from '@/lib/api-client';
 import { Modal } from '@/components/ui/Modal';
 import { OrderComplianceChecklist } from '@/features/documents/api/documents.api';
 import { buildEquineRoute, geocodeAddress, resolveLocation, GeocodedLocation } from '@/lib/geo-corridors';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 import { SepayPayment } from '@/features/orders/components/SepayPayment';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
 import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { InsuranceAmendmentForm } from '@/features/orders/components/InsuranceAmendmentForm';
+import { CustomerRefundSummaryCard } from '@/features/orders/components/CustomerRefundSummaryCard';
+import { DeliveryHandoverPanel } from '@/features/tracking/components/DeliveryHandoverPanel';
+import { escapeQuotationText } from '@/features/orders/quotation-html';
 
 const fetcher = async (url: string) => {
   let targetUrl = url;
@@ -76,10 +77,10 @@ const fetcher = async (url: string) => {
     const rawGender = String(rawObj.gender || item.gender || '').toLowerCase();
     const normalizedGender =
       rawGender.includes('female') || rawGender.includes('mare')
-        ? 'Mare (Female)'
+        ? 'Mare'
         : rawGender.includes('gelding')
         ? 'Gelding'
-        : 'Stallion (Male)';
+        : 'Stallion';
 
     const horseObj = {
       id: String(rawObj.horseId || rawObj.id || item.horseId || item.id || `hrs-${idx + 1}`),
@@ -96,36 +97,7 @@ const fetcher = async (url: string) => {
     };
   });
 
-  const defaultDocs = [
-    {
-      id: 'doc-01',
-      title: 'Horse FEI Passport',
-      uploadedDate: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-GB') : 'Ready',
-      status: 'Approved',
-    },
-    {
-      id: 'doc-02',
-      title: 'Equine Influenza Vaccination Record',
-      uploadedDate: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-GB') : 'Ready',
-      status: 'Approved',
-    },
-    {
-      id: 'doc-03',
-      title: 'Veterinary Export Health Certificate',
-      uploadedDate: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-GB') : 'Pending',
-      status: 'Approved',
-    },
-    {
-      id: 'doc-04',
-      title: 'Import / CITES Clearance Permit',
-      uploadedDate: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-GB') : 'Pending',
-      status: 'Approved',
-    },
-  ];
-
-  const documents = Array.isArray(data.documents) && data.documents.length > 0
-    ? data.documents
-    : defaultDocs;
+  const documents = Array.isArray(data.documents) ? data.documents : [];
 
   const statusStepMap: Record<string, number> = {
     requested: 2,
@@ -167,6 +139,8 @@ const fetcher = async (url: string) => {
     in_transit: 'In Transit',
     completed: 'Completed',
     cancelled: 'Cancelled',
+    cancelled_operational: 'Cancelled (Operational)',
+    quotation_sent: 'Quotation Sent',
   };
 
   const originStr = String(data.originLocation || '');
@@ -186,7 +160,6 @@ const fetcher = async (url: string) => {
   const resolvedDest = resolveLocation(destStr);
 
   // 3. Parse saved route/mode metrics from specialRequirements if present
-  // e.g. "[Lộ trình: Đường Hàng Không, 2189 km, ~7h]"
   const routeMatch = specialReq.match(/\[Lộ trình:\s*([^,]+),\s*([0-9,]+)\s*km,\s*~?([0-9]+)h\]/i);
   const savedMode = routeMatch
     ? routeMatch[1].toLowerCase().includes('hàng không') || routeMatch[1].toLowerCase().includes('air')
@@ -244,7 +217,7 @@ const fetcher = async (url: string) => {
   }
 
   // 6. Build route calculation
-  const preferredMode = (data.transportMode || savedMode || (isDomestic ? 'road' : 'air')) as 'air' | 'road';
+  const preferredMode = (savedMode || (isDomestic ? 'road' : 'air')) as 'air' | 'road';
   const routeCalc = buildEquineRoute(
     originStr,
     destStr,
@@ -261,7 +234,7 @@ const fetcher = async (url: string) => {
   const estimatedDistance = data.estimatedDistance || `${finalDistKm.toLocaleString()} km`;
   const estimatedDuration = data.estimatedDuration || (isDomestic ? `~${finalHours} hours` : `~${finalHours} hours (${preferredMode === 'air' ? 'Air Flight' : 'Road Transit'})`);
   const transitName = isDomestic
-    ? (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'rest')?.name || 'Trạm kiểm dịch nội địa')
+    ? (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'rest')?.name || 'Domestic Quarantine Station')
     : (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'airport')?.name || 'Border / Transit Checkpoint');
 
   return {
@@ -299,12 +272,30 @@ const fetcher = async (url: string) => {
   };
 };
 
+const PAYABLE_SHIPMENT_STATUSES = ['planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'];
+
 export default function RequestDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const langContext = useLanguage() || ({} as any);
+  const {
+    t = (_key: string, fallback?: string) => fallback || _key,
+    language = 'vi',
+    translateStatus = (s?: string | null) => s || '',
+    translateDocType = (s?: string | null) => s || '',
+    translateGender = (s?: string | null) => s || '',
+    translateBreed = (s?: string | null) => s || '',
+    translateUrgency = (s?: string | null) => s || '',
+    translateTransportType = (s?: string | null) => s || '',
+    translatePaymentStatus = (s?: string | null) => s || '',
+    translateCountry = (s?: string | null) => s || '',
+    translateAirportCity = (s?: string | null) => s || '',
+    translateColor = (s?: string | null) => s || '',
+    translateRejectionReason = (s?: string | null) => s || '',
+  } = langContext;
   const requestId = params?.id as string;
 
-  const { getRequestById, uploadDocumentForRequest, cancelRequest, refreshHorses } = useCustomerStore();
+  const { uploadDocumentForRequest, cancelRequest, refreshHorses } = useCustomerStore();
   const { data: request, error, isLoading: loading, mutate } = useSWR(`/orders/${requestId}`, fetcher, {
     revalidateOnFocus: true,
   });
@@ -315,6 +306,16 @@ export default function RequestDetailPage() {
     { revalidateOnFocus: true }
   );
 
+  // Tab State: 4 core tabs
+  const [activeTab, setActiveTab] = useState<'overview' | 'horses' | 'documents' | 'quotation'>('overview');
+
+  // Quotation acceptance & negotiation states
+  const [isQuotationAccepted, setIsQuotationAccepted] = useState(false);
+  const [isNegotiateModalOpen, setIsNegotiateModalOpen] = useState(false);
+  const [negotiateNotes, setNegotiateNotes] = useState('');
+  const [isSubmittingNegotiation, setIsSubmittingNegotiation] = useState(false);
+
+  // Modals
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isTrackingOpen, setIsTrackingOpen] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<{
@@ -336,36 +337,78 @@ export default function RequestDetailPage() {
     regulationId?: number | string;
   } | null>(null);
   
-  // Resubmit Modal States
+  // Resubmit Modal State
   const [isResubmitOpen, setIsResubmitOpen] = useState(false);
 
   // Cancel Request Modal States
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
 
+  // ─── ERROR HANDLING: Prevent infinite grey skeleton on 404/500 ───
   if (error) {
-    return <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-800">
-      <p>Không thể tải đơn hàng. Đơn có thể không tồn tại hoặc bạn không có quyền truy cập.</p>
-      <button type="button" onClick={() => void mutate()} className="mt-3 min-h-11 rounded-lg border border-red-300 px-4">Thử lại</button>
-    </div>;
+    return (
+      <div role="alert" style={{ padding: '60px 24px', maxWidth: '580px', margin: '40px auto', textAlign: 'center', backgroundColor: '#ffffff', borderRadius: '16px', border: '1px solid #D8CEBE', boxShadow: '0 4px 16px rgba(15, 23, 42, 0.06)' }}>
+        <div style={{ width: '56px', height: '56px', borderRadius: '14px', backgroundColor: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto' }}>
+          <AlertTriangle size={28} />
+        </div>
+        <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#181A17', marginBottom: '8px' }}>
+          {t('requestDetail.notFoundTitle', 'Không thể tìm thấy hoặc tải đơn vận chuyển')}
+        </h3>
+        <p style={{ fontSize: '13.5px', color: '#64748b', marginBottom: '24px', lineHeight: 1.5 }}>
+          {error?.message || t('requestDetail.notFoundDesc', 'Có lỗi xảy ra khi truy vấn dữ liệu từ máy chủ (Mã lỗi 404/500). Vui lòng kiểm tra lại ID đơn hàng hoặc kết nối mạng.')}
+        </p>
+        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => router.push('/customer/requests')}
+            style={{
+              padding: '10px 18px',
+              borderRadius: '8px',
+              border: '1px solid #D8CEBE',
+              backgroundColor: '#ffffff',
+              fontSize: '13.5px',
+              fontWeight: 600,
+              color: '#334155',
+              cursor: 'pointer',
+            }}
+          >
+            {t('requestDetail.backToList', 'Quay lại danh sách')}
+          </button>
+          <button
+            onClick={() => mutate()}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              border: 'none',
+              backgroundColor: '#A67C2E',
+              color: '#ffffff',
+              fontSize: '13.5px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <RefreshCw size={15} /> {t('requestDetail.retryBtn', 'Thử lại')}
+          </button>
+        </div>
+      </div>
+    );
   }
+
+  // ─── LOADING SKELETON ───
   if (loading || !request) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-        <div style={{ height: '40px', width: '30%', backgroundColor: '#e5e7eb', borderRadius: '8px', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
-        <div style={{ height: '200px', width: '100%', backgroundColor: '#e5e7eb', borderRadius: '16px', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
-        <style>{`
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .5; }
-          }
-        `}</style>
+        <div style={{ height: '40px', width: '30%', backgroundColor: '#e5e7eb', borderRadius: '8px' }} />
+        <div style={{ height: '200px', width: '100%', backgroundColor: '#e5e7eb', borderRadius: '16px' }} />
+        
       </div>
     );
   }
 
   const statusLower = String(request?.status || '').toLowerCase();
-  const isPendingReview = ['requested', 'under_review', 'change_requested'].includes(statusLower);
+  const isPendingReview = statusLower === 'requested' || statusLower === 'under_review';
   const isRejected = statusLower === 'rejected' || statusLower === 'cancelled';
   const isApproved = ['approved', 'planning', 'confirmed', 'ready_to_depart', 'ready', 'in_transit', 'completed'].includes(statusLower);
   const requirementsSent = Boolean(checklist?.requirementsSent);
@@ -380,11 +423,18 @@ export default function RequestDetailPage() {
   const hasMissingDocs = isApproved && requirementsSent && totalMissingCount > 0;
   const hasRejectedDocs = isApproved && requirementsSent && totalRejectedCount > 0;
 
-  // Compute dynamic timeline stepper that reflects both order status and quarantine compliance
+  // Rule: Only allow customer cancellation before approval/planning stages (requested, change_requested)
+  const cancellableStatuses = ['requested', 'change_requested'];
+  const canCancel = cancellableStatuses.includes(statusLower);
+
+  // Check if order has quotation available
+  const hasQuotation = Number(request.totalCost) > 0 || statusLower === 'quotation_sent' || statusLower === 'approved';
+
+  // Compute dynamic timeline stepper
   let computedStep = 2;
-  if (['requested', 'under_review', 'change_requested', 'rejected', 'cancelled'].includes(statusLower)) {
+  if (['requested', 'under_review', 'change_requested', 'rejected', 'cancelled', 'cancelled_operational'].includes(statusLower)) {
     computedStep = 2;
-  } else if (statusLower === 'approved') {
+  } else if (statusLower === 'approved' || statusLower === 'quotation_sent') {
     computedStep = 3;
   } else if (statusLower === 'planning') {
     computedStep = checklist?.isFullyCompliant ? 4 : 3;
@@ -401,15 +451,15 @@ export default function RequestDetailPage() {
   const effectiveStep = Math.max(computedStep, request.activeStepIndex || 2);
 
   const displayTimeline = [
-    { stage: 1, name: 'Request Created', status: 'completed' },
+    { stage: 1, name: language === 'en' ? 'Request Created' : 'Tạo yêu cầu', status: 'completed' },
     {
       stage: 2,
-      name: 'Manager Approval',
+      name: language === 'en' ? 'Manager Approval' : 'Quản lý duyệt',
       status: effectiveStep === 2 ? 'active' : effectiveStep > 2 ? 'completed' : 'pending',
     },
     {
       stage: 3,
-      name: 'Quarantine & Docs',
+      name: language === 'en' ? 'Quarantine & Docs' : 'Kiểm dịch & Hồ sơ',
       status:
         checklist?.isFullyCompliant || effectiveStep > 3
           ? 'completed'
@@ -419,7 +469,7 @@ export default function RequestDetailPage() {
     },
     {
       stage: 4,
-      name: 'Trip Planned',
+      name: language === 'en' ? 'Trip Planned' : 'Lập lộ trình',
       status:
         statusLower === 'ready_to_depart' || statusLower === 'ready' || statusLower === 'in_transit' || statusLower === 'completed' || effectiveStep > 4
           ? 'completed'
@@ -429,7 +479,7 @@ export default function RequestDetailPage() {
     },
     {
       stage: 5,
-      name: 'In Transit',
+      name: language === 'en' ? 'In Transit' : 'Đang vận chuyển',
       status:
         statusLower === 'completed'
           ? 'completed'
@@ -439,7 +489,7 @@ export default function RequestDetailPage() {
     },
     {
       stage: 6,
-      name: 'Handover Completed',
+      name: language === 'en' ? 'Handover Completed' : 'Hoàn tất bàn giao',
       status: statusLower === 'completed' ? 'completed' : 'pending',
     },
   ];
@@ -464,7 +514,7 @@ export default function RequestDetailPage() {
   const handleOpenReupload = (doc: any, horseId: number | string) => {
     setReuploadTarget({
       docId: doc.id,
-      title: doc.regulationTitle || doc.docType || 'Hồ sơ',
+      title: doc.regulationTitle || doc.docType || (language === 'en' ? 'Document' : 'Hồ sơ'),
       horseId,
       regulationId: doc.regulationId,
     });
@@ -480,7 +530,7 @@ export default function RequestDetailPage() {
     mutateChecklist();
     mutate();
     setIsUploadOpen(false);
-    toast.success('Hồ sơ đã được tải lên thành công!');
+    toast.success(t('requestDetail.uploadSuccess', 'Hồ sơ đã được tải lên thành công!'));
   };
 
   const handleOpenCancelModal = () => {
@@ -498,13 +548,15 @@ export default function RequestDetailPage() {
       if (mutateChecklist) await mutateChecklist();
 
       toast.success(
-        `Đơn vận chuyển ${request.requestCode || `#${request.id}`} đã được hủy thành công!`,
+        t('requestDetail.cancelSuccess', `Đơn vận chuyển ${request.requestCode || `#${request.id}`} đã được hủy thành công!`, {
+          code: request.requestCode || `#${request.id}`,
+        }),
         {
           duration: 5000,
           icon: '✅',
           style: {
             borderRadius: '10px',
-            background: '#0f172a',
+            background: '#181A17',
             color: '#fff',
             fontWeight: 600,
             fontSize: '14px',
@@ -513,7 +565,7 @@ export default function RequestDetailPage() {
       );
       setIsCancelModalOpen(false);
     } catch (err: any) {
-      toast.error(err?.message || 'Không thể hủy đơn vận chuyển lúc này. Vui lòng thử lại!', {
+      toast.error(err?.message || t('requestDetail.cancelError', 'Không thể hủy đơn vận chuyển lúc này. Vui lòng thử lại!'), {
         duration: 5000,
         style: {
           borderRadius: '10px',
@@ -528,149 +580,200 @@ export default function RequestDetailPage() {
     }
   };
 
+  const handleOpenResubmit = () => {
+    setIsResubmitOpen(true);
+  };
+
+  // Export quotation HTML / PDF directly from Detail Page
+  const exportQuotation = () => {
+    const bookingLabel =
+      request.bookingType === 'dedicated_charter'
+        ? language === 'en' ? 'Dedicated Charter' : 'Bao nguyên xe / chuyến riêng'
+        : language === 'en' ? 'Shared Stall' : 'Ghép ô chuồng';
+    const horsesRows =
+      request.horses
+        ?.map(
+          (h: any) => `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.horse?.name || h.name)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(translateBreed(h.horse?.breed || h.breed) || '—')}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(translateGender(h.horse?.gender || h.gender) || '—')}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.horse?.age ?? h.age ?? '—')} ${language === 'en' ? 'yrs' : 'tuổi'}</td>
+      </tr>`
+        )
+        .join('') ||
+      `<tr><td colspan="4" style="padding:12px;color:#787770;text-align:center;">${language === 'en' ? 'No horse information available' : 'Không có thông tin ngựa'}</td></tr>`;
+
+    const orderCodeSafe = escapeQuotationText(request.requestCode || request.id);
+    const totalNum = Number(request.totalCost) || 0;
+    const freightNum = request.transportCost != null ? Number(request.transportCost) : null;
+    const insuranceNum = Number(request.insuranceFee ?? 0);
+
+    const html = `<!DOCTYPE html>
+<html lang="${language}">
+<head>
+  <meta charset="UTF-8">
+  <title>${language === 'en' ? 'Transport Quotation' : 'Báo Giá Vận Chuyển'} - ${orderCodeSafe}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#181A17;background:#FAF8F4}
+    .page{max-width:800px;margin:0 auto;padding:40px;background:#fff}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:24px;border-bottom:3px solid #181A17;margin-bottom:28px}
+    .brand-name{font-size:22px;font-weight:800;color:#181A17;letter-spacing:0.04em}
+    .brand-sub{font-size:12px;color:#787770;margin-top:3px}
+    .doc-title{font-size:24px;font-weight:800;color:#B49A68;text-align:right}
+    .doc-id{font-size:13px;color:#57564E;text-align:right;margin-top:4px}
+    .section{margin-bottom:24px}
+    .section-title{font-size:13px;font-weight:700;text-transform:uppercase;color:#57564E;margin-bottom:10px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th{background:#FAF8F4;padding:9px 12px;text-align:left;font-weight:700;color:#57564E;border-bottom:2px solid #EAE5DA}
+    .cost-section{background:#FAF8F4;border:2px solid #C4B38E;border-radius:10px;padding:20px;text-align:center;margin:28px 0}
+    .cost-value{font-size:28px;font-weight:800;color:#2D5A3F;margin:6px 0}
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="brand-name">EQUITRANSIT LOGISTICS</div>
+      <div class="brand-sub">${language === 'en' ? 'Cross-Border Racehorse Transportation System' : 'Hệ thống Vận Chuyển Ngựa Đua Xuyên Quốc Gia'}</div>
+    </div>
+    <div>
+      <div class="doc-title">${language === 'en' ? 'OFFICIAL QUOTATION' : 'BÁO GIÁ VẬN CHUYỂN'}</div>
+      <div class="doc-id">${language === 'en' ? 'Order Code:' : 'Mã đơn:'} #${orderCodeSafe}</div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-title">${language === 'en' ? 'Journey Information' : 'Thông tin hành trình'}</div>
+    <p><strong>${language === 'en' ? 'Pickup:' : 'Điểm đón:'}</strong> ${escapeQuotationText(request.origin)} | <strong>${language === 'en' ? 'Destination:' : 'Điểm đến:'}</strong> ${escapeQuotationText(request.destination)}</p>
+    <p><strong>${language === 'en' ? 'Departure Date:' : 'Ngày xuất phát:'}</strong> ${escapeQuotationText(request.departureDate)} | <strong>${language === 'en' ? 'Distance:' : 'Quãng đường:'}</strong> ${escapeQuotationText(request.estimatedDistance || '—')}</p>
+  </div>
+  <div class="section">
+    <div class="section-title">${language === 'en' ? `Horse List (${request.horses?.length || 1} horses)` : `Danh sách ngựa (${request.horses?.length || 1} con)`}</div>
+    <table>
+      <thead><tr><th>${language === 'en' ? 'Horse Name' : 'Tên ngựa'}</th><th>${language === 'en' ? 'Breed' : 'Giống'}</th><th>${language === 'en' ? 'Gender' : 'Giới tính'}</th><th>${language === 'en' ? 'Age' : 'Tuổi'}</th></tr></thead>
+      <tbody>${horsesRows}</tbody>
+    </table>
+  </div>
+  <div class="cost-section">
+    <p style="font-size:12px;color:#57564E;margin-bottom:4px;">${language === 'en' ? 'Booking Mode:' : 'Hình thức:'} <strong>${escapeQuotationText(bookingLabel)}</strong></p>
+    ${request.stallUnitPrice != null ? `<p style="font-size:12px;color:#57564E;">${Number(request.stallUnitPrice).toLocaleString('vi-VN')} VNĐ / ô × ${Number(request.requestedHorseCount ?? request.horses?.length ?? 1)} ${language === 'en' ? 'horses' : 'ngựa'}</p>` : ''}
+    <div style="margin-top:6px;">${language === 'en' ? 'Official Transport Quotation' : 'Tổng cước vận chuyển và bảo hiểm'}</div>
+    <p style="font-size:12px;color:#57564E;margin-top:4px;">${language === 'en' ? 'Base Freight:' : 'Cước cơ bản:'} ${freightNum == null ? (language === 'en' ? 'Pending quote' : 'Chờ báo giá') : freightNum.toLocaleString('vi-VN') + ' VNĐ'} · ${language === 'en' ? 'Insurance:' : 'Phí bảo hiểm:'} ${insuranceNum.toLocaleString('vi-VN')} VNĐ</p>
+    <div class="cost-value">${totalNum > 0 ? totalNum.toLocaleString('vi-VN') + ' VNĐ' : (language === 'en' ? 'Calculating' : 'Đang tính toán')}</div>
+    <div style="font-size:12px;color:#57564E;">${language === 'en' ? 'Includes specialized transport vehicle, quarantine isolation stall, and customs clearance.' : 'Bao gồm xe chuyên dụng, chuồng kiểm dịch và thủ tục pháp lý.'}</div>
+  </div>
+</div>
+<script>window.onload=function(){window.print()}</script>
+</body>
+</html>`;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error(language === 'en' ? 'Pop-up blocked by browser. Downloading quotation file...' : 'Trình duyệt đã chặn pop-up. Hệ thống đang tự động tải tệp Báo giá về máy...');
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `BaoGia_${request.requestCode || request.id}.html`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      return;
+    }
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Top Header & Breadcrumbs */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '16px',
-        }}
-      >
-        <div>
-          {/* Breadcrumb */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '12px',
-              color: 'var(--text-muted)',
-              marginBottom: '4px',
-            }}
-          >
-            <Link href="/customer" style={{ color: 'var(--text-muted)' }}>
-              Dashboard
+    <div className="flex flex-col gap-6 pb-10">
+      {/* Editorial Header & Breadcrumbs */}
+      <header className="border-b border-[#E5DDD0] pb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs text-[#747D88] mb-1.5 flex-wrap">
+            <Link href="/customer" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
+              {language === 'en' ? 'Dashboard' : 'Bảng điều khiển'}
             </Link>
-            <ChevronRight size={12} />
-            <Link href="/customer/requests" style={{ color: 'var(--text-muted)' }}>
-              Transport Requests
+            <ChevronRight size={12} aria-hidden="true" />
+            <Link href="/customer/requests" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
+              {t('customer.requests.title', language === 'en' ? 'Transport Requests' : 'Yêu cầu vận chuyển')}
             </Link>
-            <ChevronRight size={12} />
-            <span style={{ color: 'var(--text-heading)', fontWeight: 600 }}>{request.requestCode}</span>
+            <ChevronRight size={12} aria-hidden="true" />
+            <span className="text-[#181A17] font-semibold">{request.requestCode}</span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-              Transport Request {request.requestCode}
-            </h2>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
+              {language === 'en' ? `Transport Request ${request.requestCode}` : `Yêu cầu vận chuyển ${request.requestCode}`}
+            </h1>
             <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                fontWeight: 600,
                 backgroundColor:
-                  request.status === 'CANCELLED' || request.status === 'rejected'
-                    ? '#fee2e2'
-                    : request.status === 'ready_to_depart' || request.status === 'ready'
-                    ? '#dcfce7'
+                  request.status === 'CANCELLED' || request.status === 'cancelled' || request.status === 'rejected'
+                    ? '#F8EAEA'
+                    : request.status === 'ready_to_depart' || request.status === 'ready' || request.status === 'completed'
+                    ? '#E8F2EB'
                     : request.status === 'in_transit'
-                    ? '#e0f2fe'
+                    ? '#FAF8F4'
                     : request.status === 'approved' || request.status === 'planning' || request.status === 'confirmed'
-                    ? '#dbeafe'
-                    : '#fef3c7',
+                    ? '#F3EFE4'
+                    : '#F8F0DF',
                 color:
-                  request.status === 'CANCELLED' || request.status === 'rejected'
-                    ? '#dc2626'
-                    : request.status === 'ready_to_depart' || request.status === 'ready'
-                    ? '#15803d'
+                  request.status === 'CANCELLED' || request.status === 'cancelled' || request.status === 'rejected'
+                    ? '#B33E3E'
+                    : request.status === 'ready_to_depart' || request.status === 'ready' || request.status === 'completed'
+                    ? '#287653'
                     : request.status === 'in_transit'
-                    ? '#0369a1'
+                    ? '#966516'
                     : request.status === 'approved' || request.status === 'planning' || request.status === 'confirmed'
-                    ? '#1d4ed8'
-                    : '#b45309',
+                    ? '#181A17'
+                    : '#966516',
                 border:
-                  request.status === 'CANCELLED' || request.status === 'rejected'
-                    ? '1px solid #fecaca'
-                    : request.status === 'ready_to_depart' || request.status === 'ready'
-                    ? '1px solid #86efac'
+                  request.status === 'CANCELLED' || request.status === 'cancelled' || request.status === 'rejected'
+                    ? '1px solid #E5B8B8'
+                    : request.status === 'ready_to_depart' || request.status === 'ready' || request.status === 'completed'
+                    ? '1px solid #B7DBC4'
                     : request.status === 'in_transit'
-                    ? '1px solid #bae6fd'
+                    ? '1px solid #DFCA9A'
                     : request.status === 'approved' || request.status === 'planning' || request.status === 'confirmed'
-                    ? '1px solid #bfdbfe'
-                    : '1px solid #fde68a',
+                    ? '1px solid #D4C5A3'
+                    : '1px solid #DFCA9A',
               }}
             >
-              <Clock size={13} />
-              {request.statusLabel}
+              <Clock size={12} aria-hidden="true" />
+              {translateStatus(request.statusLabel || request.status)}
             </span>
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div className="flex items-center gap-2.5 flex-wrap shrink-0">
           <button
+            type="button"
             onClick={() => router.push('/customer/tracking')}
-            style={{
-              padding: '9px 16px',
-              borderRadius: '8px',
-              border: '1px solid var(--primary)',
-              backgroundColor: '#eff6ff',
-              fontSize: '13.5px',
-              fontWeight: 600,
-              color: 'var(--primary)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
+            className="px-3.5 py-2 rounded-xl border border-[#D4C5A3] bg-[#FAF8F4] hover:bg-[#F5EFE2] text-xs font-semibold text-[#A67C2E] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
           >
-            <Plane size={14} /> Live Tracking
+            <Plane size={14} aria-hidden="true" /> {t('tracking.liveTitle', language === 'en' ? 'Trip Tracking' : 'Theo dõi hành trình')}
           </button>
-          {request.status !== 'CANCELLED' &&
-            request.status !== 'cancelled' &&
-            request.status !== 'completed' &&
-            request.status !== 'in_transit' && (
+          {canCancel && (
             <button
+              type="button"
               onClick={handleOpenCancelModal}
-              style={{
-                padding: '9px 16px',
-                borderRadius: '8px',
-                border: '1px solid #fecaca',
-                backgroundColor: '#fef2f2',
-                fontSize: '13.5px',
-                fontWeight: 600,
-                color: '#dc2626',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
+              className="px-3.5 py-2 rounded-xl border border-[#E5B8B8] bg-[#F8EAEA] hover:bg-[#F3DCDC] text-xs font-semibold text-[#B33E3E] cursor-pointer transition-colors"
             >
-              Cancel Request
+              {t('requestDetail.cancelRequest', 'Hủy yêu cầu')}
             </button>
           )}
           <button
-            style={{
-              width: '38px',
-              height: '38px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#64748b',
-            }}
+            type="button"
+            onClick={exportQuotation}
+            title={language === 'en' ? 'Download PDF Quotation' : 'Tải báo giá PDF'}
+            className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
           >
-            <MoreVertical size={16} />
+            <Download size={14} className="text-[#5F6977]" aria-hidden="true" /> {t('requestDetail.pdfBtn', 'Tải PDF')}
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Change Requested Alert Banner */}
       {request.status === 'change_requested' && (
@@ -682,25 +785,28 @@ export default function RequestDetailPage() {
             padding: '16px 20px',
             display: 'flex',
             alignItems: 'flex-start',
+            flexWrap: 'wrap',
             gap: '16px',
           }}
         >
           <div style={{ padding: '4px', backgroundColor: '#fee2e2', borderRadius: '50%', color: '#ef4444' }}>
-            <AlertTriangle size={20} />
+            <AlertTriangle size={20} aria-hidden="true" />
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: '220px' }}>
             <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700, color: '#991b1b' }}>
-              Action Required: Manager Requested Changes
+              {language === 'en' ? 'Action Required: Manager Requested Changes' : 'Yêu cầu chỉnh sửa từ Logistics Manager'}
             </h4>
             <p style={{ margin: 0, fontSize: '13px', color: '#b91c1c', lineHeight: 1.5 }}>
-              <strong>Manager Notes:</strong> {request.changeRequestNotes || 'Please update your request details and resubmit.'}
+              <strong>{language === 'en' ? 'Manager Notes:' : 'Ghi chú từ Quản lý:'}</strong>{' '}
+              {request.changeRequestNotes || (language === 'en' ? 'Please update your request details and resubmit.' : 'Vui lòng cập nhật thông tin yêu cầu và gửi lại.')}
             </p>
           </div>
           <button
-            onClick={() => setIsResubmitOpen(true)}
+            type="button"
+            onClick={handleOpenResubmit}
             style={{
               padding: '8px 16px',
-              backgroundColor: '#ef4444',
+              backgroundColor: '#dc2626',
               color: '#ffffff',
               border: 'none',
               borderRadius: '8px',
@@ -710,713 +816,789 @@ export default function RequestDetailPage() {
               whiteSpace: 'nowrap',
             }}
           >
-            Edit & Resubmit
+            {language === 'en' ? 'Edit & Resubmit' : 'Chỉnh sửa & Gửi lại'}
           </button>
         </div>
       )}
 
-      {/* Main 3-Column Layout (Left 2, Right 1) */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px', alignItems: 'start' }}>
-        {/* LEFT COLUMN */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {/* 1. STATUS TIMELINE STEPPER (7 Stages according to Flow 1-4) */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              padding: '24px 20px',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ position: 'relative', maxWidth: '800px', margin: '0 auto' }}>
-              {/* Background connector bar */}
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '18px',
-                  left: '30px',
-                  right: '30px',
-                  height: '4px',
-                  backgroundColor: '#f1f5f9',
-                  zIndex: 0,
-                  borderRadius: '999px',
-                }}
-              />
-              {/* Completed bar */}
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '18px',
-                  left: '30px',
-                  width: `${((Math.max(1, effectiveStep) - 1) / 5) * 88}%`,
-                  height: '4px',
-                  backgroundColor: '#16a34a',
-                  zIndex: 0,
-                  borderRadius: '999px',
-                  transition: 'width 0.3s ease',
-                }}
-              />
+      {/* Refund / 30-Day Credit Summary (if any record exists) */}
+      {Number(request.id || request.shipmentId || requestId) > 0 && (
+        <CustomerRefundSummaryCard shipmentId={Number(request.id || request.shipmentId || requestId)} />
+      )}
 
-              {/* 6 Stages */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-                {displayTimeline.map((stage: any) => {
-                  const isCompleted = stage.status === 'completed';
-                  const isActive = stage.status === 'active';
+      {/* Flow 6 Per-Horse Delivery Handover & Acceptance (optional) */}
+      {Number(request.id || request.shipmentId || requestId) > 0 && (
+        <DeliveryHandoverPanel
+          role="customer"
+          shipmentId={Number(request.id || request.shipmentId || requestId)}
+          shipmentStatus={statusLower}
+        />
+      )}
 
-                  return (
-                    <div
-                      key={stage.stage}
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: '8px',
-                        width: '74px',
-                        textAlign: 'center',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: '36px',
-                          height: '36px',
-                          borderRadius: '50%',
-                          backgroundColor: isCompleted ? '#16a34a' : isActive ? 'var(--primary)' : '#ffffff',
-                          color: isCompleted || isActive ? '#ffffff' : '#94a3b8',
-                          border: isCompleted
-                            ? '2px solid #ffffff'
-                            : isActive
-                            ? '2px solid #ffffff'
-                            : '2px solid #e2e8f0',
-                          boxShadow: isCompleted
-                            ? '0 0 0 2px #16a34a'
-                            : isActive
-                            ? '0 0 0 2px var(--primary)'
-                            : 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '12px',
-                          position: 'relative',
-                        }}
-                      >
-                        {isCompleted && <Check size={14} strokeWidth={3} />}
-                        {isActive && <Search size={14} />}
-                        {!isCompleted && !isActive && (
-                          <>
-                            {stage.stage === 2 && <ThumbsUp size={14} />}
-                            {stage.stage === 3 && <FileText size={14} />}
-                            {stage.stage === 4 && <CalendarCheck size={14} />}
-                            {stage.stage === 5 && <Plane size={14} />}
-                            {stage.stage === 6 && <Flag size={14} />}
-                          </>
-                        )}
-                      </div>
-
-                      <span
-                        style={{
-                          fontSize: '10.5px',
-                          fontWeight: isActive ? 700 : 600,
-                          color: isActive ? 'var(--primary)' : isCompleted ? 'var(--text-heading)' : '#94a3b8',
-                          lineHeight: 1.2,
-                        }}
-                      >
-                        {stage.name}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* 2. REQUEST SUMMARY */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-              <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                Request Summary
-              </h4>
-            </div>
-            <div style={{ padding: '24px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px' }}>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Request ID</span>
-                <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                  {request.requestCode}
-                </p>
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Created</span>
-                <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                  {request.createdDate || '23 Sep 2026, 09:42'}
-                </p>
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Transportation Type</span>
-                <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                  {request.transportationType}
-                </p>
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Current Status</span>
-                <p style={{ fontSize: '14px', fontWeight: 700, color: '#d97706', margin: '2px 0 0 0' }}>
-                  {request.statusLabel}
-                </p>
-              </div>
-              <div style={{ gridColumn: 'span 2' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Route</span>
-                <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', margin: '2px 0 0 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {request.origin}, {request.originCountryCode || 'VN'} <ArrowRight size={14} color="#94a3b8" /> {request.destination}, {request.destinationCountryCode || 'VN'}
-                </p>
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Departure</span>
-                <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                  {request.departureDate}
-                </p>
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Expected Arrival</span>
-                <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                  {request.estimatedArrivalDate}
-                </p>
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Number of Horses</span>
-                <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--primary)', margin: '2px 0 0 0' }}>
-                  {request.requestedHorseCount || request.horses?.length || 1} horses
-                </p>
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Chi phí vận chuyển (Total Cost)</span>
-                <p style={{ fontSize: '14px', fontWeight: 700, color: '#16a34a', margin: '2px 0 0 0' }}>
-                  {Number(request.totalCost) > 0
-                    ? `${Number(request.totalCost).toLocaleString('vi-VN')} ₫ (~$${(Math.round((Number(request.totalCost) / 25400) * 100) / 100).toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD)`
-                    : 'Đang chờ báo giá'}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <BookingSummary
-            bookingType={request.bookingType}
-            horseCount={Number(request.requestedHorseCount ?? request.horses?.length ?? 1)}
-            stallUnitPrice={request.stallUnitPrice}
-            status={request.status}
-            departureDate={request.departureDate}
-          />
-          <InsuranceSummary horses={request.insuranceHorses ?? []}
-            transportCost={request.transportCost ?? null} insuranceFee={Number(request.insuranceFee ?? 0)}
-            totalCost={Number(request.totalCost ?? 0)} />
-
-          {/* Payment eligibility and invoice come from the server's confirmed route. */}
-          {isApproved && <SepayPayment
-            shipmentId={Number(request.id || request.shipmentId || requestId)}
-            requestCode={request.requestCode}
-            amount={Number(request.totalCost)}
-          />}
-
-          {/* 3. TRANSPORT ROUTE */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                Transport Route
-              </h4>
-              <button
-                onClick={() => setIsTrackingOpen(true)}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: '6px',
-                  backgroundColor: '#eff6ff',
-                  color: 'var(--primary)',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  border: 'none',
-                }}
-              >
-                View Trip Tracking
-              </button>
-            </div>
-            <div style={{ padding: '28px 24px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: '600px', margin: '0 auto', position: 'relative' }}>
-                <div style={{ position: 'absolute', top: '24px', left: '40px', right: '40px', height: '3px', backgroundColor: '#e2e8f0', zIndex: 0 }} />
-
-                {/* Origin */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1 }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', marginBottom: '8px' }}>Origin</span>
-                  <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#0f172a', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #cbd5e1' }} />
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '8px' }}>{request.origin}</span>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>Vietnam</span>
-                </div>
-
-                {/* Transit Checkpoint */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1 }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', marginBottom: '8px' }}>Transit</span>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#ffffff', border: '2px solid #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', marginTop: '-6px' }}>
-                    <Building size={14} />
-                  </div>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569', marginTop: '8px' }}>{request.transitName || 'Border / Transit Checkpoint'}</span>
-                </div>
-
-                {/* Destination */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1 }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', marginBottom: '8px' }}>Destination</span>
-                  <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#94a3b8', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #cbd5e1' }} />
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '8px' }}>{request.destination}</span>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>{request.destinationCountry || 'Vietnam'}</span>
-                </div>
-              </div>
-
-              <div style={{ textAlign: 'center', marginTop: '24px', fontSize: '12px', color: '#64748b', fontWeight: 500 }}>
-                Estimated Distance: <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDistance || '1,100 km'}</strong> &nbsp;|&nbsp; Estimated Time: <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDuration || '12 hours'}</strong>
-              </div>
-            </div>
-          </div>
-
-          {/* 4. HORSES IN THIS TRANSPORT (Linked to Horse Profiles) */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-              <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                Hồ sơ ngựa ({request.horses?.length || 1} hồ sơ / {request.requestedHorseCount || 1} ngựa)
-              </h4>
-            </div>
-
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-light)' }}>
-                  <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Horse</th>
-                  <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Breed</th>
-                  <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Age / Gender</th>
-                  <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Medical Status</th>
-                  <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Documents</th>
-                  <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'right' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {request.horses?.map((item: any, idx: number) => {
-                  const horse = item.horse || item;
-                  return (
-                    <tr
-                      key={horse.id || horse.horseId || idx}
-                      style={{
-                        borderBottom: '1px solid var(--border-light)',
-                        backgroundColor: !item.isComplete ? '#fff5f5' : 'transparent',
-                      }}
-                    >
-                      <td style={{ padding: '16px 20px' }}>
-                        <Link
-                          href={`/customer/horses/${horse.id || horse.horseId || ''}`}
-                          style={{ fontWeight: 700, color: 'var(--primary)', textDecoration: 'none' }}
-                          title="View Horse Profile"
-                        >
-                          {horse.name}
-                        </Link>
-                      </td>
-                      <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>{horse.breed}</td>
-                      <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>
-                        {(() => {
-                          const g = String(horse.gender || '').toLowerCase();
-                          const isFemale = g.includes('female') || g.includes('mare');
-                          const isGelding = g.includes('gelding');
-                          const genderLabel = isFemale ? 'Female' : isGelding ? 'Gelding' : 'Male';
-                          return `${horse.age} yrs • ${genderLabel}`;
-                        })()}
-                      </td>
-                      <td style={{ padding: '16px 20px' }}>
-                        <span
-                          style={{
-                            padding: '3px 8px',
-                            borderRadius: '6px',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            textTransform: 'uppercase',
-                            backgroundColor: item.medicalStatus === 'Healthy' ? '#dcfce7' : '#fef3c7',
-                            color: item.medicalStatus === 'Healthy' ? '#15803d' : '#b45309',
-                          }}
-                        >
-                          {item.medicalStatus || 'Healthy'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '16px 20px' }}>
-                        {(() => {
-                          const horseChecklist = checklist?.horses?.find(
-                            (h) => String(h.horseId) === String(horse.id || horse.horseId)
-                          );
-                          if (isPendingReview) {
-                            return (
-                              <span
-                                style={{
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  color: '#64748b',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                }}
-                              >
-                                <Clock size={14} /> Chờ duyệt yêu cầu
-                              </span>
-                            );
-                          }
-                          if (!checklist || !requirementsSent) {
-                            return (
-                              <span
-                                style={{
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  color: '#2563eb',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                }}
-                              >
-                                <Clock size={14} /> Chờ ban hành danh mục hồ sơ
-                              </span>
-                            );
-                          }
-                          const approvedDocs =
-                            horseChecklist?.documents?.filter((d: any) => d.status === 'approved')?.length || 0;
-                          const totalDocs =
-                            (horseChecklist?.missingRegulations?.length || 0) +
-                            (horseChecklist?.documents?.length || 0);
-                          const isCompliant = Boolean(horseChecklist?.isCompliant);
-                          const hasRejected = Boolean(
-                            horseChecklist?.documents?.some((d: any) => d.status === 'rejected')
-                          );
-                          const hasMissing = (horseChecklist?.missingRegulations?.length || 0) > 0;
-
-                          if (isCompliant) {
-                            return (
-                              <span
-                                style={{
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  color: '#15803d',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                }}
-                              >
-                                <Check size={14} /> {approvedDocs}/{totalDocs} Đã duyệt
-                              </span>
-                            );
-                          }
-
-                          if (hasRejected) {
-                            return (
-                              <span
-                                style={{
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  color: '#dc2626',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                }}
-                              >
-                                <AlertTriangle size={14} /> {approvedDocs}/{totalDocs} Đã duyệt (Cần nộp lại)
-                              </span>
-                            );
-                          }
-
-                          if (hasMissing) {
-                            return (
-                              <span
-                                style={{
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  color: '#dc2626',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                }}
-                              >
-                                <AlertTriangle size={14} /> {approvedDocs}/{totalDocs} Đã duyệt (Thiếu {horseChecklist?.missingRegulations?.length})
-                              </span>
-                            );
-                          }
-
-                          return (
-                            <span
-                              style={{
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                color: '#d97706',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                              }}
-                            >
-                              <Clock size={14} /> {approvedDocs}/{totalDocs} Đã duyệt (Chờ duyệt)
-                            </span>
-                          );
-                        })()}
-                      </td>
-                      <td style={{ padding: '16px 20px', textAlign: 'right' }}>
-                        <Link
-                          href={`/customer/horses/${horse.id || horse.horseId || ''}`}
-                          style={{ color: 'var(--primary)', fontWeight: 600, fontSize: '13px' }}
-                        >
-                          View
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* 5. TRANSPORT COMPLIANCE DOCUMENTS */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div
-              style={{
-                padding: '16px 24px',
-                borderBottom: '1px solid var(--border-light)',
-                backgroundColor: '#f8fafc',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
+      {/* Official Quotation Strip */}
+      {hasQuotation && (
+        <div
+          className={`rounded-2xl px-5 py-3.5 border flex flex-wrap items-center justify-between gap-3 ${
+            isQuotationAccepted
+              ? 'bg-[#E8F2EB]/60 border-[#B7DBC4]'
+              : 'bg-[#FAF8F4] border-[#E5DDD0]'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
+            <span className="text-xs font-semibold text-[#5F6977]">
+              {isQuotationAccepted
+                ? t('requestDetail.quotationApproved', 'Báo giá đã được chấp thuận')
+                : t('requestDetail.officialQuotation', 'Báo giá vận chuyển')}
+            </span>
+            <strong className="text-base font-extrabold text-[#181A17] tabular-nums">
+              {Number(request.totalCost) > 0
+                ? `${Number(request.totalCost).toLocaleString('vi-VN')} VNĐ`
+                : t('requestDetail.preparingQuotation', 'Đang chuẩn bị báo giá')}
+            </strong>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                isQuotationAccepted
+                  ? 'bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]'
+                  : 'bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A]'
+              }`}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <ShieldCheck size={18} color="var(--primary)" />
-                <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                  Hồ sơ Kiểm dịch & Vận chuyển (Compliance Documents)
-                </h4>
-              </div>
-              {checklist && isApproved && requirementsSent && (
-                <span
+              {isQuotationAccepted ? t('requestDetail.confirmed', 'Đã xác nhận') : t('requestDetail.actionRequired', 'Cần phản hồi')}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {Number(request.totalCost) > 0 && PAYABLE_SHIPMENT_STATUSES.includes(statusLower) && (
+              <Link
+                href={`/customer/requests/${request.id || requestId}/payment`}
+                className="no-underline px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold inline-flex items-center gap-1.5 transition-colors shadow-sm"
+              >
+                <CreditCard size={14} className="text-[#C4B38E]" aria-hidden="true" /> {t('requestDetail.payViaSepay', 'Thanh toán SePay VietQR')}
+              </Link>
+            )}
+            {!isQuotationAccepted ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNegotiateNotes('');
+                    setIsNegotiateModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] cursor-pointer transition-colors"
+                >
+                  {t('requestDetail.negotiateBtn', 'Thương thảo giá')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsQuotationAccepted(true);
+                    setActiveTab('quotation');
+                    toast.success(t('requestDetail.quotationAcceptedToast', 'Báo giá đã được chấp thuận! Bạn có thể thanh toán trực tiếp qua cổng SePay VietQR bên dưới.'));
+                  }}
+                  className="px-4 py-2 rounded-xl bg-[#287653] hover:bg-[#205F43] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
+                >
+                  <Check size={14} strokeWidth={3} aria-hidden="true" /> {t('requestDetail.acceptQuotationBtn', 'Chấp Thuận Báo Giá')}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setActiveTab('quotation')}
+                className="px-3.5 py-2 rounded-xl border border-[#B7DBC4] bg-white hover:bg-[#FAF8F4] text-xs font-bold text-[#287653] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <CreditCard size={14} aria-hidden="true" /> {t('requestDetail.proceedPaymentBtn', 'Xem báo giá')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 1. STATUS TIMELINE STEPPER */}
+      <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 shadow-sm">
+        <div className="overflow-x-auto pb-1">
+        <div style={{ position: 'relative', minWidth: '540px', maxWidth: '800px', margin: '0 auto' }}>
+          {/* Background connector bar */}
+          <div
+            style={{
+              position: 'absolute',
+              top: '18px',
+              left: '30px',
+              right: '30px',
+              height: '4px',
+              backgroundColor: '#F0EEE8',
+              zIndex: 0,
+            }}
+          />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
+            {displayTimeline.map((stage) => {
+              const isCompleted = stage.status === 'completed';
+              const isActive = stage.status === 'active';
+
+              return (
+                <div
+                  key={stage.stage}
                   style={{
-                    padding: '4px 10px',
-                    borderRadius: '999px',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    backgroundColor: checklist.isFullyCompliant ? '#dcfce7' : '#fef3c7',
-                    color: checklist.isFullyCompliant ? '#15803d' : '#b45309',
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
-                    gap: '4px',
+                    gap: '8px',
+                    width: '76px',
+                    textAlign: 'center',
                   }}
                 >
-                  {checklist.isFullyCompliant ? (
-                    <>
-                      <CheckCircle2 size={13} /> Đạt chuẩn 100%
-                    </>
-                  ) : (
-                    <>
-                      <Clock size={13} /> {checklist.approvedDocumentsCount}/{checklist.totalRequiredDocuments} Đã duyệt
-                    </>
-                  )}
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      backgroundColor: isCompleted
+                        ? '#287653'
+                        : isActive
+                        ? '#181A17'
+                        : '#ffffff',
+                      color: isCompleted ? '#ffffff' : isActive ? '#C4B38E' : '#8892A0',
+                      border: isCompleted || isActive ? '2px solid transparent' : '2px solid #E5DDD0',
+                      boxShadow: isCompleted
+                        ? '0 0 0 2px #287653'
+                        : isActive
+                        ? '0 0 0 3px rgba(196, 179, 142, 0.35)'
+                        : 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '12px',
+                      position: 'relative',
+                    }}
+                  >
+                    {isCompleted && <Check size={14} strokeWidth={3} />}
+                    {isActive && <Search size={14} />}
+                    {!isCompleted && !isActive && (
+                      <>
+                        {stage.stage === 2 && <ThumbsUp size={14} />}
+                        {stage.stage === 3 && <FileText size={14} />}
+                        {stage.stage === 4 && <CalendarCheck size={14} />}
+                        {stage.stage === 5 && <Plane size={14} />}
+                        {stage.stage === 6 && <Flag size={14} />}
+                      </>
+                    )}
+                  </div>
+
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: isActive ? 700 : 600,
+                      color: isActive ? '#181A17' : isCompleted ? '#181A17' : '#747D88',
+                      lineHeight: 1.25,
+                    }}
+                  >
+                    {stage.name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        </div>
+      </div>
+
+      {/* ─── UNDERLINE TAB NAVIGATION BAR ─────────────────────────── */}
+      <div className="flex items-center gap-6 border-b border-[#E5DDD0] overflow-x-auto w-full">
+        {[
+          { id: 'overview', label: t('requestDetail.tabOverview', language === 'en' ? 'Overview & Route' : 'Tổng quan & Lộ trình'), icon: Route, count: null },
+          { id: 'horses', label: t('requestDetail.tabHorses', language === 'en' ? 'Horses' : 'Danh sách ngựa'), icon: ShieldCheck, count: request.horses?.length || request.requestedHorseCount || 1 },
+          { id: 'documents', label: t('requestDetail.tabDocuments', language === 'en' ? 'Quarantine Docs' : 'Hồ sơ kiểm dịch'), icon: FileText, count: totalMissingCount > 0 ? t('requestDetail.missingCount', '{count} thiếu', { count: totalMissingCount }) : null, alert: totalMissingCount > 0 || totalRejectedCount > 0 },
+          { id: 'quotation', label: t('requestDetail.tabQuotation', language === 'en' ? 'Quotation & Payment' : 'Báo giá & Thanh toán'), icon: CreditCard, count: Number(request.totalCost) > 0 ? t('requestDetail.hasQuotation', 'Có báo giá') : null, highlight: Number(request.totalCost) > 0 },
+        ].map((tab) => {
+          const isActive = activeTab === tab.id;
+          const IconComp = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`pb-3 pt-1 text-xs sm:text-sm whitespace-nowrap transition-colors inline-flex items-center gap-2 cursor-pointer border-b-2 -mb-[1px] bg-transparent ${
+                isActive
+                  ? 'border-[#181A17] text-[#181A17] font-bold'
+                  : 'border-transparent text-[#5F6977] hover:text-[#181A17] font-semibold'
+              }`}
+            >
+              <IconComp size={15} className={isActive ? 'text-[#A67C2E]' : ''} aria-hidden="true" />
+              <span>{tab.label}</span>
+              {tab.count && (
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                    tab.alert
+                      ? 'bg-[#F8EAEA] text-[#B33E3E]'
+                      : tab.highlight
+                      ? 'bg-[#E8F2EB] text-[#287653]'
+                      : isActive
+                      ? 'bg-[#181A17] text-white'
+                      : 'bg-[#F0EEE8] text-[#5F6977]'
+                  }`}
+                >
+                  {tab.count}
                 </span>
               )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ─── TAB 1: TỔNG QUAN & LỘ TRÌNH ────────────────────────────── */}
+      {activeTab === 'overview' && (
+        <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6 items-start">
+          <div className="lg:col-span-2 flex flex-col gap-6">
+            {/* Request Summary Card */}
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0]">
+                <h4 className="text-sm font-bold text-[#181A17] m-0">
+                  {t('requestDetail.overviewTitle', 'Thông tin tổng quan đơn hàng')}
+                </h4>
+              </div>
+              <div style={{ padding: '24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '20px' }}>
+                <div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.requestId', 'Mã đơn')}</span>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
+                    {request.requestCode}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.createdDate', 'Ngày tạo')}</span>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
+                    {request.createdDate || '23 Sep 2026, 09:42'}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.transportType', 'Hình thức vận chuyển')}</span>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
+                    {translateTransportType(request.transportationType)}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.currentStatus', 'Trạng thái hiện tại')}</span>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#d97706', margin: '2px 0 0 0' }}>
+                    {translateStatus(request.statusLabel || request.status)}
+                  </p>
+                </div>
+                <div className="sm:col-span-2">
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.route', 'Lộ trình di chuyển')}</span>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', margin: '2px 0 0 0', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    {request.origin}, {request.originCountryCode || 'VN'} <ArrowRight size={14} color="#5F6977" aria-hidden="true" /> {request.destination}, {request.destinationCountryCode || 'VN'}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.departure', 'Ngày xuất phát')}</span>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
+                    {request.departureDate}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.estimatedArrival', 'Dự kiến đến nơi')}</span>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
+                    {request.estimatedArrivalDate}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.horseCount', 'Số lượng ngựa')}</span>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--primary)', margin: '2px 0 0 0' }}>
+                    {request.requestedHorseCount || request.horses?.length || 1} {t('common.horsesUnit', 'con')}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.totalCost', 'Chi phí vận chuyển')}</span>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#287653', margin: '2px 0 0 0' }}>
+                    {Number(request.totalCost) > 0
+                      ? `${Number(request.totalCost).toLocaleString('vi-VN')} VNĐ`
+                      : t('requestDetail.awaitingQuotation', 'Đang chờ báo giá')}
+                  </p>
+                </div>
+              </div>
             </div>
 
-            {/* CASE 1: Request not yet approved by Manager */}
-            {isPendingReview ? (
-              <div style={{ padding: '28px 24px', textAlign: 'center', backgroundColor: '#fcfcfc' }}>
-                <div
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '12px',
-                    backgroundColor: '#fef3c7',
-                    color: '#d97706',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    margin: '0 auto 12px auto',
-                  }}
+            {/* Booking & Insurance Policies Summary */}
+            <BookingSummary
+              bookingType={request.bookingType}
+              horseCount={Number(request.requestedHorseCount ?? request.horses?.length ?? 1)}
+              stallUnitPrice={request.stallUnitPrice}
+              status={request.status}
+              departureDate={request.departureDate}
+            />
+            <InsuranceSummary
+              horses={request.insuranceHorses ?? []}
+              transportCost={request.transportCost ?? null}
+              insuranceFee={Number(request.insuranceFee ?? 0)}
+              totalCost={Number(request.totalCost ?? 0)}
+            />
+
+            {/* Transport Route Diagram with robust text truncate/clamp */}
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex justify-between items-center flex-wrap gap-2">
+                <h4 className="text-sm font-bold text-[#181A17] m-0">
+                  {t('requestDetail.routeMapTitle', 'Sơ đồ Lộ trình & Điểm trung chuyển')}
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setIsTrackingOpen(true)}
+                  className="px-3 py-1.5 rounded-lg bg-[#FAF8F4] text-[#A67C2E] text-xs font-semibold border border-[#D4C5A3] hover:bg-[#F5EFE2] cursor-pointer transition-colors"
                 >
-                  <Clock size={24} />
-                </div>
-                <h5 style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 6px 0' }}>
-                  Đang chờ Logistics Manager phê duyệt yêu cầu
-                </h5>
-                <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '480px', margin: '0 auto', lineHeight: 1.5 }}>
-                  Yêu cầu vận chuyển đang được quản lý rà soát. Ngay sau khi đơn được duyệt, Chuyên viên kiểm dịch (Specialist) sẽ tiếp nhận để kiểm tra quy chuẩn điểm đến ({request.destination}) và ban hành danh mục hồ sơ cần nộp.
-                </p>
+                  {t('requestDetail.viewTrackingMap', 'Xem Bản đồ Tracking Chi tiết')}
+                </button>
               </div>
-            ) : !requirementsSent ? (
-              /* CASE 2: Approved, waiting for Specialist to review destination & send requirements */
-              <div style={{ padding: '28px 24px', textAlign: 'center', backgroundColor: '#f8fafc' }}>
-                <div
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '12px',
-                    backgroundColor: '#e0f2fe',
-                    color: '#0284c7',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    margin: '0 auto 12px auto',
-                  }}
-                >
-                  <Sparkles size={24} />
-                </div>
-                <h5 style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 6px 0' }}>
-                  Đơn đã duyệt — Chuyên viên kiểm dịch đang thiết lập danh mục hồ sơ
-                </h5>
-                <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '520px', margin: '0 auto', lineHeight: 1.5 }}>
-                  Chuyên viên vận tải & kiểm dịch (Specialist) đang rà soát các quy chuẩn y tế, kiểm dịch và hải quan cho điểm đến <strong>{checklist?.destinationCountry || request.destination}</strong>. Quý khách sẽ nhận được thông báo ngay khi danh mục hồ sơ được thiết lập để tiến hành nộp.
-                </p>
-              </div>
-            ) : (
-              /* CASE 3: Specialist has reviewed & sent official requirements checklist */
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {/* Official Notification Header */}
-                <div
-                  style={{
-                    padding: '14px 20px',
-                    backgroundColor: '#f0fdf4',
-                    borderBottom: '1px solid #bbf7d0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: '12px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '280px' }}>
-                    <CheckCircle2 size={18} color="#16a34a" style={{ flexShrink: 0 }} />
-                    <p style={{ fontSize: '13px', color: '#166534', margin: 0, lineHeight: 1.4 }}>
-                      <strong>Danh mục hồ sơ chính thức do Chuyên viên yêu cầu</strong> cho hành trình đến{' '}
-                      <strong>{checklist?.destinationCountry || request.destination}</strong>
-                      {checklist?.isUsingGlobalBaseline ? ' (Áp dụng Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI)' : ''}.
-                    </p>
+              <div style={{ padding: '28px 20px' }}>
+                <div className="overflow-x-auto pb-2">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: '480px', maxWidth: '640px', margin: '0 auto', position: 'relative' }}>
+                  <div style={{ position: 'absolute', top: '24px', left: '40px', right: '40px', height: '3px', backgroundColor: '#D8CEBE', zIndex: 0 }} />
+
+                  {/* Origin */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1, maxWidth: '160px', textAlign: 'center' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#5F6977', marginBottom: '8px' }}>{language === 'en' ? 'Origin' : 'Điểm đi'}</span>
+                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#181A17', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #D8CEBE' }} />
+                    <span className="max-w-[140px] line-clamp-2 text-center" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '8px' }} title={request.origin}>
+                      {request.origin}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#5F6977' }}>{translateCountry(request.originCountryCode || 'Vietnam')}</span>
                   </div>
 
-                  {totalMissingCount > 0 && (
-                    <button
-                      onClick={() => handleOpenBatchUpload()}
-                      style={{
-                        padding: '7px 14px',
-                        borderRadius: '8px',
-                        backgroundColor: '#16a34a',
-                        color: '#ffffff',
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        border: 'none',
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        boxShadow: '0 2px 6px rgba(22, 163, 74, 0.25)',
-                      }}
-                    >
-                      <Upload size={13} /> ⚡ Nộp trọn bộ hồ sơ (Nộp tất cả)
-                    </button>
-                  )}
+                  {/* Transit Checkpoint */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1, maxWidth: '180px', textAlign: 'center' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#5F6977', marginBottom: '8px' }}>{language === 'en' ? 'Transit' : 'Trung chuyển'}</span>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#ffffff', border: '2px solid #D8CEBE', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5F6977', marginTop: '-6px' }}>
+                      <Building size={14} aria-hidden="true" />
+                    </div>
+                    <span className="max-w-[150px] line-clamp-2 text-center" style={{ fontSize: '12.5px', fontWeight: 600, color: '#475569', marginTop: '8px' }} title={request.transitName}>
+                      {request.transitName || (language === 'en' ? 'Border / Transit Checkpoint' : 'Cửa khẩu / Trạm kiểm dịch')}
+                    </span>
+                  </div>
+
+                  {/* Destination */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1, maxWidth: '160px', textAlign: 'center' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#5F6977', marginBottom: '8px' }}>{language === 'en' ? 'Destination' : 'Điểm đến'}</span>
+                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#A67C2E', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #D8CEBE' }} />
+                    <span className="max-w-[140px] line-clamp-2 text-center" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '8px' }} title={request.destination}>
+                      {request.destination}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#5F6977' }}>{translateCountry(request.destinationCountry || 'Vietnam')}</span>
+                  </div>
+                </div>
                 </div>
 
-                {checklist?.horses && checklist.horses.length > 0 ? (
-                  checklist.horses.map((horseItem, hIdx) => {
-                    return (
+                <div style={{ textAlign: 'center', marginTop: '28px', fontSize: '12px', color: '#64748b', fontWeight: 500 }}>
+                  {t('requestDetail.estimatedDistance', 'Quãng đường ước tính:')} <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDistance || '1,100 km'}</strong> &nbsp;|&nbsp; {language === 'en' ? 'Estimated Duration:' : 'Thời gian vận chuyển:'} <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDuration || '12 hours'}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Request Information Card */}
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0]">
+                <h4 className="text-sm font-bold text-[#181A17] m-0">
+                  {t('requestDetail.specialRequirementsTitle', 'Yêu cầu đặc biệt & Ghi chú lịch trình')}
+                </h4>
+              </div>
+              <div className="p-6 flex flex-col gap-4">
+                <div className="bg-[#FAF8F4] p-4 rounded-xl border border-[#E5DDD0]">
+                  <p className="text-sm text-[#181A17] m-0 italic leading-relaxed">
+                    &ldquo;{request.notes || t('requestDetail.noSpecialRequirements', 'Không có yêu cầu đặc biệt nào được ghi chú.')}&rdquo;
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right column: Activity / Audit History */}
+          <div className="lg:col-span-1 flex flex-col gap-6">
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 shadow-sm">
+              <h4 className="text-sm font-bold text-[#181A17] m-0 mb-5">
+                {t('requestDetail.auditHistoryTitle', 'Lịch sử hoạt động')}
+              </h4>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', position: 'relative', paddingLeft: '22px' }}>
+                <div style={{ position: 'absolute', top: '8px', bottom: '8px', left: '7px', width: '2px', backgroundColor: '#D8CEBE' }} />
+
+                {request.activities && request.activities.length > 0 ? (
+                  request.activities.map((act: any, index: number) => (
+                    <div key={act.id || index} style={{ position: 'relative' }}>
                       <div
-                        key={horseItem.horseId}
                         style={{
-                          borderBottom: hIdx < (checklist?.horses?.length || 0) - 1 ? '1px solid var(--border-light)' : 'none',
+                          position: 'absolute',
+                          left: '-19px',
+                          top: '4px',
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          backgroundColor: index === 0 ? 'var(--primary)' : '#D8CEBE',
+                          boxShadow: '0 0 0 3px #ffffff',
                         }}
-                      >
-                        {/* Horse subheader */}
-                        <div
+                      />
+                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>{act.timestamp}</span>
+                      <div style={{ fontSize: '13.5px', color: 'var(--text-heading)', fontWeight: 500, marginTop: '2px' }}>
+                        {act.description}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{act.actor}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '13px', color: '#64748b' }}>
+                      {t('requestDetail.createdAuditMsg', `Đơn hàng đã được khởi tạo thành công lúc {date}.`, {
+                        date: request.createdDate,
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 2: ĐÀN CHIẾN MÃ ───────────────────────────────────── */}
+      {activeTab === 'horses' && (
+        <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6 items-start">
+          <div className="lg:col-span-2 flex flex-col gap-6">
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex justify-between items-center">
+                <h4 className="text-sm font-bold text-[#181A17] m-0">
+                  {language === 'en'
+                    ? `Transport Equine Roster (${request.horses?.length || request.requestedHorseCount || 1} horses)`
+                    : `Danh sách ngựa vận chuyển (${request.horses?.length || request.requestedHorseCount || 1} con)`}
+                </h4>
+              </div>
+
+              <div className="overflow-x-auto w-full">
+                <table style={{ width: '100%', minWidth: '600px', borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-light)' }}>
+                      <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.horse', 'Chiến mã')}</th>
+                      <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.breed', 'Giống')}</th>
+                      <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.ageGender', 'Tuổi / Giới tính')}</th>
+                      <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.medicalStatus', 'Sức khỏe')}</th>
+                      <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.profile', 'Hồ sơ')}</th>
+                      <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'right' }}>{language === 'en' ? 'Actions' : 'Thao tác'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {request.horses?.map((item: any, idx: number) => {
+                      const horse = item.horse || item;
+                      return (
+                        <tr
+                          key={horse.id || horse.horseId || idx}
                           style={{
-                            padding: '12px 24px',
-                            backgroundColor: '#fafafa',
-                            borderBottom: '1px solid #f1f5f9',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
+                            borderBottom: '1px solid var(--border-light)',
+                            backgroundColor: !item.isComplete ? '#fff5f5' : 'transparent',
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-heading)' }}>
-                              Ngựa: {horseItem.horseName}
+                          <td style={{ padding: '16px 20px' }}>
+                            <Link
+                              href={`/customer/horses/${horse.id || horse.horseId || ''}`}
+                              style={{ fontWeight: 700, color: 'var(--primary)', textDecoration: 'none' }}
+                              title={language === 'en' ? 'View horse profile' : 'Xem hồ sơ ngựa'}
+                            >
+                              {horse.name}
+                            </Link>
+                          </td>
+                          <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>{translateBreed(horse.breed)}</td>
+                          <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>
+                            {horse.age} {t('common.yearsOld', 'tuổi')} • {translateGender(horse.gender)}
+                          </td>
+                          <td style={{ padding: '16px 20px' }}>
+                            <span
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                textTransform: 'uppercase',
+                                backgroundColor: item.medicalStatus === 'Healthy' ? '#dcfce7' : '#fef3c7',
+                                color: item.medicalStatus === 'Healthy' ? '#15803d' : '#b45309',
+                              }}
+                            >
+                              {item.medicalStatus || 'Healthy'}
                             </span>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          </td>
+                          <td style={{ padding: '16px 20px' }}>
                             {(() => {
-                              const hasRejected = horseItem.documents?.some((d: any) => d.status === 'rejected');
-                              const hasMissing = horseItem.missingRegulations.length > 0;
-
-                              let badgeBg = '#dcfce7';
-                              let badgeColor = '#15803d';
-                              let badgeText = 'Đủ hồ sơ hợp lệ (Đã duyệt)';
-
-                              if (horseItem.isCompliant) {
-                                badgeBg = '#dcfce7';
-                                badgeColor = '#15803d';
-                                badgeText = 'Đủ hồ sơ hợp lệ (Đã duyệt)';
-                              } else if (hasRejected) {
-                                badgeBg = '#fee2e2';
-                                badgeColor = '#b91c1c';
-                                badgeText = 'Có hồ sơ bị từ chối (Cần nộp lại)';
-                              } else if (hasMissing) {
-                                badgeBg = '#fee2e2';
-                                badgeColor = '#b91c1c';
-                                badgeText = `Còn thiếu ${horseItem.missingRegulations.length} giấy tờ`;
-                              } else {
-                                badgeBg = '#fef3c7';
-                                badgeColor = '#b45309';
-                                badgeText = 'Đã nộp đủ hồ sơ (Chờ duyệt)';
+                              const horseChecklist = checklist?.horses?.find(
+                                (h) => String(h.horseId) === String(horse.id || horse.horseId)
+                              );
+                              if (isPendingReview) {
+                                return (
+                                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <Clock size={14} /> {language === 'en' ? 'Awaiting approval' : 'Chờ duyệt yêu cầu'}
+                                  </span>
+                                );
                               }
-
+                              if (!checklist || !requirementsSent) {
+                                return (
+                                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#A67C2E', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <Clock size={14} /> {language === 'en' ? 'Awaiting regulation issuance' : 'Chờ ban hành hồ sơ'}
+                                  </span>
+                                );
+                              }
+                              const approvedDocs = horseChecklist?.documents?.filter((d: any) => d.status === 'approved')?.length || 0;
+                              const totalDocs = (horseChecklist?.missingRegulations?.length || 0) + (horseChecklist?.documents?.length || 0);
                               return (
-                                <span
-                                  style={{
-                                    fontSize: '11.5px',
-                                    fontWeight: 700,
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    backgroundColor: badgeBg,
-                                    color: badgeColor,
-                                  }}
-                                >
-                                  {badgeText}
+                                <span style={{ fontSize: '12px', fontWeight: 600, color: horseChecklist?.isCompliant ? '#15803d' : '#d97706', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  {horseChecklist?.isCompliant ? <Check size={14} /> : <Clock size={14} />} {approvedDocs}/{totalDocs} {language === 'en' ? 'Approved' : 'Đã duyệt'}
                                 </span>
                               );
                             })()}
+                          </td>
+                          <td style={{ padding: '16px 20px', textAlign: 'right' }}>
+                            <Link
+                              href={`/customer/horses/${horse.id || horse.horseId || ''}`}
+                              style={{ color: 'var(--primary)', fontWeight: 600, fontSize: '13px' }}
+                            >
+                              {language === 'en' ? 'View Profile' : 'Xem hồ sơ'}
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
 
+          <div className="lg:col-span-1 flex flex-col gap-6">
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 shadow-sm">
+              <h4 className="text-sm font-bold text-[#181A17] m-0 mb-3">
+                {language === 'en' ? 'Equine Inspection Standards' : 'Tiêu chuẩn kiểm định đàn ngựa'}
+              </h4>
+              <p className="text-xs text-[#5F6977] leading-relaxed m-0">
+                {language === 'en'
+                  ? 'All racehorses prior to loading must be fully vaccinated against Equine Influenza within 6 months and possess valid export quarantine certification.'
+                  : 'Tất cả các cá thể ngựa đua trước khi xếp xe đều phải được tiêm phòng cúm Equine Influenza đầy đủ trong vòng 6 tháng và có chứng nhận kiểm dịch xuất khẩu hợp lệ.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 3: HỒ SƠ KIỂM DỊCH & GIẤY TỜ ──────────────────────── */}
+      {activeTab === 'documents' && (
+        <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6 items-start">
+          <div className="lg:col-span-2 flex flex-col gap-6">
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck size={17} className="text-[#A67C2E]" aria-hidden="true" />
+                  <h4 className="text-sm font-bold text-[#181A17] m-0">
+                    {t('requestDetail.complianceTitle', 'Hồ sơ kiểm dịch & Giấy tờ')}
+                  </h4>
+                </div>
+                {checklist && isApproved && requirementsSent && (
+                  <span
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '999px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      backgroundColor: checklist.isFullyCompliant ? '#dcfce7' : '#fef3c7',
+                      color: checklist.isFullyCompliant ? '#15803d' : '#b45309',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    {checklist.isFullyCompliant ? (
+                      <>
+                        <CheckCircle2 size={13} /> {language === 'en' ? '100% Compliant' : 'Đạt chuẩn 100%'}
+                      </>
+                    ) : (
+                      <>
+                        <Clock size={13} /> {checklist.approvedDocumentsCount}/{checklist.totalRequiredDocuments} {language === 'en' ? 'Approved' : 'Đã duyệt'}
+                      </>
+                    )}
+                  </span>
+                )}
+              </div>
+
+              {/* CASE 1: Pending Manager review */}
+              {checklist && (checklist.inTransitComplianceAlert || checklist.effectiveTierALeadDays || checklist.tierADeadline) && (
+                <div style={{ padding: '12px 20px', borderBottom: '1px solid #EAE5DA', backgroundColor: '#FAF8F4', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {checklist.inTransitComplianceAlert && (
+                    <div
+                      role="alert"
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        backgroundColor: '#fef2f2',
+                        border: '1px solid #fecaca',
+                        color: '#991b1b',
+                        fontSize: '12.5px',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {language === 'en'
+                        ? 'Alert: A required compliance document expired during transport. Please upload an updated certificate immediately so border/quarantine clearance can proceed.'
+                        : 'Cảnh báo: Hồ sơ kiểm dịch đã hết hạn trong quá trình vận chuyển. Vui lòng nộp bản gia hạn ngay để không bị chặn thông quan cửa khẩu.'}
+                    </div>
+                  )}
+                  {(checklist.effectiveTierALeadDays || checklist.tierADeadline) && (
+                    <div className="flex flex-wrap gap-4 text-xs text-[#5F6977]">
+                      <span>
+                        {language === 'en' ? 'Tier-A Prep Window:' : 'Hạn chuẩn bị Tầng A:'}{' '}
+                        <strong className="text-[#181A17]">D - {checklist.effectiveTierALeadDays ?? 5}</strong>
+                        {checklist.tierADeadline ? ` (${checklist.tierADeadline})` : ''}
+                      </span>
+                      {checklist.tierBWindowStart && checklist.tierBWindowEnd && (
+                        <span>
+                          {language === 'en' ? 'Tier-B Vet Window:' : 'Cấp Tầng B (Thú y):'}{' '}
+                          <strong className="text-[#181A17]">
+                            {new Date(checklist.tierBWindowStart).toLocaleDateString(language === 'en' ? 'en-US' : 'vi-VN')} → {new Date(checklist.tierBWindowEnd).toLocaleDateString(language === 'en' ? 'en-US' : 'vi-VN')}
+                          </strong>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isPendingReview ? (
+                <div style={{ padding: '28px 24px', textAlign: 'center', backgroundColor: '#fcfcfc' }}>
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '12px',
+                      backgroundColor: '#fef3c7',
+                      color: '#d97706',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto 12px auto',
+                    }}
+                  >
+                    <Clock size={24} />
+                  </div>
+                  <h5 style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 6px 0' }}>
+                    {language === 'en' ? 'Awaiting Logistics Manager approval' : 'Đang chờ Logistics Manager phê duyệt yêu cầu'}
+                  </h5>
+                  <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '480px', margin: '0 auto', lineHeight: 1.5 }}>
+                    {language === 'en'
+                      ? 'Shipment request is being reviewed by management. Once approved, the Quarantine Specialist will issue the required document checklist.'
+                      : 'Yêu cầu vận chuyển đang được quản lý rà soát. Ngay sau khi đơn được duyệt, Chuyên viên kiểm dịch sẽ ban hành danh mục hồ sơ cần nộp.'}
+                  </p>
+                </div>
+              ) : !requirementsSent ? (
+                /* CASE 2: Approved, waiting for checklist establishment */
+                <div style={{ padding: '28px 24px', textAlign: 'center', backgroundColor: '#F0EEE8' }}>
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '12px',
+                      backgroundColor: '#F5EFE2',
+                      color: '#8C6621',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto 12px auto',
+                    }}
+                  >
+                    <Sparkles size={24} aria-hidden="true" />
+                  </div>
+                  <h5 style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 6px 0' }}>
+                    {language === 'en'
+                      ? 'Request Approved — Quarantine Specialist is configuring document checklist'
+                      : 'Đơn đã duyệt — Chuyên viên kiểm dịch đang thiết lập danh mục hồ sơ'}
+                  </h5>
+                  <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '520px', margin: '0 auto', lineHeight: 1.5 }}>
+                    {language === 'en'
+                      ? `Quarantine specialist is reviewing regulations for ${translateCountry(checklist?.destinationCountry) || request.destination}. You will be notified once the checklist is issued.`
+                      : `Chuyên viên kiểm dịch đang rà soát quy chuẩn điểm đến ${translateCountry(checklist?.destinationCountry) || request.destination}. Bạn sẽ nhận được thông báo ngay khi danh mục được ban hành.`}
+                  </p>
+                </div>
+              ) : (
+                /* CASE 3: Active checklist */
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div
+                    style={{
+                      padding: '14px 20px',
+                      backgroundColor: '#f0fdf4',
+                      borderBottom: '1px solid #bbf7d0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '12px',
+                    }}
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <CheckCircle2 size={18} color="#16a34a" style={{ flexShrink: 0 }} />
+                      <p style={{ fontSize: '13px', color: '#166534', margin: 0, lineHeight: 1.4 }}>
+                        {language === 'en' ? (
+                          <>
+                            <strong>Official document checklist mandated by Specialist</strong> for transit to{' '}
+                            <strong>{translateCountry(checklist?.destinationCountry) || request.destination}</strong>.
+                          </>
+                        ) : (
+                          <>
+                            <strong>Danh mục hồ sơ chính thức do Chuyên viên yêu cầu</strong> cho hành trình đến{' '}
+                            <strong>{translateCountry(checklist?.destinationCountry) || request.destination}</strong>.
+                          </>
+                        )}
+                      </p>
+                    </div>
+
+                    {totalMissingCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenBatchUpload()}
+                        style={{
+                          padding: '7px 14px',
+                          borderRadius: '8px',
+                          backgroundColor: '#287653',
+                          color: '#ffffff',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          border: 'none',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          boxShadow: '0 2px 6px rgba(40, 118, 83, 0.25)',
+                        }}
+                      >
+                        <Upload size={13} aria-hidden="true" /> {t('documents.batchUploadAll', 'Nộp trọn bộ hồ sơ')}
+                      </button>
+                    )}
+                  </div>
+
+                  {checklist?.horses && checklist.horses.length > 0 ? (
+                    checklist.horses.map((horseItem, hIdx) => {
+                      return (
+                        <div
+                          key={horseItem.horseId}
+                          style={{
+                            borderBottom: hIdx < (checklist?.horses?.length || 0) - 1 ? '1px solid var(--border-light)' : 'none',
+                          }}
+                        >
+                          <div
+                            style={{
+                              padding: '12px 24px',
+                              backgroundColor: '#fafafa',
+                              borderBottom: '1px solid #F0EEE8',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: '10px',
+                            }}
+                          >
+                            <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-heading)' }}>
+                              {language === 'en' ? 'Horse' : 'Ngựa'}: {horseItem.horseName}
+                            </span>
                             {!horseItem.isCompliant && horseItem.missingRegulations.length > 0 && (
                               <button
+                                type="button"
                                 onClick={() => handleOpenBatchUpload(horseItem)}
                                 style={{
                                   padding: '4px 10px',
                                   borderRadius: '6px',
-                                  backgroundColor: '#2563eb',
+                                  backgroundColor: '#A67C2E',
                                   color: '#ffffff',
                                   fontSize: '11.5px',
                                   fontWeight: 600,
@@ -1427,75 +1609,34 @@ export default function RequestDetailPage() {
                                   gap: '4px',
                                 }}
                               >
-                                <Upload size={12} /> Nộp tất cả ({horseItem.missingRegulations.length} mục)
+                                <Upload size={12} aria-hidden="true" /> {language === 'en' ? `Upload All (${horseItem.missingRegulations.length} items)` : `Nộp tất cả (${horseItem.missingRegulations.length} mục)`}
                               </button>
                             )}
                           </div>
-                        </div>
 
-                        {/* Missing items for this horse */}
-                        {horseItem.missingRegulations.map((reg) => (
-                          <div
-                            key={`missing-${reg.id}`}
-                            style={{
-                              padding: '14px 24px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              borderBottom: '1px solid #f8fafc',
-                              backgroundColor: '#fff5f5',
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0, paddingRight: '16px' }}>
-                              <div
-                                style={{
-                                  width: '36px',
-                                  height: '36px',
-                                  borderRadius: '8px',
-                                  backgroundColor: '#fee2e2',
-                                  color: '#dc2626',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  flexShrink: 0,
-                                }}
-                              >
-                                <AlertTriangle size={18} />
+                          {/* Missing regulations */}
+                          {horseItem.missingRegulations.map((reg) => (
+                            <div
+                              key={`missing-${reg.id}`}
+                              className="px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 border-b border-[#F0EEE8] bg-[#fff5f5]"
+                            >
+                              <div className="flex items-center gap-3.5 flex-1 min-w-[200px]">
+                                <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                  <AlertTriangle size={18} aria-hidden="true" />
+                                </div>
+                                <div className="min-w-0">
+                                  <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
+                                    {translateDocType(reg.documentType, reg.description) || reg.description || reg.documentType}
+                                  </h5>
+                                  <p style={{ fontSize: '11.5px', color: '#dc2626', margin: '2px 0 0 0' }}>
+                                    {language === 'en'
+                                      ? `Mandatory per regulations of ${translateCountry(reg.country)}`
+                                      : `Bắt buộc theo quy định ${translateCountry(reg.country)}`}
+                                  </p>
+                                </div>
                               </div>
-                              <div style={{ minWidth: 0 }}>
-                                <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
-                                  {reg.description || reg.documentType}
-                                </h5>
-                                <p style={{ fontSize: '11.5px', color: '#dc2626', margin: '2px 0 0 0', fontWeight: 500 }}>
-                                  Bắt buộc nộp theo quy định {reg.country}
-                                </p>
-                              </div>
-                            </div>
-
-                            {/* Status Column (Aligned) */}
-                            <div style={{ width: '140px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
-                              <span
-                                style={{
-                                  padding: '4px 10px',
-                                  borderRadius: '6px',
-                                  fontSize: '11.5px',
-                                  fontWeight: 700,
-                                  backgroundColor: '#fee2e2',
-                                  color: '#b91c1c',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  minWidth: '96px',
-                                  justifyContent: 'center',
-                                }}
-                              >
-                                <AlertTriangle size={12} /> Chưa nộp
-                              </span>
-                            </div>
-
-                            {/* Actions Column (Aligned) */}
-                            <div style={{ width: '200px', flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
                               <button
+                                type="button"
                                 onClick={() => handleOpenUpload(horseItem.horseId, reg.id)}
                                 style={{
                                   padding: '6px 14px',
@@ -1509,436 +1650,315 @@ export default function RequestDetailPage() {
                                   display: 'flex',
                                   alignItems: 'center',
                                   gap: '6px',
+                                  whiteSpace: 'nowrap',
                                 }}
                               >
-                                <Upload size={13} /> Tải lên ngay
+                                <Upload size={13} aria-hidden="true" /> {language === 'en' ? 'Upload Now' : 'Tải lên ngay'}
                               </button>
                             </div>
-                          </div>
-                        ))}
+                          ))}
 
-                        {/* Uploaded items for this horse */}
-                        {horseItem.documents.map((doc) => {
-                          const isDocExpiredForTrip = Boolean(doc.isExpiredForTrip) || doc.status === 'expired';
-                          const isDocApproved = doc.status === 'approved' && !isDocExpiredForTrip;
-                          const isDocSubmitted = doc.status === 'submitted' && !isDocExpiredForTrip;
-                          const isDocRejected = doc.status === 'rejected';
+                          {/* Uploaded items */}
+                          {horseItem.documents.map((doc) => {
+                            const isDocApproved = doc.status === 'approved';
+                            const isDocSubmitted = doc.status === 'submitted';
+                            const isDocRejected = doc.status === 'rejected';
 
-                          return (
-                            <div
-                              key={`doc-${doc.id}`}
-                              style={{
-                                padding: '14px 24px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                borderBottom: '1px solid #f8fafc',
-                                backgroundColor: isDocExpiredForTrip ? '#fff5f5' : undefined,
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0, paddingRight: '16px' }}>
-                                <div
-                                  style={{
-                                    width: '36px',
-                                    height: '36px',
-                                    borderRadius: '8px',
-                                    backgroundColor: isDocApproved ? '#dcfce7' : (isDocRejected || isDocExpiredForTrip) ? '#fee2e2' : '#f1f5f9',
-                                    color: isDocApproved ? '#15803d' : (isDocRejected || isDocExpiredForTrip) ? '#dc2626' : '#64748b',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    flexShrink: 0,
-                                  }}
-                                >
-                                  <FileText size={18} />
-                                </div>
-                                <div style={{ minWidth: 0 }}>
-                                  <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
-                                    {doc.regulationTitle || doc.docType}
-                                  </h5>
-                                  <p style={{ fontSize: '11.5px', color: '#64748b', margin: '2px 0 0 0' }}>
-                                    {doc.docNumber ? `Số: ${doc.docNumber} • ` : ''}Tải lên:{' '}
-                                    {new Date(doc.createdAt).toLocaleDateString('vi-VN')}
-                                    {doc.expiryDate && (
-                                      <span style={{ marginLeft: '6px', color: isDocExpiredForTrip ? '#dc2626' : '#475569', fontWeight: isDocExpiredForTrip ? 700 : 500 }}>
-                                        • Hạn: {new Date(doc.expiryDate).toLocaleDateString('vi-VN')}
-                                      </span>
-                                    )}
-                                    {doc.reviewerNotes && (
-                                      <span style={{ color: isDocRejected ? '#dc2626' : '#2563eb', marginLeft: '6px' }}>
-                                        (Ghi chú: {doc.reviewerNotes})
-                                      </span>
-                                    )}
-                                  </p>
-                                  {(doc.isExpiredForTrip || doc.isExpiringSoonForTrip) && doc.expiryNotice && (
-                                    <p style={{ fontSize: '11.5px', color: doc.isExpiredForTrip ? '#dc2626' : '#b45309', margin: '3px 0 0 0', fontWeight: 600 }}>
-                                      ⚠️ {doc.expiryNotice}
+                            return (
+                              <div
+                                key={`doc-${doc.id}`}
+                                className="px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 border-b border-[#F0EEE8]"
+                              >
+                                <div className="flex items-center gap-3.5 flex-1 min-w-[200px]">
+                                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: isDocApproved ? '#dcfce7' : isDocRejected ? '#fee2e2' : '#F0EEE8', color: isDocApproved ? '#15803d' : isDocRejected ? '#dc2626' : '#5F6977', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                    <FileText size={18} aria-hidden="true" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
+                                      {translateDocType(doc.regulationTitle || doc.docType)}
+                                    </h5>
+                                    <p style={{ fontSize: '11.5px', color: '#5F6977', margin: '2px 0 0 0' }}>
+                                      {doc.docNumber ? `${t('documents.number', 'Số')}: ${doc.docNumber} • ` : ''}{t('documents.uploadedAt', 'Tải lên')}: {new Date(doc.createdAt).toLocaleDateString(language === 'en' ? 'en-US' : 'vi-VN')}
+                                      {doc.reviewerNotes && (
+                                        <span style={{ color: isDocRejected ? '#dc2626' : '#A67C2E', marginLeft: '6px' }}>
+                                          ({t('documents.reviewerNote', 'Ghi chú')}: {translateRejectionReason(doc.reviewerNotes) || doc.reviewerNotes})
+                                        </span>
+                                      )}
                                     </p>
+                                    {(doc.isExpiredForTrip || doc.isExpiringSoonForTrip) && doc.expiryNotice && (
+                                      <p className={`text-[11.5px] mt-1 mb-0 font-semibold ${doc.isExpiredForTrip ? 'text-[#B33E3E]' : 'text-[#966516]'}`}>
+                                        {doc.expiryNotice}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                  {doc.fileUrl && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openAuthenticatedDocument(doc.id, doc.fileUrl)}
+                                      style={{
+                                        padding: '5px 10px',
+                                        borderRadius: '6px',
+                                        border: '1px solid var(--border-light)',
+                                        color: 'var(--primary)',
+                                        fontSize: '12px',
+                                        fontWeight: 600,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        cursor: 'pointer',
+                                        backgroundColor: '#ffffff',
+                                      }}
+                                    >
+                                      <Eye size={13} aria-hidden="true" /> {t('documents.viewFile', 'Xem tệp')}
+                                    </button>
+                                  )}
+
+                                  {(isDocRejected || isDocSubmitted) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenReupload(doc, horseItem.horseId)}
+                                      style={{
+                                        padding: '5px 10px',
+                                        borderRadius: '6px',
+                                        backgroundColor: isDocRejected ? '#dc2626' : '#FAF8F4',
+                                        color: isDocRejected ? '#ffffff' : '#A67C2E',
+                                        border: isDocRejected ? 'none' : '1px solid #D4C5A3',
+                                        fontSize: '12px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                      }}
+                                    >
+                                      <RefreshCw size={12} aria-hidden="true" /> {isDocRejected ? t('documents.resubmit', 'Nộp lại') : t('documents.update', 'Cập nhật')}
+                                    </button>
                                   )}
                                 </div>
                               </div>
-
-                              {/* Status Column (Aligned) */}
-                              <div style={{ width: '140px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
-                                <span
-                                  style={{
-                                    padding: '4px 10px',
-                                    borderRadius: '6px',
-                                    fontSize: '11.5px',
-                                    fontWeight: 700,
-                                    backgroundColor: isDocApproved
-                                      ? '#dcfce7'
-                                      : isDocSubmitted
-                                      ? '#fef3c7'
-                                      : (isDocRejected || isDocExpiredForTrip)
-                                      ? '#fee2e2'
-                                      : '#f1f5f9',
-                                    color: isDocApproved
-                                      ? '#15803d'
-                                      : isDocSubmitted
-                                      ? '#b45309'
-                                      : (isDocRejected || isDocExpiredForTrip)
-                                      ? '#b91c1c'
-                                      : '#64748b',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    minWidth: '96px',
-                                    justifyContent: 'center',
-                                  }}
-                                >
-                                  {isDocApproved && <CheckCircle size={12} />}
-                                  {isDocSubmitted && <Clock size={12} />}
-                                  {(isDocRejected || isDocExpiredForTrip) && <XCircle size={12} />}
-                                  {isDocApproved
-                                    ? 'Đã duyệt'
-                                    : isDocSubmitted
-                                    ? 'Chờ duyệt'
-                                    : isDocExpiredForTrip
-                                    ? 'Hết hạn'
-                                    : isDocRejected
-                                    ? 'Từ chối'
-                                    : doc.status}
-                                </span>
-                              </div>
-
-                              {/* Actions Column (Aligned) */}
-                              <div style={{ width: '200px', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                                {doc.fileUrl && (
-                                  <a
-                                    href={doc.fileUrl.startsWith('http') ? doc.fileUrl : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}${doc.fileUrl}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style={{
-                                      padding: '5px 10px',
-                                      borderRadius: '6px',
-                                      border: '1px solid var(--border-light)',
-                                      color: 'var(--primary)',
-                                      fontSize: '12px',
-                                      fontWeight: 600,
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      textDecoration: 'none',
-                                      backgroundColor: '#ffffff',
-                                    }}
-                                  >
-                                    <Eye size={13} /> Xem tệp
-                                  </a>
-                                )}
-
-                                {(isDocRejected || isDocSubmitted || isDocExpiredForTrip) && (
-                                  <button
-                                    onClick={() => handleOpenReupload(doc, horseItem.horseId)}
-                                    style={{
-                                      padding: '5px 10px',
-                                      borderRadius: '6px',
-                                      backgroundColor: (isDocRejected || isDocExpiredForTrip) ? '#dc2626' : '#eff6ff',
-                                      color: (isDocRejected || isDocExpiredForTrip) ? '#ffffff' : '#2563eb',
-                                      border: (isDocRejected || isDocExpiredForTrip) ? 'none' : '1px solid #bfdbfe',
-                                      fontSize: '12px',
-                                      fontWeight: 600,
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                    }}
-                                    title="Chọn tệp mới để cập nhật cho hồ sơ này"
-                                  >
-                                    <RefreshCw size={12} />
-                                    {isDocRejected ? 'Nộp lại' : 'Cập nhật'}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
-                    Chưa có danh mục hồ sơ được khởi tạo.
-                  </div>
-                )}
-              </div>
-            )}
+                            );
+                          })}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                      {t('documents.noRegulations', 'Chưa có danh mục hồ sơ được khởi tạo.')}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* 6. REQUEST INFORMATION */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-              <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                Request Information
-              </h4>
-            </div>
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Transportation Type</span>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                    {request.transportationType}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Departure Date</span>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                    {request.departureDate}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Expected Arrival</span>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                    {request.estimatedArrivalDate}
+          {/* Right column: Missing docs alert card */}
+          <div className="lg:col-span-1 flex flex-col gap-6">
+            {hasMissingDocs ? (
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  border: '2px solid #dc2626',
+                  borderRadius: '16px',
+                  padding: '20px',
+                  boxShadow: 'var(--shadow-md)',
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '6px', backgroundColor: '#dc2626' }} />
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <AlertTriangle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
+                      {t('documents.requiredDocsTitle', `Hồ sơ cần nộp ({count} mục)`, { count: totalMissingCount })}
+                    </h4>
+                    <p style={{ fontSize: '12.5px', color: '#475569', margin: '6px 0 16px 0', lineHeight: 1.4 }}>
+                      {t('documents.requiredDocsNotice', `Chuyên viên kiểm dịch đã phát hành yêu cầu. Còn {count} mục tài liệu cần nộp để đủ điều kiện xét duyệt.`, { count: totalMissingCount })}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenBatchUpload()}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        borderRadius: '8px',
+                        backgroundColor: '#dc2626',
+                        color: '#ffffff',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Upload size={14} aria-hidden="true" /> {t('requestDetail.batchUploadBtn', 'Nộp trọn bộ hồ sơ')}
+                    </button>
                   </div>
                 </div>
               </div>
-
-              <div style={{ paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
-                  Special Requirements & Notes
-                </span>
-                <div style={{ backgroundColor: '#f8fafc', padding: '14px', borderRadius: '8px', border: '1px solid var(--border-card)' }}>
-                  <p style={{ fontSize: '13.5px', color: 'var(--text-body)', margin: 0, fontStyle: 'italic' }}>
-                    "{request.notes || 'Temperature-controlled transportation required. Silver Star requires timothy hay during the flight due to sensitive digestion.'}"
-                  </p>
+            ) : checklist?.isFullyCompliant ? (
+              <div
+                style={{
+                  backgroundColor: '#f0fdf4',
+                  borderRadius: '16px',
+                  border: '1px solid #bbf7d0',
+                  padding: '20px',
+                }}
+              >
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <CheckCircle2 size={20} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#166534', margin: 0 }}>
+                      {t('requestDetail.fullDossierComplete', 'Hồ sơ đạt chuẩn 100%')}
+                    </h4>
+                    <p style={{ fontSize: '12.5px', color: '#15803d', margin: '6px 0 0 0', lineHeight: 1.4 }}>
+                      {t('requestDetail.allDocsApprovedDesc', 'Tất cả các tài liệu kiểm dịch và pháp lý đã được duyệt hợp lệ.')}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : null}
           </div>
         </div>
+      )}
 
-        {/* RIGHT COLUMN */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', position: 'sticky', top: '108px' }}>
-          {/* ACTION PANEL (Sticky Missing Documents Warning) */}
-          {hasMissingDocs ? (
-            <div
-              style={{
-                backgroundColor: '#ffffff',
-                border: '2px solid #dc2626',
-                borderRadius: '16px',
-                padding: '20px',
-                boxShadow: 'var(--shadow-md)',
-                position: 'relative',
-                overflow: 'hidden',
-              }}
-            >
-              <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '6px', backgroundColor: '#dc2626' }} />
+      {/* ─── TAB 4: BÁO GIÁ & THANH TOÁN ──────────────────────────── */}
+      {activeTab === 'quotation' && (
+        <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6 items-start">
+          <div className="lg:col-span-2 flex flex-col gap-6">
+            {/* Quotation Detail Breakdown Card */}
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex justify-between items-center flex-wrap gap-2">
+                <h4 className="text-sm font-bold text-[#181A17] m-0">
+                  {t('requestDetail.officialQuotation', 'Bảng chiết tính Báo giá Vận chuyển Chính thức')}
+                </h4>
+                <button
+                  type="button"
+                  onClick={exportQuotation}
+                  className="px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-[#FAF8F4] hover:bg-[#F5EFE2] text-[#A67C2E] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Download size={13} aria-hidden="true" /> {t('requestDetail.pdfBtn', 'Xuất Báo giá PDF')}
+                </button>
+              </div>
 
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <AlertTriangle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
-                <div>
-                  <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                    Hồ sơ cần nộp ({totalMissingCount} mục)
-                  </h4>
-                  <p style={{ fontSize: '12.5px', color: '#475569', margin: '6px 0 16px 0', lineHeight: 1.4 }}>
-                    Chuyên viên kiểm dịch đã phát hành yêu cầu nộp hồ sơ. Còn <strong>{totalMissingCount}</strong> mục tài liệu cần hoàn tất để đảm bảo điều kiện xuất nhập cảnh.
-                  </p>
-                  <button
-                    onClick={() => {
-                      if (totalMissingCount > 1) {
-                        handleOpenBatchUpload();
-                      } else {
-                        handleOpenUpload();
-                      }
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      backgroundColor: '#dc2626',
-                      color: '#ffffff',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      border: 'none',
-                      cursor: 'pointer',
-                      boxShadow: '0 2px 8px rgba(220, 38, 38, 0.25)',
-                    }}
-                  >
-                    <Upload size={14} /> ⚡ Nộp trọn bộ {totalMissingCount} hồ sơ (Nộp tất cả)
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : hasRejectedDocs ? (
-            <div
-              style={{
-                backgroundColor: '#ffffff',
-                borderRadius: '16px',
-                border: '1px solid #fecaca',
-                padding: '20px',
-                position: 'relative',
-                overflow: 'hidden',
-                boxShadow: 'var(--shadow-sm)',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  left: 0,
-                  width: '6px',
-                  backgroundColor: '#dc2626',
-                }}
-              />
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <AlertTriangle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
-                <div>
-                  <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                    Hồ sơ cần nộp lại ({totalRejectedCount} mục bị từ chối)
-                  </h4>
-                  <p style={{ fontSize: '12.5px', color: '#475569', margin: '6px 0 0 0', lineHeight: 1.4 }}>
-                    Chuyên viên kiểm dịch yêu cầu nộp lại {totalRejectedCount} tài liệu chưa đạt chuẩn. Vui lòng bấm <strong>"Nộp lại"</strong> tại dòng tài liệu bị từ chối bên dưới để tải lên tệp mới.
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : isApproved && requirementsSent && (
-            <div
-              style={{
-                backgroundColor: checklist?.isFullyCompliant ? '#f0fdf4' : '#eff6ff',
-                borderRadius: '16px',
-                border: checklist?.isFullyCompliant ? '1px solid #bbf7d0' : '1px solid #bfdbfe',
-                padding: '20px',
-                position: 'relative',
-                overflow: 'hidden',
-                boxShadow: 'var(--shadow-sm)',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  left: 0,
-                  width: '6px',
-                  backgroundColor: checklist?.isFullyCompliant ? '#16a34a' : '#2563eb',
-                }}
-              />
-              <div style={{ display: 'flex', gap: '12px' }}>
-                {String(request?.status || '').toLowerCase() === 'completed' || String(request?.status || '').toLowerCase() === 'delivered' ? (
-                  <>
-                    <CheckCircle2 size={22} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
-                    <div>
-                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#166534', margin: 0 }}>
-                        Vận chuyển hoàn thành thành công 100%
-                      </h4>
-                      <p style={{ fontSize: '12.5px', color: '#15803d', margin: '6px 0 0 0', lineHeight: 1.4 }}>
-                        Ngựa đã cập bến an toàn tại điểm đích và hoàn tất toàn bộ quy trình bàn giao cho người nhận. Cảm ơn quý khách đã tin tưởng và sử dụng dịch vụ của EquiTransit Logistics!
-                      </p>
+              <div className="p-6 flex flex-col gap-5">
+                <div className="bg-[#FAF8F4] rounded-xl p-5 border border-[#E5DDD0] flex justify-between items-center flex-wrap gap-4">
+                  <div>
+                    <span style={{ fontSize: '12.5px', color: '#5F6977' }}>{t('requestDetail.allInclusiveCost', 'Tổng chi phí dịch vụ trọn gói')}</span>
+                    <div style={{ fontSize: '24px', fontWeight: 800, color: '#287653', marginTop: '4px' }}>
+                      {Number(request.totalCost) > 0
+                        ? `${Number(request.totalCost).toLocaleString('vi-VN')} VNĐ`
+                        : t('requestDetail.awaitingManagerConfirmation', 'Đang chờ quản lý xác nhận')}
                     </div>
-                  </>
-                ) : String(request?.status || '').toLowerCase() === 'in_transit' ? (
-                  <>
-                    <Truck size={20} color="#0284c7" style={{ flexShrink: 0, marginTop: '2px' }} />
-                    <div>
-                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0369a1', margin: 0 }}>
-                        Đoàn xe / Chuyến bay đang di chuyển (In Transit)
-                      </h4>
-                      <p style={{ fontSize: '12.5px', color: '#0284c7', margin: '6px 0 0 0', lineHeight: 1.4 }}>
-                        Chuyến đi đang di chuyển theo đúng lộ trình kế hoạch. Quý khách có thể bấm nút <strong>"Live Tracking"</strong> ở góc trên bên phải để theo dõi trực tiếp vị trí và sinh hiệu ngựa.
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    {checklist?.isFullyCompliant ? (
-                      <CheckCircle2 size={20} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
-                    ) : (
-                      <Clock size={20} color="#2563eb" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    {!isQuotationAccepted && Number(request.totalCost) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsQuotationAccepted(true);
+                          toast.success(t('requestDetail.quotationAcceptedToast', 'Báo giá đã được chấp thuận! Bạn có thể thanh toán trực tiếp qua cổng SePay VietQR bên dưới.'));
+                        }}
+                        style={{
+                          padding: '10px 20px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          backgroundColor: '#287653',
+                          color: '#ffffff',
+                          fontWeight: 700,
+                          fontSize: '13.5px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          boxShadow: '0 2px 8px rgba(40, 118, 83, 0.25)',
+                        }}
+                      >
+                        <Check size={16} strokeWidth={3} aria-hidden="true" /> {t('requestDetail.acceptQuotationBtn', 'Chấp Thuận Báo Giá')}
+                      </button>
                     )}
-                    <div>
-                      <h4 style={{ fontSize: '15px', fontWeight: 700, color: checklist?.isFullyCompliant ? '#166534' : '#1e40af', margin: 0 }}>
-                        {checklist?.isFullyCompliant ? 'Hồ sơ đã được phê duyệt 100%' : 'Đã nộp đủ hồ sơ (Chờ duyệt)'}
-                      </h4>
-                      <p style={{ fontSize: '12.5px', color: checklist?.isFullyCompliant ? '#15803d' : '#1e3a8a', margin: '6px 0 0 0', lineHeight: 1.4 }}>
-                        {checklist?.isFullyCompliant
-                          ? 'Tất cả các tài liệu kiểm dịch và pháp lý đã được duyệt hợp lệ. Chuyến đi đã đủ điều kiện xuất phát.'
-                          : `Quý khách đã nộp đầy đủ các chứng từ theo yêu cầu (${checklist?.approvedDocumentsCount || 0}/${checklist?.totalRequiredDocuments || 0} đã duyệt). Chuyên viên kiểm dịch đang trong quá trình thẩm định hồ sơ.`}
-                      </p>
-                    </div>
-                  </>
-                )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNegotiateNotes('');
+                        setIsNegotiateModalOpen(true);
+                      }}
+                      style={{
+                        padding: '10px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #D8CEBE',
+                        backgroundColor: '#ffffff',
+                        color: '#334155',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {t('requestDetail.negotiateBtn', 'Yêu cầu thương thảo giá')}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto w-full">
+                  <table style={{ width: '100%', minWidth: '500px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #D8CEBE', backgroundColor: '#F0EEE8' }}>
+                        <th style={{ padding: '10px 14px', color: '#475569', fontWeight: 700 }}>{t('requestDetail.itemCol', 'Hạng mục dịch vụ')}</th>
+                        <th style={{ padding: '10px 14px', color: '#475569', fontWeight: 700 }}>{t('requestDetail.descCol', 'Mô tả quy chuẩn')}</th>
+                        <th style={{ padding: '10px 14px', color: '#475569', fontWeight: 700, textAlign: 'right' }}>{t('requestDetail.statusCol', 'Trạng thái')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ borderBottom: '1px solid #F0EEE8' }}>
+                        <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-heading)' }}>{t('requestDetail.itemTransport', 'Vận chuyển chuyên dụng')}</td>
+                        <td style={{ padding: '12px 14px', color: '#64748b' }}>{t('requestDetail.itemTransportDesc', 'Xe đệm khí kiểm soát nhiệt độ hoặc khoang bay hàng không')}</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right', color: '#16a34a', fontWeight: 600 }}>{t('requestDetail.included', 'Đã bao gồm')}</td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid #F0EEE8' }}>
+                        <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-heading)' }}>{t('requestDetail.itemQuarantine', 'Chuồng lưu trú cách ly kiểm dịch')}</td>
+                        <td style={{ padding: '12px 14px', color: '#64748b' }}>{t('requestDetail.itemQuarantineDesc', 'Trạm trung chuyển kiểm dịch thú y đạt chuẩn FEI/WOAH')}</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right', color: '#16a34a', fontWeight: 600 }}>{t('requestDetail.included', 'Đã bao gồm')}</td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid #F0EEE8' }}>
+                        <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-heading)' }}>{t('requestDetail.itemCustoms', 'Thủ tục hải quan & Cửa khẩu')}</td>
+                        <td style={{ padding: '12px 14px', color: '#64748b' }}>{t('requestDetail.itemCustomsDesc', 'Khai báo hải quan động vật sống và kiểm dịch xuất/nhập cảnh')}</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right', color: '#16a34a', fontWeight: 600 }}>{t('requestDetail.included', 'Đã bao gồm')}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-          )}
 
-          {/* REQUEST ACTIVITY / AUDIT HISTORY */}
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              border: '1px solid var(--border-card)',
-              padding: '24px',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <h4 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 20px 0' }}>
-              Request Activity
-            </h4>
+            {/* SePay VietQR Payment Gateway */}
+            {isApproved && (
+                <SepayPayment
+                  shipmentId={Number(request.id || request.shipmentId || requestId)}
+                  requestCode={request.requestCode}
+                  amount={Number(request.totalCost)}
+                  eligible={PAYABLE_SHIPMENT_STATUSES.includes(statusLower) && Number.isSafeInteger(Number(request.totalCost)) && Number(request.totalCost) > 0}
+                />
+              )}
+          </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', position: 'relative', paddingLeft: '22px' }}>
-              {/* Vertical line */}
-              <div style={{ position: 'absolute', top: '8px', bottom: '8px', left: '7px', width: '2px', backgroundColor: '#e2e8f0' }} />
-
-              {request.activities?.map((act: any, index: number) => (
-                <div key={act.id} style={{ position: 'relative' }}>
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: '-19px',
-                      top: '4px',
-                      width: '10px',
-                      height: '10px',
-                      borderRadius: '50%',
-                      backgroundColor: index === 0 ? 'var(--primary)' : '#cbd5e1',
-                      boxShadow: '0 0 0 3px #ffffff',
-                    }}
-                  />
-                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>{act.timestamp}</span>
-                  <div style={{ fontSize: '13.5px', color: 'var(--text-heading)', fontWeight: 500, marginTop: '2px' }}>
-                    {act.description}
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{act.actor}</div>
-                </div>
-              ))}
+          <div className="lg:col-span-1 flex flex-col gap-6">
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 shadow-sm">
+              <h4 className="text-sm font-bold text-[#181A17] m-0 mb-3">
+                {t('requestDetail.paymentPolicyTitle', 'Chính sách thanh toán an toàn')}
+              </h4>
+              <p className="text-xs text-[#5F6977] leading-relaxed m-0">
+                {t('requestDetail.paymentPolicyDesc', 'Hệ thống hỗ trợ thanh toán trực tuyến tự động qua cổng SePay VietQR / Chuyển khoản ngân hàng 24/7. Tiền cọc được giữ an toàn tại tài khoản ủy thác cho đến khi chuyến đi được xác nhận lịch trình chính thức.')}
+              </p>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Upload Modal */}
       <DocumentUploadModal
@@ -1985,23 +2005,130 @@ export default function RequestDetailPage() {
       />
 
       {/* Resubmit Modal */}
-      <Modal isOpen={isResubmitOpen} onClose={() => setIsResubmitOpen(false)} title="Chỉnh sửa & gửi lại yêu cầu"
-        subtitle={`Mã yêu cầu: ${request.requestCode}`} maxWidth="700px">
-        <InsuranceAmendmentForm key={`${request.id}-${request.updatedAt}`} orderId={Number(request.id)}
-          horses={request.insuranceHorses ?? []} specialRequirements={request.specialRequirements} bookingType={request.bookingType}
-          onCancel={() => setIsResubmitOpen(false)} onSaved={() => {
-            setIsResubmitOpen(false); void mutate(); toast.success('Đã gửi lại yêu cầu để Manager xét duyệt.');
-          }} />
+      <Modal
+        isOpen={isResubmitOpen}
+        onClose={() => setIsResubmitOpen(false)}
+        title={t('requestDetail.resubmitTitle', 'Cập nhật & Gửi lại yêu cầu vận chuyển')}
+        subtitle={`${t('customer.requestCodeLabel', 'Mã đơn')}: ${request.requestCode}`}
+        maxWidth="max-w-2xl"
+      >
+        <InsuranceAmendmentForm
+          key={`${request.id}-${request.updatedAt}`}
+          orderId={Number(request.id)}
+          horses={request.insuranceHorses ?? []}
+          specialRequirements={request.specialRequirements}
+          bookingType={request.bookingType}
+          onCancel={() => setIsResubmitOpen(false)}
+          onSaved={() => {
+            setIsResubmitOpen(false);
+            void mutate();
+            toast.success(t('requestDetail.resubmitSuccess', 'Đã gửi lại yêu cầu để Logistics Manager xét duyệt.'));
+          }}
+        />
       </Modal>
-      {/* Professional Cancel Request Confirmation Modal */}
+
+      {/* Price Negotiation Modal */}
+      <Modal
+        isOpen={isNegotiateModalOpen}
+        onClose={() => {
+          if (isSubmittingNegotiation) return;
+          setNegotiateNotes('');
+          setIsNegotiateModalOpen(false);
+        }}
+        closeDisabled={isSubmittingNegotiation}
+        title={t('requestDetail.negotiateTitle', 'Yêu cầu thương thảo giá vận chuyển')}
+        subtitle={`${t('customer.requestCodeLabel', 'Mã đơn')}: ${request.requestCode}`}
+        maxWidth="500px"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <p style={{ fontSize: '13px', color: '#475569', margin: 0, lineHeight: 1.5 }}>
+            {t('requestDetail.negotiateDesc', 'Quý khách có thể gửi mức ngân sách dự kiến hoặc đề xuất phương án điều chỉnh để Logistics Manager xem xét lại phương án báo giá.')}
+          </p>
+          <div>
+            <label htmlFor="negotiation-notes" style={{ fontSize: '12.5px', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '6px' }}>
+              {t('requestDetail.proposalBudget', 'Nội dung đề xuất / Ngân sách mong muốn:')}
+            </label>
+            <textarea
+              id="negotiation-notes"
+              rows={4}
+              value={negotiateNotes}
+              disabled={isSubmittingNegotiation}
+              onChange={(e) => setNegotiateNotes(e.target.value)}
+              placeholder={language === 'en' ? 'e.g. We would like to optimize transport costs or suggest combined flight dispatch...' : 'Ví dụ: Chúng tôi mong muốn tối ưu chi phí vận chuyển hoặc đề xuất bay ghép chuyến cùng đoàn...'}
+              className="w-full px-3 py-2.5 rounded-lg border border-[#D8CEBE] text-sm text-[#181A17] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20"
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              disabled={isSubmittingNegotiation}
+              onClick={() => {
+                setNegotiateNotes('');
+                setIsNegotiateModalOpen(false);
+              }}
+              style={{
+                padding: '9px 16px',
+                borderRadius: '8px',
+                border: '1px solid #D8CEBE',
+                backgroundColor: '#fff',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#475569',
+                cursor: isSubmittingNegotiation ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {t('common.close', 'Đóng')}
+            </button>
+            <button
+              type="button"
+              disabled={isSubmittingNegotiation || !negotiateNotes.trim()}
+              onClick={async () => {
+                setIsSubmittingNegotiation(true);
+                try {
+                  await apiClient(`/orders/${request.id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                      specialRequirements: `[${language === 'en' ? 'Price Negotiation Request' : 'Yêu cầu thương thảo giá'}: ${negotiateNotes.trim()}] | ${request.specialRequirements || ''}`,
+                    }),
+                  });
+                  await mutate();
+                  setIsNegotiateModalOpen(false);
+                  setNegotiateNotes('');
+                  toast.success(t('requestDetail.negotiateSuccess', 'Yêu cầu thương thảo giá đã được gửi đến Logistics Manager thành công!'));
+                } catch (err: any) {
+                  toast.error(err?.message || (language === 'en' ? 'Unable to submit negotiation request at this time.' : 'Không thể gửi yêu cầu thương thảo lúc này.'));
+                } finally {
+                  setIsSubmittingNegotiation(false);
+                }
+              }}
+              style={{
+                padding: '9px 20px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: '#A67C2E',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: isSubmittingNegotiation || !negotiateNotes.trim() ? 'not-allowed' : 'pointer',
+                opacity: isSubmittingNegotiation || !negotiateNotes.trim() ? 0.6 : 1,
+              }}
+            >
+              {isSubmittingNegotiation ? t('requestDetail.submitting', 'Đang gửi...') : t('requestDetail.sendNegotiationBtn', 'Gửi yêu cầu')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Cancel Order Modal: NO double-padding */}
       <Modal
         isOpen={isCancelModalOpen}
         onClose={() => !isCancelling && setIsCancelModalOpen(false)}
-        title="Xác nhận hủy đơn vận chuyển"
-        subtitle={`Mã đơn: ${request?.requestCode || `#${request?.id}`}`}
+        closeDisabled={isCancelling}
+        title={t('requestDetail.cancelModalTitle', 'Xác nhận hủy đơn vận chuyển')}
+        subtitle={`${t('customer.requestCodeLabel', 'Mã đơn')}: ${request?.requestCode || `#${request?.id}`}`}
         maxWidth="480px"
       >
-        <div style={{ padding: '24px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div
             style={{
               display: 'flex',
@@ -2011,7 +2138,6 @@ export default function RequestDetailPage() {
               borderRadius: '12px',
               backgroundColor: '#fef2f2',
               border: '1px solid #fee2e2',
-              marginBottom: '20px',
             }}
           >
             <div
@@ -2031,47 +2157,44 @@ export default function RequestDetailPage() {
             </div>
             <div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: '#991b1b', marginBottom: '4px' }}>
-                Hành động này không thể hoàn tác
+                {t('requestDetail.cannotUndo', 'Hành động này không thể hoàn tác')}
               </div>
               <div style={{ fontSize: '13px', color: '#7f1d1d', lineHeight: '1.5' }}>
-                Bạn có chắc chắn muốn hủy đơn vận chuyển <strong>{request?.requestCode || `#${request?.id}`}</strong>?
-                Sau khi hủy, hành trình vận chuyển sẽ bị dừng lại và các chú ngựa liên quan sẽ được mở khóa trạng thái.
+                {t('requestDetail.confirmCancelPrompt', 'Bạn có chắc chắn muốn hủy đơn vận chuyển {code}? Sau khi hủy, hành trình vận chuyển sẽ bị dừng lại và các chú ngựa liên quan sẽ được mở khóa trạng thái.', { code: request?.requestCode || `#${request?.id}` })}
               </div>
             </div>
           </div>
 
-          {/* Request details recap */}
           <div
             style={{
               padding: '14px 16px',
               borderRadius: '10px',
-              backgroundColor: '#f8fafc',
-              border: '1px solid #e2e8f0',
+              backgroundColor: '#F0EEE8',
+              border: '1px solid #D8CEBE',
               fontSize: '13px',
               color: '#475569',
               display: 'flex',
               flexDirection: 'column',
               gap: '8px',
-              marginBottom: '24px',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#64748b' }}>Tuyến đường:</span>
+              <span style={{ color: '#64748b' }}>{t('customer.table.route', 'Tuyến đường')}:</span>
               <span style={{ fontWeight: 600, color: '#1e293b' }}>
-                {request?.route?.origin || 'N/A'} ➔ {request?.route?.destination || 'N/A'}
+                {request?.origin} ➔ {request?.destination}
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#64748b' }}>Số lượng ngựa:</span>
-              <span style={{ fontWeight: 600, color: '#1e293b' }}>{request?.horses?.length || 1} con</span>
+              <span style={{ color: '#64748b' }}>{t('customer.table.horseCount', 'Số lượng ngựa')}:</span>
+              <span style={{ fontWeight: 600, color: '#1e293b' }}>{request?.horses?.length || 1} {t('common.horsesUnit', 'con')}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#64748b' }}>Trạng thái hiện tại:</span>
-              <span style={{ fontWeight: 600, color: '#d97706' }}>{request?.statusLabel || request?.status}</span>
+              <span style={{ color: '#64748b' }}>{t('customer.table.status', 'Trạng thái hiện tại')}:</span>
+              <span style={{ fontWeight: 600, color: '#d97706' }}>{translateStatus(request?.statusLabel || request?.status)}</span>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
             <button
               type="button"
               onClick={() => setIsCancelModalOpen(false)}
@@ -2079,7 +2202,7 @@ export default function RequestDetailPage() {
               style={{
                 padding: '10px 18px',
                 borderRadius: '8px',
-                border: '1px solid #cbd5e1',
+                border: '1px solid #D8CEBE',
                 backgroundColor: '#ffffff',
                 color: '#475569',
                 fontWeight: 600,
@@ -2087,7 +2210,7 @@ export default function RequestDetailPage() {
                 cursor: isCancelling ? 'not-allowed' : 'pointer',
               }}
             >
-              Giữ lại đơn
+              {t('requestDetail.keepRequestBtn', 'Giữ lại đơn')}
             </button>
             <button
               type="button"
@@ -2112,10 +2235,10 @@ export default function RequestDetailPage() {
               {isCancelling ? (
                 <>
                   <Loader2 size={16} className="animate-spin" />
-                  Đang xử lý hủy...
+                  {t('requestDetail.cancelling', 'Đang xử lý hủy...')}
                 </>
               ) : (
-                'Xác nhận hủy đơn'
+                t('requestDetail.confirmCancelBtn', 'Xác nhận hủy đơn')
               )}
             </button>
           </div>

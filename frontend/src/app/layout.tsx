@@ -1,13 +1,11 @@
 import type { Metadata } from 'next';
 import { Toaster } from 'react-hot-toast';
-import { DocumentStoreProvider } from '@/lib/document-store';
-import { FleetRouteStoreProvider } from '@/lib/fleet-route-store';
 import { LanguageProvider } from '@/lib/i18n/LanguageContext';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'EquiTransit Logistics - Cross-Border Racehorse Transport',
-  description: 'Specialized international racehorse transportation management system.',
+  title: 'EquiTransit Logistics - Hệ Thống Vận Tải Ngựa Đua Quốc Tế',
+  description: 'Hệ thống quản lý và điều phối vận chuyển ngựa đua xuyên quốc gia theo tiêu chuẩn IATA LAR và FEI / WOAH.',
   icons: {
     icon: [
       { url: '/icon.png', type: 'image/png' },
@@ -25,20 +23,26 @@ export default function RootLayout({
 }) {
   return (
     <html lang="vi" suppressHydrationWarning>
-      <head>
-        <link rel="icon" href="/icon.png" type="image/png" sizes="any" />
-        <link rel="shortcut icon" href="/favicon.ico" />
-        <link rel="apple-touch-icon" href="/icon.png" />
-      </head>
-      <body suppressHydrationWarning>
+      <body className="antialiased bg-page-bg text-text-primary" suppressHydrationWarning>
         <LanguageProvider>
-          <DocumentStoreProvider>
-            <FleetRouteStoreProvider>
-              {children}
-            </FleetRouteStoreProvider>
-          </DocumentStoreProvider>
+          {children}
         </LanguageProvider>
-        <Toaster position="top-right" />
+        <Toaster
+          position="top-right"
+          containerStyle={{ zIndex: 10050 }}
+          toastOptions={{
+            duration: 4000,
+            style: {
+              background: '#181A17',
+              color: '#FAF8F4',
+              borderRadius: '12px',
+              border: '1px solid #C4B38E',
+              fontSize: '13px',
+              fontWeight: 600,
+              boxShadow: '0 10px 25px rgba(24, 26, 23, 0.22)',
+            },
+          }}
+        />
       </body>
     </html>
   );

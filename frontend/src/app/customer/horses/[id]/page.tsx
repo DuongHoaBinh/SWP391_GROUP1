@@ -1,72 +1,121 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ChevronRight,
-  Edit3,
-  Trash2,
-  CheckCircle2,
-  MoreVertical,
-  Check,
-  Clock,
-  AlertTriangle,
-  Upload,
-  Download,
-  X,
+  ArrowLeft,
+  FileCheck2,
   FileText,
+  ShieldCheck,
+  Truck,
+  Upload,
+  AlertTriangle,
   UserCheck,
+  Download,
+  Info,
+  ChevronRight,
   Camera,
-  Loader2,
+  Edit2,
+  Trash2,
+  Activity,
+  Heart,
 } from 'lucide-react';
-import { useCustomerStore } from '@/lib/customer-store';
-import { HorseDocument } from '@/lib/types';
+import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
+import { Horse, HorseDocument } from '@/lib/types';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { EditHorseModal } from '@/components/horses/EditHorseModal';
 import { DeleteHorseModal } from '@/components/horses/DeleteHorseModal';
-import { apiClient } from '@/lib/api-client';
-import { getFullPhotoUrl } from '@/lib/customer-store';
-import { formatHorseColor, formatHorseMedicalStatus } from '@/lib/horse-constants';
+import { Modal } from '@/components/ui/Modal';
+import { apiClient, openAuthenticatedDocument } from '@/lib/api-client';
+import toast from 'react-hot-toast';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
-const formatDocTypeName = (type: string) => {
-  const map: Record<string, string> = {
-    horse_passport: 'Hộ chiếu ngựa (FEI / Horse Passport)',
-    health_certificate: 'Chứng nhận kiểm dịch thú y (Health Certificate)',
-    vaccination_certificate: 'Chứng nhận tiêm chủng (Vaccination Certificate)',
-    import_permit: 'Giấy phép nhập khẩu (Import Permit)',
-    export_permit: 'Giấy phép xuất khẩu (Export Permit)',
-    customs_declaration: 'Tờ khai hải quan (Customs Declaration)',
-    cites_permit: 'Giấy phép CITES (CITES Permit)',
-  };
-  return map[type] || type;
-};
-
-const formatDocStatus = (status: string) => {
-  if (status === 'approved') return 'Approved';
-  if (status === 'submitted' || status === 'draft') return 'Under Review';
-  if (status === 'rejected') return 'Rejected';
-  if (status === 'expired') return 'Expired';
-  return status;
-};
+const getFallbackHorsePhoto = () =>
+  'https://images.unsplash.com/photo-1598974357801-cbca100e65d3?auto=format&fit=crop&w=800&q=80';
 
 export default function HorseDetailPage() {
+  const { t, language, translateGender, translateBreed, translateColor, translateHealthStatus } = useLanguage();
+  const isEn = language === 'en';
   const params = useParams();
   const router = useRouter();
   const horseId = params?.id as string;
 
-  const { getHorseById, uploadDocumentForHorse, uploadDocumentForRequest, uploadHorseAvatar, refreshHorses } = useCustomerStore();
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const { getHorseById, requests, uploadHorseAvatar } = useCustomerStore();
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
-  const [apiHorse, setApiHorse] = useState<any>(null);
+
+  const initialLocal = getHorseById(horseId);
+  const [horse, setHorse] = useState<Horse | undefined>(initialLocal);
+  const [isLoading, setIsLoading] = useState(!initialLocal);
+  const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Real backend documents & health tracking logs
   const [horseDocs, setHorseDocs] = useState<any[]>([]);
   const [isLoadingDocs, setIsLoadingDocs] = useState(false);
+  const [docsError, setDocsError] = useState<string | null>(null);
   const [medicalLogs, setMedicalLogs] = useState<any[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
 
-  const fetchHorseDocs = () => {
+  const [previewDoc, setPreviewDoc] = useState<HorseDocument | null>(null);
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    };
+  }, []);
+
+  const formatDocTypeName = useCallback(
+    (docType: string): string => {
+      switch (docType) {
+        case 'passport':
+        case 'horse_passport':
+          return isEn ? 'FEI Horse Passport' : 'Hộ chiếu ngựa (FEI Passport)';
+        case 'health_certificate':
+        case 'health_cert':
+          return isEn ? 'Veterinary Health Certificate' : 'Chứng nhận sức khỏe thú y';
+        case 'quarantine_permit':
+        case 'quarantine_certificate':
+          return isEn ? 'Quarantine Isolation Certificate' : 'Giấy phép kiểm dịch';
+        case 'import_permit':
+          return isEn ? 'Import Veterinary Permit' : 'Giấy phép nhập khẩu';
+        case 'export_permit':
+          return isEn ? 'Export Quarantine Permit' : 'Giấy phép xuất khẩu';
+        case 'customs_declaration':
+          return isEn ? 'Customs Transit Declaration' : 'Tờ khai hải quan';
+        default:
+          return docType || (isEn ? 'Quarantine Document' : 'Tài liệu kiểm dịch');
+      }
+    },
+    [isEn]
+  );
+
+  const formatDocStatus = (status: string): string => {
+    switch (status) {
+      case 'approved':
+        return 'Approved';
+      case 'submitted':
+      case 'under_review':
+        return 'Under Review';
+      case 'rejected':
+        return 'Rejected';
+      case 'expired':
+        return 'Expired';
+      default:
+        return 'Missing';
+    }
+  };
+
+  const fetchHorseDocs = useCallback(() => {
     if (!horseId) return;
     setIsLoadingDocs(true);
+    setDocsError(null);
     apiClient<any[]>(`/documents/horse/${horseId}`)
       .then((data) => {
         if (Array.isArray(data)) {
@@ -91,856 +140,607 @@ export default function HorseDetailPage() {
           setHorseDocs(mapped);
         }
       })
-      .catch(() => {})
+      .catch((err: any) => {
+        setDocsError(err?.message || (isEn ? 'Could not load documents.' : 'Không thể tải danh sách chứng từ.'));
+      })
       .finally(() => setIsLoadingDocs(false));
-  };
+  }, [horseId, formatDocTypeName, isEn]);
 
-  const fetchHealthLogs = () => {
+  const fetchHealthLogs = useCallback(() => {
     if (!horseId) return;
     setIsLoadingLogs(true);
+    setLogsError(null);
     apiClient<any[]>(`/tracking/horses/${horseId}/health-logs`)
       .then((data) => {
         if (Array.isArray(data)) {
           const mapped = data.map((log) => ({
             id: log.id,
-            date: new Date(log.recordedAt).toLocaleString('vi-VN', {
+            date: new Date(log.recordedAt).toLocaleString(isEn ? 'en-US' : 'vi-VN', {
               day: '2-digit',
               month: '2-digit',
               year: 'numeric',
               hour: '2-digit',
               minute: '2-digit',
             }),
-            title: log.legName || 'Kiểm tra sức khỏe trạm vận chuyển',
-            examiner: `${log.recordedByName || 'Nhân viên thú y / áp tải'}${log.recordedByRole ? ` (${log.recordedByRole})` : ''} • Thân nhiệt: ${log.temperatureC !== null && log.temperatureC !== undefined ? `${log.temperatureC}°C` : 'Bình thường'} • Nhịp tim: ${log.heartRateBpm ? `${log.heartRateBpm} bpm` : 'Bình thường'}${log.notes ? ` • Ghi chú: ${log.notes}` : ''}`,
-            status: log.conditionStatusVi || 'Khỏe mạnh / Ổn định',
+            title: log.legName || (isEn ? 'Transit Checkpoint Health Check' : 'Kiểm tra sức khỏe trạm vận chuyển'),
+            examiner: `${
+              log.recordedByName || (isEn ? 'Veterinarian / Escort' : 'Nhân viên thú y / áp tải')
+            }${log.recordedByRole ? ` (${log.recordedByRole})` : ''} • ${
+              isEn ? 'Temp' : 'Thân nhiệt'
+            }: ${log.temperatureC !== null && log.temperatureC !== undefined ? `${log.temperatureC}°C` : '—'} • ${
+              isEn ? 'Heart Rate' : 'Nhịp tim'
+            }: ${log.heartRateBpm ? `${log.heartRateBpm} bpm` : '—'}${
+              log.notes ? ` • ${isEn ? 'Notes' : 'Ghi chú'}: ${log.notes}` : ''
+            }`,
+            status: isEn
+              ? log.conditionStatus || 'Healthy / Stable'
+              : log.conditionStatusVi || log.conditionStatus || 'Khỏe mạnh / Ổn định',
             rawStatus: log.conditionStatus,
           }));
           setMedicalLogs(mapped);
         }
       })
-      .catch(() => {})
+      .catch((err: any) => {
+        setLogsError(err?.message || (isEn ? 'Could not load health logs.' : 'Không thể tải nhật ký sức khỏe.'));
+      })
       .finally(() => setIsLoadingLogs(false));
-  };
+  }, [horseId, isEn]);
 
   useEffect(() => {
     fetchHorseDocs();
     fetchHealthLogs();
-  }, [horseId]);
+  }, [fetchHorseDocs, fetchHealthLogs]);
+
+  const showFeedback = (msg: string, durationMs = 4000) => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    setFeedbackSuccess(msg);
+    feedbackTimerRef.current = setTimeout(() => {
+      setFeedbackSuccess(null);
+    }, durationMs);
+  };
 
   useEffect(() => {
-    if (horseId) {
-      apiClient<any>(`/horses/${horseId}`)
-        .then((data) => {
-          if (data && (data.id || data.name)) {
-            setApiHorse({
-              id: String(data.id || horseId),
-              backendId: data.id,
-              code: data.passportNo || `HR-${String(data.id || horseId).padStart(5, '0')}`,
-              name: data.name,
-              breed: data.breed || 'Thoroughbred',
-              age: Number(data.age) || 4,
-              gender:
-                data.gender === 'female'
-                  ? 'Mare'
-                  : data.gender === 'gelding'
+    let isMounted = true;
+    const localAtFetch = getHorseById(horseId);
+    const fetchHorseDetail = async () => {
+      try {
+        setIsLoading(true);
+        const res = await apiClient<any>(`/horses/${horseId}`);
+        if (res && isMounted) {
+          const dobFormatted = res.dob
+            ? res.dob
+            : res.dateOfBirth
+              ? new Date(res.dateOfBirth).toLocaleDateString(isEn ? 'en-US' : 'vi-VN')
+              : '';
+          const mapped: Horse = {
+            id: String(res.id || horseId),
+            backendId: res.id ? Number(res.id) : undefined,
+            code: res.code || res.passportNo || (res.id ? `HOR-2026-${String(res.id).padStart(3, '0')}` : undefined),
+            name: res.name,
+            breed: res.breed || 'Thoroughbred',
+            age: Number(res.age) || 5,
+            gender:
+              res.gender === 'female' || res.gender === 'Mare'
+                ? 'Mare'
+                : res.gender === 'gelding' || res.gender === 'Gelding'
                   ? 'Gelding'
                   : 'Stallion',
-              dob: data.dateOfBirth
-                ? new Date(data.dateOfBirth).toISOString().split('T')[0]
-                : '',
-              color: data.color || '',
-              weight: data.weight || '',
-              microchipNumber: data.microchipNo || '',
-              passportNumber: data.passportNo || '',
-              ownerName: 'You',
-              medicalStatus: data.medicalStatus || 'Healthy',
-              specialRequirements: data.specialRequirements || '',
-              photoUrl: getFullPhotoUrl(data.photoUrl),
-              avatarUrl: getFullPhotoUrl(data.photoUrl),
-              status: data.status || 'active',
-              availabilityStatus:
-                data.status === 'in_transit'
-                  ? 'In Transit'
-                  : data.status === 'delivered'
-                  ? 'Delivered'
-                  : data.status === 'active'
-                  ? 'Available'
-                  : 'Not Cleared',
-            });
-          }
-        })
-        .catch(() => {});
-    }
-  }, [horseId]);
+            dob: dobFormatted,
+            color: res.color || '',
+            weight: res.weight ? String(res.weight) : '',
+            microchipNumber: res.microchipNumber || res.microchipNo || '',
+            passportNumber: res.passportNumber || res.passportNo || '',
+            ownerName: res.ownerName || '',
+            medicalStatus: res.medicalStatus || 'Healthy',
+            vaccinationStatus: res.vaccinationStatus || '',
+            quarantineStatus: res.quarantineStatus || 'Pending',
+            lastExamDate: res.lastExamDate || '',
+            veterinarian: res.veterinarian || '',
+            specialRequirements: res.specialRequirements || '',
+            location: res.location || '',
+            photoUrl: res.photoUrl || undefined,
+            documents: res.documents && res.documents.length > 0 ? res.documents : localAtFetch?.documents || [],
+            ...res,
+          };
+          setHorse(mapped);
+        }
+      } catch {
+        if (localAtFetch && isMounted) setHorse(localAtFetch);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+    fetchHorseDetail();
+    return () => {
+      isMounted = false;
+    };
+  }, [horseId, getHorseById, isEn]);
 
-  const storeHorse = getHorseById(horseId);
-  const horse = apiHorse
-    ? { ...storeHorse, ...apiHorse }
-    : storeHorse || {
-        id: horseId || 'hrs-001',
-        code: `HR-${String(horseId || 1).padStart(5, '0')}`,
-        name: 'Horse',
-        breed: 'Thoroughbred',
-        age: 4,
-        gender: 'Stallion',
-        dob: '2022-01-15',
-        color: '',
-        weight: '',
-        microchipNumber: '',
-        passportNumber: '',
-        ownerName: 'You',
-        medicalStatus: 'Healthy',
-        vaccinationStatus: 'Up to date',
-        quarantineStatus: 'Pending',
-        lastExamDate: '20 Sep 2026',
-        veterinarian: 'Dr. Nguyen',
-        specialRequirements: '',
-      };
+  const getHorseActiveOrder = (h: Horse) => {
+    return requests.find((r) => {
+      const match =
+        String(r.horseId) === String(h.id) ||
+        String(r.horse?.id) === String(h.id) ||
+        (h.backendId && String(r.horseId) === String(h.backendId)) ||
+        (r.horses && r.horses.some((item: any) => String(item.horse?.id) === String(h.id) || String(item.id) === String(h.id))) ||
+        (r.horse?.name && h.name && r.horse.name.toLowerCase().trim() === h.name.toLowerCase().trim());
 
-  const [previewDoc, setPreviewDoc] = useState<HorseDocument | null>(null);
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
+      const upper = String(r.status || '').toUpperCase();
+      const isFinished = upper === 'COMPLETED' || upper === 'CANCELLED' || upper === 'REJECTED';
+      return match && !isFinished;
+    });
+  };
 
-  const displayDocs = horseDocs.length > 0 ? horseDocs : (horse.documents || []);
-  const displayMedicalHistory = medicalLogs.length > 0 ? medicalLogs : (horse.medicalHistory || []);
+  const activeOrder = horse ? getHorseActiveOrder(horse) : undefined;
+  const isTransit = horse
+    ? (horse.availabilityStatus || '').toLowerCase().includes('transit') ||
+      activeOrder?.status === 'IN_TRANSIT' ||
+      activeOrder?.status === 'in_transit'
+    : false;
+
+  const displayDocs = horseDocs.length > 0 ? horseDocs : horse?.documents || [];
+  const displayMedicalHistory = medicalLogs.length > 0 ? medicalLogs : horse?.medicalHistory || [];
   const hasMissingDoc = displayDocs.some((d: any) => d.status === 'Missing');
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !horse) return;
     try {
       setIsUploadingAvatar(true);
       await uploadHorseAvatar(horse.id, file);
-      setFeedbackSuccess('Cập nhật ảnh đại diện con ngựa thành công!');
-      setTimeout(() => setFeedbackSuccess(null), 4000);
+      showFeedback(
+        t('horse.avatarUpdateSuccess', isEn ? 'Horse avatar updated successfully!' : 'Cập nhật ảnh đại diện chiến mã thành công!'),
+        4000
+      );
     } catch (err: any) {
-      alert(err?.message || 'Không thể tải lên ảnh đại diện.');
+      toast.error(err?.message || t('horse.avatarUpdateFail', isEn ? 'Could not upload avatar.' : 'Không thể tải lên ảnh đại diện. Vui lòng thử lại.'));
     } finally {
       setIsUploadingAvatar(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const handleUploadSuccess = (uploadedDoc: any) => {
-    uploadDocumentForHorse(horse.id, uploadedDoc.title);
-    uploadDocumentForRequest('TR-2026-001', uploadedDoc.title);
-    setIsUploadOpen(false);
+  const handleUploadSuccess = () => {
     fetchHorseDocs();
+    showFeedback(
+      t('horse.docUploadSuccess', isEn ? 'Quarantine document uploaded and sent for specialist review!' : 'Hồ sơ kiểm dịch đã được tải lên và chuyển tới chuyên viên thẩm định!'),
+      5000
+    );
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Top Header & Breadcrumbs */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '12px',
-        }}
-      >
-        <div>
-          {/* Breadcrumbs */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '12px',
-              color: 'var(--text-muted)',
-              marginBottom: '4px',
-            }}
-          >
-            <Link href="/customer" style={{ color: 'var(--text-muted)' }}>
-              Dashboard
-            </Link>
-            <ChevronRight size={12} />
-            <Link href="/customer/horses" style={{ color: 'var(--text-muted)' }}>
-              My Horses
-            </Link>
-            <ChevronRight size={12} />
-            <span style={{ color: 'var(--text-heading)', fontWeight: 600 }}>{horse.name}</span>
-          </div>
+  const translateDocType = (type: string, title?: string) => {
+    if (language === 'vi') return title || type;
+    switch (type) {
+      case 'Hộ chiếu ngựa (FEI Passport)':
+      case 'FEI Passport':
+        return 'FEI Horse Passport';
+      case 'Chứng nhận tiêm chủng cúm & dại':
+      case 'Vaccination Record':
+        return 'Equine Influenza & Rabies Vaccine Record';
+      case 'Xét nghiệm âm tính Coggins (EIA)':
+      case 'Coggins Test':
+        return 'Coggins Test (EIA Negative)';
+      case 'Giấy chứng nhận kiểm dịch xuất cảnh':
+      case 'Export Quarantine Permit':
+        return 'Export Veterinary Health Certificate';
+      case 'Giấy phép nhập cảnh cục thú y nước đến':
+      case 'Import Permit':
+        return 'Import Veterinary Quarantine Permit';
+      default:
+        return title || type;
+    }
+  };
 
-          <h2 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-            {horse.name}
-          </h2>
-        </div>
+  const translateDocStatusBadge = (s: string) => {
+    switch (s) {
+      case 'Approved':
+        return t('horse.docApproved', '✓ Đạt chuẩn');
+      case 'Under Review':
+        return t('horse.docUnderReview', '⏳ Đang thẩm định');
+      case 'Rejected':
+        return t('horse.docRejected', isEn ? '✕ Rejected' : '✕ Bị từ chối');
+      case 'Expired':
+        return isEn ? '✕ Expired' : '✕ Hết hạn';
+      case 'Missing':
+      default:
+        return t('horse.docMissing', '✕ Thiếu giấy tờ');
+    }
+  };
 
-        {/* Header Actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {(() => {
-            const isDelivered = horse.status === 'delivered' || horse.availabilityStatus === 'Delivered';
-            const isInTransit = horse.status === 'in_transit' || horse.availabilityStatus === 'In Transit';
-            const canShip = !isDelivered && !isInTransit && (horse.status === 'active' || horse.availabilityStatus === 'Available' || !horse.status);
-
-            return (
-              <button
-                disabled={!canShip}
-                onClick={() => {
-                  if (canShip) {
-                    router.push(`/customer/requests/new?horseId=${horse.id}`);
-                  }
-                }}
-                title={
-                  isDelivered
-                    ? 'Ngựa đã hoàn tất vận chuyển, không thể vận chuyển lại'
-                    : isInTransit
-                    ? 'Ngựa đang trong chuyến vận chuyển khác'
-                    : 'Tạo yêu cầu vận chuyển cho con ngựa này'
-                }
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '9px 16px',
-                  borderRadius: '8px',
-                  backgroundColor: canShip ? 'var(--primary)' : '#e2e8f0',
-                  color: canShip ? '#ffffff' : '#64748b',
-                  fontSize: '13.5px',
-                  fontWeight: 600,
-                  border: 'none',
-                  boxShadow: canShip ? 'var(--shadow-sm)' : 'none',
-                  cursor: canShip ? 'pointer' : 'not-allowed',
-                }}
-              >
-                {isDelivered
-                  ? 'Đã hoàn tất vận chuyển'
-                  : isInTransit
-                  ? 'Đang vận chuyển (In Transit)'
-                  : 'Ship This Horse'}
-              </button>
-            );
-          })()}
-          <button
-            onClick={() => setIsEditModalOpen(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '9px 16px',
-              borderRadius: '8px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#ffffff',
-              fontSize: '13.5px',
-              fontWeight: 600,
-              color: 'var(--text-body)',
-              boxShadow: 'var(--shadow-sm)',
-              cursor: 'pointer',
-            }}
-          >
-            <Edit3 size={15} />
-            <span>Edit Horse</span>
-          </button>
-          <button
-            onClick={() => setIsDeleteModalOpen(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '9px 16px',
-              borderRadius: '8px',
-              border: '1px solid #fecaca',
-              backgroundColor: '#fff5f5',
-              fontSize: '13.5px',
-              fontWeight: 600,
-              color: '#dc2626',
-              boxShadow: 'var(--shadow-sm)',
-              cursor: 'pointer',
-            }}
-          >
-            <Trash2 size={15} />
-            <span>Delete Horse</span>
-          </button>
-        </div>
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[500px] gap-4">
+        <div className="w-12 h-12 border-4 border-[#C4B38E] border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm font-semibold text-[#5F6977]">{t('horse.loadingProfile', 'Đang tải hồ sơ chiến mã...')}</p>
       </div>
+    );
+  }
+
+  if (!horse) {
+    return (
+      <div className="p-8 max-w-xl mx-auto my-12 text-center bg-white rounded-3xl border border-[#D8CEBE] shadow-sm">
+        <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 mx-auto flex items-center justify-center mb-4">
+          <Info size={32} aria-hidden="true" />
+        </div>
+        <h1 className="text-xl font-bold text-[#181A17] m-0">{t('horse.notFoundTitle', 'Không tìm thấy thông tin cá thể ngựa')}</h1>
+        <p className="text-sm text-[#5F6977] mt-2 mb-6">
+          {t('horse.notFoundDesc', 'Dữ liệu không tồn tại hoặc đã được chuyển vào mục lưu trữ.')}
+        </p>
+        <Link
+          href="/customer/horses"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#181A17] text-white font-bold text-xs hover:bg-[#242722] transition-colors"
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          <span>{t('horse.backToStable', isEn ? 'Back to Stable' : 'Quay lại danh sách')}</span>
+        </Link>
+      </div>
+    );
+  }
+
+  const horsePhoto = getFullPhotoUrl(horse.photoUrl) || getFallbackHorsePhoto();
+  const medStatusLower = String(horse.medicalStatus || 'Healthy').toLowerCase();
+  const medBadgeClass = medStatusLower.includes('attention')
+    ? 'bg-rose-100 text-rose-800'
+    : medStatusLower.includes('monitor') || medStatusLower.includes('review')
+      ? 'bg-amber-100 text-amber-800'
+      : 'bg-emerald-100 text-emerald-800';
+  const notUpdatedText = t('common.notUpdated', isEn ? 'Not updated' : 'Chưa cập nhật');
+
+  return (
+    <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-10">
+      {/* Breadcrumb Navigation */}
+      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs font-medium text-[#747D88] flex-wrap">
+        <Link href="/customer" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
+          {t('nav.dashboard', 'Bảng điều khiển')}
+        </Link>
+        <ChevronRight size={13} className="text-[#747D88]" aria-hidden="true" />
+        <Link href="/customer/horses" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
+          {t('horse.fleetTitle', isEn ? 'My Horses' : 'Quản Lý Ngựa Đua')}
+        </Link>
+        <ChevronRight size={13} className="text-[#747D88]" aria-hidden="true" />
+        <span className="text-[#181A17] font-bold truncate max-w-[220px]">{horse.name}</span>
+      </nav>
 
       {feedbackSuccess && (
         <div
-          style={{
-            padding: '12px 18px',
-            borderRadius: '10px',
-            backgroundColor: '#ecfdf5',
-            border: '1px solid #a7f3d0',
-            color: '#065f46',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            fontSize: '14px',
-            fontWeight: 600,
-          }}
+          role="status"
+          className="p-4 rounded-2xl bg-[#E8F2EB] border border-[#B7DBC4] text-[#287653] text-xs font-bold flex items-center justify-between gap-3 shadow-sm"
         >
-          <CheckCircle2 size={18} color="#059669" />
           <span>{feedbackSuccess}</span>
+          <button
+            type="button"
+            onClick={() => setFeedbackSuccess(null)}
+            aria-label={t('common.close', isEn ? 'Close' : 'Đóng')}
+            className="text-[#287653] hover:text-[#181A17] p-1 cursor-pointer bg-transparent border-0"
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {/* HORSE PROFILE HERO CARD */}
-      <div
-        style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          border: '1px solid var(--border-card)',
-          padding: '28px',
-          boxShadow: 'var(--shadow-sm)',
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: '28px',
-          flexWrap: 'wrap',
-        }}
-      >
-        {/* Avatar with click-to-upload & Camera Overlay */}
-        <div style={{ position: 'relative' }}>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleAvatarChange}
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            style={{ display: 'none' }}
-          />
-          <div
-            onClick={() => !isUploadingAvatar && fileInputRef.current?.click()}
-            title="Nhấn để đổi ảnh đại diện cho ngựa"
-            style={{
-              width: '130px',
-              height: '130px',
-              borderRadius: '50%',
-              overflow: 'hidden',
-              border: '4px solid #f8fafc',
-              boxShadow: '0 0 0 1px #e2e8f0',
-              flexShrink: 0,
-              backgroundColor: '#eff6ff',
-              cursor: isUploadingAvatar ? 'wait' : 'pointer',
-              position: 'relative',
-              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-            }}
-          >
-            {horse.photoUrl ? (
+      {/* Light Editorial Horse Profile Header */}
+      <header className="bg-white rounded-2xl border border-[#E5DDD0] p-6 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label={t('horse.changeAvatarHint', isEn ? 'Change racehorse avatar' : 'Nhấp để thay đổi ảnh đại diện')}
+              className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border border-[#E5DDD0] shadow-sm shrink-0 cursor-pointer group bg-[#FAF8F4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E]"
+            >
               <img
-                src={horse.photoUrl}
+                src={horsePhoto}
                 alt={horse.name}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               />
-            ) : (
-              <div
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--primary)',
-                }}
-              >
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M22 17v-1c0-4-3-7-7-7H9l-2-3H3l1 5-2 3v3h10" />
-                  <circle cx="8" cy="7" r="1" />
-                </svg>
+              <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex flex-col items-center justify-center text-white gap-1">
+                <Camera size={18} aria-hidden="true" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">{t('horse.changePhoto', 'Đổi ảnh')}</span>
               </div>
-            )}
+              <span
+                aria-hidden="true"
+                className="sm:hidden absolute bottom-1.5 right-1.5 w-7 h-7 rounded-lg bg-white/90 border border-[#D8CEBE] text-[#181A17] flex items-center justify-center"
+              >
+                <Camera size={14} />
+              </span>
+              {isUploadingAvatar && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={handleAvatarChange}
+            />
 
-            {/* Hover / Loading Overlay */}
-            {isUploadingAvatar ? (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  backgroundColor: 'rgba(15, 23, 42, 0.65)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#ffffff',
-                  gap: '6px',
-                }}
-              >
-                <Loader2 size={24} className="animate-spin" />
-                <span style={{ fontSize: '11px', fontWeight: 600 }}>Uploading...</span>
+            <div className="flex flex-col items-center sm:items-start text-center sm:text-left">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-2">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#FAF8F4] text-[#8C6621] border border-[#E5DDD0]">
+                  {translateBreed(horse.breed)}
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono text-[#5F6977] bg-[#FAF8F4] border border-[#E5DDD0]">
+                  {horse.code || `#${horse.id}`}
+                </span>
+                {isTransit ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#FAF8F4] text-[#A67C2E] border border-[#D4C5A3] inline-flex items-center gap-1.5">
+                    <Truck size={12} aria-hidden="true" />
+                    <span>{t('customer.inFlight', isEn ? 'In Transit' : 'Đang vận chuyển')}</span>
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]">
+                    ● {t('horse.stableReady', isEn ? 'Ready in Stable' : 'Sẵn sàng tại chuồng')}
+                  </span>
+                )}
               </div>
-            ) : (
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  backgroundColor: 'rgba(15, 23, 42, 0.6)',
-                  padding: '4px 0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px',
-                  color: '#ffffff',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  transition: 'opacity 0.2s ease',
-                }}
-              >
-                <Camera size={13} />
-                <span>Đổi ảnh</span>
+
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#181A17] m-0">
+                {horse.name}
+              </h1>
+
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-xs text-[#5F6977] mt-2 font-medium">
+                <span>
+                  {t('horses.age', 'Tuổi')}: <strong className="text-[#181A17]">{horse.age} {t('horse.yearsOld', 'tuổi')}</strong>
+                </span>
+                <span aria-hidden="true">•</span>
+                <span>
+                  {t('horse.genderLabel', 'Giới tính')}: <strong className="text-[#181A17]">{translateGender(horse.gender)}</strong>
+                </span>
+                <span aria-hidden="true">•</span>
+                <span>
+                  {t('horse.colorLabel', 'Màu lông')}: <strong className="text-[#181A17]">{horse.color ? translateColor(horse.color) : '—'}</strong>
+                </span>
+                <span aria-hidden="true">•</span>
+                <span>
+                  {t('horse.weightLabel', 'Thể trọng')}: <strong className="text-[#181A17]">{horse.weight || '—'}</strong>
+                </span>
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Quick Camera Badge at bottom-right */}
+          <div className="flex flex-wrap items-center justify-center md:justify-end gap-2 shrink-0 pt-4 md:pt-0 border-t md:border-t-0 border-[#EFEAE0]">
+            {isTransit && activeOrder ? (
+              <Link
+                href={`/customer/requests/${activeOrder.id}`}
+                className="px-4 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold transition-colors shadow-sm inline-flex items-center gap-2 no-underline"
+              >
+                <Truck size={14} className="text-[#C4B38E]" aria-hidden="true" />
+                <span>{t('horse.viewOrderBtn', 'Xem Đơn')} ({activeOrder.requestCode || `#${activeOrder.id}`})</span>
+              </Link>
+            ) : (
+              <Link
+                href={`/customer/requests/new?horseId=${horse.id}`}
+                className="px-4 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold transition-colors shadow-sm inline-flex items-center gap-2 no-underline"
+              >
+                <Truck size={14} className="text-[#C4B38E]" aria-hidden="true" />
+                <span>{t('horse.bookNewTripBtn', 'Tạo Chuyến Vận Chuyển')}</span>
+              </Link>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsEditModalOpen(true)}
+              className="px-3.5 py-2.5 rounded-xl bg-white hover:border-[#B49A68] text-[#181A17] text-xs font-semibold transition-colors border border-[#D8CEBE] inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Edit2 size={13} aria-hidden="true" />
+              <span>{t('common.edit', 'Sửa')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="px-3.5 py-2.5 rounded-xl bg-[#F8EAEA]/60 hover:bg-[#F8EAEA] text-[#B33E3E] text-xs font-semibold transition-colors border border-[#E5B8B8] inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 size={13} aria-hidden="true" />
+              <span>{t('common.delete', 'Xóa')}</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* 2-COLUMN DETAIL GRID (IDENTITY & MEDICAL) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Card 1: Identity & Studbook */}
+        <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-[#EFEAE0] mb-4">
+              <h2 className="text-sm font-bold text-[#181A17] m-0">
+                {t('horse.studbookTitle', 'Hồ Sơ Nhận Diện & Phả Hệ')}
+              </h2>
+              <ShieldCheck size={17} className="text-[#287653] shrink-0" aria-hidden="true" />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.microchipLabel', 'Số Microchip ISO')}</span>
+                <div className="font-mono font-bold text-[#181A17] break-all">{horse.microchipNumber || notUpdatedText}</div>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.passportLabel', 'Số Hộ Chiếu FEI')}</span>
+                <div className="font-mono font-bold text-[#181A17] break-all">{horse.passportNumber || notUpdatedText}</div>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.dobLabel', 'Ngày sinh')}</span>
+                <div className="font-bold text-[#181A17]">{horse.dob || notUpdatedText}</div>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.currentLocation', 'Địa điểm lưu trú hiện tại')}</span>
+                <div className="font-bold text-[#181A17]">{horse.location || notUpdatedText}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 p-3.5 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] text-xs flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[#5F6977] font-medium">{t('horse.originFarmLabel', isEn ? 'Registered Owner:' : 'Chủ sở hữu đăng ký:')}</span>
+            <span className="font-bold text-[#181A17]">{horse.ownerName || notUpdatedText}</span>
+          </div>
+        </div>
+
+        {/* Card 2: Medical & Quarantine Compliance */}
+        <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-[#EFEAE0] mb-4">
+              <h2 className="text-sm font-bold text-[#181A17] m-0">
+                {t('horse.medicalQuarantineTitle', 'Hồ Sơ Y Tế & Kiểm Dịch')}
+              </h2>
+              <Activity size={17} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs mb-4">
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.fitnessLabel', 'Tình trạng thể lực')}</span>
+                <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-bold text-[11px] ${medBadgeClass}`}>
+                  ● {translateHealthStatus(horse.medicalStatus || 'Healthy')}
+                </div>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.vaccineBookLabel', 'Tiêm chủng thú y')}</span>
+                <div className="font-bold text-[#287653]">{horse.vaccinationStatus || notUpdatedText}</div>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.lastExamLabel', 'Lần khám gần nhất')}</span>
+                <div className="font-bold text-[#181A17]">{horse.lastExamDate || notUpdatedText}</div>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.vetDoctorLabel', 'Bác sĩ thú y phụ trách')}</span>
+                <div className="font-bold text-[#181A17]">{horse.veterinarian || notUpdatedText}</div>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] text-xs">
+              <span className="text-[11px] font-bold text-[#A67C2E] uppercase tracking-wide block mb-1">
+                {t('horse.climateReqLabel', 'Ghi chú chăm sóc đặc biệt')}
+              </span>
+              <p className="text-[#181A17] font-medium m-0 leading-relaxed">
+                {horse.specialRequirements || (isEn ? 'No special handling notes recorded.' : 'Không có ghi chú chăm sóc đặc biệt.')}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* DOCUMENTS MATRIX & UPLOAD AUDIT */}
+      <div className="bg-white rounded-2xl border border-[#E5DDD0] shadow-sm overflow-hidden flex flex-col">
+        <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-bold text-[#181A17] m-0 flex items-center gap-2">
+              <FileCheck2 size={17} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+              <span>{t('horse.quarantineDocsMatrixTitle', 'Hồ sơ & Giấy phép kiểm dịch')}</span>
+            </h2>
+            <p className="text-xs text-[#5F6977] mt-1 m-0">
+              {t('horse.quarantineDocsMatrixDesc', 'Danh sách chứng từ thú y và giấy phép xuất nhập cảnh của ngựa.')}
+            </p>
+          </div>
+
           <button
             type="button"
-            onClick={() => !isUploadingAvatar && fileInputRef.current?.click()}
-            title="Đổi ảnh đại diện"
-            style={{
-              position: 'absolute',
-              bottom: '4px',
-              right: '4px',
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              backgroundColor: '#2563eb',
-              color: '#ffffff',
-              border: '2px solid #ffffff',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              zIndex: 2,
-            }}
+            onClick={() => setIsUploadOpen(true)}
+            className="px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold transition-colors shadow-sm inline-flex items-center gap-2 shrink-0 self-start sm:self-auto cursor-pointer"
           >
-            <Camera size={15} />
+            <Upload size={14} className="text-[#C4B38E]" aria-hidden="true" />
+            <span>{t('horse.uploadNewCertBtn', 'Tải Lên Chứng Thư Mới')}</span>
           </button>
         </div>
 
-        {/* Details & Quick Stats */}
-        <div style={{ flex: 1, minWidth: '280px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <h3 style={{ fontSize: '26px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-                  {horse.name}
-                </h3>
-                <span
-                  style={{
-                    padding: '3px 10px',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    backgroundColor: '#dcfce7',
-                    color: '#15803d',
-                    border: '1px solid #bbf7d0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                >
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
-                  {formatHorseMedicalStatus(horse.medicalStatus)}
-                </span>
-              </div>
-              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                ID: {horse.code || 'HOR-2026-001'}
-              </p>
-            </div>
-
-            <button
-              onClick={() => {
-                const el = document.getElementById('medical-history-section');
-                el?.scrollIntoView({ behavior: 'smooth' });
-              }}
-              style={{
-                padding: '9px 18px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                backgroundColor: '#ffffff',
-                color: 'var(--primary)',
-                fontWeight: 600,
-                fontSize: '13.5px',
-                boxShadow: 'var(--shadow-sm)',
-              }}
-            >
-              View Medical History
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: '16px',
-              marginTop: '24px',
-              paddingTop: '16px',
-              borderTop: '1px solid var(--border-light)',
-            }}
-          >
-            <div>
-              <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#94a3b8' }}>
-                Breed
-              </span>
-              <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                {horse.breed}
-              </p>
-            </div>
-            <div>
-              <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#94a3b8' }}>
-                Gender
-              </span>
-              <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                {horse.gender.includes('Male') ? 'Male' : horse.gender}
-              </p>
-            </div>
-            <div>
-              <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#94a3b8' }}>
-                Age
-              </span>
-              <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                {horse.age} years
-              </p>
-            </div>
-            <div>
-              <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#94a3b8' }}>
-                Owner
-              </span>
-              <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                {horse.ownerName}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 2-COLUMN GRID (Info & Medical) */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-        {/* Card 1: Horse Information */}
-        <div
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '16px',
-            border: '1px solid var(--border-card)',
-            overflow: 'hidden',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          <div
-            style={{
-              padding: '16px 24px',
-              borderBottom: '1px solid var(--border-light)',
-              backgroundColor: '#f8fafc',
-            }}
-          >
-            <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-              Horse Information
-            </h4>
-          </div>
-          <div style={{ padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-            <div>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Horse ID</span>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.code || 'HOR-2026-001'}
-              </div>
-            </div>
-            <div>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Breed</span>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.breed}
-              </div>
-            </div>
-            <div>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Gender</span>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.gender}
-              </div>
-            </div>
-            <div>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Date of Birth</span>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.dob || '12 May 2020'}
-              </div>
-            </div>
-            <div>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Color</span>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {formatHorseColor(horse.color)}
-              </div>
-            </div>
-            <div>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Weight</span>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                {horse.weight || '—'}
-              </div>
-            </div>
-            <div>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Microchip ID</span>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', fontFamily: 'monospace', marginTop: '2px' }}>
-                {horse.microchipNumber}
-              </div>
-            </div>
-            <div>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Passport Number</span>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', fontFamily: 'monospace', marginTop: '2px' }}>
-                {horse.passportNumber}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2: Medical Information */}
-        <div
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '16px',
-            border: '1px solid var(--border-card)',
-            overflow: 'hidden',
-            boxShadow: 'var(--shadow-sm)',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <div
-            style={{
-              padding: '16px 24px',
-              borderBottom: '1px solid var(--border-light)',
-              backgroundColor: '#f8fafc',
-            }}
-          >
-            <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-              Medical Information
-            </h4>
-          </div>
-          <div style={{ padding: '24px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '20px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', borderBottom: '1px solid var(--border-light)', paddingBottom: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '13.5px', color: 'var(--text-body)' }}>Medical Status</span>
-                <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, backgroundColor: '#dcfce7', color: '#15803d' }}>
-                  {formatHorseMedicalStatus(horse.medicalStatus)}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '13.5px', color: 'var(--text-body)' }}>Vaccination Status</span>
-                <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, backgroundColor: '#dcfce7', color: '#15803d' }}>
-                  {horse.vaccinationStatus || 'Up to date'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '13.5px', color: 'var(--text-body)' }}>Quarantine Status</span>
-                <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, backgroundColor: '#fef3c7', color: '#b45309' }}>
-                  {horse.quarantineStatus || 'Pending'}
-                </span>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Last Medical Exam</span>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                  {horse.lastExamDate || '20 Sep 2026'}
-                </div>
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Veterinarian</span>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', marginTop: '2px' }}>
-                  {horse.veterinarian || 'Dr. Nguyen'}
-                </div>
-              </div>
-            </div>
-
-            <div style={{ backgroundColor: '#eff6ff', border: '1px solid #dbeafe', borderRadius: '10px', padding: '14px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
-                Special Medical Requirements
-              </div>
-              <div style={{ fontSize: '13.5px', color: '#1e3a8a', fontWeight: 500, marginTop: '4px' }}>
-                "{horse.specialRequirements || 'Không có yêu cầu chăm sóc đặc biệt.'}"
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* DOCUMENTS TABLE & MISSING WARNING */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {/* Warning Banner (Shown only if documents are missing) */}
         {hasMissingDoc && (
-          <div
-            style={{
-              backgroundColor: '#fef2f2',
-              border: '1px solid #fecaca',
-              borderRadius: '14px',
-              padding: '16px 20px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '16px',
-              flexWrap: 'wrap',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-              <AlertTriangle size={22} color="#dc2626" />
+          <div className="mx-6 my-4 p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-between gap-4 text-xs flex-wrap">
+            <div className="flex items-center gap-3">
+              <AlertTriangle size={20} className="text-rose-600 shrink-0" aria-hidden="true" />
               <div>
-                <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#dc2626', margin: 0 }}>
-                  Required document is missing.
-                </h4>
-                <p style={{ fontSize: '12.5px', color: '#991b1b', margin: '2px 0 0 0' }}>
-                  Please upload the required document before the transport request can proceed.
-                </p>
+                <strong className="text-rose-950 block">{t('horse.missingDocAlert', 'Phát hiện hồ sơ kiểm dịch còn thiếu!')}</strong>
+                <span className="text-rose-800">{t('horse.missingDocAlertDesc', 'Vui lòng bổ sung đầy đủ tài liệu trước khi xe chuyên dụng nhận ngựa.')}</span>
               </div>
             </div>
-
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => router.push('/customer/requests/tr-001')}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  border: '1px solid #cbd5e1',
-                  backgroundColor: '#ffffff',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: 'var(--text-body)',
-                }}
-              >
-                Back to Request
-              </button>
-              <button
-                onClick={() => setIsUploadOpen(true)}
-                style={{
-                  padding: '8px 18px',
-                  borderRadius: '8px',
-                  backgroundColor: '#dc2626',
-                  color: '#ffffff',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  border: 'none',
-                }}
-              >
-                <Upload size={14} /> Upload Document
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsUploadOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-[#B33E3E] text-white font-bold text-xs hover:opacity-90 transition-opacity cursor-pointer"
+            >
+              {t('horse.uploadNowBtn', 'Bổ sung ngay')}
+            </button>
           </div>
         )}
 
-        {/* Documents Table */}
-        <div
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '16px',
-            border: '1px solid var(--border-card)',
-            overflow: 'hidden',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-light)', backgroundColor: '#f8fafc' }}>
-            <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-              Medical & Transport Documents
-            </h4>
+        {docsError && (
+          <div role="alert" className="mx-6 mt-4 p-3 rounded-xl bg-[#F8EAEA] border border-[#B33E3E]/30 text-xs text-[#B33E3E] flex items-center justify-between gap-2">
+            <span>{docsError}</span>
+            <button type="button" onClick={fetchHorseDocs} className="font-bold underline cursor-pointer">
+              {t('common.retry', isEn ? 'Retry' : 'Thử lại')}
+            </button>
           </div>
+        )}
 
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-light)' }}>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Document</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Type</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Uploaded Date</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Expiry Date</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Status</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'right' }}>Action</th>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-left text-xs">
+            <thead className="bg-[#FAF8F4] border-b border-[#E5DDD0] text-[11px] font-bold text-[#5F6977] uppercase tracking-wider">
+              <tr>
+                <th className="py-3.5 px-6">{t('horse.docTitleCol', 'Tên tài liệu / Chứng thư')}</th>
+                <th className="py-3.5 px-6">{t('horse.docCategoryCol', 'Phân loại')}</th>
+                <th className="py-3.5 px-6">{t('horse.docIssueDateCol', 'Ngày cấp')}</th>
+                <th className="py-3.5 px-6">{t('horse.docExpiryDateCol', 'Hạn hiệu lực')}</th>
+                <th className="py-3.5 px-6">{t('horse.docReviewStatusCol', 'Trạng thái thẩm định')}</th>
+                <th className="py-3.5 px-6 text-right">{t('common.actions', 'Thao tác')}</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[#E8E2D8] font-medium">
               {isLoadingDocs ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: '32px 20px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
-                    Đang tải danh sách tài liệu kiểm dịch...
+                  <td colSpan={6} className="py-8 text-center text-[#747D88]">
+                    {t('common.loading', isEn ? 'Loading quarantine documents...' : 'Đang tải danh sách tài liệu kiểm dịch...')}
                   </td>
                 </tr>
               ) : displayDocs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: '32px 20px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
-                    Chưa có tài liệu kiểm dịch nào được tải lên cho con ngựa này.
+                  <td colSpan={6} className="py-8 text-center text-[#747D88]">
+                    {t('customer.noDocumentsUploaded', isEn ? 'No quarantine documents uploaded for this horse yet.' : 'Chưa có tài liệu kiểm dịch nào được tải lên cho con ngựa này.')}
                   </td>
                 </tr>
               ) : (
                 displayDocs.map((doc: any) => (
-                  <tr
-                    key={doc.id}
-                    style={{
-                      borderBottom: '1px solid var(--border-light)',
-                      backgroundColor: doc.status === 'Missing' ? '#fff5f5' : 'transparent',
-                    }}
-                  >
-                    <td style={{ padding: '16px 20px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <FileText size={18} color={doc.status === 'Missing' ? '#dc2626' : '#64748b'} />
-                        <span style={{ fontWeight: 600, color: doc.status === 'Missing' ? '#dc2626' : 'var(--text-heading)' }}>
-                          {doc.title}
-                        </span>
+                  <tr key={doc.id} className="hover:bg-[#FAF8F4] transition-colors">
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-2.5">
+                        <FileText size={17} className={doc.status === 'Missing' ? 'text-rose-500 shrink-0' : 'text-[#A67C2E] shrink-0'} aria-hidden="true" />
+                        <span className="font-bold text-[#181A17]">{translateDocType(doc.type, doc.title)}</span>
                       </div>
                     </td>
-                    <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>{doc.type}</td>
-                    <td style={{ padding: '16px 20px', color: doc.uploadedDate ? 'var(--text-body)' : '#94a3b8' }}>
-                      {doc.uploadedDate || '—'}
-                    </td>
-                    <td style={{ padding: '16px 20px', color: doc.expiryDate ? 'var(--text-body)' : '#94a3b8' }}>
-                      {doc.expiryDate || '—'}
-                    </td>
-                    <td style={{ padding: '16px 20px' }}>
+                    <td className="py-4 px-6 text-[#5F6977]">{translateDocType(doc.type)}</td>
+                    <td className="py-4 px-6 font-mono text-[#5F6977]">{doc.uploadedDate || '—'}</td>
+                    <td className="py-4 px-6 font-mono text-[#5F6977]">{doc.expiryDate || '—'}</td>
+                    <td className="py-4 px-6">
                       <span
-                        style={{
-                          padding: '3px 8px',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          backgroundColor:
-                            doc.status === 'Approved'
-                              ? '#dcfce7'
-                              : doc.status === 'Under Review'
-                              ? '#eff6ff'
-                              : '#fee2e2',
-                          color:
-                            doc.status === 'Approved'
-                              ? '#15803d'
-                              : doc.status === 'Under Review'
-                              ? '#1d4ed8'
-                              : '#b91c1c',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap ${
+                          doc.status === 'Approved'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : doc.status === 'Under Review'
+                              ? 'bg-[#F3EFE4] text-[#181A17] border border-[#EAE5DA]'
+                              : doc.status === 'Expired'
+                                ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                : 'bg-rose-100 text-rose-800 border border-rose-200'
+                        }`}
                       >
-                        {doc.status === 'Approved' && <Check size={12} strokeWidth={3} />}
-                        {doc.status === 'Under Review' && <Clock size={12} />}
-                        {doc.status}
+                        {translateDocStatusBadge(doc.status)}
                       </span>
                     </td>
-                    <td style={{ padding: '16px 20px', textAlign: 'right' }}>
+                    <td className="py-4 px-6 text-right whitespace-nowrap">
                       {doc.status === 'Missing' ? (
                         <button
+                          type="button"
                           onClick={() => setIsUploadOpen(true)}
-                          style={{
-                            color: '#dc2626',
-                            fontWeight: 700,
-                            fontSize: '13px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                          }}
+                          className="text-rose-600 font-bold hover:underline cursor-pointer"
                         >
-                          <Upload size={13} /> Upload
+                          {t('horse.uploadDocAction', 'Tải lên ngay')}
                         </button>
                       ) : (
                         <button
+                          type="button"
                           onClick={() => setPreviewDoc(doc)}
-                          style={{
-                            color: 'var(--primary)',
-                            fontWeight: 600,
-                            fontSize: '13px',
-                          }}
+                          className="text-[#A67C2E] font-bold hover:underline cursor-pointer"
                         >
-                          View
+                          {t('common.viewDetails', 'Xem chi tiết')}
                         </button>
                       )}
                     </td>
@@ -953,73 +753,63 @@ export default function HorseDetailPage() {
       </div>
 
       {/* MEDICAL HISTORY TIMELINE */}
-      <div
-        id="medical-history-section"
-        style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          border: '1px solid var(--border-card)',
-          padding: '24px',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
-        <h4 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 20px 0' }}>
-          Medical History
-        </h4>
+      <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 shadow-sm flex flex-col gap-4">
+        <div className="flex items-center justify-between pb-3 border-b border-[#EFEAE0]">
+          <div>
+            <h2 className="text-sm font-bold text-[#181A17] m-0 flex items-center gap-2">
+              <Heart size={17} className="text-[#B33E3E] shrink-0" aria-hidden="true" />
+              <span>{isEn ? 'Transit Health Logs' : 'Nhật Ký Kiểm Tra Sức Khỏe Lộ Trình'}</span>
+            </h2>
+            <p className="text-xs text-[#5F6977] mt-0.5 m-0">
+              {isEn
+                ? 'Vitals, temperature, and veterinary inspection remarks recorded at checkpoints and border gates.'
+                : 'Ghi nhận tình trạng thể lực, thân nhiệt và nhịp tim của chiến mã tại từng trạm kiểm tra và cửa khẩu biên giới.'}
+            </p>
+          </div>
+        </div>
+
+        {logsError && (
+          <div role="alert" className="p-3 rounded-xl bg-[#F8EAEA] border border-[#B33E3E]/30 text-xs text-[#B33E3E] flex items-center justify-between gap-2">
+            <span>{logsError}</span>
+            <button type="button" onClick={fetchHealthLogs} className="font-bold underline cursor-pointer">
+              {t('common.retry', isEn ? 'Retry' : 'Thử lại')}
+            </button>
+          </div>
+        )}
 
         {isLoadingLogs ? (
-          <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Đang tải lịch sử kiểm tra sức khỏe...</p>
+          <p className="text-xs text-[#747D88] py-4 text-center">
+            {isEn ? 'Loading health inspection history...' : 'Đang tải lịch sử kiểm tra sức khỏe...'}
+          </p>
         ) : displayMedicalHistory.length === 0 ? (
-          <p style={{ fontSize: '13px', color: '#64748b', margin: 0, fontStyle: 'italic' }}>
-            Chưa có nhật ký kiểm tra sức khỏe nào được ghi nhận cho con ngựa này. Nhật ký sẽ tự động xuất hiện khi ngựa di chuyển qua các trạm trong chuyến đi (Flow 4).
+          <p className="text-xs text-[#747D88] py-4 text-center italic">
+            {isEn
+              ? 'No transit health logs recorded for this horse yet. Logs appear automatically during active transport checkpoints.'
+              : 'Chưa có nhật ký kiểm tra sức khỏe nào được ghi nhận cho con ngựa này. Nhật ký sẽ tự động xuất hiện khi ngựa di chuyển qua các trạm trong chuyến đi.'}
           </p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', position: 'relative', paddingLeft: '24px' }}>
-            {/* Vertical Track Line */}
-            <div
-              style={{
-                position: 'absolute',
-                top: '8px',
-                bottom: '8px',
-                left: '7px',
-                width: '2px',
-                backgroundColor: '#e2e8f0',
-              }}
-            />
-
+          <div className="flex flex-col gap-4 relative pl-6 pt-2">
+            <div className="absolute top-3 bottom-3 left-2 w-0.5 bg-[#E8E2D8]" aria-hidden="true" />
             {displayMedicalHistory.map((item: any, idx: number) => (
-              <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
+              <div key={item.id} className="flex flex-wrap items-start justify-between relative gap-3">
                 <div
-                  style={{
-                    position: 'absolute',
-                    left: '-21px',
-                    width: '10px',
-                    height: '10px',
-                    borderRadius: '50%',
-                    backgroundColor: idx === 0 ? '#16a34a' : '#94a3b8',
-                    boxShadow: '0 0 0 3px #ffffff',
-                  }}
+                  aria-hidden="true"
+                  className={`absolute -left-[21px] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white ${
+                    idx === 0 ? 'bg-emerald-600' : 'bg-[#747D88]'
+                  }`}
                 />
-                <div>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>{item.date}</span>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '2px' }}>
-                    {item.title}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                    <UserCheck size={13} style={{ display: 'inline', marginRight: '4px' }} />
-                    {item.examiner}
+                <div className="min-w-0 flex-1">
+                  <span className="text-[11px] text-[#747D88] font-semibold">{item.date}</span>
+                  <div className="text-sm font-bold text-[#181A17] mt-0.5">{item.title}</div>
+                  <div className="text-xs text-[#5F6977] mt-0.5 flex items-start gap-1.5">
+                    <UserCheck size={13} className="text-[#747D88] shrink-0 mt-0.5" aria-hidden="true" />
+                    <span>{item.examiner}</span>
                   </div>
                 </div>
-
                 <span
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    backgroundColor: idx === 0 ? '#dcfce7' : '#f1f5f9',
-                    color: idx === 0 ? '#15803d' : '#475569',
-                  }}
+                  className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold shrink-0 ${
+                    idx === 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-[#F0EEE8] text-[#273244]'
+                  }`}
                 >
                   {item.status}
                 </span>
@@ -1029,226 +819,30 @@ export default function HorseDetailPage() {
         )}
       </div>
 
-      {/* DOCUMENT PREVIEW MODAL */}
-      {previewDoc && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(4px)',
-            padding: '16px',
-          }}
-          onClick={() => setPreviewDoc(null)}
-        >
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '18px',
-              maxWidth: '700px',
-              width: '100%',
-              overflow: 'hidden',
-              boxShadow: 'var(--shadow-popup)',
-              display: 'flex',
-              flexDirection: 'column',
-              maxHeight: '90vh',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div
-              style={{
-                padding: '18px 24px',
-                borderBottom: '1px solid var(--border-light)',
-                backgroundColor: '#f8fafc',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <div>
-                <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-heading)', margin: 0 }}>
-                  {previewDoc.title}
-                </h3>
-                <span style={{ fontSize: '12px', color: '#64748b' }}>Type: {previewDoc.type}</span>
-              </div>
-              <button
-                onClick={() => setPreviewDoc(null)}
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  backgroundColor: '#e2e8f0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Info Bar */}
-            <div
-              style={{
-                padding: '12px 24px',
-                borderBottom: '1px solid var(--border-light)',
-                display: 'flex',
-                gap: '24px',
-                fontSize: '13px',
-              }}
-            >
-              <div>
-                <span style={{ color: '#94a3b8' }}>Uploaded: </span>
-                <strong>{previewDoc.uploadedDate || '20 Sep 2026'}</strong>
-              </div>
-              <div>
-                <span style={{ color: '#94a3b8' }}>Expiry: </span>
-                <strong>{previewDoc.expiryDate || '20 Sep 2031'}</strong>
-              </div>
-              <div style={{ marginLeft: 'auto' }}>
-                <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#dcfce7', color: '#15803d', fontSize: '11px', fontWeight: 700 }}>
-                  Approved
-                </span>
-              </div>
-            </div>
-
-            {/* Large Preview Area */}
-            <div
-              style={{
-                padding: '24px',
-                backgroundColor: '#f1f5f9',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: '360px',
-                overflowY: 'auto',
-              }}
-            >
-              {previewDoc.fileUrl && (previewDoc.fileUrl.endsWith('.png') || previewDoc.fileUrl.endsWith('.jpg') || previewDoc.fileUrl.endsWith('.jpeg')) ? (
-                <div style={{ textAlign: 'center' }}>
-                  <img
-                    src={getFullPhotoUrl(previewDoc.fileUrl)}
-                    alt={previewDoc.title}
-                    style={{ maxWidth: '100%', maxHeight: '420px', objectFit: 'contain', borderRadius: '10px', boxShadow: 'var(--shadow-md)' }}
-                  />
-                  <p style={{ marginTop: '12px', fontSize: '12px', color: '#64748b' }}>
-                    {previewDoc.title} • Hạn dùng: {previewDoc.expiryDate || 'Vô thời hạn'}
-                  </p>
-                </div>
-              ) : (
-                <div
-                  style={{
-                    width: '280px',
-                    padding: '24px',
-                    backgroundColor: '#ffffff',
-                    borderRadius: '12px',
-                    border: '1px solid #cbd5e1',
-                    boxShadow: 'var(--shadow-md)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '12px',
-                    color: '#94a3b8',
-                    textAlign: 'center',
-                  }}
-                >
-                  <FileText size={48} color="#2563eb" />
-                  <span style={{ fontWeight: 600, color: 'var(--text-heading)' }}>{previewDoc.title}</span>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>Hạn dùng: {previewDoc.expiryDate || '—'}</span>
-                  {previewDoc.fileUrl && (
-                    <a
-                      href={getFullPhotoUrl(previewDoc.fileUrl)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'underline', marginTop: '4px' }}
-                    >
-                      Mở tài liệu gốc ↗
-                    </a>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Modal Actions */}
-            <div
-              style={{
-                padding: '16px 24px',
-                borderTop: '1px solid var(--border-light)',
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: '12px',
-              }}
-            >
-              <button
-                onClick={() => setPreviewDoc(null)}
-                style={{
-                  padding: '9px 18px',
-                  borderRadius: '8px',
-                  border: '1px solid #cbd5e1',
-                  backgroundColor: '#ffffff',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Đóng
-              </button>
-              {previewDoc.fileUrl ? (
-                <a
-                  href={getFullPhotoUrl(previewDoc.fileUrl)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download
-                  style={{
-                    padding: '9px 20px',
-                    borderRadius: '8px',
-                    backgroundColor: 'var(--primary)',
-                    color: '#ffffff',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    textDecoration: 'none',
-                  }}
-                >
-                  <Download size={14} /> Tải xuống tệp
-                </a>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Upload Modal */}
+      {/* MODALS */}
       <DocumentUploadModal
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
         onSuccess={handleUploadSuccess}
       />
 
-      {/* Edit Horse Modal */}
       {isEditModalOpen && (
         <EditHorseModal
           isOpen={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
           horse={horse}
           onHorseUpdated={(updated) => {
-            setApiHorse(updated);
-            setFeedbackSuccess(`Đã cập nhật thông tin con ngựa "${updated.name}" thành công!`);
-            setTimeout(() => setFeedbackSuccess(null), 5000);
+            setHorse(updated);
+            showFeedback(
+              isEn
+                ? `Updated profile for "${updated.name}" successfully!`
+                : `Đã cập nhật thông tin chiến mã "${updated.name}" thành công!`,
+              5000
+            );
           }}
         />
       )}
 
-      {/* Delete Horse Modal */}
       {isDeleteModalOpen && (
         <DeleteHorseModal
           isOpen={isDeleteModalOpen}
@@ -1258,6 +852,84 @@ export default function HorseDetailPage() {
             router.push('/customer/horses');
           }}
         />
+      )}
+
+      {/* Document Quick Preview Modal */}
+      {previewDoc && (
+        <Modal
+          isOpen={Boolean(previewDoc)}
+          onClose={() => setPreviewDoc(null)}
+          title={translateDocType(previewDoc.type, previewDoc.title)}
+          subtitle={`${t('horse.docCategoryCol', 'Phân loại')}: ${translateDocType(previewDoc.type)}`}
+          maxWidth="max-w-md"
+        >
+          <div className="flex flex-col gap-4">
+            <div className="p-4 bg-[#F0EEE8] rounded-2xl flex flex-col gap-3 border border-[#D8CEBE]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#FAF8F4] text-[#A67C2E] flex items-center justify-center shrink-0">
+                  <FileText size={22} aria-hidden="true" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-[#181A17] text-sm truncate">
+                    {translateDocType(previewDoc.type, previewDoc.title)}
+                  </div>
+                  <div className="text-[11px] text-[#5F6977] font-mono">{previewDoc.id || 'DOC-AUTO'}</div>
+                </div>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-bold shrink-0 ${
+                    previewDoc.status === 'Approved'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : previewDoc.status === 'Under Review'
+                        ? 'bg-[#F3EFE4] text-[#181A17]'
+                        : 'bg-rose-100 text-rose-800'
+                  }`}
+                >
+                  {translateDocStatusBadge(previewDoc.status)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-[#D8CEBE]">
+                <div>
+                  <span className="text-[10px] text-[#747D88] font-bold uppercase block">
+                    {t('horse.docIssueDateCol', 'Ngày cấp')}
+                  </span>
+                  <span className="font-semibold text-[#273244]">{previewDoc.uploadedDate || notUpdatedText}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-[#747D88] font-bold uppercase block">
+                    {t('horse.docExpiryDateCol', 'Hạn hiệu lực')}
+                  </span>
+                  <span className="font-semibold text-[#273244]">{previewDoc.expiryDate || t('common.permanent', 'Vô thời hạn')}</span>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] flex items-center gap-2">
+                <ShieldCheck size={16} className="text-emerald-600 shrink-0" aria-hidden="true" />
+                <span>{t('horse.iataCertifiedNote', 'Chứng từ đã được lưu trữ và xác thực trên hệ thống.')}</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPreviewDoc(null)}
+                className="px-4 py-2 rounded-xl border border-[#D8CEBE] text-xs font-bold text-[#273244] hover:bg-[#F0EEE8] transition-colors cursor-pointer"
+              >
+                {t('common.close', 'Đóng')}
+              </button>
+              {previewDoc.fileUrl && (
+                <button
+                  type="button"
+                  onClick={() => openAuthenticatedDocument(previewDoc.id, previewDoc.fileUrl)}
+                  className="px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2C2F2A] text-[#C4B38E] border border-[#C4B38E]/40 text-xs font-bold transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download size={13} aria-hidden="true" />
+                  <span>{t('common.downloadFile', 'Mở / Tải tệp')}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

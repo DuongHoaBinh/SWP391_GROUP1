@@ -22,6 +22,16 @@ function render(state, props = {}, loadError) {
     if (name === 'next/link') return ({ href, children, ...rest }) => React.createElement('a', { href, ...rest }, children);
     if (name === 'lucide-react') return Object.fromEntries(['CheckCircle2', 'Copy', 'QrCode', 'RefreshCw', 'ShieldCheck'].map(icon => [icon, () => null]));
     if (name === '@/lib/auth') return { getCurrentUser: () => ({ id: 99 }) };
+    if (name === '@/lib/i18n/LanguageContext') return {
+      useLanguage: () => ({
+        language: 'vi',
+        t: (_k, fb, p) => {
+          let s = fb || _k;
+          if (p) Object.entries(p).forEach(([k, v]) => { s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), String(v)); });
+          return s;
+        },
+      }),
+    };
     if (name === '@/lib/api-client') return { apiClient: () => { throw new Error('Rendering must never initiate a transfer'); } };
     return require(name);
   };

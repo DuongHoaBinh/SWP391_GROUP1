@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -9,93 +9,66 @@ import {
   FileText,
   Upload,
   ChevronRight,
-  Filter,
   CheckCircle2,
   Clock,
   AlertTriangle,
-  MapPin,
   Shield,
-  ArrowUpRight,
-  MoreHorizontal,
   FileCheck2,
-  RefreshCw,
+  LayoutGrid,
+  List,
+  Search,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { TripTrackingModal } from '@/features/tracking/components/TripTrackingModal';
-import { useCustomerStore } from '@/lib/customer-store';
-import { TransportRequest, UserProfile } from '@/lib/types';
+import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
+import { TransportRequest, UserProfile, Horse } from '@/lib/types';
 import { getCurrentUser } from '@/lib/auth';
-import { mockCurrentUser } from '@/lib/mock-data';
 import { apiClient } from '@/lib/api-client';
 import { documentsApi } from '@/features/documents/api/documents.api';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
+import { ScrollReveal } from '@/components/ui/ScrollReveal';
+import { NumberTicker } from '@/components/ui/NumberTicker';
+import { StatusBadge, type BadgeVariant } from '@/components/ui/StatusBadge';
 
-const getStatusBadge = (status: string) => {
+const FALLBACK_HORSE_PHOTO =
+  'https://images.unsplash.com/photo-1598974357801-cbca100e65d3?auto=format&fit=crop&w=800&q=80';
+
+function getOrderBadgeVariant(status: string): BadgeVariant {
   const s = (status || '').toLowerCase();
-  if (s === 'requested' || s === 'under_review') {
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fffbeb', color: '#d97706' }}>
-        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#d97706' }} />
-        Pending Review
-      </span>
-    );
-  }
-  if (s === 'approved') {
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#ecfdf5', color: '#16a34a' }}>
-        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
-        Approved
-      </span>
-    );
-  }
-  if (s === 'planning') {
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#eff6ff', color: '#2563eb' }}>
-        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
-        In Planning
-      </span>
-    );
-  }
-  if (s === 'in_transit') {
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6' }} />
-        In Transit
-      </span>
-    );
-  }
-  if (s === 'completed') {
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f0fdf4', color: '#15803d' }}>
-        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
-        Completed
-      </span>
-    );
-  }
-  if (s === 'change_requested') {
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fff7ed', color: '#c2410c' }}>
-        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ea580c' }} />
-        Change Requested
-      </span>
-    );
-  }
-  if (s === 'rejected') {
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#fef2f2', color: '#dc2626' }}>
-        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#dc2626' }} />
-        Rejected
-      </span>
-    );
-  }
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f1f5f9', color: '#475569' }}>
-      {status}
-    </span>
-  );
-};
+  if (s === 'in_transit') return 'transit';
+  if (s === 'approved' || s === 'completed' || s === 'confirmed' || s === 'ready_to_depart') return 'success';
+  if (s === 'rejected' || s === 'cancelled') return 'danger';
+  if (s === 'requested' || s === 'under_review' || s === 'planning' || s === 'change_requested') return 'pending';
+  return 'neutral';
+}
+
+function getAirportCode(location?: string, explicitCode?: string) {
+  if (explicitCode && explicitCode.length === 3) return explicitCode;
+  const text = (location || '').toUpperCase();
+  const known = ['SGN', 'HAN', 'DAD', 'SIN', 'DXB', 'MEL', 'HKG', 'KUL', 'BKK', 'CDG', 'SYD', 'NRT', 'LHR'];
+  const found = known.find((code) => text.includes(code));
+  if (found) return found;
+  if (text.includes('SINGAPORE')) return 'SIN';
+  if (text.includes('HANOI') || text.includes('HÀ NỘI')) return 'HAN';
+  if (text.includes('HO CHI MINH') || text.includes('CỦ CHI') || text.includes('TP.HCM')) return 'SGN';
+  if (text.includes('BANGKOK') || text.includes('THAI')) return 'BKK';
+  if (text.includes('MALAYSIA') || text.includes('SELANGOR')) return 'KUL';
+  if (text.includes('DUBAI')) return 'DXB';
+  return 'TRN';
+}
 
 export default function CustomerDashboardPage() {
   const router = useRouter();
+  const {
+    t,
+    language,
+    translateStatus,
+    translateGender,
+    translateBreed,
+    translateNotification,
+  } = useLanguage();
+  const isEn = language === 'en';
 
   const {
     horses,
@@ -105,1258 +78,862 @@ export default function CustomerDashboardPage() {
     refreshHorses,
   } = useCustomerStore();
 
-  const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [myOrders, setMyOrders] = useState<any[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(true);
-  const [docCount, setDocCount] = useState({ pending: 0, missing: 0 });
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [docCount, setDocCount] = useState({ pending: 0, missing: 0, approved: 0, total: 0 });
+  const [viewMode, setViewMode] = useState<'cockpit' | 'table'>('cockpit');
+  const [transitSearchQuery, setTransitSearchQuery] = useState('');
 
-  const loadData = async () => {
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [activeRequestForUpload, setActiveRequestForUpload] = useState<string>('');
+  const [trackingRequest, setTrackingRequest] = useState<TransportRequest | null>(null);
+
+  const loadData = useCallback(async () => {
     try {
       setIsLoadingOrders(true);
+      setLoadError(null);
       const [ordersRes, docsRes] = await Promise.all([
-        apiClient<any[]>('/orders/my-orders').catch(() => []),
+        apiClient<any[]>('/orders/my-orders'),
         documentsApi.getDocuments().catch(() => []),
       ]);
       if (Array.isArray(ordersRes)) {
         setMyOrders(ordersRes);
+      } else {
+        setMyOrders([]);
       }
       if (Array.isArray(docsRes)) {
-        const pending = docsRes.filter(
-          (d: any) =>
-            (d.status || '').toUpperCase() === 'PENDING' ||
-            (d.status || '').toUpperCase() === 'UNDER_REVIEW'
+        const pending = docsRes.filter((d: any) =>
+          ['pending', 'submitted', 'under_review'].includes((d.status || '').toLowerCase())
         ).length;
-        const missing = docsRes.filter(
-          (d: any) => (d.status || '').toUpperCase() === 'MISSING'
+        const missing = docsRes.filter((d: any) =>
+          ['missing', 'rejected', 'expired'].includes((d.status || '').toLowerCase())
         ).length;
-        setDocCount({ pending, missing });
+        const approved = docsRes.filter((d: any) =>
+          (d.status || '').toLowerCase() === 'approved'
+        ).length;
+        setDocCount({ pending, missing, approved, total: docsRes.length });
       }
-    } catch (err) {
-      console.warn('Customer dashboard load error:', err);
+    } catch (err: any) {
+      setLoadError(
+        err?.message ||
+          t('common.loadError', isEn ? 'Failed to load dashboard data.' : 'Không thể tải dữ liệu bảng điều khiển.')
+      );
     } finally {
       setIsLoadingOrders(false);
     }
-  };
+  }, [isEn, t]);
 
   useEffect(() => {
     setCurrentUser(getCurrentUser());
-    const handleUserUpdate = () => {
-      setCurrentUser(getCurrentUser());
+    const handleUserUpdate = () => setCurrentUser(getCurrentUser());
+    const handleOpenUploadModal = () => {
+      setActiveRequestForUpload('');
+      setIsUploadModalOpen(true);
     };
     window.addEventListener('auth-user-updated', handleUserUpdate);
-    loadData();
-    refreshHorses();
+    window.addEventListener('open-customer-upload-modal', handleOpenUploadModal);
+    void loadData();
+    void refreshHorses();
     return () => {
       window.removeEventListener('auth-user-updated', handleUserUpdate);
+      window.removeEventListener('open-customer-upload-modal', handleOpenUploadModal);
     };
-  }, []);
-
-  // Modals state
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [activeRequestForUpload, setActiveRequestForUpload] = useState<string>('');
-  const [trackingRequest, setTrackingRequest] = useState<TransportRequest | null>(null);
+  }, [loadData, refreshHorses]);
 
   const handleDocumentUploadSuccess = (uploadedDoc: any) => {
     if (activeRequestForUpload) {
       uploadDocumentForRequest(activeRequestForUpload, uploadedDoc.title);
     }
+    setActiveRequestForUpload('');
     setIsUploadModalOpen(false);
-    loadData();
+    toast.success(t('common.success', isEn ? 'Document uploaded successfully' : 'Tải lên tài liệu thành công'));
+    void loadData();
   };
 
-  // Metrics
+  // Metrics derived from real API orders & documents
   const activeShipments = myOrders.filter(
-    (o) => o.status !== 'completed' && o.status !== 'cancelled' && o.status !== 'rejected'
+    (o) => !['completed', 'cancelled', 'rejected'].includes((o.status || '').toLowerCase())
   );
-  const inTransitCount = myOrders.filter(
-    (o) => o.status === 'in_transit' || o.status === 'planning' || o.status === 'IN_TRANSIT'
+  const inTransitShipments = myOrders.filter((o) =>
+    ['in_transit', 'ready_to_depart', 'confirmed', 'planning'].includes((o.status || '').toLowerCase())
+  );
+  const inTransitCount = myOrders.filter((o) =>
+    (o.status || '').toLowerCase() === 'in_transit'
   ).length;
-  const completedCount = myOrders.filter(
-    (o) => o.status === 'completed' || o.status === 'COMPLETED'
+  const readyOrPlanningCount = myOrders.filter((o) =>
+    ['ready_to_depart', 'confirmed', 'planning'].includes((o.status || '').toLowerCase())
+  ).length;
+  const historyOrders = myOrders.filter((o) =>
+    ['completed', 'cancelled', 'rejected'].includes((o.status || '').toLowerCase())
+  );
+  const completedCount = myOrders.filter((o) =>
+    (o.status || '').toLowerCase() === 'completed'
   ).length;
   const pendingDocsCount = docCount.pending + docCount.missing;
+  const docComplianceRate = docCount.total > 0 ? Math.round((docCount.approved / docCount.total) * 100) : null;
 
-  // Featured shipment for banner and upcoming trip card
   const upcomingTrip =
-    myOrders.find((o) => o.status === 'in_transit') ||
-    myOrders.find((o) => o.status === 'planning') ||
-    myOrders.find((o) => o.status === 'approved') ||
+    myOrders.find((o) => (o.status || '').toLowerCase() === 'in_transit') ||
+    myOrders.find((o) => (o.status || '').toLowerCase() === 'ready_to_depart') ||
+    myOrders.find((o) => (o.status || '').toLowerCase() === 'confirmed') ||
+    myOrders.find((o) => (o.status || '').toLowerCase() === 'planning') ||
+    myOrders.find((o) => (o.status || '').toLowerCase() === 'approved') ||
     myOrders[0];
 
-  const upcomingHorseName = upcomingTrip?.horses?.[0]?.name || 'Chiến mã';
-  const upcomingOrigin = upcomingTrip?.originLocation?.split(',')?.[0]?.trim() || 'Điểm xuất phát';
-  const upcomingDest = upcomingTrip?.destinationLocation?.split(',')?.[0]?.trim() || 'Điểm đến';
+  const upcomingHorseName = upcomingTrip?.horses?.[0]?.name || (isEn ? 'Equine Athlete' : 'Chiến mã');
+
+  const filteredTransits = activeShipments.filter((ord) => {
+    if (!transitSearchQuery.trim()) return true;
+    const q = transitSearchQuery.toLowerCase();
+    const code = (ord.requestCode || `REQ-${ord.id}`).toLowerCase();
+    const orig = (ord.originLocation || '').toLowerCase();
+    const dest = (ord.destinationLocation || '').toLowerCase();
+    const horseMatch = (ord.horses || []).some((h: any) => (h.name || '').toLowerCase().includes(q));
+    return code.includes(q) || orig.includes(q) || dest.includes(q) || horseMatch;
+  });
+
+  const showcaseHorses = horses.slice(0, 4);
+
+  const openOrderInModal = (ord: any) => {
+    const firstHorse = ord.horses?.[0] || {};
+    const adapted: TransportRequest = {
+      id: ord.id,
+      requestCode: ord.requestCode || `REQ-${String(ord.id).padStart(3, '0')}`,
+      horseId: String(firstHorse.horseId || firstHorse.id || ''),
+      horse: {
+        id: String(firstHorse.horseId || firstHorse.id || ''),
+        name: firstHorse.name || upcomingHorseName,
+        breed: firstHorse.breed || 'Thoroughbred',
+        age: firstHorse.age || 5,
+        gender: firstHorse.gender || 'Stallion',
+        microchipNumber: firstHorse.microchipNumber || '',
+        passportNumber: firstHorse.passportNumber || '',
+        ownerName: currentUser?.fullName || currentUser?.name || '',
+      },
+      horses: ord.horses,
+      origin: ord.originLocation || '',
+      originCode: getAirportCode(ord.originLocation),
+      destination: ord.destinationLocation || '',
+      destinationCode: getAirportCode(ord.destinationLocation),
+      departureDate: ord.requestedDate
+        ? new Date(ord.requestedDate).toLocaleDateString(isEn ? 'en-US' : 'vi-VN')
+        : '—',
+      estimatedArrivalDate: ord.arrivalDate
+        ? new Date(ord.arrivalDate).toLocaleDateString(isEn ? 'en-US' : 'vi-VN')
+        : t('common.tbd', isEn ? 'TBD' : 'Chưa cập nhật'),
+      status: ord.status,
+      statusLabel: translateStatus(ord.status),
+      activeStepIndex: 1,
+      totalSteps: 5,
+      pendingDocumentsCount: 0,
+    };
+    setTrackingRequest(adapted);
+  };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '24px',
-        padding: 0,
-        minHeight: '100%',
-        fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif",
-      }}
-    >
-      {/* 1. HERO WELCOME BANNER */}
-      <div
-        style={{
-          backgroundColor: '#0c1527',
-          backgroundImage:
-            'linear-gradient(rgba(37, 99, 235, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(37, 99, 235, 0.08) 1px, transparent 1px)',
-          backgroundSize: '28px 28px',
-          borderRadius: '18px',
-          padding: '28px 34px',
-          border: '1px solid rgba(37, 99, 235, 0.18)',
-          boxShadow: '0 10px 30px rgba(12, 21, 39, 0.1)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '20px',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.12em',
-              color: '#94a3b8',
-              textTransform: 'uppercase',
-            }}
-          >
-            {new Date().toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </div>
-          <h2
-            suppressHydrationWarning
-            style={{
-              fontSize: '28px',
-              fontWeight: 800,
-              color: '#ffffff',
-              lineHeight: 1.15,
-              letterSpacing: '-0.02em',
-              margin: 0,
-            }}
-          >
-            Xin chào, {currentUser.fullName || currentUser.name || 'Quý khách'}
-          </h2>
-          <p
-            style={{
-              fontSize: '14px',
-              color: '#cbd5e1',
-              margin: 0,
-            }}
-          >
-            Tổng quan các chuyến vận chuyển ngựa đua và hồ sơ pháp lý của bạn.
-          </p>
-
-          {/* Badges in Hero */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px', flexWrap: 'wrap' }}>
-            {upcomingTrip ? (
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '7px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                  border: '1px solid rgba(255, 255, 255, 0.14)',
-                  borderRadius: '999px',
-                  padding: '5px 12px',
-                  fontSize: '12px',
-                  color: '#f1f5f9',
-                  fontWeight: 500,
-                }}
-              >
-                <Plane size={13} color="#60a5fa" />
-                <span>
-                  {upcomingHorseName} · {upcomingOrigin} → {upcomingDest}
-                </span>
-              </div>
-            ) : null}
-
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '7px',
-                backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                border: '1px solid rgba(255, 255, 255, 0.14)',
-                borderRadius: '999px',
-                padding: '5px 12px',
-                fontSize: '12px',
-                color: '#f1f5f9',
-                fontWeight: 500,
-              }}
-            >
-              <FileText size={13} color={pendingDocsCount > 0 ? '#fbbf24' : '#34d399'} />
-              <span>
-                {pendingDocsCount > 0
-                  ? `${pendingDocsCount} hồ sơ cần bổ sung / kiểm tra`
-                  : 'Hồ sơ pháp lý hợp lệ'}
-              </span>
+    <div className="flex flex-col gap-6 w-full">
+      {/* 1. EDITORIAL HEADER */}
+      <ScrollReveal direction="up" duration={300}>
+        <header className="border-b border-[#E5DDD0] pb-5 flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+          <div className="flex flex-col gap-1 min-w-0">
+            <div className="text-[11px] font-bold tracking-[0.14em] text-[#A67C2E] uppercase" suppressHydrationWarning>
+              {new Date().toLocaleDateString(isEn ? 'en-US' : 'vi-VN', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              })}
             </div>
-          </div>
-        </div>
-
-        {/* Primary CTA in Banner */}
-        <button
-          onClick={() => router.push('/customer/requests/new')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: '#2563eb',
-            color: '#ffffff',
-            padding: '12px 20px',
-            borderRadius: '10px',
-            fontSize: '14px',
-            fontWeight: 700,
-            border: 'none',
-            cursor: 'pointer',
-            boxShadow: '0 4px 14px rgba(37, 99, 235, 0.45)',
-            transition: 'all 0.15s ease',
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#1d4ed8')}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#2563eb')}
-        >
-          <Plus size={18} strokeWidth={2.5} />
-          Create Transport Request
-        </button>
-      </div>
-
-      {/* 2. STAT SUMMARY METRIC CARDS (4 Cards) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '18px',
-        }}
-      >
-        {/* Metric 1: Active Requests */}
-        <div
-          onClick={() => router.push('/customer/requests')}
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '14px',
-            border: '1px solid #e2e8f0',
-            padding: '20px 22px',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-            cursor: 'pointer',
-            transition: 'transform 0.15s, box-shadow 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-            (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.06)';
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-            (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.03)';
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <div
-              style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '10px',
-                backgroundColor: '#eff6ff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#2563eb',
-              }}
-            >
-              <FileCheck2 size={20} />
-            </div>
-            <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '3px' }}>
-              <span>●</span> Active
-            </div>
-          </div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
-            {activeShipments.length.toString().padStart(2, '0')}
-          </div>
-          <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 500 }}>Active Requests</div>
-        </div>
-
-        {/* Metric 2: In Transit */}
-        <div
-          onClick={() => router.push('/customer/tracking')}
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '14px',
-            border: '1px solid #e2e8f0',
-            padding: '20px 22px',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-            cursor: 'pointer',
-            transition: 'transform 0.15s, box-shadow 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-            (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.06)';
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-            (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.03)';
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <div
-              style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '10px',
-                backgroundColor: '#ecfeff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#0891b2',
-              }}
-            >
-              <Plane size={20} />
-            </div>
-            <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#2563eb', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb' }} />
-              On schedule
-            </div>
-          </div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
-            {inTransitCount.toString().padStart(2, '0')}
-          </div>
-          <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 500 }}>In Transit</div>
-        </div>
-
-        {/* Metric 3: Pending Documents */}
-        <div
-          onClick={() => router.push('/customer/documents')}
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '14px',
-            border: '1px solid #e2e8f0',
-            padding: '20px 22px',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-            cursor: 'pointer',
-            transition: 'transform 0.15s, box-shadow 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-            (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.06)';
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-            (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.03)';
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <div
-              style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '10px',
-                backgroundColor: '#fffbeb',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#d97706',
-              }}
-            >
-              <FileText size={20} />
-            </div>
-            <div style={{ fontSize: '11.5px', fontWeight: 600, color: pendingDocsCount > 0 ? '#ea580c' : '#16a34a' }}>
-              {pendingDocsCount > 0 ? 'Needs attention' : 'All clear'}
-            </div>
-          </div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
-            {pendingDocsCount.toString().padStart(2, '0')}
-          </div>
-          <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 500 }}>Pending Documents</div>
-        </div>
-
-        {/* Metric 4: Completed Trips */}
-        <div
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '14px',
-            border: '1px solid #e2e8f0',
-            padding: '20px 22px',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <div
-              style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '10px',
-                backgroundColor: '#ecfdf5',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#16a34a',
-              }}
-            >
-              <CheckCircle2 size={20} />
-            </div>
-            <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '3px' }}>
-              <span>✓</span> Delivered
-            </div>
-          </div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
-            {completedCount.toString().padStart(2, '0')}
-          </div>
-          <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 500 }}>Completed Trips</div>
-        </div>
-      </div>
-
-      {/* 3. ACTIVE TRANSPORT TABLE */}
-      <div
-        style={{
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          border: '1px solid #e2e8f0',
-          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Table Section Header */}
-        <div
-          style={{
-            padding: '20px 24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            borderBottom: '1px solid #f1f5f9',
-          }}
-        >
-          <div>
-            <h3 style={{ fontSize: '16.5px', fontWeight: 700, color: '#0f172a', margin: 0 }}>
-              Active Transport
-            </h3>
-            <p style={{ fontSize: '12.5px', color: '#64748b', margin: '2px 0 0 0' }}>
-              {activeShipments.length} shipment(s) currently being managed
+            <h1 suppressHydrationWarning className="text-2xl sm:text-3xl font-extrabold text-[#181A17] tracking-tight m-0">
+              {t('customer.dashboard.welcome', 'Xin chào,')}{' '}
+              {currentUser?.fullName || currentUser?.name || (isEn ? 'Valued Client' : 'Quý khách')}
+            </h1>
+            <p className="text-sm text-[#5F6977] m-0 max-w-3xl">
+              {t(
+                'customer.dashboard.subtitle',
+                'Tổng quan đơn vận chuyển, hồ sơ kiểm dịch và lịch trình của bạn.'
+              )}
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
             <button
-              onClick={loadData}
-              title="Làm mới danh sách"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                backgroundColor: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                padding: '6px 12px',
-                fontSize: '12.5px',
-                fontWeight: 600,
-                color: '#334155',
-                cursor: 'pointer',
+              type="button"
+              onClick={() => {
+                setActiveRequestForUpload(
+                  upcomingTrip ? upcomingTrip.requestCode || `REQ-${upcomingTrip.id}` : ''
+                );
+                setIsUploadModalOpen(true);
               }}
+              className="px-4 py-2.5 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-[#181A17] text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer"
             >
-              <RefreshCw size={14} className={isLoadingOrders ? 'animate-spin' : ''} />
-              Refresh
+              <Upload size={15} className="text-[#A67C2E]" aria-hidden="true" />
+              <span>{t('customer.uploadDocsBtn', 'Nộp Hồ Sơ')}</span>
             </button>
-            <Link
-              href="/customer/requests"
-              style={{
-                fontSize: '13px',
-                fontWeight: 600,
-                color: '#2563eb',
-                textDecoration: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '2px',
-              }}
+            <button
+              type="button"
+              onClick={() => router.push('/customer/requests/new')}
+              className="px-4 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
             >
-              View all &gt;
-            </Link>
+              <Plus size={15} strokeWidth={2.5} className="text-[#C4B38E]" aria-hidden="true" />
+              <span>{t('customer.createRequestBtn', 'Tạo Yêu Cầu Vận Chuyển')}</span>
+            </button>
           </div>
-        </div>
+        </header>
+      </ScrollReveal>
 
-        {/* Table */}
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 24px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: '#64748b' }}>REQUEST ID</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: '#64748b' }}>ROUTE</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: '#64748b' }}>HORSE</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: '#64748b' }}>DEPARTURE</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: '#64748b' }}>ARRIVAL</th>
-                <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: '#64748b' }}>STATUS</th>
-                <th style={{ padding: '12px 24px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: '#64748b', textAlign: 'right' }}>ACTION</th>
-              </tr>
-            </thead>
-            <tbody>
-              {myOrders.length === 0 ? (
-                <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
-                    {isLoadingOrders ? (
-                      'Đang tải danh sách yêu cầu vận chuyển...'
-                    ) : (
-                      <div>
-                        <p style={{ margin: '0 0 12px 0', fontSize: '14px' }}>
-                          Bạn chưa có yêu cầu vận chuyển nào.
-                        </p>
-                        <button
-                          onClick={() => router.push('/customer/requests/new')}
-                          style={{
-                            padding: '8px 16px',
-                            backgroundColor: '#2563eb',
-                            color: '#ffffff',
-                            borderRadius: '8px',
-                            border: 'none',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Tạo đơn vận chuyển mới
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
+      {loadError && (
+        <div
+          role="alert"
+          className="rounded-2xl border border-[#B33E3E]/30 bg-[#F8EAEA] px-4 py-3 text-xs font-semibold text-[#B33E3E] flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0" aria-hidden="true" />
+            <span>{loadError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={loadData}
+            className="px-3 py-1.5 rounded-lg bg-[#B33E3E] text-white font-bold hover:opacity-90 transition-opacity cursor-pointer"
+          >
+            {t('common.retry', isEn ? 'Retry' : 'Thử lại')}
+          </button>
+        </div>
+      )}
+
+      {/* 2. KPI STAT SUMMARY CARDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <ScrollReveal direction="up" duration={350} delay={50}>
+          <Link
+            href="/customer/requests"
+            className="block bg-white rounded-2xl border border-[#E5DDD0] hover:border-[#C5B6A0] p-5 transition-all hover:-translate-y-0.5 shadow-sm no-underline"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-[#5F6977]">
+                {t('customer.kpi.activeRequests', 'Đơn vận chuyển đang mở')}
+              </span>
+              <FileCheck2 size={16} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+            </div>
+            <div className="text-3xl font-extrabold text-[#181A17] tabular-num-luxury mt-3">
+              {isLoadingOrders ? '—' : <NumberTicker value={activeShipments.length} duration={600} />}
+            </div>
+            <div className="text-[11px] font-medium text-[#747D88] mt-2 inline-flex items-center gap-0.5">
+              <span>{isEn ? 'View orders' : 'Xem danh sách đơn'}</span>
+              <ChevronRight size={13} aria-hidden="true" />
+            </div>
+          </Link>
+        </ScrollReveal>
+
+        <ScrollReveal direction="up" duration={350} delay={100}>
+          <Link
+            href="/customer/tracking"
+            className="block bg-white rounded-2xl border border-[#E5DDD0] hover:border-[#C5B6A0] p-5 transition-all hover:-translate-y-0.5 shadow-sm no-underline"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-[#5F6977]">
+                {t('dashboard.inTransit', 'Chuyến đang vận chuyển')}
+              </span>
+              <Plane size={16} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+            </div>
+            <div className="text-3xl font-extrabold text-[#181A17] tabular-num-luxury mt-3">
+              {isLoadingOrders ? '—' : <NumberTicker value={inTransitCount} duration={600} />}
+            </div>
+            <div className="text-[11px] font-medium text-[#747D88] mt-2 inline-flex items-center gap-0.5">
+              <span>
+                {readyOrPlanningCount > 0
+                  ? `${readyOrPlanningCount} ${isEn ? 'ready / planned' : 'chờ xuất phát / lập lịch'}`
+                  : isEn
+                    ? 'Track trips'
+                    : 'Theo dõi hành trình'}
+              </span>
+              <ChevronRight size={13} aria-hidden="true" />
+            </div>
+          </Link>
+        </ScrollReveal>
+
+        <ScrollReveal direction="up" duration={350} delay={150}>
+          <Link
+            href="/customer/documents"
+            className="block bg-white rounded-2xl border border-[#E5DDD0] hover:border-[#C5B6A0] p-5 transition-all hover:-translate-y-0.5 shadow-sm no-underline"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-[#5F6977]">
+                {t('nav.documents', 'Hồ sơ kiểm dịch hợp lệ')}
+              </span>
+              <Shield size={16} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+            </div>
+            <div className="text-3xl font-extrabold text-[#181A17] tabular-num-luxury mt-3">
+              {isLoadingOrders || docComplianceRate === null ? (
+                '—'
               ) : (
-                myOrders.slice(0, 6).map((order) => {
-                  const reqCode = order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`;
-                  const horseNames =
-                    order.horses && order.horses.length > 0
-                      ? order.horses.map((h: any) => h.name).join(', ')
-                      : `${order.requestedHorseCount || 1} chiến mã`;
-                  const depDate = order.requestedDate
-                    ? new Date(order.requestedDate).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })
-                    : '—';
-                  const arrDate = order.arrivalDate
-                    ? new Date(order.arrivalDate).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })
-                    : 'TBD';
-
-                  return (
-                    <tr key={order.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '16px 24px', fontWeight: 700, color: '#0f172a' }}>
-                        {reqCode}
-                      </td>
-                      <td style={{ padding: '16px 20px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div>
-                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{order.originLocation}</div>
-                          </div>
-                          <span style={{ color: '#94a3b8' }}>→</span>
-                          <div>
-                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{order.destinationLocation}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ padding: '16px 20px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div
-                            style={{
-                              width: '28px',
-                              height: '28px',
-                              borderRadius: '50%',
-                              backgroundColor: '#eff6ff',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontWeight: 700,
-                              fontSize: '11px',
-                              color: '#2563eb',
-                            }}
-                          >
-                            {horseNames[0] || 'H'}
-                          </div>
-                          <div>
-                            <div style={{ fontWeight: 700, color: '#0f172a' }}>{horseNames}</div>
-                            <div style={{ fontSize: '11px', color: '#64748b' }}>
-                              {order.horses?.length || order.requestedHorseCount || 1} con ngựa
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>{depDate}</td>
-                      <td style={{ padding: '16px 20px', color: '#334155', fontWeight: 500 }}>{arrDate}</td>
-                      <td style={{ padding: '16px 20px' }}>{getStatusBadge(order.status)}</td>
-                      <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                        <button
-                          onClick={() => router.push(`/customer/requests/${order.id}`)}
-                          style={{
-                            padding: '6px 14px',
-                            borderRadius: '6px',
-                            border: '1px solid #cbd5e1',
-                            backgroundColor: '#fff',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            color: '#2563eb',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          View
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
+                <NumberTicker value={docComplianceRate} duration={700} suffix="%" />
               )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+            <div
+              className={`text-[11px] font-semibold mt-2 ${
+                pendingDocsCount > 0 || (docComplianceRate !== null && docComplianceRate < 100)
+                  ? 'text-[#966516]'
+                  : docCount.total === 0
+                    ? 'text-[#747D88]'
+                    : 'text-[#287653]'
+              }`}
+            >
+              {pendingDocsCount > 0
+                ? `${pendingDocsCount} ${isEn ? 'pending' : 'cần xử lý'}`
+                : docCount.total === 0
+                  ? isEn
+                    ? 'No docs yet'
+                    : 'Chưa có hồ sơ'
+                  : docComplianceRate !== null && docComplianceRate < 100
+                    ? `${docCount.approved}/${docCount.total} ${isEn ? 'approved' : 'đã duyệt'}`
+                    : isEn
+                      ? 'All clear'
+                      : 'Đạt chuẩn'}
+            </div>
+          </Link>
+        </ScrollReveal>
+
+        <ScrollReveal direction="up" duration={350} delay={200}>
+          <Link
+            href="/customer/requests"
+            className="block bg-white rounded-2xl border border-[#E5DDD0] hover:border-[#C5B6A0] p-5 transition-all hover:-translate-y-0.5 shadow-sm no-underline"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-[#5F6977]">
+                {t('customer.kpi.completedTrips', 'Chuyến vận chuyển hoàn thành')}
+              </span>
+              <CheckCircle2 size={16} className="text-[#287653] shrink-0" aria-hidden="true" />
+            </div>
+            <div className="text-3xl font-extrabold text-[#181A17] tabular-num-luxury mt-3">
+              {isLoadingOrders ? '—' : <NumberTicker value={completedCount} duration={600} />}
+            </div>
+            <div className="text-[11px] font-medium text-[#747D88] mt-2 inline-flex items-center gap-0.5">
+              <span>{isEn ? 'Order history' : 'Lịch sử vận chuyển'}</span>
+              <ChevronRight size={13} aria-hidden="true" />
+            </div>
+          </Link>
+        </ScrollReveal>
       </div>
 
-      {/* 4. THREE-COLUMN SECTION: Upcoming Trip | Recent Requests | Notifications */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))',
-          gap: '20px',
-          alignItems: 'stretch',
-        }}
-      >
-        {/* Column 1: Upcoming Trip */}
+      {/* 2.5 ACTIONABLE MISSING / REJECTED DOCUMENTS BANNER */}
+      {docCount.missing > 0 && (
         <div
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '16px',
-            border: '1px solid #e2e8f0',
-            padding: '24px',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-          }}
+          role="status"
+          className="rounded-xl border border-[#DFCA9A] bg-[#F8F0DF] px-4 py-3 flex flex-wrap items-center justify-between gap-3"
         >
-          {upcomingTrip ? (
-            <div>
-              {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-                <div>
-                  <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: 0 }}>Upcoming Trip</h4>
-                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                    {upcomingTrip.requestCode || `REQ-${String(upcomingTrip.id).padStart(3, '0')}`}
-                  </div>
-                </div>
-                {getStatusBadge(upcomingTrip.status)}
-              </div>
-
-              {/* Horse Profile Card */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px' }}>
-                <div
-                  style={{
-                    width: '42px',
-                    height: '42px',
-                    borderRadius: '10px',
-                    backgroundColor: '#0f172a',
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 800,
-                    fontSize: '13px',
-                  }}
-                >
-                  {upcomingHorseName.slice(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>{upcomingHorseName}</div>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>
-                    {upcomingTrip.horses?.length || upcomingTrip.requestedHorseCount || 1} con ngựa đăng ký
-                  </div>
-                </div>
-              </div>
-
-              {/* Dates Bar */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '12px',
-                  backgroundColor: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '10px',
-                  padding: '12px 14px',
-                  marginBottom: '20px',
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: '11px', color: '#64748b' }}>Departure</div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', marginTop: '2px' }}>
-                    {upcomingTrip.requestedDate
-                      ? new Date(upcomingTrip.requestedDate).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })
-                      : '—'}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#64748b' }}>Est. arrival</div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', marginTop: '2px' }}>
-                    {upcomingTrip.arrivalDate
-                      ? new Date(upcomingTrip.arrivalDate).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })
-                      : 'TBD'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Milestones / Route */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', position: 'relative' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                  <div
-                    style={{
-                      width: '24px',
-                      height: '24px',
-                      borderRadius: '50%',
-                      backgroundColor: '#2563eb',
-                      color: '#ffffff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      flexShrink: 0,
-                    }}
-                  >
-                    1
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Điểm đón ngựa</div>
-                    <div style={{ fontSize: '11.5px', color: '#64748b' }}>{upcomingTrip.originLocation}</div>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                  <div
-                    style={{
-                      width: '24px',
-                      height: '24px',
-                      borderRadius: '50%',
-                      backgroundColor: '#eff6ff',
-                      border: '2px solid #2563eb',
-                      color: '#2563eb',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      flexShrink: 0,
-                    }}
-                  >
-                    2
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Điểm bàn giao cuối</div>
-                    <div style={{ fontSize: '11.5px', color: '#64748b' }}>{upcomingTrip.destinationLocation}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '40px 10px', color: '#64748b' }}>
-              <Plane size={36} color="#94a3b8" style={{ margin: '0 auto 12px auto' }} />
-              <h5 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: '0 0 6px 0' }}>Chưa có chuyến đi</h5>
-              <p style={{ fontSize: '12.5px', margin: 0 }}>Tạo yêu cầu vận chuyển để xem hành trình tại đây.</p>
-            </div>
-          )}
-
-          <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #f1f5f9' }}>
-            <button
-              onClick={() => {
-                if (upcomingTrip) {
-                  router.push(`/customer/requests/${upcomingTrip.id}`);
-                } else {
-                  router.push('/customer/requests/new');
-                }
-              }}
-              style={{
-                width: '100%',
-                padding: '9px',
-                borderRadius: '8px',
-                backgroundColor: '#eff6ff',
-                color: '#2563eb',
-                border: '1px solid #bfdbfe',
-                fontSize: '13px',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              {upcomingTrip ? 'Xem chi tiết chuyến đi' : 'Tạo đơn mới ngay'}
-            </button>
+          <div className="flex items-center gap-2.5 text-xs font-semibold text-[#7A591C]">
+            <AlertTriangle size={16} className="text-[#966516] shrink-0" aria-hidden="true" />
+            <span>
+              {isEn
+                ? `You have ${docCount.missing} missing or rejected document(s) requiring upload to keep quarantine clearance on schedule.`
+                : `Bạn có ${docCount.missing} hồ sơ còn thiếu hoặc cần tải lại để đảm bảo tiến độ kiểm dịch.`}
+            </span>
           </div>
+          <Link
+            href="/customer/documents"
+            className="no-underline px-3.5 py-1.5 rounded-lg bg-[#181A17] hover:bg-[#2A2D28] text-white text-xs font-bold inline-flex items-center gap-1 shrink-0 transition-colors"
+          >
+            <span>{isEn ? 'Open Documents' : 'Bổ sung hồ sơ ngay'}</span>
+            <ChevronRight size={13} aria-hidden="true" />
+          </Link>
         </div>
+      )}
 
-        {/* Column 2: Recent Requests */}
-        <div
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '16px',
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ padding: '24px 24px 0 24px' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <div>
-                <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: 0 }}>Recent Requests</h4>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>Latest submissions</div>
+      {/* 3. ACTIVE SHIPMENTS */}
+      <ScrollReveal direction="up" duration={400} delay={120}>
+        {isLoadingOrders && myOrders.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 space-y-3 shadow-sm">
+            <div className="h-5 w-52 rounded skeleton-shimmer" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="h-36 rounded-xl skeleton-shimmer" />
+              <div className="h-36 rounded-xl skeleton-shimmer" />
+            </div>
+          </div>
+        ) : activeShipments.length > 0 ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-base font-bold text-[#181A17] m-0">
+                {t('customer.inTransitJourneysTitle', isEn ? 'Active Shipments' : 'Đơn đang hoạt động')}{' '}
+                <span className="text-[#747D88] font-semibold">({activeShipments.length})</span>
+              </h2>
+
+              <div className="flex items-center gap-3">
+                <div className="inline-flex p-0.5 bg-[#F0EEE8] rounded-lg border border-[#E5DDD0]">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('cockpit')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      viewMode === 'cockpit' ? 'bg-white text-[#181A17] shadow-sm' : 'text-[#5F6977] hover:text-[#181A17]'
+                    }`}
+                  >
+                    <LayoutGrid size={13} aria-hidden="true" />
+                    <span>{t('customer.viewCockpit', isEn ? 'Cards' : 'Thẻ')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('table')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      viewMode === 'table' ? 'bg-[#181A17] text-white shadow-sm' : 'text-[#5F6977] hover:text-[#181A17]'
+                    }`}
+                  >
+                    <List size={13} aria-hidden="true" />
+                    <span>{t('customer.viewTable', isEn ? 'Table' : 'Bảng')}</span>
+                  </button>
+                </div>
+
+                <Link
+                  href="/customer/tracking"
+                  className="text-xs font-bold text-[#A67C2E] hover:text-[#181A17] inline-flex items-center gap-1 no-underline transition-colors"
+                >
+                  <span>{t('customer.globalRadar', isEn ? 'Track Trips' : 'Theo dõi hành trình')}</span>
+                  <ChevronRight size={14} aria-hidden="true" />
+                </Link>
               </div>
-              <Link href="/customer/requests" style={{ fontSize: '12.5px', fontWeight: 600, color: '#2563eb', textDecoration: 'none' }}>
-                See all
+            </div>
+
+            {viewMode === 'cockpit' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(inTransitShipments.length > 0 ? inTransitShipments : activeShipments).slice(0, 4).map((ord) => {
+                  const reqCode = ord.requestCode || `REQ-${String(ord.id).padStart(3, '0')}`;
+                  const originCity =
+                    ord.originLocation?.split(',')?.[0]?.trim() ||
+                    ord.originLocation ||
+                    t('common.origin', isEn ? 'Origin' : 'Xuất phát');
+                  const destCity =
+                    ord.destinationLocation?.split(',')?.[0]?.trim() ||
+                    ord.destinationLocation ||
+                    t('common.destination', isEn ? 'Destination' : 'Điểm đến');
+                  const horseNames =
+                    ord.horses?.map((h: any) => h.name).join(', ') ||
+                    `${ord.requestedHorseCount || 1} ${isEn ? 'horses' : 'ngựa'}`;
+                  return (
+                    <div
+                      key={ord.id}
+                      className="bg-white rounded-2xl border border-[#E5DDD0] hover:border-[#C5B6A0] p-5 flex flex-col gap-4 transition-all shadow-sm"
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="technical-id-badge">{reqCode}</span>
+                          <StatusBadge
+                            label={translateStatus(ord.status)}
+                            variant={getOrderBadgeVariant(ord.status)}
+                            hasDot={(ord.status || '').toLowerCase() === 'in_transit'}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openOrderInModal(ord)}
+                          className="text-xs font-bold text-[#A67C2E] hover:underline cursor-pointer"
+                        >
+                          {t('customer.flightRadarBtn', isEn ? 'Track' : 'Theo dõi')}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3 py-1">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-base font-extrabold text-[#181A17] truncate" title={ord.originLocation}>
+                            {originCity}
+                          </div>
+                          <div className="text-[11px] text-[#5F6977] truncate" title={ord.originLocation}>
+                            {ord.originLocation}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-center justify-center px-2 min-w-[96px] max-w-[140px]">
+                          <div className="flex items-center gap-1.5 w-full">
+                            <span className="h-[1px] flex-1 border-t border-dashed border-[#C4B38E]" />
+                            <Plane size={13} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+                            <span className="h-[1px] flex-1 border-t border-dashed border-[#C4B38E]" />
+                          </div>
+                          <span className="text-[10px] font-bold text-[#966516] mt-1 truncate max-w-full text-center">
+                            {horseNames}
+                          </span>
+                        </div>
+
+                        <div className="text-right min-w-0 flex-1">
+                          <div className="text-base font-extrabold text-[#181A17] truncate" title={ord.destinationLocation}>
+                            {destCity}
+                          </div>
+                          <div className="text-[11px] text-[#5F6977] truncate" title={ord.destinationLocation}>
+                            {ord.destinationLocation}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-3 border-t border-[#EFEAE0] text-xs gap-2">
+                        <span className="text-[#5F6977]">
+                          {t('customer.table.departure', 'Khởi hành')}:{' '}
+                          <strong className="text-[#181A17]">
+                            {ord.requestedDate
+                              ? new Date(ord.requestedDate).toLocaleDateString(isEn ? 'en-US' : 'vi-VN')
+                              : '—'}
+                          </strong>
+                        </span>
+                        <Link
+                          href={`/customer/requests/${ord.id}`}
+                          className="font-bold text-[#A67C2E] hover:text-[#181A17] inline-flex items-center gap-1"
+                        >
+                          <span>{t('orders.viewDetails', 'Chi tiết đơn')}</span>
+                          <ChevronRight size={14} aria-hidden="true" />
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+                <div className="p-3.5 bg-white border-b border-[#EFEAE0] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#747D88]" aria-hidden="true" />
+                    <input
+                      type="text"
+                      aria-label={t('customer.searchTransitPlaceholder', 'Tìm theo mã đơn, tên ngựa, địa điểm...')}
+                      value={transitSearchQuery}
+                      onChange={(e) => setTransitSearchQuery(e.target.value)}
+                      placeholder={t('customer.searchTransitPlaceholder', 'Tìm theo mã đơn, tên ngựa, địa điểm...')}
+                      className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-[#FAF8F4] focus:bg-white text-xs text-[#181A17] outline-none focus:border-[#A67C2E]"
+                    />
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[680px] text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-[#FAF8F4] border-b border-[#E5DDD0] text-[#5F6977] uppercase tracking-wider text-[11px]">
+                        <th className="py-3 px-4 font-bold">{t('customer.table.requestId', 'Mã đơn')}</th>
+                        <th className="py-3 px-4 font-bold">{t('customer.table.route', 'Hành trình')}</th>
+                        <th className="py-3 px-4 font-bold">{t('customer.table.horse', 'Chiến mã')}</th>
+                        <th className="py-3 px-4 font-bold">{t('customer.table.departure', 'Khởi hành')}</th>
+                        <th className="py-3 px-4 font-bold">{t('customer.table.status', 'Trạng thái')}</th>
+                        <th className="py-3 px-4 font-bold text-right">{t('customer.table.action', 'Thao tác')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#EFEAE0]">
+                      {filteredTransits.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-10 text-center text-xs text-[#5F6977]">
+                            {t('common.noResults', isEn ? 'No matching orders found' : 'Không tìm thấy đơn phù hợp')}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredTransits.slice(0, 8).map((order) => {
+                          const reqCode = order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`;
+                          const horseNames =
+                            order.horses && order.horses.length > 0
+                              ? order.horses.map((h: any) => h.name).join(', ')
+                              : `${order.requestedHorseCount || 1} ${isEn ? 'horses' : 'chiến mã'}`;
+                          return (
+                            <tr key={order.id} className="hover:bg-[#FAF8F4] transition-colors">
+                              <td className="py-3.5 px-4 font-mono font-bold text-[#A67C2E] whitespace-nowrap">{reqCode}</td>
+                              <td className="py-3.5 px-4 font-semibold text-[#181A17]">
+                                {order.originLocation} → {order.destinationLocation}
+                              </td>
+                              <td className="py-3.5 px-4 text-[#273244] font-medium">{horseNames}</td>
+                              <td className="py-3.5 px-4 text-[#5F6977] whitespace-nowrap">
+                                {order.requestedDate
+                                  ? new Date(order.requestedDate).toLocaleDateString(isEn ? 'en-US' : 'vi-VN')
+                                  : '—'}
+                              </td>
+                              <td className="py-3.5 px-4 whitespace-nowrap">
+                                <StatusBadge label={translateStatus(order.status)} variant={getOrderBadgeVariant(order.status)} />
+                              </td>
+                              <td className="py-3.5 px-4 text-right space-x-2 whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  onClick={() => openOrderInModal(order)}
+                                  className="px-2.5 py-1 rounded-lg bg-[#FAF8F4] border border-[#E5DDD0] text-[#A67C2E] font-bold hover:bg-[#181A17] hover:text-white transition-colors cursor-pointer"
+                                >
+                                  {t('customer.flightRadarBtn', isEn ? 'Track' : 'Theo dõi')}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => router.push(`/customer/requests/${order.id}`)}
+                                  className="px-2.5 py-1 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-bold hover:bg-[#F0EEE8] transition-colors cursor-pointer"
+                                >
+                                  {t('common.view', 'Xem')}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 sm:p-8 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="max-w-xl">
+                <h2 className="text-lg font-bold text-[#181A17] m-0">
+                  {t('customer.createInternationalTripTitle', 'Khởi Tạo Yêu Cầu Vận Chuyển Ngựa Đua')}
+                </h2>
+                <p className="text-xs sm:text-sm text-[#5F6977] mt-1.5 mb-4 leading-relaxed">
+                  {t('customer.createInternationalTripDesc', 'Đặt dịch vụ ghép chuồng hoặc bao chuyến kèm quy trình kiểm dịch trọn gói.')}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-3 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-full bg-[#181A17] text-[#C4B38E] flex items-center justify-center font-bold text-xs shrink-0">1</span>
+                    <span className="text-xs font-semibold text-[#181A17]">{t('customer.stepSelectHorse', 'Chọn chiến mã')}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-full bg-[#181A17] text-[#C4B38E] flex items-center justify-center font-bold text-xs shrink-0">2</span>
+                    <span className="text-xs font-semibold text-[#181A17]">{t('customer.stepQuarantineDocs', 'Hồ sơ kiểm dịch')}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-full bg-[#181A17] text-[#C4B38E] flex items-center justify-center font-bold text-xs shrink-0">3</span>
+                    <span className="text-xs font-semibold text-[#181A17]">{t('customer.stepCharterFlight', 'Theo dõi hành trình')}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col items-start md:items-end gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => router.push('/customer/requests/new')}
+                  className="px-5 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold inline-flex items-center gap-2 cursor-pointer shadow-sm"
+                >
+                  <Plus size={15} className="text-[#C4B38E]" aria-hidden="true" />
+                  <span>{t('customer.bookTransportNow', 'Tạo đơn vận chuyển ngay')}</span>
+                </button>
+                <span className="text-[11px] text-[#747D88]">
+                  {t('customer.consulting247', 'Hỗ trợ kiểm dịch & hải quan 24/7')}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </ScrollReveal>
+
+      {/* 4. OPERATIONAL GRID */}
+      {(() => {
+        const showOrdersPanel = historyOrders.length > 0 || activeShipments.length === 0;
+        const ordersPanelList = activeShipments.length > 0 ? historyOrders : myOrders;
+        const ordersPanelTitle =
+          activeShipments.length > 0
+            ? t('customer.orderHistoryTitle', isEn ? 'Recent Order History' : 'Lịch Sử Đơn Vận Chuyển')
+            : t('customer.recentRequestsTitle', 'Yêu Cầu Vận Chuyển Gần Đây');
+
+        const stableCard = (
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+            <div className="px-5 py-3.5 bg-white border-b border-[#EFEAE0] flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-[#181A17] m-0">{t('customer.myStableTitle', 'Chiến mã của bạn')}</h2>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#FAF8F4] text-[#181A17] border border-[#E5DDD0]">
+                  {horses.length}
+                </span>
+              </div>
+              <Link href="/customer/horses" className="text-xs font-bold text-[#A67C2E] hover:underline inline-flex items-center gap-1">
+                <span>{t('common.viewAll', 'Tất cả')}</span>
+                <ChevronRight size={13} aria-hidden="true" />
               </Link>
             </div>
 
-            {/* List */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {myOrders.length === 0 ? (
-                <div style={{ padding: '24px 0', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
-                  Chưa có đơn nào gần đây
-                </div>
-              ) : (
-                myOrders.slice(0, 4).map((req) => {
-                  const code = req.requestCode || `REQ-${String(req.id).padStart(3, '0')}`;
-                  const orig = req.originLocation?.split(',')?.[0]?.trim() || 'Origin';
-                  const dest = req.destinationLocation?.split(',')?.[0]?.trim() || 'Destination';
-                  const dateStr = req.requestedDate
-                    ? new Date(req.requestedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    : 'Recent';
-
+            {showcaseHorses.length > 0 ? (
+              <div className="divide-y divide-[#EFEAE0]">
+                {showcaseHorses.map((horse: Horse) => {
+                  const isTransit = horse.availabilityStatus === 'In Transit' || horse.status === 'in_transit';
+                  const imgSrc = getFullPhotoUrl(horse.photoUrl) || FALLBACK_HORSE_PHOTO;
                   return (
-                    <div
-                      key={req.id}
-                      onClick={() => router.push(`/customer/requests/${req.id}`)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '12px 14px',
-                        borderRadius: '10px',
-                        border: '1px solid #f1f5f9',
-                        backgroundColor: '#ffffff',
-                        cursor: 'pointer',
-                        transition: 'background-color 0.15s',
-                      }}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f8fafc')}
-                      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#ffffff')}
+                    <Link
+                      key={horse.id}
+                      href={`/customer/horses/${horse.id}`}
+                      className="p-3.5 flex items-center justify-between gap-3 hover:bg-[#FAF8F4] transition-colors no-underline"
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
-                          <FileText size={16} />
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl overflow-hidden border border-[#E5DDD0] shrink-0 bg-[#FAF8F4]">
+                          <img
+                            src={imgSrc}
+                            alt={horse.name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src = FALLBACK_HORSE_PHOTO;
+                            }}
+                          />
                         </div>
-                        <div>
-                          <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{code}</div>
-                          <div style={{ fontSize: '11px', color: '#64748b' }}>
-                            {orig} → {dest} · {dateStr}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-[#181A17] truncate">{horse.name}</span>
+                            <span className="text-[10px] text-[#747D88] shrink-0">({translateGender(horse.gender)})</span>
+                          </div>
+                          <div className="text-[11px] text-[#5F6977] truncate">
+                            {translateBreed(horse.breed)} • {horse.age} {t('horse.yearsOld', 'tuổi')}
                           </div>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {getStatusBadge(req.status)}
-                        <ChevronRight size={14} color="#94a3b8" />
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
+                          isTransit
+                            ? 'bg-[#FAF8F4] text-[#A67C2E] border-[#D4C5A3]'
+                            : 'bg-[#E8F2EB] text-[#287653] border-[#B7DBC4]'
+                        }`}
+                      >
+                        {isTransit ? t('customer.inFlight', 'Đang vận chuyển') : t('customer.ready', 'Sẵn sàng')}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-6 text-center text-xs text-[#5F6977]">
+                <p className="m-0 mb-3">{t('customer.noHorsesInList', 'Chưa có chiến mã trong danh sách.')}</p>
+                <Link
+                  href="/customer/horses"
+                  className="px-3.5 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:bg-[#FAF8F4] text-[#181A17] font-bold inline-flex items-center gap-1"
+                >
+                  <Plus size={13} aria-hidden="true" />
+                  <span>{t('customer.registerHorseBtn', 'Đăng Ký Ngựa')}</span>
+                </Link>
+              </div>
+            )}
+          </div>
+        );
+
+        const notificationsCard = (
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+            <div className="px-5 py-3.5 bg-white border-b border-[#EFEAE0] flex items-center justify-between gap-2">
+              <h2 className="text-sm font-bold text-[#181A17] m-0">{t('common.notifications', 'Thông báo')}</h2>
+              <button
+                type="button"
+                disabled={notifications.length === 0}
+                onClick={markAllNotificationsRead}
+                className="text-xs font-semibold text-[#A67C2E] hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {t('common.markAllRead', 'Đã đọc hết')}
+              </button>
+            </div>
+            <div className="p-4 flex flex-col gap-2.5">
+              {notifications.length === 0 ? (
+                <div className="py-6 text-center text-xs text-[#747D88]">
+                  {t('notifications.empty', isEn ? 'No new notifications' : 'Không có thông báo mới nào')}
+                </div>
+              ) : (
+                notifications.slice(0, 3).map((notif) => {
+                  const localized = translateNotification(notif.title, notif.message);
+                  return (
+                    <Link
+                      key={notif.id}
+                      href="/customer/notifications"
+                      className="flex items-start gap-2.5 p-2.5 rounded-xl bg-[#FAF8F4] hover:bg-[#F3EFE4]/60 border border-[#E5DDD0] transition-colors no-underline"
+                    >
+                      <div
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                          notif.type === 'CRITICAL' ? 'bg-[#F8EAEA] text-[#B33E3E]' : 'bg-white border border-[#E5DDD0] text-[#A67C2E]'
+                        }`}
+                      >
+                        {notif.type === 'CRITICAL' ? (
+                          <AlertTriangle size={14} aria-hidden="true" />
+                        ) : (
+                          <Clock size={14} aria-hidden="true" />
+                        )}
                       </div>
-                    </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold text-[#181A17] line-clamp-1">{localized.title}</div>
+                        <div className="text-[11px] text-[#5F6977] line-clamp-2 mt-0.5">
+                          {localized.message || notif.timeAgo}
+                        </div>
+                      </div>
+                    </Link>
                   );
                 })
               )}
+              <Link
+                href="/customer/notifications"
+                className="text-center text-xs font-bold text-[#A67C2E] hover:underline pt-1"
+              >
+                {t('customer.viewAllNotifications', 'Xem tất cả thông báo')}
+              </Link>
             </div>
           </div>
+        );
 
-          <button
-            onClick={() => router.push('/customer/requests')}
-            style={{
-              width: '100%',
-              padding: '14px',
-              border: 'none',
-              borderTop: '1px solid #f1f5f9',
-              backgroundColor: '#fafbfc',
-              fontSize: '13px',
-              fontWeight: 700,
-              color: '#0f172a',
-              cursor: 'pointer',
-              marginTop: '16px',
-              textAlign: 'center',
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f1f5f9')}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = '#fafbfc')}
-          >
-            View Details
-          </button>
-        </div>
-
-        {/* Column 3: Notifications */}
-        <div
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '16px',
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ padding: '24px 24px 0 24px' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <div>
-                <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', margin: 0 }}>Notifications</h4>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                  {notifications.filter((n) => !n.isRead).length} unread
-                </div>
-              </div>
-              <button
-                onClick={markAllNotificationsRead}
-                style={{
-                  fontSize: '12.5px',
-                  fontWeight: 600,
-                  color: '#64748b',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = '#2563eb')}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
-              >
-                Mark all read
-              </button>
-            </div>
-
-            {/* Notifications List */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {notifications.slice(0, 3).map((notif) => (
-                <div
-                  key={notif.id}
-                  onClick={() => router.push('/customer/notifications')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '12px',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    backgroundColor: '#fafbfc',
-                    cursor: 'pointer',
-                    position: 'relative',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: '8px',
-                      backgroundColor: notif.type === 'CRITICAL' ? '#fef2f2' : '#eff6ff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: notif.type === 'CRITICAL' ? '#dc2626' : '#2563eb',
-                      flexShrink: 0,
-                      marginTop: '2px',
-                    }}
-                  >
-                    {notif.type === 'CRITICAL' ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {showOrdersPanel && (
+              <div className="lg:col-span-8 flex flex-col gap-6">
+                <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+                  <div className="px-5 py-3.5 bg-white border-b border-[#EFEAE0] flex items-center justify-between gap-2">
+                    <h2 className="text-sm font-bold text-[#181A17] m-0">{ordersPanelTitle}</h2>
+                    <Link href="/customer/requests" className="text-xs font-bold text-[#A67C2E] hover:underline inline-flex items-center gap-1">
+                      <span>{t('common.viewAll', 'Xem tất cả')}</span>
+                      <ChevronRight size={13} aria-hidden="true" />
+                    </Link>
                   </div>
-                  <div style={{ flex: 1, paddingRight: '12px' }}>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
-                      {notif.title}
+
+                  {ordersPanelList.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-[#5F6977]">
+                      {isLoadingOrders
+                        ? t('common.loading', 'Đang tải danh sách đơn...')
+                        : t('customer.noRequestsYet', 'Chưa có yêu cầu vận chuyển nào.')}
                     </div>
-                    <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '3px' }}>
-                      {notif.message || notif.timeAgo}
+                  ) : (
+                    <div className="divide-y divide-[#EFEAE0]">
+                      {ordersPanelList.slice(0, 5).map((req) => {
+                        const code = req.requestCode || `REQ-${String(req.id).padStart(3, '0')}`;
+                        const orig =
+                          req.originLocation?.split(',')?.[0]?.trim() || t('common.origin', isEn ? 'Origin' : 'Xuất phát');
+                        const dest =
+                          req.destinationLocation?.split(',')?.[0]?.trim() ||
+                          t('common.destination', isEn ? 'Destination' : 'Điểm đến');
+                        return (
+                          <Link
+                            key={req.id}
+                            href={`/customer/requests/${req.id}`}
+                            className="px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-[#FAF8F4] transition-colors no-underline"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-9 h-9 rounded-lg bg-[#FAF8F4] border border-[#E5DDD0] flex items-center justify-center text-[#A67C2E] shrink-0">
+                                <FileText size={16} aria-hidden="true" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-[#181A17] font-mono">{code}</div>
+                                <div className="text-[11.5px] text-[#5F6977] truncate">
+                                  {orig} → {dest} ·{' '}
+                                  {req.requestedDate
+                                    ? new Date(req.requestedDate).toLocaleDateString(isEn ? 'en-US' : 'vi-VN')
+                                    : '—'}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <StatusBadge label={translateStatus(req.status)} variant={getOrderBadgeVariant(req.status)} />
+                              <ChevronRight size={14} className="text-[#747D88]" aria-hidden="true" />
+                            </div>
+                          </Link>
+                        );
+                      })}
                     </div>
-                  </div>
-                  {!notif.isRead && (
-                    <span
-                      style={{
-                        width: '7px',
-                        height: '7px',
-                        borderRadius: '50%',
-                        backgroundColor: '#2563eb',
-                        position: 'absolute',
-                        top: '14px',
-                        right: '12px',
-                      }}
-                    />
                   )}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
+
+            {showOrdersPanel ? (
+              <div className="lg:col-span-4 flex flex-col gap-6">
+                {stableCard}
+                {notificationsCard}
+              </div>
+            ) : (
+              <div className="lg:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                {stableCard}
+                {notificationsCard}
+              </div>
+            )}
           </div>
-
-          <Link
-            href="/customer/notifications"
-            style={{
-              display: 'block',
-              textAlign: 'center',
-              padding: '14px',
-              borderTop: '1px solid #f1f5f9',
-              backgroundColor: '#fafbfc',
-              fontSize: '13px',
-              fontWeight: 700,
-              color: '#2563eb',
-              textDecoration: 'none',
-              marginTop: '16px',
-            }}
-          >
-            View all notifications
-          </Link>
-        </div>
-      </div>
-
-      {/* 5. QUICK ACTIONS SECTION (4 Cards Grid) */}
-      <div>
-        <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', marginBottom: '14px' }}>
-          Quick Actions
-        </h4>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: '16px',
-          }}
-        >
-          {/* Card 1: Create Transport Request */}
-          <div
-            onClick={() => router.push('/customer/requests/new')}
-            style={{
-              backgroundColor: '#2563eb',
-              borderRadius: '14px',
-              padding: '20px',
-              color: '#ffffff',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              minHeight: '110px',
-              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
-              transition: 'transform 0.15s, box-shadow 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 8px 20px rgba(37, 99, 235, 0.45)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 4px 14px rgba(37, 99, 235, 0.35)';
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Plus size={16} strokeWidth={2.5} />
-              </div>
-              <ArrowUpRight size={18} color="rgba(255, 255, 255, 0.7)" />
-            </div>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>Create Transport Request</div>
-              <div style={{ fontSize: '11.5px', color: 'rgba(255, 255, 255, 0.8)', marginTop: '2px' }}>
-                Book a new cross-border shipment
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Upload Documents */}
-          <div
-            onClick={() => {
-              if (upcomingTrip) {
-                setActiveRequestForUpload(upcomingTrip.requestCode || `REQ-${upcomingTrip.id}`);
-              }
-              setIsUploadModalOpen(true);
-            }}
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '14px',
-              border: '1px solid #e2e8f0',
-              padding: '20px',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              minHeight: '110px',
-              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-              transition: 'transform 0.15s, box-shadow 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.06)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.03)';
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  backgroundColor: '#fff7ed',
-                  border: '1px solid #fed7aa',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#ea580c',
-                }}
-              >
-                <Upload size={16} />
-              </div>
-              <ArrowUpRight size={18} color="#94a3b8" />
-            </div>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>Upload Documents</div>
-              <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
-                Health, passport & export permits
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: View My Horses */}
-          <div
-            onClick={() => router.push('/customer/horses')}
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '14px',
-              border: '1px solid #e2e8f0',
-              padding: '20px',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              minHeight: '110px',
-              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-              transition: 'transform 0.15s, box-shadow 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.06)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.03)';
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  backgroundColor: '#ecfdf5',
-                  border: '1px solid #bbf7d0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#16a34a',
-                }}
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M22 17v-1c0-4-3-7-7-7H9l-2-3H3l1 5-2 3v3h10" />
-                  <path d="M12 12v5" />
-                  <path d="M17 12v5" />
-                  <circle cx="8" cy="7" r="1" />
-                </svg>
-              </div>
-              <ArrowUpRight size={18} color="#94a3b8" />
-            </div>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>View My Horses</div>
-              <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
-                {horses.length} horses registered
-              </div>
-            </div>
-          </div>
-
-          {/* Card 4: Track Trip */}
-          <div
-            onClick={() => router.push('/customer/tracking')}
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '14px',
-              border: '1px solid #e2e8f0',
-              padding: '20px',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              minHeight: '110px',
-              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.03)',
-              transition: 'transform 0.15s, box-shadow 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.06)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.03)';
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  backgroundColor: '#eff6ff',
-                  border: '1px solid #bfdbfe',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#2563eb',
-                }}
-              >
-                <MapPin size={16} />
-              </div>
-              <ArrowUpRight size={18} color="#94a3b8" />
-            </div>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>Track Trip</div>
-              <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
-                Live status of {upcomingTrip?.requestCode || 'current shipments'}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Modals */}
       <DocumentUploadModal
         isOpen={isUploadModalOpen}
-        onClose={() => setIsUploadModalOpen(false)}
+        onClose={() => {
+          setIsUploadModalOpen(false);
+          setActiveRequestForUpload('');
+        }}
         onSuccess={handleDocumentUploadSuccess}
       />
 

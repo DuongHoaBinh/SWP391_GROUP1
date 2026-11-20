@@ -99,3 +99,31 @@ test('a selected road trip locks its schedule while flight schedules remain edit
   assert.equal(LegScheduleFields({ leg: { legType: 'road', roadTripId: 8 }, readOnly: false, onChange() {} }).props.disabled, true);
   assert.equal(LegScheduleFields({ leg: { legType: 'flight' }, readOnly: false, onChange() {} }).props.disabled, false);
 });
+
+test('auth helper never imports mockCurrentUser or returns a fallback customer identity', () => {
+  const file = path.resolve(__dirname, '../src/lib/auth.ts');
+  const source = fs.readFileSync(file, 'utf8');
+  assert.doesNotMatch(source, /mockCurrentUser/);
+
+  const oldWindow = global.window;
+  const oldStorage = global.localStorage;
+  try {
+    delete global.window;
+    const ssrAuth = loadText(source, file);
+    assert.equal(ssrAuth.getAuthenticatedUser(), null);
+    assert.deepEqual(
+      { id: ssrAuth.getCurrentUser().id, email: ssrAuth.getCurrentUser().email, role: ssrAuth.getCurrentUser().role },
+      { id: '', email: '', role: '' },
+    );
+
+    global.window = {};
+    global.localStorage = { getItem: () => null };
+    const browserAuth = loadText(source, file);
+    assert.equal(browserAuth.getAuthenticatedUser(), null);
+    assert.equal(browserAuth.getCurrentUser().name, '');
+    assert.equal(browserAuth.getCurrentUser().role, '');
+  } finally {
+    if (oldWindow === undefined) delete global.window; else global.window = oldWindow;
+    if (oldStorage === undefined) delete global.localStorage; else global.localStorage = oldStorage;
+  }
+});

@@ -2,29 +2,45 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   Search,
   Filter,
+  Eye,
+  CheckCircle,
+  Truck,
+  Plane,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Eye,
-  CheckCircle,
   XCircle,
   FileText,
+  FileEdit,
   Download,
-  Truck,
-  Plane,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import toast from 'react-hot-toast';
+import { Modal } from '@/components/ui/Modal';
+import { StatusBadge, BadgeVariant } from '@/components/ui/StatusBadge';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { escapeQuotationText } from '@/features/orders/quotation-html';
-import { BookingQuoteSummary } from '@/features/orders/components/BookingSummary';
+import {
+  BookingSummary,
+  BookingQuoteSummary,
+  ManagerFreightSuggestionCard,
+} from '@/features/orders/components/BookingSummary';
 import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
 import type { InsuredHorse } from '@/features/orders/insurance-policy';
-import { bookingName, bookingQuotePayload, type BookingType } from '@/features/orders/booking-policy';
+import {
+  bookingName,
+  bookingQuotePayload,
+  suggestManagerFreightQuote,
+  type BookingType,
+} from '@/features/orders/booking-policy';
 import { buildEquineRoute } from '@/lib/geo-corridors';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -41,58 +57,6 @@ type ShipmentStatus =
   | 'completed'
   | 'cancelled';
 
-interface OrderHorse extends Partial<InsuredHorse> {
-  horseId?: number;
-  name?: string;
-  breed?: string | null;
-  gender?: string | null;
-  age?: number | null;
-  color?: string | null;
-  weight?: number | null;
-  medicalStatus?: string | null;
-  microchipNo?: string | null;
-  passportNo?: string | null;
-  specialRequirements?: string | null;
-}
-
-interface TransportOrder {
-  transportMode?: 'road' | 'air' | null;
-  bookingType?: BookingType;
-  stallUnitPrice?: number | null;
-  id: number;
-  requestCode?: string;
-  customerId: number;
-  contactName: string | null;
-  contactEmail: string;
-  originLocation: string;
-  destinationLocation: string;
-  requestedDate: string;
-  departureDate: string | null;
-  requestedHorseCount?: number;
-  status: ShipmentStatus;
-  totalCost: number;
-  transportCost?: number | null;
-  insuranceFee?: number;
-  createdAt: string;
-  customerEmail?: string;
-  approverName?: string;
-  horses?: OrderHorse[];
-  specialRequirements?: string | null;
-  rejectionReason?: string | null;
-}
-
-interface PaginatedOrders {
-  data: TransportOrder[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-}
-
-type SortField = 'createdAt' | 'totalCost' | 'requestedDate';
-type SortOrder = 'asc' | 'desc';
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
   requested: 'Pending Approval',
   under_review: 'Under Review',
@@ -108,225 +72,356 @@ const STATUS_LABELS: Record<ShipmentStatus, string> = {
 };
 
 const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border: string }> = {
-  requested: { bg: '#fef3c7', color: '#b45309', border: '#fde68a' },
-  under_review: { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
-  change_requested: { bg: '#fff7ed', color: '#c2410c', border: '#ffedd5' },
-  approved: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
-  rejected: { bg: '#fee2e2', color: '#b91c1c', border: '#fecaca' },
-  planning: { bg: '#f3e8ff', color: '#7c3aed', border: '#ddd6fe' },
-  confirmed: { bg: '#dbeafe', color: '#1d4ed8', border: '#bfdbfe' },
-  ready_to_depart: { bg: '#ccfbf1', color: '#0f766e', border: '#99f6e4' },
-  in_transit: { bg: '#e0f2fe', color: '#0369a1', border: '#bae6fd' },
-  completed: { bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' },
-  cancelled: { bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0' },
+  requested: { bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
+  under_review: { bg: '#FAF8F4', color: '#A67C2E', border: '#D4C5A3' },
+  change_requested: { bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
+  approved: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
+  rejected: { bg: '#F8EAEA', color: '#B33E3E', border: '#E5B8B8' },
+  planning: { bg: '#FAF8F4', color: '#A67C2E', border: '#D4C5A3' },
+  confirmed: { bg: '#FAF8F4', color: '#181A17', border: '#D4C5A3' },
+  ready_to_depart: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
+  in_transit: { bg: '#FAF8F4', color: '#A67C2E', border: '#D4C5A3' },
+  completed: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
+  cancelled: { bg: '#F0EEE8', color: '#5B6779', border: '#D8CEBE' },
 };
 
-function formatDate(iso: string | null) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+interface OrderHorse extends Partial<InsuredHorse> {
+  horseId?: number;
+  name?: string;
+  breed?: string | null;
+  gender?: string | null;
+  age?: number | null;
+  color?: string | null;
+  weight?: number | null;
+  medicalStatus?: string | null;
+  microchipNo?: string | null;
+  passportNo?: string | null;
+  specialRequirements?: string | null;
 }
 
-function toLocalDateString(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+interface TransportOrder {
+  id: number;
+  requestCode?: string | null;
+  userId: number;
+  customerName?: string;
+  customerEmail?: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+  originLocation: string;
+  originAddress?: string;
+  destinationLocation: string;
+  destinationAddress?: string;
+  requestedDate: string;
+  estimatedArrival?: string | null;
+  status: ShipmentStatus;
+  totalCost: number;
+  transportCost?: number | null;
+  insuranceFee?: number | null;
+  insurancePlan?: string | null;
+  insuranceCoverage?: number | null;
+  specialRequirements?: string | null;
+  internalNotes?: string | null;
+  rejectionReason?: string | null;
+  transportMode?: 'road' | 'air' | null;
+  bookingType?: BookingType;
+  stallUnitPrice?: number | null;
+  requestedHorseCount?: number;
+  createdAt: string;
+  updatedAt: string;
+  horses?: OrderHorse[];
 }
 
-function formatCurrency(n: number) {
-  if (!n || n === 0) return '—';
-  return n.toLocaleString('vi-VN') + ' ₫';
+type SortField = 'createdAt' | 'requestedDate' | 'totalCost' | 'status' | 'id';
+type SortOrder = 'asc' | 'desc';
+
+// Helper for status config
+function getStatusBadgeConfig(status: ShipmentStatus): { variant: BadgeVariant } {
+  switch (status) {
+    case 'requested':
+      return { variant: 'info' };
+    case 'under_review':
+      return { variant: 'pending' };
+    case 'approved':
+      return { variant: 'success' };
+    case 'rejected':
+      return { variant: 'danger' };
+    case 'planning':
+      return { variant: 'info' };
+    case 'confirmed':
+      return { variant: 'info' };
+    case 'ready_to_depart':
+      return { variant: 'success' };
+    case 'change_requested':
+      return { variant: 'pending' };
+    case 'in_transit':
+      return { variant: 'transit' };
+    case 'completed':
+      return { variant: 'success' };
+    case 'cancelled':
+    default:
+      return { variant: 'neutral' };
+  }
 }
 
-// ─── PDF Export ────────────────────────────────────────────────────────────────
-function exportQuotationPDF(order: TransportOrder) {
+// ─── Formatters ────────────────────────────────────────────────────────────────
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('vi-VN');
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatCurrency(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined || isNaN(amount)) return 'Chưa định giá';
+  if (amount === 0) return '0 ₫';
+  return amount.toLocaleString('vi-VN') + ' ₫';
+}
+
+// ─── PDF Export (Safe with XSS Escaping & Pop-up Handling) ──────────────────────
+function exportQuotationPDF(order: TransportOrder, isEn = false, statusLabel?: string) {
+  const resolvedStatusLabel = statusLabel || STATUS_LABELS[order.status] || order.status;
+  const sc = STATUS_COLORS[order.status] || { bg: '#F0EEE8', color: '#5B6779', border: '#D8CEBE' };
   const printWindow = window.open('', '_blank');
-  if (!printWindow) return;
+  if (!printWindow) {
+    toast.error(
+      isEn
+        ? 'Browser blocked new window. Please allow popups to print quotation.'
+        : 'Trình duyệt đang chặn mở cửa sổ mới. Vui lòng cho phép pop-up để in báo giá.'
+    );
+    return;
+  }
 
-  const horses = order.horses?.map((h) => `
-    <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.name)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.breed || '—')}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.gender || '—')}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;">${escapeQuotationText(h.age ?? '—')} yrs</td>
-    </tr>
-  `).join('') || '<tr><td colspan="4" style="padding:8px 12px;">Không có thông tin ngựa</td></tr>';
+  const horsesHtml =
+    order.horses && order.horses.length > 0
+      ? order.horses
+          .map(
+            (h) => `
+      <tr>
+        <td style="padding:10px 14px;border-bottom:1px solid #D8CEBE;font-weight:600;">${escapeQuotationText(h.name || '—')}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #D8CEBE;">${escapeQuotationText(h.breed || '—')}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #D8CEBE;">${escapeQuotationText(h.gender || '—')}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #D8CEBE;">${h.age !== null && h.age !== undefined ? `${h.age} ${isEn ? 'yo' : 'tuổi'}` : '—'}</td>
+      </tr>`
+          )
+          .join('')
+      : `<tr><td colspan="4" style="padding:12px;text-align:center;color:#5C6658;">${isEn ? 'No horse manifest information' : 'Chưa có thông tin ngựa'}</td></tr>`;
 
   const html = `<!DOCTYPE html>
-<html lang="vi">
+<html lang="${isEn ? 'en' : 'vi'}">
 <head>
   <meta charset="UTF-8">
-  <title>Báo Giá Vận Chuyển - ${escapeQuotationText(order.requestCode || `#${order.id}`)}</title>
+  <title>${isEn ? 'Transport Quotation' : 'Báo Giá Vận Chuyển'} - ${escapeQuotationText(order.requestCode || `#${order.id}`)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; background: #fff; }
-    .page { max-width: 800px; margin: 0 auto; padding: 40px; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 24px; border-bottom: 3px solid #1e40af; margin-bottom: 28px; }
-    .brand { display: flex; flex-direction: column; }
-    .brand-name { font-size: 22px; font-weight: 800; color: #1e40af; letter-spacing: -0.5px; }
-    .brand-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #181A17; background: #fff; line-height: 1.5; }
+    .page { max-width: 820px; margin: 0 auto; padding: 40px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 24px; border-bottom: 3px solid #A67C2E; margin-bottom: 28px; }
+    .brand-name { font-size: 22px; font-weight: 800; color: #181A17; letter-spacing: 0.02em; }
+    .brand-sub { font-size: 12px; color: #5C6658; margin-top: 2px; }
     .doc-info { text-align: right; }
-    .doc-title { font-size: 24px; font-weight: 800; color: #0f172a; }
-    .doc-id { font-size: 13px; color: #64748b; margin-top: 4px; }
-    .doc-date { font-size: 12px; color: #94a3b8; margin-top: 2px; }
-    .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; background: ${STATUS_COLORS[order.status]?.bg || '#f1f5f9'}; color: ${STATUS_COLORS[order.status]?.color || '#64748b'}; margin-top: 6px; border: 1px solid ${STATUS_COLORS[order.status]?.border || '#e2e8f0'}; }
+    .doc-title { font-size: 20px; font-weight: 800; color: #A67C2E; }
+    .doc-id { font-size: 13px; color: #2C2F2A; margin-top: 4px; font-weight: 600; }
+    .doc-date { font-size: 12px; color: #5C6658; }
+    .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; background: ${sc.bg}; color: ${sc.color}; border: 1px solid ${sc.border}; margin-top: 6px; }
     .section { margin-bottom: 24px; }
-    .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }
+    .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #5C6658; border-bottom: 1px solid #D8CEBE; padding-bottom: 6px; margin-bottom: 12px; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-    .info-box { background: #f8fafc; padding: 14px 16px; border-radius: 8px; border: 1px solid #e2e8f0; }
-    .info-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
-    .info-value { font-size: 14px; font-weight: 600; color: #0f172a; }
-    table { width: 100%; border-collapse: collapse; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; }
-    thead { background: #1e40af; }
-    thead th { padding: 10px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #ffffff; text-align: left; }
-    .cost-section { background: #1e40af; border-radius: 12px; padding: 20px 24px; margin: 24px 0; color: #fff; }
-    .cost-label { font-size: 13px; opacity: 0.8; margin-bottom: 4px; }
-    .cost-value { font-size: 28px; font-weight: 800; }
-    .cost-sub { font-size: 11px; opacity: 0.6; margin-top: 4px; }
-    .footer { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; }
-    .note-box { background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 16px; margin-top: 16px; font-size: 12px; color: #92400e; }
-    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .info-box { background: #FAF8F4; border: 1px solid #D8CEBE; border-radius: 8px; padding: 12px 14px; }
+    .info-label { font-size: 11px; color: #5C6658; font-weight: 600; text-transform: uppercase; }
+    .info-value { font-size: 13px; font-weight: 600; color: #181A17; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { background: #F0EEE8; padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #2C2F2A; }
+    .cost-section { background: #FAF8F4; border: 2px solid #B49A68; border-radius: 12px; padding: 20px 24px; text-align: center; margin: 28px 0; }
+    .cost-label { font-size: 13px; font-weight: 700; color: #181A17; text-transform: uppercase; }
+    .cost-value { font-size: 32px; font-weight: 900; color: #A67C2E; margin: 4px 0; }
+    .cost-sub { font-size: 12px; color: #5C6658; }
+    .note-box { background: #F8F0DF; border: 1px solid #DFCA9A; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #7A591C; margin-top: 8px; }
+    .footer { border-top: 1px solid #D8CEBE; padding-top: 16px; margin-top: 32px; font-size: 11px; color: #5C6658; display: flex; justify-content: space-between; }
+    @media print {
+      body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .page { padding: 20px; }
+    }
   </style>
 </head>
 <body>
 <div class="page">
-  <!-- Header -->
   <div class="header">
-    <div class="brand">
-      <div class="brand-name">🏇 RaceHorse Logistics</div>
-      <div class="brand-sub">Cross-Border Racehorse Transport System</div>
-      <div class="brand-sub" style="margin-top:8px;">Hotline: +84 28 3456 7890 | info@racehorse-logistics.vn</div>
+    <div>
+      <div class="brand-name">EquiTransit Logistics</div>
+      <div class="brand-sub">${isEn ? 'Cross-Border Racehorse Transportation System' : 'Hệ Thống Vận Chuyển Ngựa Đua Xuyên Biên Giới'}</div>
+      <div class="brand-sub" style="margin-top:6px;">Hotline: +84 28 3456 7890 | Email: dispatch@equitransit.vn</div>
     </div>
     <div class="doc-info">
-      <div class="doc-title">BÁO GIÁ VẬN CHUYỂN</div>
-      <div class="doc-id">Mã yêu cầu: ${escapeQuotationText(order.requestCode || `#${order.id}`)}</div>
-      <div class="doc-date">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}</div>
-      <div><span class="status-badge">${STATUS_LABELS[order.status]}</span></div>
+      <div class="doc-title">${isEn ? 'OFFICIAL QUOTATION' : 'BÁO GIÁ VẬN CHUYỂN'}</div>
+      <div class="doc-id">${isEn ? 'Request Code:' : 'Mã yêu cầu:'} ${escapeQuotationText(order.requestCode || `#${order.id}`)}</div>
+      <div class="doc-date">${isEn ? 'Issued Date:' : 'Ngày xuất:'} ${new Date().toLocaleDateString(isEn ? 'en-US' : 'vi-VN')}</div>
+      <div><span class="status-badge">${escapeQuotationText(resolvedStatusLabel)}</span></div>
     </div>
   </div>
 
-  <!-- Customer Info -->
   <div class="section">
-    <div class="section-title">Thông tin khách hàng</div>
+    <div class="section-title">${isEn ? 'Customer Details' : 'Thông tin khách hàng'}</div>
     <div class="grid-2">
       <div class="info-box">
-        <div class="info-label">Tên liên hệ</div>
+        <div class="info-label">${isEn ? 'Contact Person' : 'Người liên hệ'}</div>
         <div class="info-value">${escapeQuotationText(order.contactName || '—')}</div>
       </div>
       <div class="info-box">
-        <div class="info-label">Email</div>
-        <div class="info-value">${escapeQuotationText(order.contactEmail)}</div>
+        <div class="info-label">${isEn ? 'Account Email' : 'Email tài khoản'}</div>
+        <div class="info-value">${escapeQuotationText(order.contactEmail || order.customerEmail || '—')}</div>
       </div>
     </div>
   </div>
 
-  <!-- Route Info -->
   <div class="section">
-    <div class="section-title">Thông tin tuyến vận chuyển</div>
+    <div class="section-title">${isEn ? 'Route & Schedule' : 'Thông tin lộ trình vận tải'}</div>
     <div class="grid-3">
       <div class="info-box">
-        <div class="info-label">Điểm xuất phát</div>
+        <div class="info-label">${isEn ? 'Origin Location' : 'Điểm xuất phát'}</div>
         <div class="info-value">${escapeQuotationText(order.originLocation)}</div>
       </div>
       <div class="info-box">
-        <div class="info-label">Điểm đến</div>
+        <div class="info-label">${isEn ? 'Destination Location' : 'Điểm đến'}</div>
         <div class="info-value">${escapeQuotationText(order.destinationLocation)}</div>
       </div>
       <div class="info-box">
-        <div class="info-label">Ngày yêu cầu xuất phát</div>
+        <div class="info-label">${isEn ? 'Requested Departure Date' : 'Ngày yêu cầu xuất phát'}</div>
         <div class="info-value">${formatDate(order.requestedDate)}</div>
       </div>
     </div>
-    ${order.specialRequirements ? `<div class="note-box" style="margin-top:12px;"><strong>Yêu cầu đặc biệt:</strong> ${escapeQuotationText(order.specialRequirements)}</div>` : ''}
+    ${
+      order.specialRequirements
+        ? `<div class="note-box"><strong>${isEn ? 'Special Requirements:' : 'Yêu cầu đặc biệt:'}</strong> ${escapeQuotationText(
+            order.specialRequirements
+          )}</div>`
+        : ''
+    }
   </div>
 
-  <!-- Horses -->
   <div class="section">
-    <div class="section-title">Danh sách ngựa vận chuyển (${order.horses?.length || 0} con)</div>
+    <div class="section-title">${isEn ? `Racehorse Manifest (${order.horses?.length || 0} horses)` : `Danh sách ngựa (${order.horses?.length || 0} con)`}</div>
     <table>
       <thead>
         <tr>
-          <th>Tên ngựa</th>
-          <th>Giống</th>
-          <th>Giới tính</th>
-          <th>Tuổi</th>
+          <th>${isEn ? 'Horse Name' : 'Tên ngựa'}</th>
+          <th>${isEn ? 'Breed' : 'Giống'}</th>
+          <th>${isEn ? 'Gender' : 'Giới tính'}</th>
+          <th>${isEn ? 'Age' : 'Tuổi'}</th>
         </tr>
       </thead>
       <tbody>
-        ${horses}
+        ${horsesHtml}
       </tbody>
     </table>
   </div>
 
-  <!-- Cost -->
   <div class="cost-section">
-    <p>Hình thức: ${bookingName(order.bookingType)}</p>
-    ${order.stallUnitPrice == null ? '' : `<p>${order.stallUnitPrice.toLocaleString('vi-VN')} VNĐ / ô × ${order.requestedHorseCount ?? 1} ngựa</p>`}
-    <div class="cost-label">Tổng cước vận chuyển và bảo hiểm</div>
-    <p>Cước cơ bản: ${order.transportCost == null ? 'Chờ báo giá' : order.transportCost.toLocaleString('vi-VN') + ' VNĐ'} · Phí bảo hiểm: ${(order.insuranceFee ?? 0).toLocaleString('vi-VN')} VNĐ</p>
-    <div class="cost-value">${order.totalCost > 0 ? order.totalCost.toLocaleString('vi-VN') + ' ₫' : 'Chưa định giá'}</div>
-    <div class="cost-sub">${order.totalCost > 0 ? 'Đã bao gồm: phí vận chuyển, kiểm dịch, hải quan cơ bản' : 'Vui lòng chờ Manager xác nhận báo giá'}</div>
+    <p style="font-size:12px;margin-bottom:4px;color:#1e293b;">${isEn ? 'Booking Mode' : 'Hình thức'}: <strong>${bookingName(order.bookingType)}</strong></p>
+    ${order.stallUnitPrice != null ? `<p style="font-size:12px;margin-bottom:6px;color:#475569;">${order.stallUnitPrice.toLocaleString('vi-VN')} VNĐ / ô × ${order.requestedHorseCount ?? 1} ${isEn ? 'horses' : 'ngựa'}</p>` : ''}
+    <div class="cost-label">${isEn ? 'Official Freight Quotation' : 'Tổng cước vận chuyển và bảo hiểm'}</div>
+    ${order.transportCost != null ? `<p style="font-size:12px;color:#475569;margin:4px 0;">${isEn ? 'Base Freight:' : 'Cước cơ bản:'} ${order.transportCost.toLocaleString('vi-VN')} VNĐ · ${isEn ? 'Insurance:' : 'Phí bảo hiểm:'} ${(order.insuranceFee ?? 0).toLocaleString('vi-VN')} VNĐ</p>` : ''}
+    <div class="cost-value">${
+      order.totalCost > 0 ? order.totalCost.toLocaleString('vi-VN') + ' ₫' : (isEn ? 'Not Quoted' : 'Chưa định giá')
+    }</div>
+    <div class="cost-sub">${
+      order.totalCost > 0
+        ? (isEn
+            ? 'Includes: Road/Air cargo freight, international veterinary quarantine clearances, and transit insurance'
+            : 'Đã bao gồm: cước chặng bộ/hàng không, thủ tục kiểm dịch hải quan và bảo hiểm hành trình')
+        : (isEn
+            ? 'Awaiting Logistics Manager official review and confirmation'
+            : 'Vui lòng chờ Logistics Manager kiểm tra và xác nhận báo giá chi tiết')
+    }</div>
   </div>
 
-  <!-- Rejection reason if any -->
-  ${order.rejectionReason ? `
+  ${
+    order.rejectionReason
+      ? `
   <div class="section">
-    <div class="section-title" style="color:#b91c1c;">Lý do từ chối</div>
-    <div class="note-box" style="background:#fee2e2;border-color:#fecaca;color:#b91c1c;">${escapeQuotationText(order.rejectionReason)}</div>
-  </div>` : ''}
+    <div class="section-title" style="color:#b91c1c;">${isEn ? 'Rejection Reason' : 'Lý do từ chối'}</div>
+    <div class="note-box" style="background:#fee2e2;border-color:#fecaca;color:#b91c1c;">${escapeQuotationText(
+      order.rejectionReason
+    )}</div>
+  </div>`
+      : ''
+  }
 
-  <!-- Footer -->
   <div class="footer">
-    <div>
-      <div>RaceHorse Logistics Co., Ltd.</div>
-      <div>MST: 0315678901 | Số 123 Đường Nguyễn Huệ, Q.1, TP.HCM</div>
-    </div>
-    <div style="text-align:right;">
-      <div>Tài liệu này có giá trị trong 30 ngày kể từ ngày xuất</div>
-      <div>Powered by RaceHorse Transport System v2.0</div>
-    </div>
+    <div>${isEn ? 'Generated automatically by Equine Transport Logistics Management System' : 'Được tạo tự động bởi Hệ Thống Quản Lý Vận Chuyển Ngựa Đua Xuyên Quốc Gia'}</div>
+    <div>${isEn ? 'Page 1 of 1' : 'Trang 1 / 1'}</div>
   </div>
 </div>
-<script>window.onload = function() { window.print(); }</script>
+<script>
+  window.onload = function() { window.print(); }
+</script>
 </body>
 </html>`;
 
+  printWindow.document.open?.();
   printWindow.document.write(html);
   printWindow.document.close();
 }
 
-// ─── Main Component ─────────────────────────────────────────────────────────────
+// ─── Main Component ────────────────────────────────────────────────────────────
 export default function ManagerRequestsPage() {
-  const router = useRouter();
+  const lang = useLanguage() || ({} as any);
+  const { t = (_k: string, fb?: string) => fb || _k, language = "vi" } = lang;
+  const isEn = language === 'en';
 
-  // Filter & sort state
+  // Data state
+  const [orders, setOrders] = useState<TransportOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // Filter / Sort / Pagination state
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState<ShipmentStatus | 'all'>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
   const [departureDateFrom, setDepartureDateFrom] = useState('');
   const [departureDateTo, setDepartureDateTo] = useState('');
   const [sortBy, setSortBy] = useState<SortField>('createdAt');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState<10 | 20>(10);
-
-  // Data state
-  const [orders, setOrders] = useState<TransportOrder[]>([]);
+  const [limit] = useState<number>(10);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
 
-  // Approve/reject modal state
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get('search');
+      if (q) setSearch(q);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Modals state
+  const [viewOrder, setViewOrder] = useState<TransportOrder | null>(null);
   const [approveOrder, setApproveOrder] = useState<TransportOrder | null>(null);
-  const [rejectOrder, setRejectOrder] = useState<TransportOrder | null>(null);
   const [totalCostInput, setTotalCostInput] = useState('');
+  const [operatingCostInput, setOperatingCostInput] = useState('');
+  const [rejectOrder, setRejectOrder] = useState<TransportOrder | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [requestChangeOrder, setRequestChangeOrder] = useState<TransportOrder | null>(null);
+  const [requestChangeReason, setRequestChangeReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Road/Air transport mode & USD/VND currency states for approval
   const [selectedTransportMode, setSelectedTransportMode] = useState<'road' | 'air'>('road');
   const [costCurrency, setCostCurrency] = useState<'USD' | 'VND'>('VND');
+  const [usdToVndRate, setUsdToVndRate] = useState<number>(25400);
+
+  useEffect(() => {
+    apiClient<{ usdToVnd?: number }>('/orders/insurance-policy')
+      .then((res) => {
+        const rate = Number(res?.usdToVnd);
+        if (Number.isFinite(rate) && rate > 0) setUsdToVndRate(rate);
+      })
+      .catch(() => {});
+  }, []);
 
   const openApproveModal = (order: TransportOrder) => {
     setApproveOrder(order);
@@ -339,21 +434,33 @@ export default function ManagerRequestsPage() {
       (dStr.includes('vietnam') || dStr.includes('việt nam') || dStr.includes('hà nội') || dStr.includes('ha noi'));
     const isRoadRequested = reqNotes.includes('đường bộ') || reqNotes.includes('road') || isDomestic;
 
-    const initialMode: 'road' | 'air' = order.transportMode ?? (reqNotes.includes('hàng không') || reqNotes.includes('air')
-      ? 'air'
-      : isRoadRequested
-      ? 'road'
-      : 'air');
+    const initialMode: 'road' | 'air' =
+      order.transportMode ??
+      (reqNotes.includes('hàng không') || reqNotes.includes('air')
+        ? 'air'
+        : isRoadRequested
+        ? 'road'
+        : 'air');
     setSelectedTransportMode(initialMode);
 
     const routeInfo = buildEquineRoute(order.originLocation || '', order.destinationLocation || '', initialMode);
     const horseCount = order.requestedHorseCount || (order.horses?.length || 1);
-    const baseCost = initialMode === 'air' ? 600 + routeInfo.distanceKm * 1.6 : 300 + routeInfo.distanceKm * 1.1;
-    const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
+    const suggestion = suggestManagerFreightQuote({
+      transportMode: initialMode,
+      bookingType: order.bookingType ?? 'shared_stall',
+      horseCount,
+      distanceKm: routeInfo.distanceKm,
+      customsCount: routeInfo.customsCount,
+      usdToVndRate,
+    });
 
     setCostCurrency('VND');
     const shared = order.bookingType !== 'dedicated_charter';
-    setTotalCostInput(String(shared ? order.stallUnitPrice ?? Math.round((order.transportCost ?? estimatedUsd * 25400) / horseCount) : order.transportCost ?? Math.round(estimatedUsd * 25400)));
+    const existingQuote = shared
+      ? Number(order.stallUnitPrice || 0)
+      : Number(order.transportCost || 0);
+    setTotalCostInput(String(existingQuote > 0 ? existingQuote : suggestion.suggestedInputVnd));
+    setOperatingCostInput(String(suggestion.suggestedOperatingCostVnd));
   };
 
   const handleModeToggle = (newMode: 'road' | 'air') => {
@@ -361,13 +468,20 @@ export default function ManagerRequestsPage() {
     setSelectedTransportMode(newMode);
     const routeInfo = buildEquineRoute(approveOrder.originLocation || '', approveOrder.destinationLocation || '', newMode);
     const horseCount = approveOrder.requestedHorseCount || (approveOrder.horses?.length || 1);
-    const baseCost = newMode === 'air' ? 600 + routeInfo.distanceKm * 1.6 : 300 + routeInfo.distanceKm * 1.1;
-    const estimatedUsd = Math.max(800, Math.round(baseCost * Math.sqrt(horseCount)));
+    const suggestion = suggestManagerFreightQuote({
+      transportMode: newMode,
+      bookingType: approveOrder.bookingType ?? 'shared_stall',
+      horseCount,
+      distanceKm: routeInfo.distanceKm,
+      customsCount: routeInfo.customsCount,
+      usdToVndRate,
+    });
     if (costCurrency === 'USD') {
-      setTotalCostInput(String(approveOrder.bookingType === 'dedicated_charter' ? estimatedUsd : Math.round(estimatedUsd / horseCount)));
+      setTotalCostInput(String(suggestion.suggestedInputUsd));
     } else {
-      setTotalCostInput(String(Math.round(estimatedUsd * 25400 / (approveOrder.bookingType === 'dedicated_charter' ? 1 : horseCount))));
+      setTotalCostInput(String(suggestion.suggestedInputVnd));
     }
+    setOperatingCostInput(String(suggestion.suggestedOperatingCostVnd));
   };
 
   const handleCurrencyToggle = (newCurr: 'USD' | 'VND') => {
@@ -375,82 +489,82 @@ export default function ManagerRequestsPage() {
     const val = parseFloat(totalCostInput);
     if (!isNaN(val) && val > 0) {
       if (newCurr === 'VND') {
-        setTotalCostInput(String(Math.round(val * 25400)));
+        setTotalCostInput(String(Math.round(val * usdToVndRate)));
       } else {
-        const usd = val / 25400;
+        const usd = val / usdToVndRate;
         setTotalCostInput(usd < 100 ? usd.toFixed(2) : String(Math.round(usd * 100) / 100));
       }
     }
     setCostCurrency(newCurr);
   };
 
+  // Fetch orders from real backend API
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams();
-      if (filterStatus !== 'all') params.set('status', filterStatus);
-      if (departureDateFrom) params.set('departureDateFrom', departureDateFrom);
-      if (departureDateTo) params.set('departureDateTo', departureDateTo);
-      params.set('sortBy', sortBy);
-      params.set('sortOrder', sortOrder);
-      params.set('page', String(page));
-      params.set('limit', String(limit));
+      const query = new URLSearchParams();
+      query.append('page', String(page));
+      query.append('limit', String(limit));
+      if (filterStatus && filterStatus !== 'all') {
+        query.append('status', filterStatus);
+      }
+      if (departureDateFrom) {
+        query.append('departureDateFrom', departureDateFrom);
+      }
+      if (departureDateTo) {
+        query.append('departureDateTo', departureDateTo);
+      }
+      if (sortBy) {
+        query.append('sortBy', sortBy);
+        query.append('sortOrder', sortOrder);
+      }
 
-      const result = await apiClient<any>(`/orders?${params.toString()}`);
-      if (Array.isArray(result)) {
-        let list: TransportOrder[] = [...result];
-        if (filterStatus !== 'all') {
-          list = list.filter((o) => o.status === filterStatus);
-        }
-        if (departureDateFrom) {
-          list = list.filter((o) => {
-            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
-            return dateStr && dateStr >= departureDateFrom;
-          });
-        }
-        if (departureDateTo) {
-          list = list.filter((o) => {
-            const dateStr = toLocalDateString(o.departureDate || o.requestedDate);
-            return dateStr && dateStr <= departureDateTo;
-          });
-        }
-        if (sortBy === 'totalCost') {
-          list.sort((a, b) => (sortOrder === 'asc' ? a.totalCost - b.totalCost : b.totalCost - a.totalCost));
-        } else if (sortBy === 'requestedDate') {
-          list.sort((a, b) => (sortOrder === 'asc' ? new Date(a.requestedDate).getTime() - new Date(b.requestedDate).getTime() : new Date(b.requestedDate).getTime() - new Date(a.requestedDate).getTime()));
-        } else {
-          list.sort((a, b) => (sortOrder === 'asc' ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-        }
-        const total = list.length;
-        const totalPages = Math.max(1, Math.ceil(total / limit));
-        const paginated = list.slice((page - 1) * limit, page * limit);
-        setOrders(paginated);
-        setPagination({ total, totalPages });
-      } else if (result && Array.isArray(result.data)) {
-        setOrders(result.data);
-        setPagination({ total: result.total ?? result.data.length, totalPages: result.totalPages ?? 1 });
+      const res = await apiClient<{
+        data: TransportOrder[];
+        pagination: { total: number; totalPages: number; page: number; limit: number };
+      }>(`/orders?${query.toString()}`);
+
+      if (res && Array.isArray(res.data)) {
+        setOrders(res.data);
+        setPagination({
+          total: res.pagination?.total || res.data.length,
+          totalPages: res.pagination?.totalPages || 1,
+        });
+      } else if (Array.isArray(res)) {
+        setOrders(res as any);
+        setPagination({ total: (res as any).length, totalPages: 1 });
       } else {
         setOrders([]);
         setPagination({ total: 0, totalPages: 1 });
       }
     } catch (err: any) {
+      console.error('Failed to fetch orders:', err);
+      setError(err?.message || 'Không thể tải danh sách yêu cầu');
       setOrders([]);
       setPagination({ total: 0, totalPages: 1 });
-      setError(err.message || 'Không thể tải đơn hàng. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, departureDateFrom, departureDateTo, sortBy, sortOrder, page, limit]);
+  }, [page, limit, filterStatus, departureDateFrom, departureDateTo, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
 
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(1);
-  }, [filterStatus, departureDateFrom, departureDateTo, sortBy, sortOrder, limit]);
+  // Client-side search filtering
+  const displayedOrders = orders.filter((o) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      String(o.id).includes(q) ||
+      (o.requestCode && o.requestCode.toLowerCase().includes(q)) ||
+      (o.contactName && o.contactName.toLowerCase().includes(q)) ||
+      (o.contactEmail && o.contactEmail.toLowerCase().includes(q)) ||
+      (o.originLocation && o.originLocation.toLowerCase().includes(q)) ||
+      (o.destinationLocation && o.destinationLocation.toLowerCase().includes(q))
+    );
+  });
 
   const handleSort = (field: SortField) => {
     if (sortBy === field) {
@@ -459,284 +573,480 @@ export default function ManagerRequestsPage() {
       setSortBy(field);
       setSortOrder('desc');
     }
+    setPage(1);
   };
 
   const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortBy !== field) return <ArrowUpDown size={13} color="#94a3b8" />;
-    return sortOrder === 'asc' ? <ArrowUp size={13} color="var(--primary)" /> : <ArrowDown size={13} color="var(--primary)" />;
+    if (sortBy !== field) return <ArrowUpDown size={14} className="text-slate-400 opacity-60" />;
+    return sortOrder === 'asc' ? (
+      <ArrowUp size={14} className="text-[#A67C2E]" />
+    ) : (
+      <ArrowDown size={14} className="text-[#A67C2E]" />
+    );
   };
 
+  // Actions
   const handleApprove = async () => {
-    if (!approveOrder) return;
+    if (!approveOrder || actionLoading) return;
+    const quoted = Number(totalCostInput);
+    if (!quoted || isNaN(quoted) || quoted <= 0) {
+      toast.error(t('manager.requests.toastValidPrice', 'Vui lòng nhập báo giá hợp lệ (lớn hơn 0)'));
+      return;
+    }
+    const operating = Number(operatingCostInput) || 0;
     setActionLoading(true);
     try {
       await apiClient(`/orders/${approveOrder.id}/approve`, {
         method: 'PATCH',
         body: JSON.stringify({
-          ...bookingQuotePayload(totalCostInput, approveOrder.bookingType ?? 'shared_stall', approveOrder.requestedHorseCount ?? 1, costCurrency),
+          ...bookingQuotePayload(totalCostInput, approveOrder.bookingType ?? 'shared_stall', approveOrder.requestedHorseCount ?? 1, costCurrency, usdToVndRate),
           transportMode: selectedTransportMode,
+          estimatedOperatingCost: operating,
         }),
       });
+      toast.success(
+        t('manager.requests.toastApproveSuccess', `Đã phê duyệt và báo giá thành công cho đơn #${approveOrder.id}`, {
+          id: approveOrder.id,
+        })
+      );
       setApproveOrder(null);
       setTotalCostInput('');
+      setOperatingCostInput('');
       fetchOrders();
     } catch (err: any) {
-      alert(err.message || 'Không thể phê duyệt');
+      toast.error(err.message || t('manager.requests.loadFailed', 'Không thể phê duyệt đơn hàng'));
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleReject = async () => {
-    if (!rejectOrder || !rejectReason.trim()) return;
+    if (!rejectOrder || actionLoading) return;
+    if (!rejectReason.trim() || rejectReason.trim().length < 5) {
+      toast.error(t('manager.requests.toastRejectMinChars', 'Lý do từ chối phải có ít nhất 5 ký tự'));
+      return;
+    }
     setActionLoading(true);
     try {
       await apiClient(`/orders/${rejectOrder.id}/reject`, {
         method: 'PATCH',
-        body: JSON.stringify({ reason: rejectReason }),
+        body: JSON.stringify({ reason: rejectReason.trim() }),
       });
+      toast.success(
+        t('manager.requests.toastRejectSuccess', `Đã từ chối đơn hàng #${rejectOrder.id}`, {
+          id: rejectOrder.id,
+        })
+      );
       setRejectOrder(null);
       setRejectReason('');
       fetchOrders();
     } catch (err: any) {
-      alert(err.message || 'Không thể từ chối');
+      toast.error(err.message || t('manager.requests.loadFailed', 'Không thể từ chối đơn hàng'));
     } finally {
       setActionLoading(false);
     }
   };
 
-  // Filter by search locally (order id / customer email)
-  const displayedOrders = orders.filter((o) => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      String(o.id).includes(q) ||
-      (o.requestCode || '').toLowerCase().includes(q) ||
-      (o.customerEmail || '').toLowerCase().includes(q) ||
-      (o.contactName || '').toLowerCase().includes(q) ||
-      o.originLocation.toLowerCase().includes(q) ||
-      o.destinationLocation.toLowerCase().includes(q)
-    );
-  });
+  const handleRequestChanges = async () => {
+    if (!requestChangeOrder || actionLoading) return;
+    if (!requestChangeReason.trim() || requestChangeReason.trim().length < 5) {
+      toast.error(t('manager.requests.toastChangeMinChars', 'Vui lòng nhập nội dung yêu cầu sửa đổi (tối thiểu 5 ký tự)'));
+      return;
+    }
+    setActionLoading(true);
+    try {
+      await apiClient(`/orders/${requestChangeOrder.id}/request-changes`, {
+        method: 'PATCH',
+        body: JSON.stringify({ reason: requestChangeReason.trim() }),
+      });
+      toast.success(
+        t('manager.requests.toastChangeSuccess', `Đã gửi yêu cầu chỉnh sửa cho đơn #${requestChangeOrder.id}`, {
+          id: requestChangeOrder.id,
+        })
+      );
+      setRequestChangeOrder(null);
+      setRequestChangeReason('');
+      fetchOrders();
+    } catch (err: any) {
+      toast.error(err.message || t('manager.requests.loadFailed', 'Không thể gửi yêu cầu chỉnh sửa'));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const translateStatus = (s: ShipmentStatus): string => {
+    switch (s) {
+      case 'requested':
+        return t('manager.requests.statusRequested', 'Mới tạo');
+      case 'under_review':
+        return t('manager.requests.statusUnderReview', 'Đang thẩm định');
+      case 'approved':
+        return t('manager.requests.statusApproved', 'Đã duyệt / Báo giá');
+      case 'rejected':
+        return t('manager.requests.statusRejected', 'Đã từ chối');
+      case 'planning':
+        return t('manager.requests.statusPlanning', 'Đang lập tuyến');
+      case 'change_requested':
+        return t('manager.requests.statusChangeRequested', 'Yêu cầu chỉnh sửa');
+      case 'confirmed':
+        return t('manager.requests.statusConfirmed', 'Đã xác nhận chuyến');
+      case 'ready_to_depart':
+        return t('manager.requests.statusReadyToDepart', 'Sẵn sàng xuất phát');
+      case 'in_transit':
+        return t('manager.requests.statusInTransit', 'Đang vận chuyển');
+      case 'completed':
+        return t('manager.requests.statusCompleted', 'Đã hoàn tất');
+      case 'cancelled':
+        return t('manager.requests.statusCancelled', 'Đã hủy');
+      default:
+        return s;
+    }
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <div className="flex flex-col gap-6 max-w-[1600px] mx-auto pb-16">
+      {/* ─── Header & Breadcrumbs ────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-heading, #0f172a)', margin: 0 }}>
-            Transport Requests
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted, #64748b)', margin: '4px 0 0 0' }}>
-            Review, price and approve customer transport requests
+          <div className="flex items-center gap-2 text-xs text-slate-500 font-semibold mb-1">
+            <span>{t('manager.requests.breadcrumbDashboard', 'Quản Trị Vận Hành')}</span>
+            <span>/</span>
+            <span className="text-slate-900">{t('manager.requests.breadcrumbTitle', 'Yêu Cầu Vận Chuyển')}</span>
+          </div>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
+            {t('manager.requests.pageTitle', 'Quản Lý Yêu Cầu Vận Chuyển')}
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#F3EFE4] text-[#181A17] font-bold">
+              {pagination.total} {t('manager.requests.totalUnit', 'đơn')}
+            </span>
+          </h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {t('manager.requests.pageSubtitle', 'Thẩm định hồ sơ ban đầu, định giá cước và phê duyệt các yêu cầu vận chuyển ngựa đua.')}
           </p>
         </div>
-        <div style={{ background: '#eff6ff', padding: '10px 18px', borderRadius: '10px', border: '1px solid #dbeafe', textAlign: 'right' }}>
-          <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 600, textTransform: 'uppercase' }}>Total Requests</div>
-          <div style={{ fontSize: '22px', fontWeight: 800, color: '#1e40af' }}>{pagination.total}</div>
+
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => fetchOrders()}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer shadow-sm transition-colors"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            {t('manager.requests.btnRefresh', 'Làm mới')}
+          </button>
         </div>
       </div>
 
-      {/* Filter Bar */}
-      <div style={{
-        backgroundColor: '#ffffff',
-        borderRadius: '14px',
-        border: '1px solid #e2e8f0',
-        padding: '16px 20px',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '14px',
-      }}>
-        {/* Row 1: Search + Status tabs */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          {/* Search */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 14px', minWidth: '260px' }}>
-            <Search size={15} color="#94a3b8" />
+      {/* ─── Search & Filters Bar ────────────────────────────────────────────── */}
+      <div className="bg-white p-4 rounded-2xl border border-[#D8CEBE] shadow-sm flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+        {/* Search */}
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            aria-label={t('manager.requests.searchPlaceholder', 'Tìm kiếm theo ID, mã đơn, khách hàng, điểm đi, điểm đến...')}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('manager.requests.searchPlaceholder', 'Tìm kiếm theo ID, mã đơn, khách hàng, điểm đi, điểm đến...')}
+            className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#C4B38E]/20 focus:border-[#181A17] transition-all font-medium"
+          />
+        </div>
+
+        {/* Filter Controls */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Status Select */}
+          <div className="flex items-center gap-1.5 bg-[#FAF9F5] border border-[#D8CEBE] rounded-xl px-2.5 py-1">
+            <Filter size={13} className="text-slate-500" />
+            <select
+              aria-label={t('manager.requests.colStatus', 'Trạng thái')}
+              value={filterStatus}
+              onChange={(e) => {
+                setFilterStatus(e.target.value);
+                setPage(1);
+              }}
+              className="bg-transparent text-xs font-bold text-slate-700 focus:outline-none cursor-pointer py-1"
+            >
+              <option value="all">{t('manager.requests.filterAllStatus', 'Tất cả trạng thái')}</option>
+              <option value="requested">{t('manager.requests.statusRequested', 'Mới tạo')}</option>
+              <option value="under_review">{t('manager.requests.statusUnderReview', 'Đang thẩm định')}</option>
+              <option value="approved">{t('manager.requests.statusApproved', 'Đã duyệt / Báo giá')}</option>
+              <option value="rejected">{t('manager.requests.statusRejected', 'Đã từ chối')}</option>
+              <option value="change_requested">{t('manager.requests.statusChangeRequested', 'Yêu cầu chỉnh sửa')}</option>
+              <option value="planning">{t('manager.requests.statusPlanning', 'Đang lập tuyến')}</option>
+              <option value="confirmed">{t('manager.requests.statusConfirmed', 'Đã xác nhận chuyến')}</option>
+              <option value="ready_to_depart">{t('manager.requests.statusReadyToDepart', 'Sẵn sàng xuất phát')}</option>
+              <option value="in_transit">{t('manager.requests.statusInTransit', 'Đang vận chuyển')}</option>
+              <option value="completed">{t('manager.requests.statusCompleted', 'Đã hoàn tất')}</option>
+              <option value="cancelled">{t('manager.requests.statusCancelled', 'Đã hủy')}</option>
+            </select>
+          </div>
+
+          {/* Date Range From */}
+          <div className="flex items-center gap-1.5 bg-[#FAF9F5] border border-[#D8CEBE] rounded-xl px-2 py-1">
+            <label htmlFor="requests-date-from" className="text-[10px] uppercase font-bold text-slate-500">
+              {t('manager.requests.dateFrom', 'Từ')}
+            </label>
             <input
-              type="text"
-              placeholder="Search by ID, email, location..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', width: '100%' }}
+              id="requests-date-from"
+              type="date"
+              value={departureDateFrom}
+              onChange={(e) => {
+                setDepartureDateFrom(e.target.value);
+                setPage(1);
+              }}
+              className="bg-transparent text-xs text-slate-700 focus:outline-none cursor-pointer py-0.5"
             />
           </div>
 
-          {/* Status Filter */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <Filter size={14} color="#64748b" />
-            {(['all', 'requested', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed', 'cancelled', 'rejected'] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setFilterStatus(s)}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  border: filterStatus === s ? '1px solid #1d4ed8' : '1px solid #e2e8f0',
-                  backgroundColor: filterStatus === s ? '#eff6ff' : '#ffffff',
-                  color: filterStatus === s ? '#1d4ed8' : '#64748b',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {s === 'all' ? 'All' : STATUS_LABELS[s]}
-              </button>
-            ))}
+          {/* Date Range To */}
+          <div className="flex items-center gap-1.5 bg-[#FAF9F5] border border-[#D8CEBE] rounded-xl px-2 py-1">
+            <label htmlFor="requests-date-to" className="text-[10px] uppercase font-bold text-slate-500">
+              {t('manager.requests.dateTo', 'Đến')}
+            </label>
+            <input
+              id="requests-date-to"
+              type="date"
+              value={departureDateTo}
+              onChange={(e) => {
+                setDepartureDateTo(e.target.value);
+                setPage(1);
+              }}
+              className="bg-transparent text-xs text-slate-700 focus:outline-none cursor-pointer py-0.5"
+            />
           </div>
-        </div>
 
-        {/* Row 2: Date range + Limit */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>Departure date:</span>
-          <input
-            type="date"
-            value={departureDateFrom}
-            onChange={(e) => setDepartureDateFrom(e.target.value)}
-            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px', backgroundColor: '#f8fafc' }}
-          />
-          <span style={{ fontSize: '12px', color: '#94a3b8' }}>to</span>
-          <input
-            type="date"
-            value={departureDateTo}
-            min={departureDateFrom}
-            onChange={(e) => setDepartureDateTo(e.target.value)}
-            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px', backgroundColor: '#f8fafc' }}
-          />
-
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Rows:</span>
-            {([10, 20] as const).map((n) => (
-              <button
-                key={n}
-                onClick={() => setLimit(n)}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  border: limit === n ? '1px solid #1d4ed8' : '1px solid #e2e8f0',
-                  backgroundColor: limit === n ? '#eff6ff' : '#ffffff',
-                  color: limit === n ? '#1d4ed8' : '#64748b',
-                  cursor: 'pointer',
-                }}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
+          {/* Clear Filter */}
+          {(filterStatus !== 'all' || departureDateFrom || departureDateTo || search) && (
+            <button
+              type="button"
+              onClick={() => {
+                setFilterStatus('all');
+                setDepartureDateFrom('');
+                setDepartureDateTo('');
+                setSearch('');
+                setPage(1);
+              }}
+              className="text-xs text-rose-600 font-bold hover:underline px-2 py-1 cursor-pointer"
+            >
+              {t('manager.requests.clearFilter', 'Xóa lọc')}
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Table */}
-      <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-        {loading ? (
-          <div style={{ padding: '60px', textAlign: 'center', color: '#94a3b8', fontSize: '14px' }}>Loading...</div>
-        ) : error ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#dc2626', fontSize: '14px' }}>{error}</div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead style={{ backgroundColor: '#f8fafc' }}>
-              <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>REQ-ID</th>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>Customer</th>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>Route</th>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
-                  <button onClick={() => handleSort('requestedDate')} style={{ display: 'flex', alignItems: 'center', gap: '4px', border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase' }}>
-                    Departure <SortIcon field="requestedDate" />
-                  </button>
+      {/* ─── Error Message ───────────────────────────────────────────────────── */}
+      {error && (
+        <div role="alert" className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchOrders()}
+            className="text-xs font-bold underline hover:no-underline cursor-pointer"
+          >
+            {t('manager.requests.retry', 'Thử lại')}
+          </button>
+        </div>
+      )}
+
+      {/* ─── Requests Table ──────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-2xl border border-[#D8CEBE] shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm min-w-[920px]">
+            <thead>
+              <tr className="bg-[#FAF9F5] border-b border-[#D8CEBE]">
+                <th
+                  aria-sort={sortBy === 'id' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  onClick={() => handleSort('id')}
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                >
+                  <div className="flex items-center gap-1">
+                    {t('manager.requests.colId', 'MÃ ĐƠN')}
+                    <SortIcon field="id" />
+                  </div>
                 </th>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
-                  <button onClick={() => handleSort('totalCost')} style={{ display: 'flex', alignItems: 'center', gap: '4px', border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase' }}>
-                    Cost <SortIcon field="totalCost" />
-                  </button>
+                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600">
+                  {t('manager.requests.colCustomer', 'KHÁCH HÀNG')}
                 </th>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>Status</th>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
-                  <button onClick={() => handleSort('createdAt')} style={{ display: 'flex', alignItems: 'center', gap: '4px', border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase' }}>
-                    Submitted <SortIcon field="createdAt" />
-                  </button>
+                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600">
+                  {t('manager.requests.colRoute', 'LỘ TRÌNH VẬN CHUYỂN')}
                 </th>
-                <th style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748b', textAlign: 'right' }}>Actions</th>
+                <th
+                  aria-sort={sortBy === 'requestedDate' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  onClick={() => handleSort('requestedDate')}
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                >
+                  <div className="flex items-center gap-1">
+                    {t('manager.requests.colDeparture', 'NGÀY KHỞI HÀNH')}
+                    <SortIcon field="requestedDate" />
+                  </div>
+                </th>
+                <th
+                  aria-sort={sortBy === 'totalCost' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  onClick={() => handleSort('totalCost')}
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                >
+                  <div className="flex items-center gap-1">
+                    {t('manager.requests.colPrice', 'BÁO GIÁ')}
+                    <SortIcon field="totalCost" />
+                  </div>
+                </th>
+                <th
+                  aria-sort={sortBy === 'status' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  onClick={() => handleSort('status')}
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                >
+                  <div className="flex items-center gap-1">
+                    {t('manager.requests.colStatus', 'TRẠNG THÁI')}
+                    <SortIcon field="status" />
+                  </div>
+                </th>
+                <th
+                  aria-sort={sortBy === 'createdAt' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  onClick={() => handleSort('createdAt')}
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                >
+                  <div className="flex items-center gap-1">
+                    {t('manager.requests.colCreated', 'NGÀY TẠO')}
+                    <SortIcon field="createdAt" />
+                  </div>
+                </th>
+                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 text-right">
+                  {t('manager.requests.colActions', 'THAO TÁC')}
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[#F0EEE8]">
               {displayedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: '48px', textAlign: 'center', color: '#94a3b8', fontSize: '14px' }}>
-                    No transport requests found
+                  <td colSpan={8} className="py-16 text-center text-slate-500 text-sm">
+                    {loading ? (
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <RefreshCw size={24} className="animate-spin text-[#A67C2E]" />
+                        <span>{t('manager.requests.loading', 'Đang tải danh sách yêu cầu...')}</span>
+                      </div>
+                    ) : (
+                      t('manager.requests.noOrdersFound', 'Không tìm thấy yêu cầu vận chuyển nào.')
+                    )}
                   </td>
                 </tr>
               ) : (
                 displayedOrders.map((order) => {
-                  const sc = STATUS_COLORS[order.status] || { bg: '#f1f5f9', color: '#475569', border: '#e2e8f0' };
+                  const statusConfig = getStatusBadgeConfig(order.status);
+                  const orderCode = order.requestCode || `#${order.id}`;
                   return (
-                    <tr key={order.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '14px 16px', fontWeight: 700, color: '#1d4ed8', fontSize: '13px' }}>
-                        <Link href={`/manager/requests/${order.id}`} style={{ color: '#1d4ed8', textDecoration: 'none' }}>
-                          {order.requestCode || `REQ-${String(order.id).padStart(3, '0')}`}
+                    <tr key={order.id} className="hover:bg-[#FAF9F5] transition-colors">
+                      <td className="py-3.5 px-4 font-bold text-[#181A17]">
+                        <Link href={`/manager/requests/${order.id}`} className="hover:underline">
+                          {orderCode}
                         </Link>
                       </td>
-                      <td style={{ padding: '14px 16px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>{order.contactName || '—'}</div>
-                        <div style={{ fontSize: '11px', color: '#94a3b8' }}>{order.customerEmail}</div>
+                      <td className="py-3.5 px-4">
+                        <div className="font-bold text-slate-900">{order.contactName || '—'}</div>
+                        <div className="text-xs text-slate-500">
+                          {order.customerEmail || order.contactEmail}
+                        </div>
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: '13px', color: '#334155' }}>
-                        {order.originLocation} → {order.destinationLocation}
-                        <div className="mt-1 text-xs font-semibold text-blue-700" title={bookingName(order.bookingType)}>{order.bookingType === 'dedicated_charter' ? 'Bao chuyến' : 'Ghép ô chuồng'}</div>
+                      <td className="py-3.5 px-4 text-slate-700 font-medium">
+                        <div>
+                          {order.originLocation} → {order.destinationLocation}
+                        </div>
+                        <div className="mt-1 text-xs font-semibold text-[#7A591C]">
+                          {order.bookingType === 'dedicated_charter'
+                            ? isEn
+                              ? 'Dedicated Charter'
+                              : 'Bao chuyến'
+                            : isEn
+                            ? 'Shared Stall'
+                            : 'Ghép ô chuồng'}
+                        </div>
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: '13px', color: '#334155' }}>{formatDate(order.requestedDate)}</td>
-                      <td style={{ padding: '14px 16px', fontSize: '13px', fontWeight: 700, color: order.totalCost > 0 ? '#15803d' : '#94a3b8' }}>
-                        {formatCurrency(order.totalCost)}
+                      <td className="py-3.5 px-4 text-slate-600">{formatDate(order.requestedDate)}</td>
+                      <td className="py-3.5 px-4 font-extrabold text-slate-900">
+                        {order.totalCost > 0 ? (
+                          <span className="text-emerald-700">{formatCurrency(order.totalCost)}</span>
+                        ) : (
+                          <span className="text-slate-500 font-normal">{t('manager.requests.notQuoted', 'Chưa báo giá')}</span>
+                        )}
                       </td>
-                      <td style={{ padding: '14px 16px' }}>
-                        <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, backgroundColor: sc.bg, color: sc.color, border: `1px solid ${sc.border}` }}>
-                          {STATUS_LABELS[order.status] || order.status}
-                        </span>
+                      <td className="py-3.5 px-4">
+                        <StatusBadge label={translateStatus(order.status)} variant={statusConfig.variant} />
                       </td>
-                      <td style={{ padding: '14px 16px', fontSize: '12px', color: '#64748b' }}>{formatDate(order.createdAt)}</td>
-                      <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                          {/* View */}
+                      <td className="py-3.5 px-4 text-xs text-slate-500">
+                        {formatDate(order.createdAt)}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex gap-1.5 justify-end flex-wrap items-center">
+                          {/* View Detail Modal */}
                           <button
-                            onClick={() => router.push(`/manager/requests/${order.id}`)}
-                            title="View Details"
-                            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#475569', fontWeight: 600 }}
+                            type="button"
+                            onClick={() => setViewOrder(order)}
+                            title={t('manager.requests.btnViewDetail', 'Xem chi tiết')}
+                            className="px-2.5 py-1.5 rounded-lg border border-[#D8CEBE] bg-white text-slate-700 hover:bg-slate-50 font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
                           >
-                            <Eye size={13} /> View
+                            <Eye size={13} /> {t('manager.requests.btnViewDetail', 'Xem')}
                           </button>
 
-                          {/* Approve - only for requested status */}
+                          {/* Print Quotation PDF */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              exportQuotationPDF(
+                                order,
+                                language === 'en',
+                                translateStatus(order.status)
+                              )
+                            }
+                            aria-label={t('manager.requests.btnPrintQuotation', 'In Báo Giá PDF')}
+                            title={t('manager.requests.btnPrintQuotation', 'In Báo Giá PDF')}
+                            className="px-2 py-1.5 rounded-lg border border-[#D8CEBE] bg-white text-slate-600 hover:text-[#181A17] hover:bg-[#FAF8F4] font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <Download size={13} />
+                          </button>
+
+                          {/* Approve (Only for 'requested') */}
                           {order.status === 'requested' && (
                             <button
+                              type="button"
                               onClick={() => openApproveModal(order)}
-                              title="Approve"
-                              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #bbf7d0', background: '#dcfce7', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#15803d', fontWeight: 600 }}
+                              title={t('manager.requests.btnApprove', 'Phê duyệt & Định giá')}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
                             >
-                              <CheckCircle size={13} /> Approve
+                              <CheckCircle size={13} /> {t('manager.requests.btnApprove', 'Duyệt')}
                             </button>
                           )}
 
-                          {/* Reject - only for requested status */}
+                          {/* Request Changes (Only for 'requested') */}
                           {order.status === 'requested' && (
                             <button
-                              onClick={() => { setRejectOrder(order); setRejectReason(''); }}
-                              title="Reject"
-                              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #fecaca', background: '#fee2e2', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#b91c1c', fontWeight: 600 }}
+                              type="button"
+                              onClick={() => {
+                                setRequestChangeOrder(order);
+                                setRequestChangeReason('');
+                              }}
+                              title={t('manager.requests.btnRequestChange', 'Yêu cầu chỉnh sửa')}
+                              className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
                             >
-                              <XCircle size={13} /> Reject
+                              <FileEdit size={13} /> {t('manager.requests.btnRequestChange', 'Sửa')}
                             </button>
                           )}
 
-                          {/* PDF Export */}
-                          <button
-                            onClick={() => exportQuotationPDF(order)}
-                            title="Export Quotation PDF"
-                            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #dbeafe', background: '#eff6ff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#1d4ed8', fontWeight: 600 }}
-                          >
-                            <Download size={13} /> PDF
-                          </button>
+                          {/* Reject (Only for 'requested') */}
+                          {order.status === 'requested' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRejectOrder(order);
+                                setRejectReason('');
+                              }}
+                              title={t('manager.requests.btnReject', 'Từ chối')}
+                              className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                            >
+                              <XCircle size={13} /> {t('manager.requests.btnReject', 'Từ chối')}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -745,327 +1055,527 @@ export default function ManagerRequestsPage() {
               )}
             </tbody>
           </table>
-        )}
+        </div>
 
-        {/* Pagination */}
-        {!loading && pagination.totalPages > 1 && (
-          <div style={{ padding: '16px 20px', borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: '13px', color: '#64748b' }}>
-              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, pagination.total)} of {pagination.total} requests
+        {/* ─── Pagination ────────────────────────────────────────────────────── */}
+        {pagination.totalPages > 1 && (
+          <div className="p-4 border-t border-[#D8CEBE] bg-[#FAF9F5] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 font-medium">
+            <div>
+              {t(
+                'manager.requests.paginationShowing',
+                `Hiển thị ${(page - 1) * limit + 1} - ${Math.min(page * limit, pagination.total)} trong tổng số ${pagination.total} đơn`,
+                {
+                  from: (page - 1) * limit + 1,
+                  to: Math.min(page * limit, pagination.total),
+                  total: pagination.total,
+                }
+              )}
             </div>
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <div className="flex items-center gap-1.5">
               <button
+                type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
-                style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', background: page === 1 ? '#f8fafc' : '#fff', cursor: page === 1 ? 'not-allowed' : 'pointer', color: page === 1 ? '#cbd5e1' : '#475569', display: 'flex', alignItems: 'center', gap: '4px' }}
+                className="px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-white text-slate-700 hover:bg-slate-50 font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
               >
-                <ChevronLeft size={14} /> Prev
+                <ChevronLeft size={14} /> {t('manager.requests.prevPage', 'Trước')}
               </button>
-              {Array.from({ length: Math.min(pagination.totalPages, 5) }, (_, i) => {
-                const pageNum = i + 1;
-                return (
-                  <button
-                    key={pageNum}
-                    onClick={() => setPage(pageNum)}
-                    style={{ padding: '6px 12px', borderRadius: '6px', border: page === pageNum ? '1px solid #1d4ed8' : '1px solid #e2e8f0', background: page === pageNum ? '#eff6ff' : '#fff', cursor: 'pointer', fontWeight: page === pageNum ? 700 : 400, color: page === pageNum ? '#1d4ed8' : '#475569', fontSize: '13px' }}
-                  >
-                    {pageNum}
-                  </button>
-                );
-              })}
+              <div className="px-3 py-1.5 rounded-lg bg-white border border-[#D8CEBE] font-bold text-slate-800">
+                {page} / {pagination.totalPages}
+              </div>
               <button
+                type="button"
                 onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
                 disabled={page === pagination.totalPages}
-                style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', background: page === pagination.totalPages ? '#f8fafc' : '#fff', cursor: page === pagination.totalPages ? 'not-allowed' : 'pointer', color: page === pagination.totalPages ? '#cbd5e1' : '#475569', display: 'flex', alignItems: 'center', gap: '4px' }}
+                className="px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-white text-slate-700 hover:bg-slate-50 font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
               >
-                Next <ChevronRight size={14} />
+                {t('manager.requests.nextPage', 'Sau')} <ChevronRight size={14} />
               </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Approve Modal */}
-      {approveOrder && (() => {
-        const routeInfo = buildEquineRoute(
-          approveOrder.originLocation || "",
-          approveOrder.destinationLocation || "",
-          selectedTransportMode
-        );
-        const horseCount = approveOrder.requestedHorseCount || (approveOrder.horses?.length || 1);
-        const orderCode = approveOrder.requestCode || `REQ-${String(approveOrder.id).padStart(3, "0")}`;
-
-        return (
-          <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
-            <div style={{ background: "#fff", borderRadius: "16px", padding: "24px 28px", width: "100%", maxWidth: "560px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
-              {/* Header */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                <h3 style={{ fontSize: "18px", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                  Phê duyệt đơn vận chuyển {orderCode}
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setApproveOrder(null)}
-                  style={{ background: "transparent", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "18px", padding: "4px" }}
-                >
-                  ✕
-                </button>
+      {/* ─── MODAL 1: Detail Modal ──────────────────────────────────────────────── */}
+      <Modal
+        isOpen={!!viewOrder}
+        onClose={() => setViewOrder(null)}
+        title={t('manager.requests.modalDetailTitle', `Chi Tiết Yêu Cầu Vận Chuyển #${viewOrder?.id}`, { id: viewOrder?.id || '' })}
+        subtitle={t('manager.requests.modalDetailSubtitle', `Được tạo vào ngày ${formatDate(viewOrder?.createdAt || null)}`, { date: formatDate(viewOrder?.createdAt || null) })}
+        maxWidth="max-w-2xl"
+      >
+        {viewOrder && (
+          <div className="flex flex-col gap-4 text-sm">
+            <div className="flex items-center justify-between pb-3 border-b border-[#F0EEE8]">
+              <div>
+                <span className="text-xs text-slate-500 font-bold uppercase">{t('manager.requests.modalDetailStatus', 'Trạng Thái Đơn:')}</span>
+                <div className="mt-1">
+                  <StatusBadge
+                    label={translateStatus(viewOrder.status)}
+                    variant={getStatusBadgeConfig(viewOrder.status).variant}
+                  />
+                </div>
               </div>
+              <div className="text-right">
+                <span className="text-xs text-slate-500 font-bold uppercase">{t('manager.requests.modalDetailPrice', 'Chi Phí Báo Giá:')}</span>
+                <div className="text-xl font-extrabold text-emerald-700 mt-0.5">
+                  {formatCurrency(viewOrder.totalCost)}
+                </div>
+              </div>
+            </div>
 
-              {/* Route & Distance Card */}
-              <div style={{ padding: "14px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", marginBottom: "14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "12px", fontWeight: 700, color: "#64748b" }}>
-                    Lộ trình & Khoảng cách:
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 bg-[#FAF9F5] p-4 rounded-xl border border-[#D8CEBE]">
+              <div>
+                <div className="text-xs text-slate-500 font-bold uppercase">{t('manager.requests.modalDetailCustomer', 'Khách hàng')}</div>
+                <div className="font-bold text-slate-900 mt-0.5">{viewOrder.contactName || '—'}</div>
+                <div className="text-xs text-slate-600 mt-0.5">{viewOrder.contactPhone || '—'}</div>
+                <div className="text-xs text-slate-600">{viewOrder.contactEmail || viewOrder.customerEmail}</div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500 font-bold uppercase">{t('manager.requests.modalDetailSchedule', 'Thời gian vận chuyển')}</div>
+                <div className="text-xs text-slate-700 mt-1">
+                  <span className="font-semibold">{t('manager.requests.departureDate', 'Khởi hành:')}</span> {formatDate(viewOrder.requestedDate)}
+                </div>
+                <div className="text-xs text-slate-700 mt-0.5">
+                  <span className="font-semibold">{t('manager.requests.arrivalDate', 'Dự kiến đến:')}</span> {formatDate(viewOrder.estimatedArrival)}
+                </div>
+              </div>
+            </div>
+
+            {/* Booking & Insurance summary if available */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <BookingSummary
+                bookingType={viewOrder.bookingType}
+                horseCount={viewOrder.requestedHorseCount || viewOrder.horses?.length || 1}
+                stallUnitPrice={viewOrder.stallUnitPrice}
+                status={viewOrder.status}
+                departureDate={viewOrder.requestedDate}
+              />
+              <InsuranceSummary
+                horses={(viewOrder.horses ?? []).map((h) => ({
+                  horseId: h.horseId,
+                  name: h.name ?? 'Ngựa',
+                  quantity: h.quantity ?? 1,
+                  declaredValue: h.declaredValue ?? 0,
+                  declaredCurrency: h.declaredCurrency ?? 'VND',
+                  exchangeRate: h.exchangeRate ?? 1,
+                  declaredValueVnd: h.declaredValueVnd ?? 0,
+                  insurancePackage: h.insurancePackage ?? 'basic',
+                  insuranceFee: h.insuranceFee ?? 0,
+                  maxCompensation: h.maxCompensation ?? 50000000,
+                  emergencyVetCovered: Boolean(h.emergencyVetCovered),
+                }))}
+                transportCost={viewOrder.transportCost ?? null}
+                insuranceFee={Number(viewOrder.insuranceFee ?? 0)}
+                totalCost={viewOrder.totalCost}
+              />
+            </div>
+
+            {/* Route Details */}
+            <div className="p-3.5 bg-[#FAF8F4] rounded-xl border border-[#D8CEBE] text-xs">
+              <div className="font-bold text-[#181A17] mb-1">{t('manager.requests.modalDetailRoute', 'Hành Trình Vận Chuyển')}</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-700">
+                <div>
+                  <span className="text-slate-500 font-semibold">{t('manager.requests.originPoint', 'Điểm đi:')}</span> {viewOrder.originLocation}
+                  {viewOrder.originAddress && <div className="text-slate-500 text-[11px]">{viewOrder.originAddress}</div>}
+                </div>
+                <div>
+                  <span className="text-slate-500 font-semibold">{t('manager.requests.destinationPoint', 'Điểm đến:')}</span> {viewOrder.destinationLocation}
+                  {viewOrder.destinationAddress && <div className="text-slate-500 text-[11px]">{viewOrder.destinationAddress}</div>}
+                </div>
+              </div>
+            </div>
+
+            {/* Horse Manifest */}
+            <div>
+              <div className="text-xs font-bold text-slate-700 uppercase mb-2">
+                {t('manager.requests.modalDetailHorseManifest', `Danh Sách Ngựa (${viewOrder.horses?.length || 0} con):`, {
+                  count: viewOrder.horses?.length || 0,
+                })}
+              </div>
+              {viewOrder.horses && viewOrder.horses.length > 0 ? (
+                <div className="border border-[#D8CEBE] rounded-xl overflow-x-auto">
+                  <table className="w-full text-left text-xs min-w-[440px]">
+                    <thead className="bg-[#FAF9F5] border-b border-[#D8CEBE]">
+                      <tr>
+                        <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseName', 'Tên ngựa')}</th>
+                        <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseBreed', 'Giống')}</th>
+                        <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseGender', 'Giới tính')}</th>
+                        <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseAge', 'Tuổi')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F0EEE8]">
+                      {viewOrder.horses.map((h, idx) => (
+                        <tr key={idx}>
+                          <td className="p-2.5 font-bold text-slate-900">{h.name || '—'}</td>
+                          <td className="p-2.5 text-slate-600">{h.breed || '—'}</td>
+                          <td className="p-2.5 text-slate-600">{h.gender || '—'}</td>
+                          <td className="p-2.5 text-slate-600">{h.age !== null && h.age !== undefined ? `${h.age}` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 italic">
+                  {t('manager.requests.noHorseManifest', 'Không có thông tin ngựa trong đơn.')}
+                </p>
+              )}
+            </div>
+
+            {/* Special Requirements */}
+            {viewOrder.specialRequirements && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+                <span className="font-bold">{t('manager.requests.specialReq', 'Yêu cầu đặc biệt:')}</span> {viewOrder.specialRequirements}
+              </div>
+            )}
+
+            {/* Rejection / Note */}
+            {viewOrder.rejectionReason && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-900">
+                <span className="font-bold">{t('manager.requests.rejectionReason', 'Lý do từ chối:')}</span> {viewOrder.rejectionReason}
+              </div>
+            )}
+
+            <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-[#F0EEE8]">
+              <button
+                type="button"
+                onClick={() =>
+                  exportQuotationPDF(
+                    viewOrder,
+                    language === 'en',
+                    translateStatus(viewOrder.status)
+                  )
+                }
+                className="px-4 py-2 rounded-xl border border-[#D8CEBE] text-slate-700 font-bold text-xs hover:bg-slate-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download size={14} /> {t('manager.requests.btnPrintQuotation', 'In Báo Giá PDF')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewOrder(null)}
+                className="px-4 py-2 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 cursor-pointer"
+              >
+                {t('manager.common.close', 'Đóng')}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ─── MODAL 2: Approve & Set Price ───────────────────────────────────────── */}
+      <Modal
+        isOpen={!!approveOrder}
+        onClose={() => { if (!actionLoading) setApproveOrder(null); }}
+        closeDisabled={actionLoading}
+        title={t('manager.requests.modalApproveTitle', `Phê Duyệt & Báo Giá Đơn #${approveOrder?.id}`, { id: approveOrder?.id || '' })}
+        subtitle={`${approveOrder?.originLocation} → ${approveOrder?.destinationLocation}`}
+        maxWidth="max-w-xl"
+      >
+        {approveOrder && (() => {
+          const routeInfo = buildEquineRoute(
+            approveOrder.originLocation || '',
+            approveOrder.destinationLocation || '',
+            selectedTransportMode
+          );
+
+          return (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleApprove();
+              }}
+              className="flex flex-col gap-4 text-sm"
+            >
+              {/* Route & Mode Selection Card */}
+              <div className="p-3.5 bg-[#FAF8F4] border border-[#D8CEBE] rounded-xl flex flex-col gap-2.5">
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <span className="text-xs font-bold text-[#242722]">
+                    {t('manager.requests.transportMethod', 'Phương thức vận chuyển:')}
                   </span>
-                  <div style={{ display: "flex", gap: "4px", background: "#fff", padding: "3px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                  <div className="flex gap-1 bg-white p-1 rounded-lg border border-[#D8CEBE]">
                     <button
                       type="button"
-                      onClick={() => handleModeToggle("road")}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "4px",
-                        padding: "4px 10px",
-                        fontSize: "11px",
-                        fontWeight: 700,
-                        borderRadius: "6px",
-                        border: "none",
-                        cursor: "pointer",
-                        backgroundColor: selectedTransportMode === "road" ? "#eff6ff" : "transparent",
-                        color: selectedTransportMode === "road" ? "#2563eb" : "#64748b",
-                      }}
+                      onClick={() => handleModeToggle('road')}
+                      className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                        selectedTransportMode === 'road' ? 'bg-[#181A17] text-[#FAF8F4] shadow-sm' : 'text-slate-600 hover:text-[#181A17]'
+                      }`}
                     >
-                      <Truck size={12} /> Đường bộ
+                      <Truck size={12} /> {t('manager.requests.modeRoad', 'Đường bộ')}
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleModeToggle("air")}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "4px",
-                        padding: "4px 10px",
-                        fontSize: "11px",
-                        fontWeight: 700,
-                        borderRadius: "6px",
-                        border: "none",
-                        cursor: "pointer",
-                        backgroundColor: selectedTransportMode === "air" ? "#eff6ff" : "transparent",
-                        color: selectedTransportMode === "air" ? "#2563eb" : "#64748b",
-                      }}
+                      onClick={() => handleModeToggle('air')}
+                      className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                        selectedTransportMode === 'air' ? 'bg-[#181A17] text-[#FAF8F4] shadow-sm' : 'text-slate-600 hover:text-[#181A17]'
+                      }`}
                     >
-                      <Plane size={12} /> Hàng không
+                      <Plane size={12} /> {t('manager.requests.modeAir', 'Hàng không')}
                     </button>
                   </div>
                 </div>
 
-                <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", marginBottom: "10px" }}>
+                <div className="text-xs font-bold text-[#181A17]">
                   {approveOrder.originLocation} → {approveOrder.destinationLocation}
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", fontSize: "11px" }}>
+                <div className="grid grid-cols-3 gap-2 text-xs">
                   <div>
-                    <span style={{ color: "#94a3b8", display: "block" }}>Khoảng cách:</span>
-                    <strong style={{ color: "#0284c7", fontSize: "12px" }}>{routeInfo.distanceKm.toLocaleString("vi-VN")} km</strong>
+                    <span className="text-slate-500 block text-[11px]">{t('manager.requests.distance', 'Khoảng cách:')}</span>
+                    <strong className="text-[#7A591C]">{routeInfo.distanceKm.toLocaleString('vi-VN')} km</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#94a3b8", display: "block" }}>Thời gian ước tính:</span>
-                    <strong style={{ color: "#0f172a", fontSize: "12px" }}>~{routeInfo.durationHours} giờ</strong>
+                    <span className="text-slate-500 block text-[11px]">{t('manager.requests.estDuration', 'Thời gian ước tính:')}</span>
+                    <strong className="text-[#181A17]">~{routeInfo.durationHours} {isEn ? 'hrs' : 'giờ'}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#94a3b8", display: "block" }}>Số lượng ngựa:</span>
-                    <strong style={{ color: "#15803d", fontSize: "12px" }}>{horseCount} cá thể</strong>
+                    <span className="text-slate-500 block text-[11px]">{t('manager.requests.borderGates', 'Cửa khẩu:')}</span>
+                    <strong className="text-[#181A17]">{routeInfo.customsCount} {isEn ? 'posts' : 'trạm'}</strong>
                   </div>
                 </div>
               </div>
 
-              {/* Horse Info Card */}
-              <div style={{ padding: "14px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", marginBottom: "14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "12px", fontWeight: 700, color: "#991b1b" }}>
-                    🐎 Hồ sơ ngựa vận chuyển ({approveOrder.horses?.length || 1} hồ sơ / {horseCount} ngựa):
-                  </span>
-                  <span style={{ fontSize: "10px", color: "#94a3b8", background: "#fff", padding: "2px 6px", borderRadius: "4px", border: "1px solid #e2e8f0" }}>
-                    Mã định danh thú y
-                  </span>
-                </div>
+              {/* Suggested Freight Basis Card */}
+              <ManagerFreightSuggestionCard
+                transportMode={selectedTransportMode}
+                bookingType={approveOrder.bookingType}
+                horseCount={approveOrder.requestedHorseCount || approveOrder.horses?.length || 1}
+                distanceKm={routeInfo.distanceKm}
+                customsCount={routeInfo.customsCount}
+                usdToVndRate={usdToVndRate}
+                currentInput={totalCostInput}
+                currency={costCurrency}
+                onApplySuggestion={(sug) => {
+                  setTotalCostInput(
+                    String(costCurrency === 'USD' ? sug.suggestedInputUsd : sug.suggestedInputVnd)
+                  );
+                  setOperatingCostInput(String(sug.suggestedOperatingCostVnd));
+                }}
+              />
 
-                <div className="my-4"><BookingQuoteSummary input={totalCostInput} bookingType={approveOrder.bookingType} horseCount={horseCount} currency={costCurrency} insuranceFee={Number(approveOrder.insuranceFee ?? 0)} /></div>
-                <InsuranceSummary horses={(approveOrder.horses ?? []).map(h => ({ ...h, name: h.name ?? 'Ngựa' }))} transportCost={approveOrder.transportCost ?? null} insuranceFee={Number(approveOrder.insuranceFee ?? 0)} totalCost={approveOrder.totalCost} />
-                {approveOrder.horses && approveOrder.horses.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "140px", overflowY: "auto" }}>
-                    {approveOrder.horses.map((horse, idx) => (
-                      <div
-                        key={horse.horseId || idx}
-                        style={{ padding: "10px", background: "#fff", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "12px" }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                          <strong style={{ color: "#0f172a" }}>#{idx + 1}. {horse.name || "Chiến mã"}</strong>
-                          <span style={{ fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "12px", background: "#eff6ff", color: "#2563eb" }}>
-                            {horse.breed || "Ngựa đua"}
-                          </span>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px", fontSize: "11px", color: "#64748b" }}>
-                          <div>Tuổi / Giới tính: <strong style={{ color: "#0f172a" }}>{horse.age ? `${horse.age} tuổi` : "N/A"} • {horse.gender === "male" ? "Đực" : horse.gender === "female" ? "Cái" : horse.gender || "N/A"}</strong></div>
-                          <div>Màu / Cân nặng: <strong style={{ color: "#0f172a" }}>{horse.color || "Chestnut"} {horse.weight ? `• ${horse.weight} kg` : ""}</strong></div>
-                          <div>Microchip/Passport: <strong style={{ color: "#0f172a", fontFamily: "monospace" }}>{horse.microchipNo || horse.passportNo || "981456789234123"}</strong></div>
-                        </div>
-                        {horse.medicalStatus && (
-                          <div style={{ marginTop: "4px", fontSize: "11px", color: "#b45309" }}>
-                            🩺 Sức khỏe: {horse.medicalStatus}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ padding: "8px 12px", background: "#fff", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "12px", color: "#64748b" }}>
-                    Khách hàng: <strong style={{ color: "#0f172a" }}>{approveOrder.contactName || approveOrder.customerEmail}</strong>
-                  </div>
-                )}
-              </div>
+              {/* Booking Quote & Insurance Summary */}
+              <BookingQuoteSummary
+                input={totalCostInput}
+                bookingType={approveOrder.bookingType}
+                horseCount={approveOrder.requestedHorseCount || approveOrder.horses?.length || 1}
+                currency={costCurrency}
+                insuranceFee={Number(approveOrder.insuranceFee ?? 0)}
+              />
 
-              {/* Price & Currency */}
-              <div style={{ marginBottom: "16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                  <label style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
-                    {approveOrder.bookingType === 'dedicated_charter' ? 'Cước trọn gói toàn chuyến (chưa bảo hiểm)' : 'Đơn giá mỗi ô chuồng / ngựa (chưa bảo hiểm)'} <span style={{ color: "#dc2626" }}>*</span>
+              {/* Price Input with USD/VND toggle */}
+              <div className="p-3.5 bg-[#FAF9F5] border border-[#D8CEBE] rounded-xl flex flex-col gap-2">
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <label htmlFor="requests-approve-price" className="text-xs font-bold text-[#242722]">
+                    {approveOrder.bookingType === 'dedicated_charter'
+                      ? t('manager.requests.charterPriceLabel', 'Cước trọn gói *')
+                      : t('manager.requests.stallPriceLabel', 'Đơn giá mỗi ô chuồng *')}
                   </label>
-                  <div style={{ display: "flex", gap: "4px", background: "#f1f5f9", padding: "2px", borderRadius: "6px" }}>
+                  <div className="flex gap-1 bg-white p-0.5 rounded-lg border border-[#D8CEBE]">
                     <button
                       type="button"
-                      onClick={() => handleCurrencyToggle("USD")}
-                      style={{
-                        padding: "3px 8px",
-                        fontSize: "11px",
-                        fontWeight: 700,
-                        borderRadius: "4px",
-                        border: "none",
-                        cursor: "pointer",
-                        background: costCurrency === "USD" ? "#fff" : "transparent",
-                        color: costCurrency === "USD" ? "#2563eb" : "#64748b",
-                        boxShadow: costCurrency === "USD" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
-                      }}
+                      onClick={() => handleCurrencyToggle('USD')}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer ${
+                        costCurrency === 'USD' ? 'bg-[#181A17] text-white' : 'text-slate-600'
+                      }`}
                     >
                       USD ($)
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleCurrencyToggle("VND")}
-                      style={{
-                        padding: "3px 8px",
-                        fontSize: "11px",
-                        fontWeight: 700,
-                        borderRadius: "4px",
-                        border: "none",
-                        cursor: "pointer",
-                        background: costCurrency === "VND" ? "#fff" : "transparent",
-                        color: costCurrency === "VND" ? "#16a34a" : "#64748b",
-                        boxShadow: costCurrency === "VND" ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
-                      }}
+                      onClick={() => handleCurrencyToggle('VND')}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer ${
+                        costCurrency === 'VND' ? 'bg-[#287653] text-white' : 'text-slate-600'
+                      }`}
                     >
                       VND (₫)
                     </button>
                   </div>
                 </div>
 
-                <div style={{ position: "relative" }}>
+                <div className="relative">
                   <input
+                    id="requests-approve-price"
                     type="number"
-                    min={0}
+                    min={costCurrency === 'USD' ? '0.01' : 1}
+                    step={costCurrency === 'USD' ? 'any' : 1}
+                    required
                     value={totalCostInput}
-                    aria-label={approveOrder.bookingType === 'dedicated_charter' ? 'Cước trọn gói toàn chuyến' : 'Đơn giá mỗi ô chuồng'}
                     onChange={(e) => setTotalCostInput(e.target.value)}
-                    placeholder={costCurrency === "USD" ? "e.g. 2500" : "e.g. 60000000"}
-                    style={{
-                      width: "100%",
-                      padding: "10px 60px 10px 14px",
-                      borderRadius: "8px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "14px",
-                      fontWeight: 700,
-                      outline: "none",
-                    }}
+                    placeholder={costCurrency === 'USD' ? 'VD: 2500' : 'VD: 60000000'}
+                    className="w-full h-11 px-3.5 pr-16 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-slate-900 text-sm font-bold outline-none focus:ring-2 focus:ring-[#C4B38E]/20 focus:border-[#181A17]"
                   />
-                  <span style={{ position: "absolute", right: "12px", top: "12px", fontSize: "12px", fontWeight: 700, color: "#64748b" }}>
-                    {costCurrency === "USD" ? "USD ($)" : "VND (₫)"}
+                  <span className="absolute right-3.5 top-3 text-xs font-bold text-slate-500">
+                    {costCurrency === 'USD' ? 'USD ($)' : 'VND (₫)'}
                   </span>
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b", marginTop: "6px" }}>
-                  <span>Tỷ lệ quy đổi khi lưu báo giá (1 USD ≈ 25.400 VND):</span>
-                  <strong style={{ color: "#0f172a" }}>
-                    {costCurrency === "USD"
-                      ? `≈ ${(Math.round((parseFloat(totalCostInput) || 0) * 25400)).toLocaleString("vi-VN")} VND`
-                      : `≈ $${(Math.round(((parseFloat(totalCostInput) || 0) / 25400) * 100) / 100).toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`}
+                <div className="flex justify-between text-[11px] text-slate-600 mt-1">
+                  <span>{t('manager.requests.fxRateNote', 'Tỷ lệ quy đổi (1 USD ≈ 25.400 VND):')}</span>
+                  <strong className="text-slate-800">
+                    {costCurrency === 'USD'
+                      ? `≈ ${(Math.round((parseFloat(totalCostInput) || 0) * 25400)).toLocaleString('vi-VN')} VND`
+                      : `≈ $${(Math.round(((parseFloat(totalCostInput) || 0) / 25400) * 100) / 100).toLocaleString('vi-VN')} USD`}
                   </strong>
                 </div>
-                <p style={{ fontSize: "11px", color: "#94a3b8", margin: "4px 0 0 0" }}>
-                  Báo giá dự kiến được lưu bằng VND, gồm cước cơ bản và bảo hiểm. Hóa đơn và thanh toán SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.
+
+                <p className="text-[11px] text-slate-500 m-0">
+                  {t(
+                    'manager.requests.sepayUnlockHint',
+                    'Báo giá dự kiến được lưu bằng VND, gồm cước cơ bản và bảo hiểm. Hóa đơn và thanh toán SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.'
+                  )}
                 </p>
               </div>
 
-              {/* Actions */}
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", paddingTop: "10px", borderTop: "1px solid #f1f5f9" }}>
+              {/* Operating Cost Input (Internal) */}
+              <div>
+                <label htmlFor="requests-operating-cost" className="text-xs font-bold text-slate-700 block mb-1.5">
+                  {t('manager.requests.fieldOperatingCost', 'Chi Phí Vận Hành Ước Tính (VND)')}{' '}
+                  <span className="text-slate-500 font-normal">{t('manager.requests.internalOnlyNote', '(Nội bộ Manager)')}</span>
+                </label>
+                <input
+                  id="requests-operating-cost"
+                  type="number"
+                  min={0}
+                  value={operatingCostInput}
+                  onChange={(e) => setOperatingCostInput(e.target.value)}
+                  placeholder="VD: 35000000"
+                  className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-slate-900 text-sm outline-none focus:ring-2 focus:ring-[#C4B38E]/20 focus:border-[#181A17]"
+                />
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-[#F0EEE8] mt-2">
                 <button
                   type="button"
+                  disabled={actionLoading}
                   onClick={() => setApproveOrder(null)}
-                  style={{ padding: "9px 20px", borderRadius: "8px", border: "1px solid #e2e8f0", background: "#fff", fontSize: "13px", fontWeight: 600, color: "#64748b", cursor: "pointer" }}
+                  className="px-4 py-2.5 rounded-xl border border-[#D8CEBE] text-slate-700 font-bold text-xs hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
                 >
-                  Hủy bỏ
+                  {t('manager.common.cancel', 'Hủy')}
                 </button>
                 <button
-                  type="button"
-                  onClick={handleApprove}
+                  type="submit"
                   disabled={actionLoading}
-                  style={{
-                    padding: "9px 24px",
-                    borderRadius: "8px",
-                    border: "none",
-                    background: "#15803d",
-                    color: "#fff",
-                    fontSize: "13px",
-                    fontWeight: 700,
-                    cursor: actionLoading ? "not-allowed" : "pointer",
-                    opacity: actionLoading ? 0.7 : 1,
-                  }}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-700 text-white font-bold text-xs hover:bg-emerald-800 disabled:opacity-50 cursor-pointer"
                 >
-                  {actionLoading ? "Đang xử lý..." : "Xác nhận phê duyệt"}
+                  {actionLoading ? t('manager.requests.btnApproving', 'Đang duyệt...') : `✓ ${t('manager.requests.btnConfirmApprove', 'Xác Nhận Phê Duyệt')}`}
                 </button>
               </div>
+            </form>
+          );
+        })()}
+      </Modal>
+
+      {/* ─── MODAL 3: Request Changes ───────────────────────────────────────────── */}
+      <Modal
+        isOpen={!!requestChangeOrder}
+        onClose={() => { if (!actionLoading) setRequestChangeOrder(null); }}
+        closeDisabled={actionLoading}
+        title={t('manager.requests.modalChangeTitle', `Yêu Cầu Chỉnh Sửa Đơn #${requestChangeOrder?.id}`, { id: requestChangeOrder?.id || '' })}
+        subtitle={t('manager.requests.modalChangeSubtitle', 'Gửi ghi chú yêu cầu khách hàng cập nhật lại thông tin lộ trình hoặc hồ sơ')}
+        maxWidth="max-w-md"
+      >
+        {requestChangeOrder && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleRequestChanges();
+            }}
+            className="flex flex-col gap-4 text-sm"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label htmlFor="requests-change-reason" className="text-xs font-bold text-slate-700">
+                  {t('manager.requests.fieldChangeReason', 'Nội Dung Yêu Cầu Chỉnh Sửa (Tối thiểu 5 ký tự) *')}
+                </label>
+                <span className="text-[11px] text-slate-500">{requestChangeReason.trim().length} / 5+</span>
+              </div>
+              <textarea
+                id="requests-change-reason"
+                rows={4}
+                required
+                value={requestChangeReason}
+                onChange={(e) => setRequestChangeReason(e.target.value)}
+                placeholder={t('manager.requests.fieldChangePlaceholder', 'VD: Vui lòng bổ sung giấy kiểm dịch và chọn lại ngày đón ngựa...')}
+                className="w-full p-3 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-slate-900 text-sm outline-none focus:ring-2 focus:ring-[#C4B38E]/20 focus:border-[#181A17]"
+              />
             </div>
-          </div>
-        );
-      })()}
-      {/* Reject Modal */}
-      {rejectOrder && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', borderRadius: '16px', padding: '28px', width: '440px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#b91c1c', margin: '0 0 8px' }}>Reject Request #{rejectOrder.id}</h3>
-            <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 20px' }}>
-              {rejectOrder.originLocation} → {rejectOrder.destinationLocation}<br />
-              Customer: {rejectOrder.contactName || rejectOrder.customerEmail}
-            </p>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a', display: 'block', marginBottom: '6px' }}>
-              Rejection Reason <span style={{ color: '#dc2626' }}>*</span>
-            </label>
-            <textarea
-              rows={3}
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Please provide a detailed reason for rejection..."
-              style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: rejectReason.trim() ? '1px solid #cbd5e1' : '1px solid #fecaca', fontSize: '13px', resize: 'vertical', marginBottom: '20px' }}
-            />
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setRejectOrder(null)} style={{ padding: '9px 20px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontSize: '13px', fontWeight: 600, color: '#64748b', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleReject} disabled={actionLoading || !rejectReason.trim()} style={{ padding: '9px 24px', borderRadius: '8px', border: 'none', background: '#dc2626', color: '#fff', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: (actionLoading || !rejectReason.trim()) ? 0.7 : 1 }}>
-                {actionLoading ? 'Rejecting...' : '✗ Reject Request'}
+
+            <div className="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-[#F0EEE8]">
+              <button
+                type="button"
+                disabled={actionLoading}
+                onClick={() => setRequestChangeOrder(null)}
+                className="px-4 py-2.5 rounded-xl border border-[#D8CEBE] text-slate-700 font-bold text-xs hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+              >
+                {t('manager.common.cancel', 'Hủy')}
+              </button>
+              <button
+                type="submit"
+                disabled={actionLoading || requestChangeReason.trim().length < 5}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 text-white font-bold text-xs hover:bg-amber-700 disabled:opacity-50 cursor-pointer"
+              >
+                {actionLoading ? t('manager.requests.btnSending', 'Đang gửi...') : t('manager.requests.btnSendChange', 'Gửi Yêu Cầu Cho Khách')}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </form>
+        )}
+      </Modal>
+
+      {/* ─── MODAL 4: Reject Order ──────────────────────────────────────────────── */}
+      <Modal
+        isOpen={!!rejectOrder}
+        onClose={() => { if (!actionLoading) setRejectOrder(null); }}
+        closeDisabled={actionLoading}
+        title={t('manager.requests.modalRejectTitle', `Từ Chối Đơn Vận Chuyển #${rejectOrder?.id}`, { id: rejectOrder?.id || '' })}
+        subtitle={t('manager.requests.modalRejectSubtitle', 'Vui lòng nêu rõ lý do từ chối để thông báo đến khách hàng')}
+        maxWidth="max-w-md"
+      >
+        {rejectOrder && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleReject();
+            }}
+            className="flex flex-col gap-4 text-sm"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label htmlFor="requests-reject-reason" className="text-xs font-bold text-slate-700">
+                  {t('manager.requests.fieldRejectReason', 'Lý Do Từ Chối (Tối thiểu 5 ký tự) *')}
+                </label>
+                <span className="text-[11px] text-slate-500">{rejectReason.trim().length} / 5+</span>
+              </div>
+              <textarea
+                id="requests-reject-reason"
+                rows={4}
+                required
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder={t('manager.requests.fieldRejectPlaceholder', 'VD: Tuyến vận chuyển qua cửa khẩu hiện đang đóng băng do dịch bệnh...')}
+                className="w-full p-3 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-slate-900 text-sm outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-600"
+              />
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-[#F0EEE8]">
+              <button
+                type="button"
+                disabled={actionLoading}
+                onClick={() => setRejectOrder(null)}
+                className="px-4 py-2.5 rounded-xl border border-[#D8CEBE] text-slate-700 font-bold text-xs hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+              >
+                {t('manager.common.cancel', 'Hủy')}
+              </button>
+              <button
+                type="submit"
+                disabled={actionLoading || rejectReason.trim().length < 5}
+                className="px-5 py-2.5 rounded-xl bg-red-600 text-white font-bold text-xs hover:bg-red-700 disabled:opacity-50 cursor-pointer"
+              >
+                {actionLoading ? t('manager.requests.btnRejecting', 'Đang từ chối...') : `✗ ${t('manager.requests.btnConfirmReject', 'Xác Nhận Từ Chối')}`}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -17,6 +17,8 @@ export interface UserProfile {
   organization?: string;
   avatarUrl?: string;
   initials: string;
+  authProvider?: 'local' | 'google';
+  hasPassword?: boolean;
   persona?: 'driver' | 'escort';
   specialization?: 'driver' | 'escort' | string | null;
 }

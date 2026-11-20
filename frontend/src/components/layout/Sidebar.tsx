@@ -1,26 +1,25 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
   Truck,
   FolderClosed,
   Navigation,
   Bell,
-  HelpCircle,
-  LogOut,
   BarChart3,
   Settings,
+  LogOut,
   X,
+  Pin,
+  PinOff,
 } from 'lucide-react';
-import { clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { apiClient } from '@/lib/api-client';
-import { mockCurrentUser } from '@/lib/mock-data';
-import { UserProfile } from '@/lib/types';
-import { LogoutConfirmModal } from './LogoutConfirmModal';
+import { logout } from '@/lib/auth';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
+import { LogoutConfirmModal } from './LogoutConfirmModal';
 
 interface NavItem {
   label: string;
@@ -36,18 +35,92 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose }) => {
   const pathname = usePathname();
-  const router = useRouter();
-  const { t } = useLanguage();
-  const [currentUser, setCurrentUser] = useState<UserProfile>(mockCurrentUser);
-  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const { t, language } = useLanguage();
+  const isEn = language === 'en';
   const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [isPinned, setIsPinned] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const leaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
-    setCurrentUser(getCurrentUser());
+    try {
+      const saved =
+        localStorage.getItem('equitransit_sidebar_pinned') ??
+        localStorage.getItem('equiroute_sidebar_pinned');
+      if (saved !== null) {
+        setIsPinned(saved === 'true');
+      }
+    } catch {
+      // ignore
+    }
 
+    return () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current?.();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', handleEsc);
+    };
+  }, [mobileOpen]);
+
+  const togglePin = () => {
+    setIsPinned((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('equitransit_sidebar_pinned', String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  const handleMouseEnter = () => {
+    if (leaveTimeoutRef.current) {
+      clearTimeout(leaveTimeoutRef.current);
+      leaveTimeoutRef.current = null;
+    }
+    if (!isPinned) {
+      hoverTimeoutRef.current = setTimeout(() => {
+        setIsHovered(true);
+      }, 120);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    if (!isPinned) {
+      leaveTimeoutRef.current = setTimeout(() => {
+        setIsHovered(false);
+      }, 150);
+    }
+  };
+
+  const isExpanded = isPinned || isHovered;
+
+  useEffect(() => {
     const fetchUnread = async () => {
       try {
-        const notifs = await apiClient<any[]>('/notifications');
+        const notifs = await apiClient<Array<{ isRead?: boolean }>>('/notifications');
         if (Array.isArray(notifs)) {
           setUnreadNotifs(notifs.filter((n) => !n.isRead).length);
         }
@@ -57,31 +130,25 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
     };
     fetchUnread();
 
-    const handleUserUpdate = () => {
-      setCurrentUser(getCurrentUser());
-      fetchUnread();
-    };
-    window.addEventListener('auth-user-updated', handleUserUpdate);
     window.addEventListener('notifications-updated', fetchUnread);
     return () => {
-      window.removeEventListener('auth-user-updated', handleUserUpdate);
       window.removeEventListener('notifications-updated', fetchUnread);
     };
   }, []);
 
   const navItems: NavItem[] = [
     {
-      label: t('nav.dashboard', 'Dashboard'),
+      label: t('nav.dashboard', 'Tổng quan'),
       href: '/customer',
-      icon: <LayoutDashboard size={18} />,
+      icon: <LayoutDashboard size={18} aria-hidden="true" />,
     },
     {
-      label: t('nav.requests', 'Transport Requests'),
+      label: t('nav.requests', 'Yêu cầu vận chuyển'),
       href: '/customer/requests',
-      icon: <Truck size={18} />,
+      icon: <Truck size={18} aria-hidden="true" />,
     },
     {
-      label: t('nav.horses', 'My Horses'),
+      label: t('nav.horses', 'Quản lý ngựa đua'),
       href: '/customer/horses',
       icon: (
         <svg
@@ -93,6 +160,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
+          aria-hidden="true"
         >
           <path d="M22 17v-1c0-4-3-7-7-7H9l-2-3H3l1 5-2 3v3h10" />
           <path d="M12 12v5" />
@@ -102,45 +170,143 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
       ),
     },
     {
-      label: t('nav.documents', 'Documents'),
+      label: t('nav.documents', 'Hồ sơ & Giấy tờ'),
       href: '/customer/documents',
-      icon: <FolderClosed size={18} />,
-      badge: 2,
+      icon: <FolderClosed size={18} aria-hidden="true" />,
     },
     {
-      label: t('nav.tracking', 'Trip Tracking'),
+      label: t('nav.tracking', 'Theo dõi hành trình'),
       href: '/customer/tracking',
-      icon: <Navigation size={18} />,
+      icon: <Navigation size={18} aria-hidden="true" />,
     },
     {
-      label: t('common.notifications', 'Notifications'),
+      label: t('common.notifications', 'Thông báo'),
       href: '/customer/notifications',
-      icon: <Bell size={18} />,
+      icon: <Bell size={18} aria-hidden="true" />,
       badge: unreadNotifs > 0 ? unreadNotifs : undefined,
     },
   ];
 
   const managementItems: NavItem[] = [
     {
-      label: t('nav.reports', 'Reports'),
+      label: t('nav.reports', 'Báo cáo chi phí'),
       href: '/customer/reports',
-      icon: <BarChart3 size={18} />,
+      icon: <BarChart3 size={18} aria-hidden="true" />,
     },
     {
-      label: t('common.settings', 'Settings'),
+      label: t('common.settings', 'Cài đặt tài khoản'),
       href: '/customer/settings',
-      icon: <Settings size={18} />,
+      icon: <Settings size={18} aria-hidden="true" />,
     },
   ];
-
-  const handleLogoutClick = () => {
-    setShowLogoutModal(true);
-  };
 
   const handleConfirmLogout = () => {
     setShowLogoutModal(false);
     logout();
   };
+
+  const pinLabel = isPinned
+    ? t('sidebar.unpin', isEn ? 'Unpin sidebar' : 'Bỏ ghim thanh menu')
+    : t('sidebar.pin', isEn ? 'Pin sidebar' : 'Ghim cố định thanh menu');
+
+  const renderBrandHeader = (mobile = false) => (
+    <div
+      style={{
+        padding: !mobile && !isExpanded ? '20px 10px' : '20px 18px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: !mobile && !isExpanded ? 'center' : 'space-between',
+        borderBottom: '1px solid #2C2F2A',
+        flexDirection: !mobile && !isExpanded ? 'column' : 'row',
+        gap: !mobile && !isExpanded ? '12px' : '0',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+        {mobile ? (
+          <div
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '11px',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)',
+              border: '1px solid rgba(180, 154, 104, 0.45)',
+              backgroundColor: '#242722',
+              flexShrink: 0,
+            }}
+          >
+            <img src="/logo.png" alt="EquiTransit" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={togglePin}
+            title={pinLabel}
+            aria-label={pinLabel}
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B49A68] cursor-pointer"
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '11px',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)',
+              border: '1px solid rgba(180, 154, 104, 0.45)',
+              backgroundColor: '#242722',
+              flexShrink: 0,
+              padding: 0,
+            }}
+          >
+            <img src="/logo.png" alt="EquiTransit" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          </button>
+        )}
+
+        {(mobile || isExpanded) && (
+          <div style={{ whiteSpace: 'nowrap', overflow: 'hidden' }}>
+            <div style={{ fontSize: '15px', fontWeight: 800, color: '#F7F7F4', lineHeight: 1.1 }}>
+              EquiTransit <span style={{ color: '#B49A68', fontSize: '11px', fontWeight: 700 }}>CLIENT</span>
+            </div>
+            <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 500, letterSpacing: '0.01em', marginTop: '2px' }}>
+              {t('common.appTagline', 'Vận tải ngựa đua xuyên quốc gia')}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {mobile ? (
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+          aria-label={t('nav.closeMenu', isEn ? 'Close navigation menu' : 'Đóng thanh điều hướng')}
+        >
+          <X size={20} aria-hidden="true" />
+        </button>
+      ) : (
+        isExpanded && (
+          <button
+            type="button"
+            onClick={togglePin}
+            className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all cursor-pointer ${
+              isPinned
+                ? 'bg-[#242722] text-[#B49A68] border border-[#B49A68]/50'
+                : 'text-slate-400 hover:text-white hover:bg-white/10'
+            }`}
+            title={pinLabel}
+            aria-label={pinLabel}
+            aria-pressed={isPinned}
+          >
+            {isPinned ? <Pin size={15} className="rotate-45 text-[#B49A68]" aria-hidden="true" /> : <PinOff size={15} aria-hidden="true" />}
+          </button>
+        )
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -149,73 +315,40 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
         onClose={() => setShowLogoutModal(false)}
         onConfirm={handleConfirmLogout}
       />
+
       {/* Mobile Drawer */}
       {mobileOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+            aria-hidden="true"
+            className="fixed inset-0 bg-[#181A17]/65 backdrop-blur-sm animate-fade-in-only"
             onClick={onClose}
           />
           <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('nav.mobileNav', isEn ? 'Mobile navigation' : 'Điều hướng di động')}
             style={{
-              width: '260px',
-              backgroundColor: '#0c121e',
-              color: '#94a3b8',
+              width: '268px',
+              backgroundColor: '#181A17',
+              color: '#94A3B8',
               display: 'flex',
               flexDirection: 'column',
-              height: '100vh',
+              height: '100dvh',
               position: 'relative',
               zIndex: 51,
-              borderRight: '1px solid #192233',
+              borderRight: '1px solid #2C2F2A',
             }}
             className="animate-fade-in shadow-2xl"
           >
-            <div
-              style={{
-                padding: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                borderBottom: '1px solid #162030',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '10px',
-                    overflow: 'hidden',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    backgroundColor: '#0c1a2e',
-                  }}
-                >
-                  <img src="/logo.png" alt="RaceHorse Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                </div>
-                <div>
-                  <div style={{ fontSize: '16px', fontWeight: 800, color: '#ffffff', lineHeight: 1.1 }}>RaceHorse</div>
-                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, letterSpacing: '0.06em', marginTop: '2px' }}>Logistics</div>
-                </div>
-              </div>
-              <button
-                onClick={onClose}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
-                aria-label="Close navigation menu"
-              >
-                <X size={20} />
-              </button>
-            </div>
+            {renderBrandHeader(true)}
 
             <div style={{ flex: 1, padding: '20px 14px', display: 'flex', flexDirection: 'column', gap: '24px', overflowY: 'auto' }}>
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', padding: '0 10px', marginBottom: '8px' }}>
-                  Navigation
+                <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.08em', color: '#B49A68', textTransform: 'uppercase', padding: '0 10px', marginBottom: '8px' }}>
+                  {t('nav.navigation', 'Điều Hướng')}
                 </div>
-                <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {navItems.map((item) => {
                     const isActive = item.href === '/customer' ? pathname === '/customer' : pathname?.startsWith(item.href);
                     return (
@@ -223,25 +356,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
                         key={item.href}
                         href={item.href}
                         onClick={onClose}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '10px 12px',
-                          borderRadius: '8px',
-                          fontSize: '13.5px',
-                          fontWeight: isActive ? 600 : 500,
-                          color: isActive ? '#ffffff' : '#94a3b8',
-                          backgroundColor: isActive ? '#1c283c' : 'transparent',
-                          textDecoration: 'none',
-                        }}
+                        aria-current={isActive ? 'page' : undefined}
+                        className={`flex items-center justify-between px-3 py-2.5 rounded-[10px] text-[13.5px] transition-colors no-underline border-l-[3px] ${
+                          isActive
+                            ? 'font-bold text-[#F7F7F4] bg-[#B49A68]/20 border-[#B49A68]'
+                            : 'font-medium text-slate-300 border-transparent hover:bg-[#242722] hover:text-[#F7F7F4]'
+                        }`}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <span style={{ color: isActive ? '#3b82f6' : '#64748b' }}>{item.icon}</span>
-                          <span>{item.label}</span>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className={isActive ? 'text-[#B49A68]' : 'text-slate-400'}>{item.icon}</span>
+                          <span className="truncate">{item.label}</span>
                         </div>
                         {item.badge !== undefined && (
-                          <span style={{ padding: '2px 7px', borderRadius: '999px', fontSize: '11px', fontWeight: 700, backgroundColor: '#ef4444', color: '#ffffff' }}>
+                          <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-[#B33E3E] text-white shrink-0">
                             {item.badge}
                           </span>
                         )}
@@ -252,10 +379,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
               </div>
 
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', padding: '0 10px', marginBottom: '8px' }}>
-                  Management
+                <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.08em', color: '#B49A68', textTransform: 'uppercase', padding: '0 10px', marginBottom: '8px' }}>
+                  {t('nav.management', 'Quản Lý')}
                 </div>
-                <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {managementItems.map((item) => {
                     const isActive = pathname?.startsWith(item.href);
                     return (
@@ -263,321 +390,271 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
                         key={item.href}
                         href={item.href}
                         onClick={onClose}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '10px 12px',
-                          borderRadius: '8px',
-                          fontSize: '13.5px',
-                          fontWeight: isActive ? 600 : 500,
-                          color: isActive ? '#ffffff' : '#94a3b8',
-                          backgroundColor: isActive ? '#1c283c' : 'transparent',
-                          textDecoration: 'none',
-                        }}
+                        aria-current={isActive ? 'page' : undefined}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[13.5px] transition-colors no-underline border-l-[3px] ${
+                          isActive
+                            ? 'font-bold text-[#F7F7F4] bg-[#B49A68]/20 border-[#B49A68]'
+                            : 'font-medium text-slate-300 border-transparent hover:bg-[#242722] hover:text-[#F7F7F4]'
+                        }`}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <span style={{ color: isActive ? '#3b82f6' : '#64748b' }}>{item.icon}</span>
-                          <span>{item.label}</span>
-                        </div>
+                        <span className={isActive ? 'text-[#B49A68]' : 'text-slate-400'}>{item.icon}</span>
+                        <span className="truncate">{item.label}</span>
                       </Link>
                     );
                   })}
                 </nav>
+              </div>
+
+              <div style={{ marginTop: 'auto', paddingTop: '14px', borderTop: '1px solid #2C2F2A' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose?.();
+                    setShowLogoutModal(true);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[13.5px] font-semibold text-rose-300 bg-[#B33E3E]/15 border border-[#B33E3E]/30 hover:bg-[#B33E3E]/25 transition-colors cursor-pointer"
+                >
+                  <LogOut size={17} aria-hidden="true" />
+                  <span>{t('common.logout', 'Đăng xuất')}</span>
+                </button>
               </div>
             </div>
           </aside>
         </div>
       )}
 
-      {/* Desktop Sidebar */}
+      {/* Desktop Sidebar (never set inline display:flex so hidden md:flex hides it on mobile!) */}
       <aside
-        className="hidden md:flex"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        className="hidden md:flex flex-col liquid-glass-sidebar shrink-0 no-scrollbar"
         style={{
-          width: '260px',
-          backgroundColor: '#0c121e',
-          color: '#94a3b8',
-          flexDirection: 'column',
+          width: isExpanded ? '260px' : '76px',
+          color: '#94A3B8',
           height: '100vh',
           position: 'sticky',
           top: 0,
           zIndex: 40,
-          borderRight: '1px solid #192233',
-          flexShrink: 0,
+          overflowX: isExpanded ? 'hidden' : 'visible',
+          transition: 'width 0.28s cubic-bezier(0.2, 0, 0, 1)',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
         }}
       >
-      {/* Brand Header */}
-      <div
-        style={{
-          padding: '24px 20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          borderBottom: '1px solid #162030',
-        }}
-      >
+        {renderBrandHeader(false)}
+
         <div
+          className="no-scrollbar"
           style={{
-            width: '36px',
-            height: '36px',
-            borderRadius: '10px',
-            overflow: 'hidden',
+            flex: 1,
+            padding: !isExpanded ? '16px 8px' : '20px 14px',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            backgroundColor: '#0c1a2e',
+            flexDirection: 'column',
+            gap: !isExpanded ? '14px' : '22px',
+            overflowY: isExpanded ? 'auto' : 'visible',
+            overflowX: isExpanded ? 'hidden' : 'visible',
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
           }}
         >
-          <img src="/logo.png" alt="RaceHorse Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        </div>
-        <div>
-          <div style={{ fontSize: '16px', fontWeight: 800, color: '#ffffff', lineHeight: 1.1 }}>
-            RaceHorse
-          </div>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, letterSpacing: '0.06em', marginTop: '2px' }}>
-            Logistics
-          </div>
-        </div>
-      </div>
+          {/* Section: NAVIGATION */}
+          <div>
+            {isExpanded ? (
+              <div
+                style={{
+                  fontSize: '10.5px',
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: '#B49A68',
+                  textTransform: 'uppercase',
+                  padding: '0 10px',
+                  marginBottom: '8px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t('nav.navigation', 'Điều Hướng')}
+              </div>
+            ) : (
+              <div className="w-8 h-[1px] bg-[#2C2F2A] mx-auto my-2" />
+            )}
 
-      {/* Navigation Groups */}
-      <div
-        style={{
-          flex: 1,
-          padding: '20px 14px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '24px',
-          overflowY: 'auto',
-        }}
-      >
-        {/* Section: NAVIGATION */}
-        <div>
-          <div
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              color: '#475569',
-              textTransform: 'uppercase',
-              padding: '0 10px',
-              marginBottom: '8px',
-            }}
-          >
-            Navigation
-          </div>
-          <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-            {navItems.map((item) => {
-              const isActive =
-                item.href === '/customer'
-                  ? pathname === '/customer'
-                  : pathname?.startsWith(item.href);
+            <nav style={{ display: 'flex', flexDirection: 'column', gap: !isExpanded ? '6px' : '3px' }}>
+              {navItems.map((item) => {
+                const isActive =
+                  item.href === '/customer'
+                    ? pathname === '/customer'
+                    : pathname?.startsWith(item.href);
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    fontSize: '13.5px',
-                    fontWeight: isActive ? 600 : 500,
-                    color: isActive ? '#ffffff' : '#94a3b8',
-                    backgroundColor: isActive ? '#1c283c' : 'transparent',
-                    textDecoration: 'none',
-                    transition: 'all 0.15s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive) {
-                      (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-                      (e.currentTarget as HTMLElement).style.color = '#f1f5f9';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) {
-                      (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
-                      (e.currentTarget as HTMLElement).style.color = '#94a3b8';
-                    }
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{ color: isActive ? '#60a5fa' : '#64748b' }}>{item.icon}</span>
-                    <span>{item.label}</span>
-                  </div>
-
-                  {item.badge !== undefined && (
-                    <span
-                      style={{
-                        padding: '2px 7px',
-                        borderRadius: '999px',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        backgroundColor: '#2563eb',
-                        color: '#ffffff',
-                      }}
+                if (!isExpanded) {
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      aria-label={item.label}
+                      aria-current={isActive ? 'page' : undefined}
+                      className="relative group flex items-center justify-center py-1"
                     >
-                      {item.badge}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
+                      <div
+                        className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-200 group-hover:bg-[#242722] group-hover:text-[#F7F7F4] ${
+                          isActive
+                            ? 'bg-[#242722] text-[#B49A68] border border-[#B49A68]/50 shadow-sm'
+                            : 'text-slate-300'
+                        }`}
+                      >
+                        {item.icon}
+                      </div>
 
-        {/* Section: MANAGEMENT */}
-        <div>
-          <div
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              color: '#475569',
-              textTransform: 'uppercase',
-              padding: '0 10px',
-              marginBottom: '8px',
-            }}
-          >
-            Management
+                      {item.badge !== undefined && (
+                        <span aria-hidden="true" className="absolute top-1.5 right-3 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-[#181A17] animate-pulse" />
+                      )}
+
+                      <div
+                        aria-hidden="true"
+                        className="absolute left-full ml-3 px-3 py-1.5 rounded-xl bg-[#181A17] text-[#F7F7F4] text-xs font-bold whitespace-nowrap shadow-xl border border-[#2C2F2A] pointer-events-none opacity-0 group-hover:opacity-100 transition-all duration-150 z-50 flex items-center gap-2 -translate-x-1.5 group-hover:translate-x-0"
+                      >
+                        <span>{item.label}</span>
+                        {item.badge !== undefined && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#B33E3E] text-white">
+                            {item.badge}
+                          </span>
+                        )}
+                      </div>
+                    </Link>
+                  );
+                }
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`flex items-center justify-between px-3 py-2.5 rounded-[10px] text-[13.5px] whitespace-nowrap transition-all duration-150 no-underline border-l-[3px] ${
+                      isActive
+                        ? 'font-bold text-[#F7F7F4] bg-[#B49A68]/20 border-[#B49A68]'
+                        : 'font-medium text-slate-300 border-transparent hover:bg-[#242722] hover:text-[#F7F7F4]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className={isActive ? 'text-[#B49A68]' : 'text-slate-400'}>{item.icon}</span>
+                      <span>{item.label}</span>
+                    </div>
+
+                    {item.badge !== undefined && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-[#B33E3E] text-white">
+                        {item.badge}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
+            </nav>
           </div>
-          <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-            {managementItems.map((item) => {
-              const isActive = pathname?.startsWith(item.href);
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    fontSize: '13.5px',
-                    fontWeight: isActive ? 600 : 500,
-                    color: isActive ? '#ffffff' : '#94a3b8',
-                    backgroundColor: isActive ? '#1c283c' : 'transparent',
-                    textDecoration: 'none',
-                    transition: 'all 0.15s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive) {
-                      (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-                      (e.currentTarget as HTMLElement).style.color = '#f1f5f9';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) {
-                      (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
-                      (e.currentTarget as HTMLElement).style.color = '#94a3b8';
-                    }
-                  }}
+          {/* Section: MANAGEMENT */}
+          <div>
+            {isExpanded ? (
+              <div
+                style={{
+                  fontSize: '10.5px',
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: '#B49A68',
+                  textTransform: 'uppercase',
+                  padding: '0 10px',
+                  marginBottom: '8px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t('nav.management', 'Quản Lý')}
+              </div>
+            ) : (
+              <div className="w-8 h-[1px] bg-[#2C2F2A] mx-auto my-2" />
+            )}
+
+            <nav style={{ display: 'flex', flexDirection: 'column', gap: !isExpanded ? '6px' : '3px' }}>
+              {managementItems.map((item) => {
+                const isActive = pathname?.startsWith(item.href);
+
+                if (!isExpanded) {
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      aria-label={item.label}
+                      aria-current={isActive ? 'page' : undefined}
+                      className="relative group flex items-center justify-center py-1"
+                    >
+                      <div
+                        className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-200 group-hover:bg-[#242722] group-hover:text-[#F7F7F4] ${
+                          isActive
+                            ? 'bg-[#242722] text-[#B49A68] border border-[#B49A68]/50 shadow-sm'
+                            : 'text-slate-300'
+                        }`}
+                      >
+                        {item.icon}
+                      </div>
+
+                      <div
+                        aria-hidden="true"
+                        className="absolute left-full ml-3 px-3 py-1.5 rounded-xl bg-[#181A17] text-[#F7F7F4] text-xs font-bold whitespace-nowrap shadow-xl border border-[#2C2F2A] pointer-events-none opacity-0 group-hover:opacity-100 transition-all duration-150 z-50 -translate-x-1.5 group-hover:translate-x-0"
+                      >
+                        <span>{item.label}</span>
+                      </div>
+                    </Link>
+                  );
+                }
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[13.5px] whitespace-nowrap transition-all duration-150 no-underline border-l-[3px] ${
+                      isActive
+                        ? 'font-bold text-[#F7F7F4] bg-[#B49A68]/20 border-[#B49A68]'
+                        : 'font-medium text-slate-300 border-transparent hover:bg-[#242722] hover:text-[#F7F7F4]'
+                    }`}
+                  >
+                    <span className={isActive ? 'text-[#B49A68]' : 'text-slate-400'}>{item.icon}</span>
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Logout Action */}
+          <div style={{ marginTop: 'auto', paddingTop: '14px', borderTop: '1px solid #2C2F2A' }}>
+            {!isExpanded ? (
+              <button
+                type="button"
+                onClick={() => setShowLogoutModal(true)}
+                className="relative group flex items-center justify-center w-full py-1 cursor-pointer"
+                aria-label={t('common.logout', 'Đăng xuất')}
+              >
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center text-rose-300 hover:bg-[#B33E3E]/20 hover:text-rose-200 transition-colors">
+                  <LogOut size={18} aria-hidden="true" />
+                </div>
+                <div
+                  aria-hidden="true"
+                  className="absolute left-full ml-3 px-3 py-1.5 rounded-xl bg-[#181A17] text-[#F7F7F4] text-xs font-bold whitespace-nowrap shadow-xl border border-[#2C2F2A] pointer-events-none opacity-0 group-hover:opacity-100 transition-all duration-150 z-50"
                 >
-                  <span style={{ color: isActive ? '#60a5fa' : '#64748b' }}>{item.icon}</span>
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
-      </div>
-
-      {/* Bottom Footer Section */}
-      <div
-        style={{
-          padding: '16px 14px',
-          borderTop: '1px solid #162030',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '10px',
-        }}
-      >
-        {/* User Card */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px',
-            borderRadius: '10px',
-            backgroundColor: '#121a29',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-            <div
-              suppressHydrationWarning
-              style={{
-                width: '34px',
-                height: '34px',
-                borderRadius: '50%',
-                backgroundColor: '#2563eb',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 700,
-                fontSize: '12px',
-                flexShrink: 0,
-              }}
-            >
-              {currentUser.initials || 'CU'}
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div
-                suppressHydrationWarning
-                style={{
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: '#ffffff',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
+                  {t('common.logout', 'Đăng xuất')}
+                </div>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowLogoutModal(true)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[13.5px] font-semibold text-rose-300 bg-[#B33E3E]/15 border border-[#B33E3E]/30 hover:bg-[#B33E3E]/25 transition-colors whitespace-nowrap cursor-pointer"
               >
-                {currentUser.name || currentUser.email}
-              </div>
-              <div
-                suppressHydrationWarning
-                style={{
-                  fontSize: '11px',
-                  color: '#64748b',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {currentUser.email}
-              </div>
-            </div>
+                <LogOut size={17} aria-hidden="true" />
+                <span>{t('common.logout', 'Đăng xuất')}</span>
+              </button>
+            )}
           </div>
-
-          <button
-            onClick={handleLogoutClick}
-            title="Log out"
-            style={{
-              padding: '6px',
-              color: '#64748b',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              borderRadius: '6px',
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = '#f87171')}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
-          >
-            <LogOut size={16} />
-          </button>
         </div>
-      </div>
-    </aside>
+      </aside>
     </>
   );
 };
