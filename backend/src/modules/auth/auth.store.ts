@@ -8,7 +8,13 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
-import { AuthUser, PendingRegistration, UserRole } from './auth.types';
+import {
+  AuthUser,
+  GOOGLE_OAUTH_NO_PASSWORD_MARKER,
+  hasLocalPasswordHash,
+  PendingRegistration,
+  UserRole,
+} from './auth.types';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { MYSQL_POOL } from '../../common/database/database.module';
 
@@ -26,6 +32,7 @@ interface UserRow extends RowDataPacket {
   address: string | null;
   avatar_url: string | null;
   password_hash: string;
+  auth_provider?: 'local' | 'google';
   role_name: string;
   email_verified: number;
   status?: 'active' | 'inactive' | 'suspended';
@@ -146,7 +153,7 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
 
   async findUser(email: string): Promise<AuthUser | undefined> {
     const [rows] = await this.pool.execute<UserRow[]>(
-      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.status, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.email = ? LIMIT 1',
+      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.auth_provider, u.email_verified, u.status, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.email = ? LIMIT 1',
       [email.trim().toLowerCase()],
     );
     const row = rows[0];
@@ -156,7 +163,7 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
 
   async findUserById(userId: string | number): Promise<AuthUser | undefined> {
     const [rows] = await this.pool.execute<UserRow[]>(
-      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.email_verified, u.status, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.user_id = ? LIMIT 1',
+      'SELECT u.user_id, u.full_name, u.email, u.phone, u.address, u.avatar_url, u.password_hash, u.auth_provider, u.email_verified, u.status, u.created_at, u.specialization, r.role_name FROM `user` u JOIN `role` r ON r.role_id = u.role_id WHERE u.user_id = ? LIMIT 1',
       [Number(userId)],
     );
     const row = rows[0];
@@ -174,6 +181,8 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       avatarUrl: row.avatar_url,
       passwordHash: row.password_hash,
       role: this.userRole(row.role_name),
+      authProvider: row.auth_provider ?? 'local',
+      hasPassword: hasLocalPasswordHash(row.password_hash),
       emailVerified: Boolean(row.email_verified),
       status: row.status ?? 'active',
       specialization: row.specialization ?? null,
@@ -330,7 +339,6 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       ['Customer'],
     );
     const roleId = roleRows[0]?.role_id ?? 6;
-    const dummyPasswordHash = await bcrypt.hash(`google-oauth-${info.googleId}-${Date.now()}`, 12);
 
     const [result] = await this.pool.execute(
       'INSERT INTO `user` (role_id, full_name, email, password_hash, account_origin, auth_provider, google_id, avatar_url, email_verified, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -338,7 +346,7 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
         roleId,
         info.name || email.split('@')[0],
         email,
-        dummyPasswordHash,
+        GOOGLE_OAUTH_NO_PASSWORD_MARKER,
         'self_registered',
         'google',
         info.googleId,

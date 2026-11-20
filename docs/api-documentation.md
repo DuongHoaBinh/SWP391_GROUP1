@@ -59,6 +59,8 @@ Response:
 	"phone": "0912345678",
 	"address": "123 Nguyễn Huệ, TP.HCM",
 	"avatarUrl": "",
+	"authProvider": "local",
+	"hasPassword": true,
 	"createdAt": "2026-09-30T10:00:00.000Z"
 }
 ```
@@ -97,7 +99,7 @@ Response:
 
 ### `POST /auth/change-password`
 
-Changes the password for the currently authenticated user. Requires Bearer JWT token.
+Changes the password for the currently authenticated user, or sets an initial password for a Google OAuth account that does not have a local password yet (`hasPassword: false`, where `currentPassword` may be omitted). Requires Bearer JWT token.
 
 Request body:
 ```json
@@ -111,7 +113,8 @@ Request body:
 Response:
 ```json
 {
-	"message": "Mật khẩu đã được thay đổi thành công"
+	"message": "Mật khẩu đã được thay đổi thành công",
+	"hasPassword": true
 }
 ```
 
@@ -592,7 +595,7 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
 ## Spec v3.1 Endpoints (Waves 0–5: Governance, Compliance, SLA, Vitals, Flow 5 & Flow 6)
 
 - **Orders Cutoff & Operational Governance (`OrdersController`, `OrdersOpsController`):**
-  - `GET /orders/cutoff-policy`: Authenticated users query dynamic `Order Cutoff` minimum lead days (`MAX(4d charter | 7d shared, maxTierALead + 2d)`) and `earliestDepartureDate` (UTC) by `destinationLocation`, `originLocation`, `bookingType`, `transportMode`, `transportationType`.
+  - `GET /orders/cutoff-policy`: Authenticated users query dynamic `Order Cutoff` minimum lead days (`MAX(2d charter | 3d shared, maxTierALead + 2d)`) and `earliestDepartureDate` (UTC) by `destinationLocation`, `originLocation`, `bookingType`, `transportMode`, `transportationType`.
   - `POST /orders` (`CUSTOMER`) & `PUT /orders/:id` (`CUSTOMER`): Enforce dynamic `Order Cutoff`; departures earlier than `earliestDepartureDate` return `422 Unprocessable Entity` with `code: 'ORDER_CUTOFF_VIOLATION'`. Wrong-state mutations and race conditions return `409 Conflict`.
   - `POST /orders/:id/operational-cancel` (`LOGISTICS_MANAGER`, `ADMIN`): Transitions shipment to `cancelled_operational` (forbidden once `in_transit` -> `409 Conflict`), computes refund/credit policy matrix, deducts logged disbursements, and creates `shipment_refund_record`.
   - `GET /orders/refunds` (`LOGISTICS_MANAGER`, `ADMIN`) & `GET /orders/:id/refunds` (authorized order viewers): Lists manual refund / 30-day credit records.

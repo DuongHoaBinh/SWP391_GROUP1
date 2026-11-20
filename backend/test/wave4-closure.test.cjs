@@ -267,7 +267,7 @@ test('Wave 5 Order Cutoff: createOrder & updateOrder reject violations with 422 
     return new Date(utc).toISOString();
   };
 
-  // Domestic shared_stall requires >= 7d; +5d must reject 422
+  // Domestic shared_stall requires >= 3d; +2d must reject 422
   await assert.rejects(
     () =>
       ordersService.createOrder(
@@ -277,13 +277,27 @@ test('Wave 5 Order Cutoff: createOrder & updateOrder reject violations with 422 
           destinationLocation: 'Đà Nẵng, Vietnam',
           transportationType: 'Domestic',
           bookingType: 'shared_stall',
-          requestedDate: dayIso(5),
+          requestedDate: dayIso(2),
         },
       ),
     (err) => err instanceof UnprocessableEntityException && err.getStatus() === 422 && err.getResponse().code === 'ORDER_CUTOFF_VIOLATION',
   );
 
-  // Domestic dedicated_charter requires >= 4d; +4d succeeds
+  // Domestic dedicated_charter requires >= 2d; +1d must reject 422 and +2d succeeds
+  await assert.rejects(
+    () =>
+      ordersService.createOrder(
+        { id: 6, role: UserRole.CUSTOMER, email: 'cust@test.local' },
+        {
+          originLocation: 'Củ Chi, TP.HCM, Vietnam',
+          destinationLocation: 'Đà Nẵng, Vietnam',
+          transportationType: 'Domestic',
+          bookingType: 'dedicated_charter',
+          requestedDate: dayIso(1),
+        },
+      ),
+    (err) => err instanceof UnprocessableEntityException && err.getStatus() === 422 && err.getResponse().code === 'ORDER_CUTOFF_VIOLATION',
+  );
   await ordersService.createOrder(
     { id: 6, role: UserRole.CUSTOMER, email: 'cust@test.local' },
     {
@@ -291,7 +305,7 @@ test('Wave 5 Order Cutoff: createOrder & updateOrder reject violations with 422 
       destinationLocation: 'Đà Nẵng, Vietnam',
       transportationType: 'Domestic',
       bookingType: 'dedicated_charter',
-      requestedDate: dayIso(4),
+      requestedDate: dayIso(2),
     },
   );
   assert.equal(createdPayloads.length, 1);

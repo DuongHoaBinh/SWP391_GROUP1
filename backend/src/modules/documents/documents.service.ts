@@ -441,7 +441,7 @@ export class DocumentsService {
     destinationCountry: string;
     earliestDepartureDate: string;
   }> {
-    const baseCutoffDays = input.bookingType === 'dedicated_charter' ? 4 : 7;
+    const baseCutoffDays = input.bookingType === 'dedicated_charter' ? 2 : 3;
     const destinationCountry = input.destinationLocation
       ? this.detectDestinationCountry(input.destinationLocation)
       : 'Vietnam';
@@ -468,7 +468,7 @@ export class DocumentsService {
 
     const tierARegs = applicableRegulations.filter((r) => (r.docTier || 'A') === 'A');
     const maxTierALead =
-      tierARegs.length > 0 ? Math.max(...tierARegs.map((r) => Number(r.leadTimeDays ?? 5))) : 0;
+      tierARegs.length > 0 ? Math.max(...tierARegs.map((r) => Number(r.leadTimeDays ?? 2))) : 0;
     const minLeadDays = Math.max(baseCutoffDays, maxTierALead + 2);
     const now = new Date();
     const earliestUtcMs =
@@ -644,11 +644,11 @@ export class DocumentsService {
       ? `Quốc gia đến "${destinationCountry}" hiện chưa có danh mục quy chế riêng. Hệ thống tự động áp dụng Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI.`
       : undefined;
 
-    const baseDays = order.booking_type === 'dedicated_charter' ? 3 : 5;
+    const baseDays = order.booking_type === 'dedicated_charter' ? 1 : 2;
     const tierARegs = applicableRegulations.filter((r) => (r.docTier || 'A') === 'A');
-    const maxTierALead = tierARegs.length > 0 ? Math.max(...tierARegs.map((r) => Number(r.leadTimeDays ?? 5))) : 0;
+    const maxTierALead = tierARegs.length > 0 ? Math.max(...tierARegs.map((r) => Number(r.leadTimeDays ?? 2))) : 0;
     const effectiveTierALeadDays = Math.max(baseDays, maxTierALead);
-    const orderCutoffDays = Math.max(order.booking_type === 'dedicated_charter' ? 4 : 7, maxTierALead + 2);
+    const orderCutoffDays = Math.max(order.booking_type === 'dedicated_charter' ? 2 : 3, maxTierALead + 2);
 
     const depRaw = order.departure_date || order.requested_date;
     const depMs = depRaw ? new Date(depRaw).getTime() : NaN;

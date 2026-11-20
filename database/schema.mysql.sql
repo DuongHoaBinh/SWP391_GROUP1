@@ -87,7 +87,7 @@ CREATE TABLE regulation (
   border_gate VARCHAR(100) NULL,
   transport_mode ENUM('road','air','both') NOT NULL DEFAULT 'both',
   doc_tier ENUM('A','B') NOT NULL DEFAULT 'A',
-  lead_time_days INT NOT NULL DEFAULT 5,
+  lead_time_days INT NOT NULL DEFAULT 2,
   requires_authority_approval BOOLEAN NOT NULL DEFAULT FALSE,
   min_validity_buffer_hours INT NOT NULL DEFAULT 24,
   document_type VARCHAR(100) NOT NULL,

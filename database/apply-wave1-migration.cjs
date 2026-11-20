@@ -70,7 +70,7 @@ async function main() {
     await ensureColumn(db, 'regulation', 'border_gate', 'VARCHAR(100) NULL');
     await ensureColumn(db, 'regulation', 'transport_mode', "ENUM('road','air','both') NOT NULL DEFAULT 'both'");
     await ensureColumn(db, 'regulation', 'doc_tier', "ENUM('A','B') NOT NULL DEFAULT 'A'");
-    await ensureColumn(db, 'regulation', 'lead_time_days', 'INT NOT NULL DEFAULT 5');
+    await ensureColumn(db, 'regulation', 'lead_time_days', 'INT NOT NULL DEFAULT 2');
     await ensureColumn(db, 'regulation', 'requires_authority_approval', 'BOOLEAN NOT NULL DEFAULT FALSE');
     await ensureColumn(db, 'regulation', 'min_validity_buffer_hours', 'INT NOT NULL DEFAULT 24');
 
@@ -87,17 +87,27 @@ async function main() {
       UPDATE regulation
       SET doc_tier = 'A',
           requires_authority_approval = TRUE,
-          lead_time_days = 14,
+          lead_time_days = 3,
           min_validity_buffer_hours = 48
-      WHERE LOWER(document_type) IN ('import_permit', 'export_permit', 'quarantine_certificate')
+      WHERE LOWER(document_type) IN ('import_permit', 'export_permit', 'quarantine_certificate', 'customs_declaration')
         AND LOWER(country) <> 'vietnam'
     `);
 
     await db.execute(`
       UPDATE regulation
       SET requires_authority_approval = FALSE,
-          min_validity_buffer_hours = 24
+          min_validity_buffer_hours = 24,
+          lead_time_days = CASE WHEN doc_tier = 'B' THEN 1 ELSE 0 END
       WHERE LOWER(country) = 'vietnam'
+    `);
+
+    await db.execute(`
+      UPDATE regulation
+      SET lead_time_days = 1
+      WHERE LOWER(country) <> 'vietnam'
+        AND doc_tier = 'A'
+        AND LOWER(document_type) NOT IN ('import_permit', 'export_permit', 'quarantine_certificate', 'customs_declaration')
+        AND lead_time_days > 3
     `);
 
     await db.execute(`

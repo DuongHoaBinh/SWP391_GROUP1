@@ -224,6 +224,8 @@ export class RoutesService implements OnModuleInit {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
 
+    let route = await this.routesStore.findRouteByShipmentId(shipmentId);
+
     if (dto.legs.some(l => l.legType === 'road' && !l.vehicleId && l.vehiclePlate && !l.roadTripId)) {
       const vehicles = await this.fleetStore.findAllVehicles();
       dto = { ...dto, legs: dto.legs.map(leg => {
@@ -232,9 +234,100 @@ export class RoutesService implements OnModuleInit {
         return vehicle ? { ...leg, vehicleId: vehicle.id } : leg;
       }) };
     }
+
+    if (
+      dto.legs.some(l => l.legType === 'flight') &&
+      typeof (this.routesStore as any).findAllAirlines === 'function' &&
+      typeof (this.routesStore as any).findAllAirports === 'function'
+    ) {
+      const [airlines, airports] = await Promise.all([
+        this.routesStore.findAllAirlines(),
+        this.routesStore.findAllAirports(),
+      ]);
+      dto = {
+        ...dto,
+        legs: dto.legs.map((leg) => {
+          if (leg.legType !== 'flight') return leg;
+          let airlineId = leg.airlineId ?? route?.managerAirlineId ?? undefined;
+          let airlineName = leg.airlineName;
+          if (!airlineId && airlineName) {
+            const norm = airlineName.trim().toLowerCase();
+            const matchedAirline = airlines.find(
+              (a) =>
+                a.name.toLowerCase() === norm ||
+                norm.includes(a.name.toLowerCase()) ||
+                a.name.toLowerCase().includes(norm) ||
+                norm.includes(`(${a.code.toLowerCase()})`),
+            );
+            if (matchedAirline) {
+              airlineId = matchedAirline.id;
+              airlineName = matchedAirline.name;
+            }
+          }
+          if (!airlineId && airlines.length > 0) {
+            airlineId = airlines[0].id;
+            if (!airlineName) airlineName = airlines[0].name;
+          }
+
+          const matchAirport = (text?: string, code?: string, fallbackId?: number | null) => {
+            if (code) {
+              const byCode = airports.find((ap) => ap.iataCode.toLowerCase() === code.trim().toLowerCase());
+              if (byCode) return byCode;
+            }
+            if (text) {
+              const normText = text.trim().toLowerCase();
+              const byIataInText = airports.find(
+                (ap) =>
+                  normText.includes(`(${ap.iataCode.toLowerCase()}`) ||
+                  normText.includes(` ${ap.iataCode.toLowerCase()} `) ||
+                  normText.endsWith(` ${ap.iataCode.toLowerCase()}`),
+              );
+              if (byIataInText) return byIataInText;
+              const byNameOrCity = airports.find(
+                (ap) =>
+                  normText.includes(ap.name.toLowerCase()) ||
+                  normText.includes(ap.city.toLowerCase()) ||
+                  normText.includes(ap.country.toLowerCase()),
+              );
+              if (byNameOrCity) return byNameOrCity;
+            }
+            if (fallbackId) {
+              return airports.find((ap) => ap.id === Number(fallbackId));
+            }
+            return undefined;
+          };
+
+          const depAp =
+            (leg.departureAirportId ? airports.find((ap) => ap.id === Number(leg.departureAirportId)) : undefined) ||
+            matchAirport(leg.originLocation, leg.departureAirportCode, route?.managerDepartureAirportId) ||
+            airports.find((ap) => ap.country.toLowerCase().includes('viet')) ||
+            airports[0];
+
+          const arrAp =
+            (leg.arrivalAirportId ? airports.find((ap) => ap.id === Number(leg.arrivalAirportId)) : undefined) ||
+            matchAirport(leg.destinationLocation, leg.arrivalAirportCode, route?.managerArrivalAirportId) ||
+            matchAirport(order.destinationLocation, undefined, null) ||
+            airports.find((ap) => !ap.country.toLowerCase().includes('viet')) ||
+            airports[0];
+
+          const requiredStalls = Math.max(Number(leg.stallsBooked || 0), Number(order.requestedHorseCount || 1));
+
+          return {
+            ...leg,
+            airlineId: airlineId ?? leg.airlineId,
+            airlineName: airlineName ?? leg.airlineName,
+            departureAirportId: leg.departureAirportId ?? depAp?.id,
+            departureAirportCode: leg.departureAirportCode ?? depAp?.iataCode,
+            arrivalAirportId: leg.arrivalAirportId ?? arrAp?.id,
+            arrivalAirportCode: leg.arrivalAirportCode ?? arrAp?.iataCode,
+            stallsBooked: requiredStalls,
+          };
+        }),
+      };
+    }
+
     const roadVehicles = [...new Set(dto.legs.filter(l => l.legType === 'road' && l.vehicleId && !l.roadTripId).map(l => l.vehicleId!))];
     if (roadVehicles.length) assertRoadCapacity(order.requestedHorseCount, roadVehicles, await this.fleetStore.findVehiclesByIds(roadVehicles));
-    let route = await this.routesStore.findRouteByShipmentId(shipmentId);
     let routeId: number;
     if (!route) {
       routeId = await this.routesStore.createRoute(shipmentId, dto.routeName, dto.totalDistanceKm);

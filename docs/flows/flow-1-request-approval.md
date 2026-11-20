@@ -56,8 +56,8 @@ Requested corrections merge omitted policy fields and quantities with the existi
 
 7. **Quy chuẩn thời gian ghép chuồng (Consolidation SLA & Dynamic Lead Time — Hòa giải Spec v3.1, `DEC-03` & `DEC-05` Approved):**
    - **Lead Time Động cho Hồ sơ Tầng A (`Target Spec v3.1 (Planned)`):**
-     - `Tier_A_Deadline = departure_date - MAX(base_days, MAX(regulation.lead_time_days))` với `base_days = 5` ngày cho `shared_stall` và `base_days = 3` ngày cho `dedicated_charter`.
-     - `Order_Cutoff = departure_date - MAX(7 ngày [shared] hoặc 4 ngày [charter], MaxLeadTime + 2 ngày)`.
+     - `Tier_A_Deadline = departure_date - MAX(base_days, MAX(regulation.lead_time_days))` với `base_days = 2` ngày cho `shared_stall` và `base_days = 1` ngày cho `dedicated_charter`.
+     - `Order_Cutoff = departure_date - MAX(3 ngày [shared] hoặc 2 ngày [charter], MaxLeadTime + 2 ngày)` (mặc định quốc tế `lead_time_days = 3` -> `5` ngày trước khởi hành; nội địa `2–3` ngày; quốc gia áp quy chế riêng dài hơn tự động tăng theo `lead_time_days + 2`).
      - *Ghi chú hòa giải:* Thay cho mốc cứng `D - 5` đối với các tuyến quốc tế có giấy phép nhập khẩu cần `14–30` ngày, đồng thời chỉ áp dụng mốc sớm cho **Tầng A** (hộ chiếu, tiêm phòng, xét nghiệm máu dài hạn). Giấy kiểm dịch **Tầng B** ngắn hạn (48–72h) chỉ cấp từ `D - 1` (`T - 24h` → `T - 6h`) để đảm bảo hiệu lực vượt qua thời điểm thông quan/đến nơi.
    - **Mốc Chốt sổ ghép tuyến (`D - 3` / `T - 72h`) vs Phát hành Hóa đơn (`≤ T - 58h`, Hard Cap `T - 52h`):**
      - Đúng `T - 72h`, đóng nhận đơn ghép mới. Coordinator chốt lộ trình Multi-stop + vị trí ô chuồng và phân công nhân sự chậm nhất `T - 70h`.

@@ -109,9 +109,10 @@ export class FleetService {
     dto: CreateStaffDto,
     actor?: AuthenticatedUser,
   ): Promise<AvailableStaff & { temporaryPassword?: string }> {
-    const existing = await this.fleetStore.findUserByEmail(dto.email);
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    const existing = await this.fleetStore.findUserByEmail(normalizedEmail);
     if (existing) {
-      throw new ConflictException(`Email "${dto.email}" đã tồn tại trong hệ thống!`);
+      throw new ConflictException(`Email "${normalizedEmail}" đã tồn tại trong hệ thống!`);
     }
 
     const targetRoleName = await this.fleetStore.findRoleNameById(dto.roleId);
@@ -133,14 +134,17 @@ export class FleetService {
     const generatedPassword = providedPassword ? undefined : `${randomBytes(8).toString('base64url')}1A!`;
     const passwordToHash = providedPassword || generatedPassword!;
     const passwordHash = await bcrypt.hash(passwordToHash, 12);
+    const resolvedSpec = dto.roleId === 5 ? (dto.specialization || 'driver') : undefined;
+    const createdBy = actor?.id && Number.isSafeInteger(Number(actor.id)) ? Number(actor.id) : null;
 
     const created = await this.fleetStore.createStaffUser({
-      fullName: dto.fullName,
-      email: dto.email,
-      phone: dto.phone,
+      fullName: dto.fullName.trim(),
+      email: normalizedEmail,
+      phone: dto.phone?.trim() || undefined,
       roleId: dto.roleId,
-      specialization: dto.specialization,
+      specialization: resolvedSpec,
       passwordHash,
+      createdBy,
     });
 
     return generatedPassword ? { ...created, temporaryPassword: generatedPassword } : created;
@@ -259,6 +263,7 @@ export class FleetService {
       await this.fleetStore.validateStaffEligibilityAndSchedule(
         shipmentId,
         dto.assignments.map((a) => a.userId),
+        dto.assignments,
       );
     }
 

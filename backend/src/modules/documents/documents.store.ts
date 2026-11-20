@@ -157,7 +157,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       borderGate: r.border_gate ?? null,
       transportMode: (r.transport_mode as 'road' | 'air' | 'both') || 'both',
       docTier: (r.doc_tier as 'A' | 'B') || 'A',
-      leadTimeDays: r.lead_time_days !== undefined && r.lead_time_days !== null ? Number(r.lead_time_days) : 5,
+      leadTimeDays: r.lead_time_days !== undefined && r.lead_time_days !== null ? Number(r.lead_time_days) : 2,
       requiresAuthorityApproval: Boolean(r.requires_authority_approval),
       minValidityBufferHours:
         r.min_validity_buffer_hours !== undefined && r.min_validity_buffer_hours !== null
@@ -224,7 +224,17 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     const effectiveDate = this.toMysqlDateParam(dto.effectiveDate);
     const isDomesticVn = dto.country.trim().toLowerCase() === 'vietnam';
     const docTier = dto.docTier ?? (dto.documentType === 'health_certificate' ? 'B' : 'A');
-    const leadTimeDays = dto.leadTimeDays ?? (docTier === 'B' ? 1 : 5);
+    const leadTimeDays =
+      dto.leadTimeDays ??
+      (docTier === 'B'
+        ? 1
+        : isDomesticVn
+          ? 0
+          : ['import_permit', 'export_permit', 'quarantine_certificate', 'customs_declaration'].includes(
+                dto.documentType.trim(),
+              )
+            ? 3
+            : 1);
     const requiresAuth =
       dto.requiresAuthorityApproval ??
       (!isDomesticVn && ['import_permit', 'export_permit', 'quarantine_certificate', 'health_certificate'].includes(dto.documentType));
@@ -278,7 +288,17 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     const effDate = this.toMysqlDateParam(effectiveDate) ?? this.formatMysqlDateOnly(new Date());
     const isDomesticVn = country.trim().toLowerCase() === 'vietnam';
     const docTier = meta?.docTier ?? (documentType === 'health_certificate' ? 'B' : 'A');
-    const leadTimeDays = meta?.leadTimeDays ?? (docTier === 'B' ? 1 : 5);
+    const leadTimeDays =
+      meta?.leadTimeDays ??
+      (docTier === 'B'
+        ? 1
+        : isDomesticVn
+          ? 0
+          : ['import_permit', 'export_permit', 'quarantine_certificate', 'customs_declaration'].includes(
+                documentType,
+              )
+            ? 3
+            : 1);
     const requiresAuth = meta?.requiresAuthorityApproval ?? (!isDomesticVn && ['import_permit', 'export_permit', 'quarantine_certificate'].includes(documentType));
     const bufferHours = meta?.minValidityBufferHours ?? (isDomesticVn ? 24 : 48);
     const transportMode = meta?.transportMode ?? 'both';

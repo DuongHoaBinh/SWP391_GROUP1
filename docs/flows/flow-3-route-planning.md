@@ -13,8 +13,8 @@
 - **Tích hợp bên ngoài:** Không kết nối API đặt vé hãng bay thật; Coordinator đặt chỗ bên ngoài và nhập mã booking, số stall vào hệ thống.
 - **Hình thức đặt chỗ & Gom chuyến (Consolidation):** `order.bookingType` phân biệt `shared_stall` (ghép ô chuồng trên hành lang chung) và `dedicated_charter` (xe riêng cho đoàn, ưu tiên tuyến thẳng/giờ yêu cầu).
   - *Đường bộ ghép chuồng:* Tuyến Multi-stop (nhiều điểm đón, nhiều điểm trả dọc trục Bắc – Nam). Coordinator sắp xếp thứ tự ô chuồng trên xe logic (ngựa xuống trước ở khoang ngoài gần cửa dỡ, ngựa đi xa nhất ở trong cùng).
-  - *Hàng không ghép chuồng:* Mô hình Hub-to-Hub cố định giữa các sân bay cargo lớn (Tân Sơn Nhất SGN, Nội Bài HAN, Changi, v.v.) kết hợp xe tải trung chuyển chặng đầu và chặng cuối. Thùng Airstall/ULD ghép tối đa 3 ngựa.
-  - *Khung thời hạn (SLA):* Đặt chỗ $\ge 7$ ngày; nộp hồ sơ thú y $\ge 5$ ngày; Coordinator chốt sổ lộ trình và vị trí chuồng trước giờ chạy 72 giờ (3 ngày - Cut-off time).
+  - *Hàng không ghép chuồng:* Mô hình Hub-to-Hub cố định giữa các sân bay cargo lớn (Tân Sơn Nhất SGN, Nội Bài HAN, Changi, v.v.) kết hợp xe tải trung chuyển chặng đầu và chặng cuối. Thùng Airstall/ULD ghép tối đa 3 ngựa. Khi xuất phát hoặc đích đến không phải sân bay, UI lập lộ trình tự động tạo và bắt buộc đủ chuỗi **Xe thùng đường bộ $\rightarrow$ Chuyến bay $\rightarrow$ Xe thùng đường bộ** trước khi gửi duyệt.
+  - *Khung thời hạn (SLA — Hòa giải Spec v3.1, `DEC-05` Approved):* Đặt chỗ `>= MAX(3 ngày [shared] / 2 ngày [charter], MaxLeadTime + 2 ngày)`; nộp hồ sơ Tầng A `>= MAX(2 ngày [shared] / 1 ngày [charter], MAX(lead_time_days))`; Coordinator chốt lộ trình và phân công trước `T - 70h` (Cut-off `T - 72h`). Driver/Escort chính xác nhận theo **SLA 4 giờ làm việc (`08:00–18:00`) hoặc tối đa 12 giờ đồng hồ** (mục tiêu hóa đơn `≤ T - 58h`), quá hạn chuyển Backup Pool với **Backup SLA 4 giờ đồng hồ** (**Trần cứng hóa đơn `T - 52h`**). Hạn thanh toán = `MIN(invoice_issued_at + 24h, departure_at - 30h)`.
 - Khi phát hành invoice sau xác nhận, lưu `bookingType`, `stallUnitPrice` (nếu có), số ngựa, cước và bảo hiểm trong snapshot. Thanh toán vẫn đợi Flow 3 xác nhận, điều kiện xuất phát vẫn yêu cầu đủ tiền và đủ hồ sơ.
 
 ---
@@ -148,3 +148,29 @@ Ready to depart ──► [Chuyển giao sang Flow 4: Theo dõi hành trình]
 - Migration 021 (`021_add_transfer_hub_stop_type.sql`) bổ sung `'transfer_hub'` vào `route_stop.stop_type` ENUM để lưu các điểm đón/trả ghép trung gian trên chuyến đường bộ hợp nhất.
 - Khi ghép nhiều đơn `shared_stall` khác điểm đón hoặc khác điểm trả vào cùng `road_trip`, `routes.store` (`consolidateSharedRoadTripWaypoints` cùng helper `road-trip-sequencing.ts`) tự động sắp xếp lộ trình vật lý dọc hành lang: Điểm đón xa nhất -> Điểm đón ghép gần hơn (`stop_type = 'transfer_hub'`) -> Các trạm dừng chung dọc tuyến -> Điểm trả ghép gần hơn (`stop_type = 'transfer_hub'`) -> Điểm trả xa nhất, cập nhật `road_trip` và đồng bộ `route_stop` trên các đơn cùng chuyến.
 - API đọc route (`routes.service`) thực hiện ẩn dữ liệu phía server cho role `Customer`: loại bỏ điểm `transfer_hub`, ẩn `roadTripId` và giữ nguyên điểm đi/đến thuộc chính đơn của khách hàng.
+
+## 8. Chuẩn hóa SLA Xác nhận Tài xế, Backup Pool, Thanh toán Động & AC (BA Spec v3.1 — `DEC-05` & `DEC-08` Approved)
+
+> [!IMPORTANT]
+> Phân quyền thao tác tuân thủ Ma trận RACI tại [actors-and-roles.md](file:///f:/SWP/Project/SWP391_GROUP1/docs/actors-and-roles.md).
+
+### Quy tắc Nghiệp vụ Bổ sung (`BR-F3-05` → `BR-F3-07`, `DEC-08`)
+
+- **`BR-F3-05` (Driver Confirmation SLA, Backup Pool & Invoice Hard Cap `T - 52h` — `Target Spec v3.1 (Planned)`):**
+  - Sau khi được phân công (chậm nhất `T - 70h`), Driver/Escort chính phải bấm Confirm/Decline trong **4 giờ làm việc (`08:00–18:00`) hoặc tối đa 12 giờ đồng hồ liên tục** (nhắc ở mốc 50%: 2 giờ làm việc / 6 giờ đồng hồ), hướng tới mục tiêu phát hành hóa đơn chậm nhất `T - 58h`.
+  - Quá SLA → hệ thống gửi Escalation lên Coordinator & Manager để chuyển sang **Backup Pool** với **Backup SLA rút gọn = 4 giờ đồng hồ**. Việc thay đổi nhân sự cùng vai trò trên kế hoạch đang `approved` **không làm mất trạng thái `approved`** (không cần quay về `draft` nếu xe và giờ giữ nguyên).
+  - **Trần cứng phát hành hóa đơn (`Invoice Hard Cap`): `T - 52h`**. Nhân sự cuối cùng xác nhận trong cùng 1 transaction sẽ chuyển `confirmed`, phát hành duy nhất 1 `shipment_invoice` và mở Gate 1.
+- **`BR-F3-06` (Fallback khi Không đủ Backup Pool hoặc Quá Trần `T - 52h` — `Target Spec v3.1 (Planned)`):** Nếu trước `T - 62h` không đủ nhân sự thay thế hoặc chạm trần `T - 52h` vẫn chưa xác nhận đủ, hệ thống phát cảnh báo High tới Logistics Manager để chọn: **(a)** điều chuyển nội bộ từ chuyến có lịch xa hơn; **(b)** kích hoạt tài xế/hộ tống hợp đồng ngoài đã thẩm định (`Pre-vetted External Contractor`); hoặc **(c)** dời lịch chuyến (cho phép khách chọn dời ngày miễn phí hoặc `cancelled_operational` hoàn 100%).
+- **`BR-F3-07` (Cửa sổ Thanh toán Động, Gia hạn Trần `T - 24h` & Tự hủy — `Target Spec v3.1 (Planned)`):**
+  - Hạn thanh toán neo theo thời điểm xuất hóa đơn thực tế: `payment_due_at = MIN(invoice_issued_at + 24h, departure_at - 30h)` (nhắc trước hạn 6 giờ).
+  - Quá `payment_due_at` chưa có SePay `succeeded` → gắn trạng thái con `payment_overdue` và báo động Manager + Coordinator. Manager chọn giải phóng chuồng (`cancelled_operational`) trước `T - 28h`, hoặc cấp gia hạn **1 lần duy nhất** với hạn `grace_due_at = MIN(grace_granted_at + 10h, departure_at - 24h)`.
+  - Quá `grace_due_at` vẫn chưa thanh toán → hệ thống **tự động chuyển `cancelled_operational`** (`cancellation_category = payment_overdue_expired`) để giải phóng ô chuồng.
+- **`DEC-08` (Xác nhận Vận hành Hàng không Release 1):** Release 1 giữ quản lý chặng bay ở mức Coordinator nhập thủ công (`airline_id`, `flight_number`, `booking_reference`, `stalls_booked`), chưa mở ghép Airstall đa khách hàng tự động.
+
+### Acceptance Criteria (BDD — Flow 3)
+
+- **AC-F3-01 (Chặn Overbooking Đồng thời):** *Given* xe 4 chuồng đã có `road_trip` `shared_stall` giữ 3 chuồng 08:00–18:00. *When* Coordinator ghép thêm đơn 2 ngựa hoặc tạo `dedicated_charter` trùng khung giờ. *Then* giao dịch rollback hoàn toàn và trả `409 Conflict`.
+- **AC-F3-02 (Hóa đơn Duy nhất & Mở Gate 1):** *Given* kế hoạch `approved` có 1 Driver và 1 Escort. *When* Driver xác nhận trước, Escort xác nhận sau (kể cả gửi lặp request retry). *Then* chuyển `confirmed`, phát hành đúng 1 `shipment_invoice` bất biến và mở `paymentUnlocked = true`.
+- **AC-F3-03 (Cô lập Dữ liệu Khách trên Chuyến Ghép):** *Given* Đơn A (TP.HCM → Hà Nội) và Đơn B (Đồng Nai → Đà Nẵng) ghép chung 1 `road_trip`. *When* Customer A xem lộ trình đơn A. *Then* response ẩn hoàn toàn `transfer_hub` của Đơn B, `roadTripId` và danh tính Đơn B.
+- **AC-F3-04 (Backup SLA & Hard Cap `T - 52h`):** *Given* Driver chính quá SLA lúc `T - 58h`, Coordinator gán Backup Driver B (kế hoạch giữ nguyên `approved`); Backup Driver B xác nhận lúc `T - 54h`. *Then* hóa đơn phát hành lúc `T - 54h` với `payment_due_at = T - 30h`. Nếu tới `T - 52h` vẫn chưa xác nhận đủ, hệ thống phát cảnh báo High `BR-F3-06` tới Manager.
+- **AC-F3-05 (Gia hạn Thanh toán Trần `T - 24h` & Tự động Hủy):** *Given* hóa đơn quá hạn lúc `T - 34h` (`payment_overdue`), đến `T - 28h` Manager bấm gia hạn 1 lần. *Then* `grace_due_at` bị chặn cứng tại `T - 24h` (còn 4 giờ); bấm gia hạn lần 2 trả `409 Conflict`; tại `T - 24h` nếu vẫn chưa có SePay `succeeded`, đơn tự động chuyển `cancelled_operational` (`payment_overdue_expired`).

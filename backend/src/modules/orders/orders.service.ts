@@ -44,7 +44,7 @@ export class OrdersService {
     if (typeof this.documentsService?.computeOrderCutoffPolicy === 'function') {
       return this.documentsService.computeOrderCutoffPolicy(input);
     }
-    const baseCutoffDays = input.bookingType === 'dedicated_charter' ? 4 : 7;
+    const baseCutoffDays = input.bookingType === 'dedicated_charter' ? 2 : 3;
     const now = new Date();
     const earliestUtcMs =
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) +

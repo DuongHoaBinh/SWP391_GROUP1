@@ -18,7 +18,12 @@ import { GoogleLoginDto } from './dto/google-login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { AuthStore } from './auth.store';
-import { AuthUser, PendingRegistration, UserRole } from './auth.types';
+import {
+  AuthUser,
+  hasLocalPasswordHash,
+  PendingRegistration,
+  UserRole,
+} from './auth.types';
 import { MailService } from './mail.service';
 
 @Injectable()
@@ -52,6 +57,10 @@ export class AuthService {
     }
   }
 
+  private hasLocalPassword(user: AuthUser): boolean {
+    return user.hasPassword ?? hasLocalPasswordHash(user.passwordHash);
+  }
+
   private buildUserResponse(user: AuthUser) {
     return {
       id: user.id,
@@ -62,6 +71,8 @@ export class AuthService {
       phone: user.phone || '',
       address: user.address || '',
       avatarUrl: user.avatarUrl || '',
+      authProvider: user.authProvider ?? 'local',
+      hasPassword: this.hasLocalPassword(user),
       specialization: user.specialization ?? null,
       persona: this.resolvePersona(user),
     };
@@ -226,7 +237,11 @@ export class AuthService {
   async login(dto: LoginDto) {
     const email = dto.email.trim().toLowerCase();
     const user = await this.authStore.findUser(email);
-    if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
+    if (
+      !user ||
+      !this.hasLocalPassword(user) ||
+      !(await bcrypt.compare(dto.password, user.passwordHash))
+    ) {
       throw new UnauthorizedException('Invalid email or password');
     }
     this.assertActiveAccount(user);
@@ -276,25 +291,33 @@ export class AuthService {
       throw new BadRequestException('Mật khẩu xác nhận không khớp');
     }
 
-    if (dto.currentPassword === dto.newPassword) {
-      throw new BadRequestException('Mật khẩu mới không được trùng với mật khẩu hiện tại');
-    }
-
     const user = await this.authStore.findUserById(userId);
     if (!user) {
       throw new NotFoundException('Người dùng không tồn tại');
     }
 
-    const isMatch = await bcrypt.compare(dto.currentPassword, user.passwordHash);
-    if (!isMatch) {
-      throw new BadRequestException('Mật khẩu hiện tại không chính xác');
+    const userHasPassword = this.hasLocalPassword(user);
+    if (userHasPassword) {
+      if (!dto.currentPassword) {
+        throw new BadRequestException('Vui lòng nhập mật khẩu hiện tại');
+      }
+      if (dto.currentPassword === dto.newPassword) {
+        throw new BadRequestException('Mật khẩu mới không được trùng với mật khẩu hiện tại');
+      }
+      const isMatch = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+      if (!isMatch) {
+        throw new BadRequestException('Mật khẩu hiện tại không chính xác');
+      }
     }
 
     const newHash = await bcrypt.hash(dto.newPassword, 12);
     await this.authStore.updateUserPassword(userId, newHash);
 
     return {
-      message: 'Mật khẩu đã được thay đổi thành công',
+      message: userHasPassword
+        ? 'Mật khẩu đã được thay đổi thành công'
+        : 'Thiết lập mật khẩu thành công. Bạn có thể đăng nhập bằng Email/Mật khẩu hoặc Google.',
+      hasPassword: true,
     };
   }
 

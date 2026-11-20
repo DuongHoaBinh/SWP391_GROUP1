@@ -261,7 +261,11 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     return rows[0]?.role_name ?? null;
   }
 
-  async validateStaffEligibilityAndSchedule(shipmentId: number, userIds: number[]): Promise<void> {
+  async validateStaffEligibilityAndSchedule(
+    shipmentId: number,
+    userIds: number[],
+    assignments?: Array<{ userId: number; roleInShipment?: string }>,
+  ): Promise<void> {
     const uniqueIds = [...new Set(userIds.filter((id) => Number.isFinite(id)))];
     if (uniqueIds.length === 0) return;
 
@@ -289,7 +293,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
 
     // Check time overlap against other active non-sibling shipments that have scheduled legs
     const [targetLegs] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT rl.road_trip_id, rl.planned_departure, rl.planned_arrival
+      `SELECT rl.leg_type, rl.vehicle_id, rl.sequence_no, rl.road_trip_id, rl.planned_departure, rl.planned_arrival
        FROM route_leg rl
        JOIN route r ON r.route_id = rl.route_id
        WHERE r.shipment_id = ? AND rl.planned_departure IS NOT NULL AND rl.planned_arrival IS NOT NULL`,
@@ -298,9 +302,26 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
 
     if (targetLegs.length === 0) return;
     const siblingIds = new Set(await this.findSiblingShipmentsOnSameRoadTrip(shipmentId));
+    const hasFlightLeg = targetLegs.some((l) => l.leg_type === 'flight');
+    const roleByUserId = new Map<number, string>();
+    for (const a of assignments || []) {
+      if (a && Number.isFinite(Number(a.userId)) && a.roleInShipment) {
+        roleByUserId.set(Number(a.userId), String(a.roleInShipment).toLowerCase());
+      }
+    }
 
-    for (const leg of targetLegs) {
-      for (const u of users) {
+    for (const u of users) {
+      const assignedRole = roleByUserId.get(Number(u.user_id));
+      // On multimodal air shipments, the road truck driver only operates company road leg(s) (e.g. Farm -> Departure Airport),
+      // while the veterinary escort accompanies the horses across all legs (road + flight + arrival clearance).
+      const applicableLegs =
+        hasFlightLeg && assignedRole === 'driver'
+          ? targetLegs.filter(
+              (l) => l.leg_type === 'road' && (l.vehicle_id !== null || Number(l.sequence_no) === 1),
+            )
+          : targetLegs;
+
+      for (const leg of applicableLegs) {
         const [conflicts] = await this.pool.execute<RowDataPacket[]>(
           `SELECT DISTINCT s.shipment_id
            FROM shipment_assignment sa
@@ -311,6 +332,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
              AND s.shipment_id <> ?
              AND s.status IN ('planning', 'ready_to_depart', 'in_transit')
              AND (sa.confirmation_notes IS NULL OR sa.confirmation_notes NOT LIKE 'TỪ CHỐI%')
+             AND (sa.role_in_shipment <> 'driver' OR ol.leg_type = 'road')
              AND ol.planned_departure IS NOT NULL AND ol.planned_arrival IS NOT NULL
              AND ol.planned_departure < ? AND ol.planned_arrival > ?`,
           [u.user_id, shipmentId, leg.planned_arrival, leg.planned_departure],
@@ -522,9 +544,10 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async findUserByEmail(email: string): Promise<any | null> {
+    const normalizedEmail = email.trim().toLowerCase();
     const [rows] = await this.pool.execute<any[]>(
-      'SELECT user_id, email FROM `user` WHERE email = ? LIMIT 1',
-      [email],
+      'SELECT user_id, email FROM `user` WHERE LOWER(email) = ? LIMIT 1',
+      [normalizedEmail],
     );
     return rows[0] || null;
   }
@@ -536,18 +559,23 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     roleId: number;
     specialization?: string;
     passwordHash: string;
+    createdBy?: number | null;
   }): Promise<AvailableStaff> {
-    const resolvedSpec = dto.specialization || (dto.roleId === 5 ? 'driver' : null);
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    const resolvedSpec = dto.roleId === 5 ? (dto.specialization || 'driver') : null;
+    const defaultShift = dto.roleId === 5 ? 'Morning (06:00 - 14:00)' : 'Ca Hành Chính (08:00 - 17:00)';
     const [result] = await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO \`user\` (role_id, specialization, full_name, email, phone, password_hash, account_origin, auth_provider, email_verified, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'system_created', 'local', 1, 'active')`,
+      `INSERT INTO \`user\` (role_id, specialization, full_name, email, phone, password_hash, account_origin, auth_provider, email_verified, status, created_by, current_shift, duty_status)
+       VALUES (?, ?, ?, ?, ?, ?, 'system_created', 'local', 1, 'active', ?, ?, 'ON_DUTY')`,
       [
         dto.roleId,
         resolvedSpec,
-        dto.fullName,
-        dto.email,
-        dto.phone || null,
+        dto.fullName.trim(),
+        normalizedEmail,
+        dto.phone?.trim() || null,
         dto.passwordHash,
+        dto.createdBy ?? null,
+        defaultShift,
       ],
     );
 
@@ -559,14 +587,16 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
 
     return {
       id: result.insertId,
-      fullName: dto.fullName,
-      email: dto.email,
-      phone: dto.phone || null,
+      fullName: dto.fullName.trim(),
+      email: normalizedEmail,
+      phone: dto.phone?.trim() || null,
       roleId: dto.roleId,
       roleName,
       specialization: resolvedSpec,
       activeTrips: 0,
       status: 'active',
+      currentShift: defaultShift,
+      dutyStatus: 'ON_DUTY',
     };
   }
 

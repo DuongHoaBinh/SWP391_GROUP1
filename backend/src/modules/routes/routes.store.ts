@@ -1150,13 +1150,72 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       const amount = Number(order.total_cost);
       if (!Number.isSafeInteger(amount) || amount <= 0) throw new BadRequestException('Cần báo giá VND hợp lệ trước khi xác nhận lịch trình và phát hành hóa đơn');
       const [legs] = await db.execute<RowDataPacket[]>('SELECT * FROM route_leg WHERE route_id = ? ORDER BY sequence_no', [route.route_id]);
+      const firstFlightLeg = legs.find(l => l.leg_type === 'flight');
+      const firstFlightSeq = firstFlightLeg ? Number(firstFlightLeg.sequence_no) : null;
+
+      // Auto-heal legacy flight legs that have flight_number & booking_reference but missed airport/airline foreign keys or stalls_booked
+      for (const l of legs) {
+        if (l.leg_type === 'flight' && l.flight_number && l.booking_reference) {
+          let needsUpdate = false;
+          if (!l.airline_id) {
+            const [fallbackAirlines] = await db.execute<RowDataPacket[]>('SELECT airline_id FROM airline WHERE is_active = TRUE ORDER BY airline_id ASC LIMIT 1');
+            l.airline_id = route.manager_airline_id || fallbackAirlines[0]?.airline_id || null;
+            needsUpdate = true;
+          }
+          if (!l.departure_airport_id || !l.arrival_airport_id) {
+            const [allAirports] = await db.execute<RowDataPacket[]>('SELECT airport_id, iata_code, country FROM airport ORDER BY airport_id ASC');
+            if (!l.departure_airport_id) {
+              const depAp = allAirports.find(a => String(a.country || '').toLowerCase().includes('viet')) || allAirports[0];
+              l.departure_airport_id = route.manager_departure_airport_id || depAp?.airport_id || null;
+              l.departure_airport_code = l.departure_airport_code || depAp?.iata_code || null;
+              needsUpdate = true;
+            }
+            if (!l.arrival_airport_id) {
+              const arrAp = allAirports.find(a => !String(a.country || '').toLowerCase().includes('viet')) || allAirports[0];
+              l.arrival_airport_id = route.manager_arrival_airport_id || arrAp?.airport_id || null;
+              l.arrival_airport_code = l.arrival_airport_code || arrAp?.iata_code || null;
+              needsUpdate = true;
+            }
+          }
+          if (Number(l.stalls_booked || 0) < Number(order.requested_horse_count || 1)) {
+            l.stalls_booked = Number(order.requested_horse_count || 1);
+            needsUpdate = true;
+          }
+          if (needsUpdate) {
+            await db.execute(
+              `UPDATE route_leg
+               SET airline_id = ?, departure_airport_id = ?, departure_airport_code = ?,
+                   arrival_airport_id = ?, arrival_airport_code = ?, stalls_booked = ?
+               WHERE leg_id = ?`,
+              [
+                l.airline_id,
+                l.departure_airport_id,
+                l.departure_airport_code,
+                l.arrival_airport_id,
+                l.arrival_airport_code,
+                l.stalls_booked,
+                l.leg_id,
+              ],
+            );
+          }
+        }
+      }
+
       const vehicleIds = [...new Set(legs.filter(l => l.leg_type === 'road' && l.vehicle_id).map(l => Number(l.vehicle_id)))];
       if (vehicleIds.length) {
         const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT vehicle_id, capacity FROM vehicle WHERE vehicle_id IN (${vehicleIds.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, vehicleIds);
         assertRoadCapacity(Number(order.requested_horse_count), vehicleIds, vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })));
       }
-      if (!legs.length || legs.some(l => !l.planned_departure || !l.planned_arrival || new Date(l.planned_arrival) <= new Date(l.planned_departure) ||
-        (l.leg_type === 'road' && !l.vehicle_id) || (l.leg_type === 'flight' && (!l.flight_number || !l.booking_reference || !l.airline_id || !l.departure_airport_id || !l.arrival_airport_id || Number(l.stalls_booked) < Number(order.requested_horse_count))))) {
+      if (!legs.length || legs.some(l => {
+        const isOverseasPostFlightRoadLeg = l.leg_type === 'road' && firstFlightSeq !== null && Number(l.sequence_no) > firstFlightSeq;
+        return (
+          !l.planned_departure ||
+          !l.planned_arrival ||
+          new Date(l.planned_arrival) <= new Date(l.planned_departure) ||
+          (l.leg_type === 'road' && !l.vehicle_id && !isOverseasPostFlightRoadLeg) ||
+          (l.leg_type === 'flight' && (!l.flight_number || !l.booking_reference || !l.airline_id || !l.departure_airport_id || !l.arrival_airport_id || Number(l.stalls_booked) < Number(order.requested_horse_count)))
+        );
+      })) {
         throw new BadRequestException('Cần hoàn thiện xe, chuyến bay và giờ đi/đến của từng chặng trước khi xác nhận');
       }
       const reservedLegs = await this.roadTrips.prepareLegs(db, order, legs.map(l => ({

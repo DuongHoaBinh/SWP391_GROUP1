@@ -12,7 +12,7 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
       {
         documentType: 'horse_passport',
         docTier: 'A',
-        leadTimeDays: 5,
+        leadTimeDays: 1,
         requiresAuthorityApproval: false,
         minValidityBufferHours: 48,
         transportMode: 'both',
@@ -32,7 +32,7 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
       {
         documentType: 'vaccination_certificate',
         docTier: 'A',
-        leadTimeDays: 5,
+        leadTimeDays: 1,
         requiresAuthorityApproval: false,
         minValidityBufferHours: 48,
         transportMode: 'both',
@@ -42,7 +42,7 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
       {
         documentType: 'customs_declaration',
         docTier: 'A',
-        leadTimeDays: 7,
+        leadTimeDays: 3,
         requiresAuthorityApproval: true,
         minValidityBufferHours: 48,
         transportMode: 'both',
@@ -62,7 +62,7 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
       {
         documentType: 'horse_passport',
         docTier: 'A',
-        leadTimeDays: 5,
+        leadTimeDays: 1,
         requiresAuthorityApproval: false,
         minValidityBufferHours: 48,
         transportMode: 'both',
@@ -82,7 +82,7 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
       {
         documentType: 'vaccination_certificate',
         docTier: 'A',
-        leadTimeDays: 5,
+        leadTimeDays: 1,
         requiresAuthorityApproval: false,
         minValidityBufferHours: 48,
         transportMode: 'both',
@@ -92,7 +92,7 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
       {
         documentType: 'import_permit',
         docTier: 'A',
-        leadTimeDays: 14,
+        leadTimeDays: 3,
         requiresAuthorityApproval: true,
         minValidityBufferHours: 48,
         transportMode: 'both',
@@ -111,26 +111,51 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
     items: [
       {
         documentType: 'horse_passport',
+        docTier: 'A',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Hộ chiếu ngựa FEI kèm chứng thư xác nhận đăng ký của Hiệp hội Đua ngựa (JRA Japan / HKJC Hong Kong / KRA Korea).',
       },
       {
         documentType: 'health_certificate',
+        docTier: 'B',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Giấy chứng nhận kiểm dịch y tế chính thức của Trạm Kiểm dịch Động vật (AQS Nhật Bản / AFCD Hồng Kông) cấp trong 48h.',
       },
       {
         documentType: 'vaccination_certificate',
+        docTier: 'A',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Phiếu xét nghiệm phòng thí nghiệm âm tính với Thiếu máu truyền nhiễm ngựa (EIA Coggins Test), Viêm động mạch ngựa (EVA) và Dịch tễ Glanders.',
       },
       {
         documentType: 'quarantine_certificate',
+        docTier: 'A',
+        leadTimeDays: 3,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
-          'Chứng nhận cách ly kiểm dịch tiền xuất cảnh 14 ngày (Pre-export Quarantine) tại trạm cách ly được phê duyệt.',
+          'Chứng nhận cách ly kiểm dịch tiền xuất cảnh (Pre-export Quarantine) tại trạm cách ly được phê duyệt.',
       },
       {
         documentType: 'import_permit',
+        docTier: 'A',
+        leadTimeDays: 3,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Giấy phép nhập khẩu chính thức từ Bộ Nông Lâm Thủy sản Nhật Bản (MAFF) hoặc Cục Nông nghiệp & Thủy sản Hồng Kông (AFCD).',
       },
@@ -146,21 +171,41 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
     items: [
       {
         documentType: 'horse_passport',
+        docTier: 'A',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Hộ chiếu ngựa quốc tế FEI / Emirates Racing Authority (ERA) hoặc Qatar Racing & Equestrian Club (QREC).',
       },
       {
         documentType: 'health_certificate',
+        docTier: 'B',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Giấy chứng nhận kiểm dịch thú y đạt chuẩn Bộ Biến đổi Khí hậu & Môi trường UAE (MOCCAE) hoặc Bộ Đô thị Qatar (MECC).',
       },
       {
         documentType: 'vaccination_certificate',
+        docTier: 'A',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Chứng nhận xét nghiệm PCR âm tính với Dịch tả ngựa Châu Phi (African Horse Sickness - AHS) và Cúm ngựa.',
       },
       {
         documentType: 'customs_declaration',
+        docTier: 'A',
+        leadTimeDays: 3,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Tờ khai Hải quan điện tử & Sổ tạm quản ATA Carnet tạm nhập tái xuất phục vụ thi đấu thể thao quốc tế.',
       },
@@ -176,21 +221,41 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
     items: [
       {
         documentType: 'horse_passport',
+        docTier: 'A',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Hộ chiếu ngựa FEI nhận diện 30 ngày theo quy định Ủy ban Châu Âu (Regulation EU 2021/963) kèm vi mạch transponder.',
       },
       {
         documentType: 'health_certificate',
+        docTier: 'B',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Chứng thư kiểm dịch điện tử TRACES-NT Official Animal Health Certificate được phê duyệt bởi cơ quan thú y có thẩm quyền.',
       },
       {
         documentType: 'vaccination_certificate',
+        docTier: 'A',
+        leadTimeDays: 1,
+        requiresAuthorityApproval: false,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Sổ tiêm chủng Cúm ngựa và Uốn ván (Equine Influenza & Tetanus) theo đúng lộ trình quy chuẩn EU Directive.',
       },
       {
         documentType: 'import_permit',
+        docTier: 'A',
+        leadTimeDays: 3,
+        requiresAuthorityApproval: true,
+        minValidityBufferHours: 48,
+        transportMode: 'both',
         description:
           'Giấy phép thông quan tại Trạm Kiểm soát Biên giới chỉ định của EU (BIP - Border Inspection Post).',
       },
@@ -217,7 +282,7 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
       {
         documentType: 'vaccination_certificate',
         docTier: 'A',
-        leadTimeDays: 5,
+        leadTimeDays: 0,
         requiresAuthorityApproval: false,
         minValidityBufferHours: 24,
         transportMode: 'both',
@@ -227,7 +292,7 @@ export const REGULATION_PRESET_TEMPLATES: RegulationTemplatePreset[] = [
       {
         documentType: 'horse_passport',
         docTier: 'A',
-        leadTimeDays: 5,
+        leadTimeDays: 0,
         requiresAuthorityApproval: false,
         minValidityBufferHours: 24,
         transportMode: 'both',
