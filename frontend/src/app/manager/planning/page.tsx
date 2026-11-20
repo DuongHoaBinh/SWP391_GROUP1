@@ -858,6 +858,19 @@ export default function ManagerPlanningPage() {
         );
         return;
       }
+
+      const driverObj = availableDrivers.find((d) => String(d.id) === String(selectedDriverId));
+      const isCurrentDriver = assignmentStaffList.some(
+        (s: any) => s.userId === Number(selectedDriverId) && s.roleInShipment === 'driver'
+      );
+      if (driverObj && Number(driverObj.activeTrips || 0) > 0 && !isCurrentDriver) {
+        toast.error(
+          isEn
+            ? `Driver ${driverObj.fullName} is currently busy with ${driverObj.activeTrips} active trip(s)! Please select an available driver.`
+            : `Tài xế ${driverObj.fullName} hiện đang bận (${driverObj.activeTrips} chuyến)! Vui lòng chọn tài xế đang rảnh.`
+        );
+        return;
+      }
     }
 
     if (selectedEscortId) {
@@ -872,6 +885,19 @@ export default function ManagerPlanningPage() {
           isEn
             ? `Veterinary escort ${declinedEscort.user?.fullName || ''} previously declined this trip! Please select another available escort.`
             : `Chuyên viên y tế ${declinedEscort.user?.fullName || ''} đã từ chối chuyến này trước đó! Vui lòng chọn người khác đang rảnh.`
+        );
+        return;
+      }
+
+      const escortObj = availableDrivers.find((d) => String(d.id) === String(selectedEscortId));
+      const isCurrentEscort = assignmentStaffList.some(
+        (s: any) => s.userId === Number(selectedEscortId) && s.roleInShipment === 'escort'
+      );
+      if (escortObj && Number(escortObj.activeTrips || 0) > 0 && !isCurrentEscort) {
+        toast.error(
+          isEn
+            ? `Medical escort ${escortObj.fullName} is currently busy with ${escortObj.activeTrips} active trip(s)! Please select an available escort.`
+            : `Chuyên viên y tế / Hộ tống ${escortObj.fullName} hiện đang bận (${escortObj.activeTrips} chuyến)! Vui lòng chọn người đang rảnh.`
         );
         return;
       }
@@ -2384,15 +2410,29 @@ export default function ManagerPlanningPage() {
                           '-- Chọn tài xế điều khiển phương tiện (Đang rảnh) --'
                         )}
                   </option>
-                  {availableDrivers
-                    .filter(
-                      (d) =>
+                  {(() => {
+                    const freeDrivers = availableDrivers.filter((d) => {
+                      const isDriverRole =
                         d.specialization === 'driver' ||
                         (!d.specialization &&
                           !d.fullName?.toLowerCase().includes('thú y') &&
-                          !d.email?.includes('escort'))
-                    )
-                    .map((d) => {
+                          !d.email?.includes('escort'));
+                      if (!isDriverRole) return false;
+                      const isCurrentDriver = String(d.id) === selectedDriverId;
+                      return Number(d.activeTrips || 0) === 0 || isCurrentDriver;
+                    });
+
+                    if (freeDrivers.length === 0) {
+                      return (
+                        <option disabled value="">
+                          {isEn
+                            ? '⚠️ No drivers currently available (All drivers are busy on active trips)'
+                            : '⚠️ Không có tài xế nào đang rảnh (Tất cả tài xế đều đang bận chuyến)'}
+                        </option>
+                      );
+                    }
+
+                    return freeDrivers.map((d) => {
                       const hasDeclined = assignmentStaffList.some(
                         (s: any) =>
                           s.userId === d.id &&
@@ -2400,7 +2440,6 @@ export default function ManagerPlanningPage() {
                           s.confirmationNotes?.includes('TỪ CHỐI')
                       );
                       const isCurrentDriver = String(d.id) === selectedDriverId;
-                      const isFree = Number(d.activeTrips || 0) === 0 || isCurrentDriver;
 
                       return (
                         <option key={d.id} value={d.id} disabled={hasDeclined}>
@@ -2409,14 +2448,11 @@ export default function ManagerPlanningPage() {
                             ? `— ${t('manager.planning.statusDeclined', 'ĐÃ TỪ CHỐI CHUYẾN NÀY (Không khả dụng)')}`
                             : isCurrentDriver
                             ? `— (${t('manager.planning.statusCurrentlySelected', 'Đang chọn')})`
-                            : isFree
-                            ? `— ${t('manager.planning.statusAvailableFree', 'Đang rảnh (0 chuyến)')}`
-                            : `— ${t('manager.planning.statusBusy', `Đang bận (${d.activeTrips} chuyến)`, {
-                                count: d.activeTrips,
-                              })}`}
+                            : `— ${t('manager.planning.statusAvailableFree', 'Đang rảnh (0 chuyến)')}`}
                         </option>
                       );
-                    })}
+                    });
+                  })()}
                 </select>
               </div>
 
@@ -2446,14 +2482,28 @@ export default function ManagerPlanningPage() {
                           '-- Chọn chuyên viên y tế / hộ tống đi kèm (Đang rảnh) --'
                         )}
                   </option>
-                  {availableDrivers
-                    .filter(
-                      (d) =>
+                  {(() => {
+                    const freeEscorts = availableDrivers.filter((d) => {
+                      const isEscortRole =
                         d.specialization === 'escort' ||
                         (!d.specialization &&
-                          (d.fullName?.toLowerCase().includes('thú y') || d.email?.includes('escort')))
-                    )
-                    .map((d) => {
+                          (d.fullName?.toLowerCase().includes('thú y') || d.email?.includes('escort')));
+                      if (!isEscortRole) return false;
+                      const isCurrentEscort = String(d.id) === selectedEscortId;
+                      return Number(d.activeTrips || 0) === 0 || isCurrentEscort;
+                    });
+
+                    if (freeEscorts.length === 0) {
+                      return (
+                        <option disabled value="">
+                          {isEn
+                            ? '⚠️ No medical escorts available (All escorts/vets are busy on active trips)'
+                            : '⚠️ Không có nhân viên y tế / hộ tống nào đang rảnh (Tất cả đều đang bận chuyến)'}
+                        </option>
+                      );
+                    }
+
+                    return freeEscorts.map((d) => {
                       const hasDeclined = assignmentStaffList.some(
                         (s: any) =>
                           s.userId === d.id &&
@@ -2461,7 +2511,6 @@ export default function ManagerPlanningPage() {
                           s.confirmationNotes?.includes('TỪ CHỐI')
                       );
                       const isCurrentEscort = String(d.id) === selectedEscortId;
-                      const isFree = Number(d.activeTrips || 0) === 0 || isCurrentEscort;
 
                       return (
                         <option key={d.id} value={d.id} disabled={hasDeclined}>
@@ -2470,14 +2519,11 @@ export default function ManagerPlanningPage() {
                             ? `— ${t('manager.planning.statusDeclined', 'ĐÃ TỪ CHỐI CHUYẾN NÀY (Không khả dụng)')}`
                             : isCurrentEscort
                             ? `— (${t('manager.planning.statusCurrentlySelected', 'Đang chọn')})`
-                            : isFree
-                            ? `— ${t('manager.planning.statusAvailableFree', 'Đang rảnh (0 chuyến)')}`
-                            : `— ${t('manager.planning.statusBusy', `Đang bận (${d.activeTrips} chuyến)`, {
-                                count: d.activeTrips,
-                              })}`}
+                            : `— ${t('manager.planning.statusAvailableFree', 'Đang rảnh (0 chuyến)')}`}
                         </option>
                       );
-                    })}
+                    });
+                  })()}
                 </select>
               </div>
 

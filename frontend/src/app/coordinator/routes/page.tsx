@@ -463,8 +463,12 @@ function RoutePlanningContent() {
     const managerType = String(order?.routeDetail?.managerVehicleType || '').toLowerCase();
     const roadFleet = vehicles.filter((v) => !v.type?.toLowerCase().includes('air') && v.status !== 'maintenance');
 
-    const isUsableForOrder = (v: typeof vehicles[number]) =>
-      v.status === 'available' || !v.assignedTripCode || v.assignedTripCode === order?.requestCode;
+    const isUsableForOrder = (v: typeof vehicles[number]) => {
+      const isCurrentTripVehicle = Boolean(v.assignedTripCode) && v.assignedTripCode === order?.requestCode;
+      const isInTransport =
+        (v.status === 'in_use' || Boolean(v.assignedTripCode)) && !isCurrentTripVehicle;
+      return !isInTransport && v.status !== 'maintenance';
+    };
 
     const chosen =
       roadFleet.find(
@@ -475,8 +479,8 @@ function RoutePlanningContent() {
           String(v.type || '').toLowerCase() === managerType
       ) ||
       roadFleet.find((v) => isUsableForOrder(v) && Number(v.capacity || 0) >= requiredHorses) ||
-      roadFleet.find((v) => Number(v.capacity || 0) >= requiredHorses) ||
       roadFleet.find((v) => isUsableForOrder(v)) ||
+      roadFleet.find((v) => Number(v.capacity || 0) >= requiredHorses) ||
       roadFleet[0];
 
     if (!chosen) {
@@ -1245,14 +1249,45 @@ function RoutePlanningContent() {
       }
 
       const isPostFlightRoad = l.legType === 'road' && firstFlightIdx !== -1 && i > firstFlightIdx;
-      if (l.legType === 'road' && !isPostFlightRoad && !l.vehiclePlate && !l.vehicleId && !l.roadTripId) {
-        toast.error(
-          language === 'en'
-            ? `Leg #${seqLabel}: Please select a specialized horse truck for the domestic road leg.`
-            : `Chặng #${seqLabel}: Vui lòng chọn phương tiện / xe chuyên dụng cho chặng đường bộ nội địa!`,
-          { duration: 6000 }
-        );
-        return;
+      if (l.legType === 'road' && !isPostFlightRoad) {
+        if (!l.vehiclePlate && !l.vehicleId && !l.roadTripId) {
+          toast.error(
+            language === 'en'
+              ? `Leg #${seqLabel}: Please select a specialized horse truck for the domestic road leg.`
+              : `Chặng #${seqLabel}: Vui lòng chọn phương tiện / xe chuyên dụng cho chặng đường bộ nội địa!`,
+            { duration: 6000 }
+          );
+          return;
+        }
+
+        if (l.vehiclePlate) {
+          const matchedVehicle = vehicles.find((v) => v.code === l.vehiclePlate || (l.vehicleId && String(v.id) === String(l.vehicleId)));
+          if (matchedVehicle) {
+            const isCurrentTrip = Boolean(matchedVehicle.assignedTripCode) && matchedVehicle.assignedTripCode === selectedPlanningOrder?.requestCode;
+            const isInTransport =
+              (matchedVehicle.status === 'in_use' || Boolean(matchedVehicle.assignedTripCode)) &&
+              !isCurrentTrip;
+            if (isInTransport) {
+              toast.error(
+                language === 'en'
+                  ? `Leg #${seqLabel}: Vehicle "${matchedVehicle.code}" is currently in transport (${matchedVehicle.assignedTripCode || 'running another trip'}). Please select an available vehicle.`
+                  : `Chặng #${seqLabel}: Xe "${matchedVehicle.code}" hiện đang trong quá trình vận chuyển (${matchedVehicle.assignedTripCode || 'đang chạy chuyến khác'})! Vui lòng chọn xe khác sẵn sàng.`,
+                { duration: 6000 }
+              );
+              return;
+            }
+            const requiredStalls = Math.max(1, Number(selectedPlanningOrder?.horseCount || 1));
+            if (Number(matchedVehicle.capacity || 0) < requiredStalls) {
+              toast.error(
+                language === 'en'
+                  ? `Leg #${seqLabel}: Vehicle "${matchedVehicle.code}" has insufficient stalls (${matchedVehicle.capacity}/${requiredStalls} horses).`
+                  : `Chặng #${seqLabel}: Xe "${matchedVehicle.code}" không đủ sức chứa (${matchedVehicle.capacity}/${requiredStalls} ngựa)!`,
+                { duration: 6000 }
+              );
+              return;
+            }
+          }
+        }
       }
 
       if (l.legType === 'flight') {
@@ -2562,28 +2597,51 @@ function RoutePlanningContent() {
                                     </optgroup>
                                   )}
                                   <optgroup label={t('coordinator.routes.domesticFleetGroup', 'Đội xe chuyên dụng nội bộ (Việt Nam)')}>
-                                    {vehicles
-                                      .filter((v) => !v.type?.toLowerCase().includes('air'))
-                                      .map((v) => {
-                                        const isBusy =
-                                          v.status === 'in_use' &&
-                                          v.assignedTripCode &&
-                                          v.assignedTripCode !== selectedPlanningOrder?.requestCode;
-                                        const requiredStalls = Math.max(1, Number(selectedPlanningOrder?.horseCount || 1));
-                                        const isUnderCapacity = Number(v.capacity || 0) < requiredStalls;
+                                    {(() => {
+                                      const availableRoadFleet = vehicles
+                                        .filter((v) => !v.type?.toLowerCase().includes('air'))
+                                        .filter((v) => {
+                                          const isCurrentLegVehicle = v.code === leg.vehiclePlate;
+                                          const isCurrentTripVehicle =
+                                            Boolean(v.assignedTripCode) &&
+                                            v.assignedTripCode === selectedPlanningOrder?.requestCode;
+                                          const isInTransport =
+                                            (v.status === 'in_use' || Boolean(v.assignedTripCode)) &&
+                                            !isCurrentLegVehicle &&
+                                            !isCurrentTripVehicle;
+                                          // Ẩn các xe đang trong quá trình vận chuyển chuyến khác
+                                          return !isInTransport;
+                                        });
+
+                                      if (availableRoadFleet.length === 0) {
                                         return (
-                                          <option key={v.id} value={v.code} disabled={Boolean(isBusy || isUnderCapacity)}>
+                                          <option disabled value="">
+                                            {language === 'en'
+                                              ? '⚠️ All specialized vehicles are currently in transit'
+                                              : '⚠️ Tất cả xe chuyên dụng đều đang trong quá trình vận chuyển'}
+                                          </option>
+                                        );
+                                      }
+
+                                      const requiredStalls = Math.max(1, Number(selectedPlanningOrder?.horseCount || 1));
+
+                                      return availableRoadFleet.map((v) => {
+                                        const isUnderCapacity = Number(v.capacity || 0) < requiredStalls;
+                                        const isCurrentTrip =
+                                          v.code === leg.vehiclePlate ||
+                                          (Boolean(v.assignedTripCode) && v.assignedTripCode === selectedPlanningOrder?.requestCode);
+                                        return (
+                                          <option key={v.id} value={v.code} disabled={Boolean(isUnderCapacity)}>
                                             {v.code} — {translateVehicleType(v.type)} ({v.capacity} stall, {v.location}){' '}
                                             {isUnderCapacity
                                               ? `— ⚠️ ${language === 'en' ? `Insufficient stalls (${v.capacity}/${requiredStalls})` : `Không đủ chuồng (${v.capacity}/${requiredStalls} ngựa)`}`
-                                              : isBusy
-                                              ? `— ⚠️ ${language === 'en' ? `Running trip ${v.assignedTripCode}` : `Đang chạy chuyến ${v.assignedTripCode}`}`
-                                              : v.status === 'in_use'
+                                              : isCurrentTrip && v.status === 'in_use'
                                               ? `— (${language === 'en' ? 'In use for this trip' : 'Đang dùng cho chuyến này'})`
                                               : `— ${language === 'en' ? 'Available' : 'Sẵn sàng'}`}
                                           </option>
                                         );
-                                      })}
+                                      });
+                                    })()}
                                   </optgroup>
                                 </select>
                                 {leg.vehiclePlate && (leg.vehiclePlate.includes('đến đón') || leg.vehiclePlate.includes('đến rước') || leg.vehiclePlate.includes('pickup') || leg.vehiclePlate.includes('Consignee')) && (
