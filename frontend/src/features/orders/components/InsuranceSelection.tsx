@@ -47,9 +47,9 @@ export function InsuranceSelection({ horses, values, onChange, policy, error, on
             <legend className="px-1 font-semibold text-[#181A17]">
               {horse.name} · {horse.quantity ?? 1} {t('common.horsesUnit', 'ngựa')}
             </legend>
-            <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-              <label className="text-sm font-medium text-[#181A17]">
-                {t('insurance.declaredValueLabel', 'Giá trị ước tính / ngựa')}
+            <div>
+              <label className="text-sm font-medium text-[#181A17] block">
+                {t('insurance.declaredValueLabel', 'Giá trị ước tính / ngựa')} (VNĐ)
                 <input
                   type="number"
                   min="0"
@@ -60,22 +60,9 @@ export function InsuranceSelection({ horses, values, onChange, policy, error, on
                   aria-invalid={Boolean(preview.error)}
                   aria-describedby={`insurance-help-${horse.id}`}
                   placeholder={t('insurance.declaredValuePlaceholder', 'Ví dụ: 100000000')}
-                  onChange={e => onChange(horse.id, { ...value, declaredValue: e.target.value })}
+                  onChange={e => onChange(horse.id, { ...value, declaredCurrency: 'VND', declaredValue: e.target.value })}
                   className="mt-1 min-h-11 w-full rounded-lg border border-[#D8CEBE] bg-white px-3 text-[#181A17] focus:border-[#181A17] focus:outline-none focus:ring-2 focus:ring-[#C4B38E]/30"
                 />
-              </label>
-              <label className="text-sm font-medium text-[#181A17]">
-                {t('insurance.currencyLabel', 'Loại tiền')}
-                <select
-                  value={value.declaredCurrency}
-                  onChange={e => onChange(horse.id, { ...value, declaredCurrency: e.target.value as 'VND' | 'USD' })}
-                  className="mt-1 min-h-11 w-full rounded-lg border border-[#D8CEBE] bg-white px-3 text-[#181A17] cursor-pointer"
-                >
-                  <option value="VND">VNĐ</option>
-                  <option value="USD" disabled={!policy?.usdToVnd}>
-                    USD{!policy?.usdToVnd ? ` (${t('insurance.noExchangeRate', 'chưa có tỷ giá')})` : ''}
-                  </option>
-                </select>
               </label>
             </div>
             {keepsPolicy && (

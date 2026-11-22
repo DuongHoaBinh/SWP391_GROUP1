@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { usePathname } from 'next/navigation';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { PortalLoadingSkeleton } from '@/components/layout/PortalLoadingSkeleton';
 import {
   Stethoscope,
   Plus,
@@ -48,8 +49,10 @@ const DEFAULT_VITAL_CFG: EquineVitalConfigItem = {
   observationalConditions: ['climate_change', 'other'],
 };
 
-export default function HorseHealthPage() {
+function HorseHealthContent() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const queryShipmentParam = Number(searchParams.get('shipmentId'));
   const { t, language, translateStatus, translateCondition, translateBreed, translateRole } = useLanguage();
   const [currentUser, setCurrentUser] = useState<ReturnType<typeof getCurrentUser> | null>(null);
   const [trips, setTrips] = useState<AssignedTripSummary[]>([]);
@@ -117,9 +120,16 @@ export default function HorseHealthPage() {
       const list = await trackingApi.getMyTrips();
       setTrips(list);
       if (list.length > 0) {
-        const active = list.find((tr) => tr.shipment_status === 'in_transit') || list[0];
+        const requested = Number.isFinite(queryShipmentParam)
+          ? list.find((tr) => tr.shipment_id === queryShipmentParam)
+          : undefined;
+        const active = requested || list.find((tr) => tr.shipment_status === 'in_transit') || list[0];
         setSelectedShipmentId((prev) =>
-          prev && list.some((tr) => tr.shipment_id === prev) ? prev : active.shipment_id
+          requested
+            ? requested.shipment_id
+            : prev && list.some((tr) => tr.shipment_id === prev)
+            ? prev
+            : active.shipment_id
         );
       } else {
         setSelectedShipmentId(null);
@@ -135,7 +145,7 @@ export default function HorseHealthPage() {
     } finally {
       setIsLoadingTrips(false);
     }
-  }, [language]);
+  }, [language, queryShipmentParam]);
 
   const loadDetails = useCallback(
     async (shipmentId: number, isSilent = false) => {
@@ -567,6 +577,8 @@ export default function HorseHealthPage() {
               disabled={
                 !selectedShipmentId ||
                 assignedHorses.length === 0 ||
+                currentTrip?.shipment_status === 'confirmed' ||
+                trackingDetails?.shipmentStatus === 'confirmed' ||
                 currentTrip?.shipment_status === 'completed' ||
                 trackingDetails?.shipmentStatus === 'completed'
               }
@@ -919,12 +931,17 @@ export default function HorseHealthPage() {
                 id="health-leg-select"
                 value={formData.legName}
                 onChange={(e) => setFormData({ ...formData, legName: e.target.value })}
-                className="w-full min-h-[44px] px-3 border border-[#D8CEBE] rounded-xl outline-none font-bold text-xs bg-white focus:border-[#2D5A3F]"
+                disabled={Boolean(trackingDetails?.milestones?.some((m) => m.status === 'CURRENT'))}
+                className="w-full min-h-[44px] px-3 border border-[#D8CEBE] rounded-xl outline-none font-bold text-xs bg-[#FAF8F4] text-[#181A17] focus:border-[#2D5A3F] disabled:opacity-90 disabled:cursor-not-allowed"
                 required
               >
                 {trackingDetails?.milestones && trackingDetails.milestones.length > 0 ? (
                   trackingDetails.milestones.map((m) => (
-                    <option key={m.id} value={`#${m.seq} - ${m.title}`}>
+                    <option
+                      key={m.id}
+                      value={`#${m.seq} - ${m.title}`}
+                      disabled={m.status !== 'CURRENT'}
+                    >
                       #{m.seq}: {m.title}{' '}
                       {m.status === 'CURRENT'
                         ? language === 'en'
@@ -1297,5 +1314,13 @@ export default function HorseHealthPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+export default function HorseHealthPage() {
+  return (
+    <Suspense fallback={<PortalLoadingSkeleton />}>
+      <HorseHealthContent />
+    </Suspense>
   );
 }

@@ -208,23 +208,13 @@ export default function CoordinatorLayout({
       icon: <Truck size={18} />,
     },
     {
-      label: t('nav.schedule', 'Lịch trình điều phối'),
-      href: '/coordinator/schedule',
-      icon: <CalendarDays size={18} />,
-    },
-    {
-      label: t('nav.monitoring', 'Giám sát thời gian thực'),
+      label: t('nav.monitoring', 'Giám sát'),
       href: '/coordinator/monitoring',
       icon: <Radio size={18} />,
     },
   ];
 
   const managementItems: NavItem[] = [
-    {
-      label: t('nav.alerts', 'Cảnh báo vận hành'),
-      href: '/coordinator/alerts',
-      icon: <AlertTriangle size={18} />,
-    },
     {
       label: t('common.notifications', 'Thông báo'),
       href: '/coordinator/notifications',

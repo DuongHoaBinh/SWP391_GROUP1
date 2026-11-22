@@ -248,10 +248,26 @@ export const documentsApi = {
       docNumber?: string;
     }
   ): Promise<ApiTransportDocument> => {
-    return apiClient<ApiTransportDocument>(`/documents/${id}/review`, {
+    const reviewed = await apiClient<ApiTransportDocument>(`/documents/${id}/review`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
+    if (data.status === 'approved') {
+      try {
+        await apiClient(`/documents/${id}/authority-approval`, {
+          method: 'POST',
+          body: JSON.stringify({
+            authorityName: 'Cục Thú y / Cơ quan Kiểm dịch Cửa khẩu',
+            status: 'approved',
+            referenceNumber: data.docNumber || undefined,
+            notes: data.notes || 'Đã xác nhận phê duyệt kiểm dịch đạt chuẩn',
+          }),
+        });
+      } catch {
+        // Ignore if already recorded
+      }
+    }
+    return reviewed;
   },
 
   // Authority approval

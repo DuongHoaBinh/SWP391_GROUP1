@@ -751,29 +751,27 @@ export default function RegulationsPage() {
 
         {/* Table Content */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse min-w-[920px]">
+          <table className="w-full table-fixed text-left text-sm border-collapse min-w-[720px]">
             <thead>
               <tr className="bg-[#F0EEE8] border-b border-[#D8CEBE] text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-                <th className="p-4 w-16">{language === 'en' ? 'Code' : 'Mã'}</th>
-                <th className="p-4 w-44">{language === 'en' ? 'Country / Border Gate' : 'Quốc gia / Cửa khẩu'}</th>
-                <th className="p-4">{language === 'en' ? 'Requirement Title & Detailed Description' : 'Tiêu đề yêu cầu & Mô tả chi tiết'}</th>
-                <th className="p-4 w-44">{language === 'en' ? 'Document Code' : 'Mã chứng từ'}</th>
-                <th className="p-4 w-40">{language === 'en' ? 'Scope & Mandate' : 'Phạm vi & Pháp lý'}</th>
-                <th className="p-4 w-28">{language === 'en' ? 'Status' : 'Trạng thái'}</th>
-                <th className="p-4 w-28 text-center">{language === 'en' ? 'Actions' : 'Thao tác'}</th>
+                <th className="px-6 py-4 w-[12%]">{language === 'en' ? 'Code' : 'Mã'}</th>
+                <th className="px-6 py-4 w-[24%]">{language === 'en' ? 'Country / Border Gate' : 'Quốc gia / Cửa khẩu'}</th>
+                <th className="px-6 py-4 w-[38%]">{language === 'en' ? 'Requirement Title & Detailed Description' : 'Tiêu đề yêu cầu & Mô tả chi tiết'}</th>
+                <th className="px-6 py-4 w-[14%] text-center">{language === 'en' ? 'Status' : 'Trạng thái'}</th>
+                <th className="px-6 py-4 w-[12%] text-center">{language === 'en' ? 'Actions' : 'Thao tác'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E8E2D8]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-slate-500">
+                  <td colSpan={5} className="p-12 text-center text-slate-500">
                     <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-[#181A17] border-t-transparent mb-2"></div>
                     <div>{language === 'en' ? 'Loading quarantine protocols from database...' : 'Đang tải dữ liệu quy định từ cơ sở dữ liệu...'}</div>
                   </td>
                 </tr>
               ) : fetchError ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center">
+                  <td colSpan={5} className="p-12 text-center">
                     <div className="max-w-md mx-auto flex flex-col items-center">
                       <AlertTriangle size={36} className="text-red-500 mb-2" />
                       <h3 className="text-sm font-bold text-slate-800 mb-1">
@@ -792,7 +790,7 @@ export default function RegulationsPage() {
                 </tr>
               ) : paginatedRegulations.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-slate-500">
+                  <td colSpan={5} className="p-12 text-center text-slate-500">
                     <Info size={32} className="mx-auto text-slate-300 mb-2" />
                     {language === 'en' ? 'No regulations found matching the selected filters.' : 'Không tìm thấy quy định nào phù hợp với bộ lọc đã chọn.'}
                   </td>
@@ -802,10 +800,10 @@ export default function RegulationsPage() {
                   const isBaseline = reg.country === 'Global Baseline';
                   return (
                     <tr key={reg.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="p-4 font-mono text-xs font-bold text-slate-600">
+                      <td className="px-6 py-4 font-mono text-xs font-bold text-slate-600">
                         #{reg.id}
                       </td>
-                      <td className="p-4">
+                      <td className="px-6 py-4">
                         <div className="font-semibold text-slate-800 flex items-center gap-1.5">
                           {isBaseline ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FAF8F4] text-[#181A17] border border-[#EAE5DA] text-xs font-bold">
@@ -818,63 +816,21 @@ export default function RegulationsPage() {
                         {reg.borderGate && (
                           <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5 font-medium">
                             <span className="text-[#A67C2E]">📍</span>
-                            <span className="truncate max-w-[150px]" title={reg.borderGate}>
+                            <span className="truncate max-w-[220px]" title={reg.borderGate}>
                               {reg.borderGate}
                             </span>
                           </div>
                         )}
                       </td>
-                      <td className="p-4">
-                        <div className="font-medium text-slate-800 leading-snug">{translateDocType(reg.docType, reg.title)}</div>
+                      <td className="px-6 py-4">
+                        <div className="font-semibold text-slate-800 leading-snug">{translateDocType(reg.docType, reg.title)}</div>
                       </td>
-                      <td className="p-4">
-                        <span className="bg-slate-100 px-2 py-0.5 rounded text-xs font-mono text-slate-700 border border-slate-200">
-                          {translateDocType(reg.docType)}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex flex-col gap-1 items-start text-[11px]">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold border ${
-                              reg.scope === 'per_horse'
-                                ? 'bg-[#F8F0DF] text-[#966516] border-[#DFCA9A]'
-                                : 'bg-[#FAF8F4] text-[#181A17] border-[#D8CEBE]'
-                            }`}
-                          >
-                            {reg.scope === 'per_horse' ? (language === 'en' ? '🐴 Per Horse' : '🐴 Từng cá thể') : (language === 'en' ? '📦 Per Shipment' : '📦 Cả chuyến')}
-                          </span>
-                          <div className="flex flex-wrap gap-1">
-                            <span className="px-1.5 py-0.5 rounded font-bold bg-[#181A17] text-[#C4B38E]">
-                              {language === 'en' ? `Tier ${reg.docTier}` : `Tầng ${reg.docTier}`} • D-{reg.leadTimeDays}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded font-semibold bg-slate-100 text-slate-700 border border-slate-200 uppercase">
-                              {reg.transportMode}
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap gap-1">
-                            <span
-                              className={`px-1.5 py-0.5 rounded font-semibold ${
-                                reg.requiresAuthorityApproval
-                                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              }`}
-                            >
-                              {reg.requiresAuthorityApproval
-                                ? (language === 'en' ? '2-Tier Auth' : 'Duyệt 2 tầng')
-                                : (language === 'en' ? '1-Tier Internal' : 'Duyệt nội bộ')}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded font-mono text-slate-600 bg-slate-50 border border-slate-200">
-                              +{reg.minValidityBufferHours}h
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                      <td className="px-6 py-4 text-center">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
                           {translateStatus(reg.status)}
                         </span>
                       </td>
-                      <td className="p-4 text-center">
+                      <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
                             type="button"

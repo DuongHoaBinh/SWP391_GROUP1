@@ -849,7 +849,6 @@ ${isFullyApproved
                 <th className="p-4">{t('documents.horseAndOrder', 'Chiến mã / Mã đơn')}</th>
                 <th className="p-4">{t('customer.requests.tableDestination', 'Điểm đến')}</th>
                 <th className="p-4">{t('documents.overallProgress', 'Tiến độ tổng')}</th>
-                <th className="p-4">{t('documents.category', 'Phân loại chứng từ')}</th>
                 <th className="p-4">{t('common.status', 'Trạng thái')}</th>
                 <th className="p-4 text-right">{t('common.actions', 'Thao tác')}</th>
               </tr>
@@ -857,7 +856,7 @@ ${isFullyApproved
             <tbody className="divide-y divide-[#E8E2D8]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-[#5C6658] font-medium text-sm">
+                  <td colSpan={6} className="p-12 text-center text-[#5C6658] font-medium text-sm">
                     {isEn
                       ? 'Loading transport dossiers from system...'
                       : 'Đang tải danh sách túi hồ sơ vận chuyển từ hệ thống...'}
@@ -865,7 +864,7 @@ ${isFullyApproved
                 </tr>
               ) : filteredDossiers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-[#5C6658] font-medium">
+                  <td colSpan={6} className="p-8 text-center text-[#5C6658] font-medium">
                     {isEn
                       ? 'No matching transport dossiers found.'
                       : 'Không tìm thấy bộ hồ sơ vận chuyển nào phù hợp.'}
@@ -875,7 +874,6 @@ ${isFullyApproved
                 filteredDossiers.map((dos) => {
                   const progressPct =
                     dos.totalDocs > 0 ? Math.round((dos.approvedDocs / dos.totalDocs) * 100) : 0;
-                  const breakdown = getDocBreakdown(dos);
 
                   return (
                     <tr key={dos.id} className="hover:bg-[#FAF9F5] transition-colors">
@@ -899,23 +897,6 @@ ${isFullyApproved
                             />
                           </div>
                           <span className="text-[11px] text-[#5C6658] whitespace-nowrap">{progressPct}%</span>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#E8F2EB] text-[#287653]">
-                            ✓ {breakdown.approved}
-                          </span>
-                          {breakdown.pending > 0 && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#F8F0DF] text-[#966516]">
-                              ⏳ {breakdown.pending}
-                            </span>
-                          )}
-                          {breakdown.missing > 0 && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#F8EAEA] text-[#B33E3E]">
-                              ! {breakdown.missing}
-                            </span>
-                          )}
                         </div>
                       </td>
                       <td className="p-4">

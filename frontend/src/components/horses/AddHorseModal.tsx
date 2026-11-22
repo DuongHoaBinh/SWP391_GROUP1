@@ -78,7 +78,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   const [passportNumber, setPassportNumber] = useState('');
   const [microchipNumber, setMicrochipNumber] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(CHAMPION_PRESETS[0].url);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [error, setError] = useState('');
@@ -119,7 +119,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
     setPassportNumber('');
     setMicrochipNumber('');
     setPhotoFile(null);
-    setPhotoPreview(CHAMPION_PRESETS[0].url);
+    setPhotoPreview(null);
     setError('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -385,13 +385,15 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                   </div>
 
                   <div className="flex-1 w-full text-center sm:text-left">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div>
                         <h4 className="text-sm font-bold text-text-primary uppercase tracking-wide">
                           {t('horses.portraitPhoto', 'Ảnh Chân Dung Chiến Mã')}
                         </h4>
                         <p className="text-xs text-text-secondary mt-0.5">
-                          {t('horses.portraitPhotoSubtitle', 'Tải ảnh thực tế từ thiết bị hoặc chọn nhanh ảnh mẫu')}
+                          {language === 'en'
+                            ? 'Upload an actual photo of your racehorse from your device (PNG, JPG, WEBP)'
+                            : 'Tải ảnh thực tế của chiến mã từ thiết bị (PNG, JPG, WEBP)'}
                         </p>
                       </div>
                       <button
@@ -402,38 +404,6 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                         <Upload size={13} />
                         <span>{t('horses.uploadFromDevice', 'Tải từ thiết bị')}</span>
                       </button>
-                    </div>
-
-                    <div className="mt-3">
-                      <div className="text-[11px] font-semibold text-text-muted mb-1.5 uppercase tracking-wider">
-                        {t('horses.selectSamplePhoto', 'Chọn nhanh ảnh mẫu chuẩn')}:
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {CHAMPION_PRESETS.map((p, idx) => {
-                          const isSelected = photoPreview === p.url;
-                          return (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => {
-                                setPhotoFile(null);
-                                setPhotoPreview(p.url);
-                              }}
-                              className={`flex items-center gap-2 p-1.5 rounded-xl border text-left transition-all ${
-                                isSelected
-                                  ? 'border-primary bg-primary-subtle shadow-sm'
-                                  : 'border-border bg-surface hover:border-border-beige-hover'
-                              }`}
-                            >
-                              <img src={p.url} alt={p.label} className="w-8 h-8 rounded-lg object-cover shrink-0" />
-                              <div className="min-w-0">
-                                <div className="text-[11px] font-bold text-text-primary truncate">{p.label}</div>
-                                <div className="text-[10px] text-text-secondary truncate">{language === 'en' ? p.subEn : p.subVi}</div>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -559,11 +529,11 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                     </label>
                     <input
                       type="number"
-                      min={1}
-                      max={35}
                       value={age}
-                      onChange={(e) => setAge(parseInt(e.target.value) || 1)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
+                      readOnly
+                      tabIndex={-1}
+                      aria-readonly="true"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-muted text-sm font-semibold text-text-secondary cursor-not-allowed outline-none"
                     />
                   </div>
                   <div>
@@ -578,23 +548,6 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                       className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
                     />
                   </div>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
-                    {t('horses.medicalStatus', 'Tình trạng sức khỏe / y tế')}
-                  </label>
-                  <select
-                    value={medicalStatus}
-                    onChange={(e) => setMedicalStatus(e.target.value as any)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary cursor-pointer"
-                  >
-                    {HORSE_MEDICAL_STATUSES.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
                 </div>
               </div>
             </div>

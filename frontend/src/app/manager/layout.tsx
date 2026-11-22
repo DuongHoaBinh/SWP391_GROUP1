@@ -219,11 +219,6 @@ export default function ManagerLayout({
 
   const managementItems: NavItem[] = [
     {
-      label: t('manager.nav.reports', 'Báo Cáo & Phân Tích'),
-      href: '/manager/reports',
-      icon: <BarChart3 size={18} />,
-    },
-    {
       label: t('common.notifications', 'Thông Báo'),
       href: '/manager/notifications',
       icon: <Bell size={18} />,

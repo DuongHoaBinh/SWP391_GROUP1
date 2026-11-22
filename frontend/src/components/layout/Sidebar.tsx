@@ -189,11 +189,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
 
   const managementItems: NavItem[] = [
     {
-      label: t('nav.reports', 'Báo cáo chi phí'),
-      href: '/customer/reports',
-      icon: <BarChart3 size={18} aria-hidden="true" />,
-    },
-    {
       label: t('common.settings', 'Cài đặt tài khoản'),
       href: '/customer/settings',
       icon: <Settings size={18} aria-hidden="true" />,

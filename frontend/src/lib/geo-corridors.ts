@@ -1866,16 +1866,64 @@ export async function searchAddressSuggestions(
   const hasVietnamToken = normQuery.includes('vietnam') || normQuery.includes('viet nam');
   const searchQuery = domesticOnly && !hasVietnamToken ? `${trimmed}, Vietnam` : trimmed;
 
+  const airportPool = domesticOnly ? VIETNAM_AIRPORTS : [...VIETNAM_AIRPORTS, ...INTERNATIONAL_EQUINE_AIRPORTS];
+  const localMatches: AddressSuggestion[] = airportPool
+    .filter((a) => {
+      const normName = normalizeVietnamese(a.name);
+      const code = (a.code || '').toLowerCase();
+      return normName.includes(normQuery) || code === normQuery || (normQuery.length >= 3 && code.includes(normQuery));
+    })
+    .slice(0, limit)
+    .map((a, idx) => ({
+      id: `local-airport-${a.code || idx}`,
+      primaryLabel: a.name,
+      secondaryLabel: a.country,
+      fullAddress: a.name,
+      category: 'airport' as const,
+      geo: {
+        coords: a.coords,
+        displayName: a.name,
+        country: a.country,
+      },
+    }));
+
+  const knownLocMatches: AddressSuggestion[] = KNOWN_LOCATIONS.filter((loc) => {
+    if (domesticOnly && !loc.isVietnam) return false;
+    const normLocName = normalizeVietnamese(loc.name);
+    return (
+      normLocName.includes(normQuery) ||
+      loc.keywords.some((kw) => normalizeVietnamese(kw).includes(normQuery))
+    );
+  })
+    .slice(0, limit)
+    .map((loc) => ({
+      id: `local-loc-${loc.id}`,
+      primaryLabel: loc.name,
+      secondaryLabel: loc.country,
+      fullAddress: `${loc.name}, ${loc.country}`,
+      category: 'city' as const,
+      geo: {
+        coords: loc.coords,
+        displayName: loc.name,
+        country: loc.country,
+      },
+    }));
+
   try {
     const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(searchQuery)}&limit=12`;
     const res = await fetch(url, { signal: options?.signal });
-    if (!res.ok) return [];
+    if (!res.ok) return [...localMatches, ...knownLocMatches].slice(0, limit);
     const data = await res.json();
     const features = Array.isArray(data?.features) ? data.features : [];
 
-    const seenFull = new Set<string>();
+    const seenFull = new Set<string>(
+      [...localMatches, ...knownLocMatches].map((item) => normalizeVietnamese(item.fullAddress))
+    );
     const seenMotorway = new Set<string>();
-    const ranked: Array<{ score: number; item: AddressSuggestion }> = [];
+    const ranked: Array<{ score: number; item: AddressSuggestion }> = [
+      ...localMatches.map((item, i) => ({ score: 600 - i, item })),
+      ...knownLocMatches.map((item, i) => ({ score: 480 - i, item })),
+    ];
 
     for (let idx = 0; idx < features.length; idx++) {
       const feat = features[idx];
@@ -1972,22 +2020,90 @@ export async function searchAddressSuggestions(
     // Fall back to airport hub catalog when offline or aborted
   }
 
-  const airportPool = domesticOnly ? VIETNAM_AIRPORTS : [...VIETNAM_AIRPORTS, ...INTERNATIONAL_EQUINE_AIRPORTS];
-  return airportPool
-    .filter((a) => normalizeVietnamese(a.name).includes(normQuery) || a.code?.toLowerCase() === normQuery)
-    .slice(0, limit)
-    .map((a, idx) => ({
-      id: `fallback-${a.code || idx}`,
-      primaryLabel: a.name,
-      secondaryLabel: a.country,
-      fullAddress: a.name,
-      category: 'airport' as const,
-      geo: {
-        coords: a.coords,
-        displayName: a.name,
-        country: a.country,
-      },
-    }));
+  return [...localMatches, ...knownLocMatches].slice(0, limit);
+}
+
+/**
+ * Resolve exact coordinates [lat, lng] for a leg endpoint (airport, known city/province, or explicit coords)
+ */
+export function resolveEndpointCoordinates(
+  rawText?: string | null,
+  explicitCoords?: [number, number] | null
+): [number, number] | null {
+  if (explicitCoords && Array.isArray(explicitCoords) && explicitCoords.length === 2) {
+    return explicitCoords;
+  }
+  const trimmed = (rawText || '').trim();
+  if (trimmed.length < 2) return null;
+
+  const norm = normalizeVietnamese(trimmed);
+  const allAirports = [...VIETNAM_AIRPORTS, ...INTERNATIONAL_EQUINE_AIRPORTS];
+
+  // 1. Check IATA code in parentheses e.g. (SGN), (HAN), (PNH), (SIN)
+  const iataMatch = trimmed.match(/\(([A-Za-z]{3})\b/);
+  if (iataMatch) {
+    const code = iataMatch[1].toUpperCase();
+    const byCode = allAirports.find((a) => a.code?.toUpperCase() === code);
+    if (byCode) return byCode.coords;
+  }
+
+  // 2. Check airport name keywords
+  for (const ap of allAirports) {
+    const apBase = normalizeVietnamese(ap.name.split('(')[0])
+      .replace(/\bsan bay quoc te\b/g, '')
+      .replace(/\bsan bay\b/g, '')
+      .trim();
+    if (apBase.length >= 3 && (norm.includes(apBase) || apBase.includes(norm))) {
+      return ap.coords;
+    }
+    if (ap.code && new RegExp(`\\b${ap.code.toLowerCase()}\\b`).test(norm)) {
+      return ap.coords;
+    }
+  }
+
+  // 3. Check KNOWN_LOCATIONS by segment or full string
+  const segments = trimmed
+    .split(',')
+    .map((s) => normalizeVietnamese(s))
+    .filter((s) => s.length >= 2);
+
+  for (const seg of [...segments, norm]) {
+    const matched = matchBestLocation(seg, KNOWN_LOCATIONS);
+    if (matched) {
+      if (isAirportLocationText(trimmed) && matched.nearestAirport?.coords) {
+        return matched.nearestAirport.coords;
+      }
+      return matched.coords;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Automatically estimate distance (km) and duration (hours) between two leg endpoints
+ */
+export function estimateLegDistanceAndDuration(
+  originText?: string | null,
+  destinationText?: string | null,
+  legType: 'road' | 'flight' = 'road',
+  originCoords?: [number, number] | null,
+  destCoords?: [number, number] | null
+): { distanceKm: number; durationHours: number } | null {
+  const fromCoords = resolveEndpointCoordinates(originText, originCoords);
+  const toCoords = resolveEndpointCoordinates(destinationText, destCoords);
+  if (!fromCoords || !toCoords) return null;
+
+  const directKm = calculateHaversine(fromCoords, toCoords);
+  if (legType === 'flight') {
+    const distanceKm = Math.max(80, Math.round(directKm * 1.05));
+    const durationHours = Math.max(1, Math.round((distanceKm / 750 + 0.5) * 2) / 2);
+    return { distanceKm, durationHours };
+  }
+
+  const distanceKm = directKm < 2 ? 12 : Math.max(10, Math.round(directKm * 1.3));
+  const durationHours = Math.max(0.5, Math.round((distanceKm / 50) * 2) / 2);
+  return { distanceKm, durationHours };
 }
 
 /**

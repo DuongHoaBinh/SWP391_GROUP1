@@ -222,7 +222,7 @@ const SEVERITY_DATA: Record<string, { en: string; vi: string }> = {
 const STOP_TYPE_DATA: Record<string, { en: string; vi: string }> = {
   origin: { en: 'Departure Point', vi: 'Điểm xuất phát' },
   destination: { en: 'Destination Point', vi: 'Điểm đến' },
-  rest: { en: 'FEI Rest Station', vi: 'Trạm Nghỉ FEI' },
+  rest: { en: 'Rest Station', vi: 'Trạm Nghỉ' },
   quarantine: { en: 'Quarantine Station', vi: 'Trạm Kiểm Dịch' },
   refuel: { en: 'Technical & Refuel Stop', vi: 'Trạm Tiếp Nhiên Liệu' },
   border_check: { en: 'Border Gate Checkpoint', vi: 'Cửa Khẩu Quốc Tế' },

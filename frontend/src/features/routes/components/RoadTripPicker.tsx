@@ -39,6 +39,8 @@ export function RoadTripPicker({
   const isLoading = trips === undefined && !error;
   const matchingTrips =
     trips?.filter((t) => t.bookingType === bookingType || t.id === leg.roadTripId) ?? [];
+  const hasSelectedOutsideList =
+    Boolean(leg.roadTripId) && !matchingTrips.some((t) => t.id === leg.roadTripId);
 
   return (
     <div className="mb-3 space-y-2 rounded-xl border border-[#287653]/30 bg-white p-3.5 text-sm">
@@ -71,6 +73,11 @@ export function RoadTripPicker({
               ? 'Create new road trip on save'
               : 'Tạo chuyến mới khi lưu kế hoạch'}
           </option>
+          {hasSelectedOutsideList && leg.roadTripId && (
+            <option value={leg.roadTripId}>
+              #{leg.roadTripId} · {leg.vehiclePlate || 'Xe đã gán'} · {leg.originLocation} → {leg.destinationLocation}
+            </option>
+          )}
           {matchingTrips.map((t) => (
             <option key={t.id} value={t.id}>
               #{t.id} · {t.vehiclePlate} · {t.originLocation} → {t.destinationLocation} ·{' '}

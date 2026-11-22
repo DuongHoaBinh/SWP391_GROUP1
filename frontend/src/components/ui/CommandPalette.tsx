@@ -105,16 +105,6 @@ export function CommandPalette() {
           icon: <AlertTriangle className="w-4 h-4 text-[#B33E3E]" />,
           url: '/manager/incidents',
         },
-        {
-          id: 'mgr-rep',
-          category: 'actions',
-          title: isEn ? 'Performance & Revenue Reports' : 'Báo cáo hiệu suất & Doanh thu',
-          subtitle: isEn
-            ? 'Revenue analytics, operating costs & on-time delivery KPIs'
-            : 'Thống kê doanh thu, chi phí và tỷ lệ giao đúng hạn',
-          icon: <Activity className="w-4 h-4 text-[#287653]" />,
-          url: '/manager/reports',
-        },
       ];
     }
 
@@ -204,14 +194,6 @@ export function CommandPalette() {
             : 'Theo dõi xe thùng chuyên dụng và trạng thái sẵn sàng',
           icon: <Truck className="w-4 h-4 text-[#B49A68]" />,
           url: '/coordinator/vehicles',
-        },
-        {
-          id: 'coord-sched',
-          category: 'actions',
-          title: isEn ? 'Dispatch Schedule' : 'Lịch trình điều phối chuyến đi',
-          subtitle: isEn ? 'Departure timeline and active legs' : 'Lịch khởi hành theo ngày và tuần',
-          icon: <Calendar className="w-4 h-4 text-[#A67C2E]" />,
-          url: '/coordinator/schedule',
         },
         {
           id: 'coord-mon',
@@ -351,16 +333,6 @@ export function CommandPalette() {
         ),
         icon: <ShieldCheck className="w-4 h-4 text-[#966516]" />,
         url: '/customer/documents',
-      },
-      {
-        id: 'act-reports',
-        category: 'actions',
-        title: t('nav.reports', isEn ? 'Reports & Analytics' : 'Báo cáo & Phân tích chi phí'),
-        subtitle: isEn
-          ? 'Operational history, customs expenses & financial statements'
-          : 'Báo cáo vận hành, chi phí hải quan và lịch sử vận chuyển',
-        icon: <FileText className="w-4 h-4 text-[#5F6977]" />,
-        url: '/customer/reports',
       },
     ];
   }, [pathname, t, isEn]);

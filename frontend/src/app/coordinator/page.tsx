@@ -361,14 +361,6 @@ export default function CoordinatorDashboardPage() {
           </button>
 
           <Link
-            href="/coordinator/schedule"
-            className="px-4 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] text-xs font-bold border border-[#D8CEBE] inline-flex items-center gap-1.5 transition-colors no-underline"
-          >
-            <CalendarDays className="w-3.5 h-3.5 text-[#966516]" />
-            <span>{t('coordinator.viewSchedule', 'Lịch Trình')}</span>
-          </Link>
-
-          <Link
             href="/coordinator/routes"
             className="px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D28] text-white text-xs font-bold shadow-sm inline-flex items-center gap-2 transition-colors no-underline"
           >
@@ -450,7 +442,7 @@ export default function CoordinatorDashboardPage() {
         </Link>
 
         <Link
-          href="/coordinator/schedule"
+          href="/coordinator/routes"
           className="no-underline bg-white rounded-2xl p-5 border border-[#E5DDD0] hover:border-[#C4B38E] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
         >
           <div className="flex items-center justify-between mb-3">
@@ -795,7 +787,7 @@ export default function CoordinatorDashboardPage() {
                             {trip.orderCode || trip.id}
                           </span>
                           <Link
-                            href="/coordinator/schedule"
+                            href="/coordinator/monitoring"
                             className="block text-xs text-[#181A17] font-bold hover:text-[#966516] mt-1 no-underline"
                           >
                             {trip.horseName || t('common.racehorse', 'Ngựa đua')}

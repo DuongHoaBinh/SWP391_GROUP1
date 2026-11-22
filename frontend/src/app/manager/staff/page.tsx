@@ -178,18 +178,19 @@ export default function ManagerStaffPage() {
         body: JSON.stringify({
           currentShift: newShift,
           dutyStatus: newStatus,
+          releaseActiveTrips: newStatus === 'ON_DUTY',
         }),
       });
 
       setStaffList((prev) =>
         prev.map((s) =>
           s.id === selectedStaff.id
-            ? {
-                ...s,
-                currentShift: newShift,
-                dutyStatus: newStatus,
-                activeTrip: newTrip.trim() || null,
-              }
+              ? {
+                  ...s,
+                  currentShift: newShift,
+                  dutyStatus: newStatus,
+                  ...(newStatus === 'ON_DUTY' ? { activeTripsCount: 0, activeTrip: null } : {}),
+                }
             : s,
         ),
       );
@@ -716,7 +717,7 @@ export default function ManagerStaffPage() {
                           {staff.activeTrip}
                         </span>
                       ) : staff.activeTripsCount > 0 ? (
-                        <span className="inline-flex items-center gap-1.5 font-bold text-[#966516] bg-[#F8F0DF] px-2.5 py-1 rounded-lg border border-[#DFCA9A]">
+                        <span className="inline-flex items-center gap-1.5 font-bold text-xs whitespace-nowrap text-[#966516] bg-[#F8F0DF] px-2.5 py-1 rounded-lg border border-[#DFCA9A]">
                           {staff.activeTripsCount}{' '}
                           {language === 'en'
                             ? staff.activeTripsCount > 1
@@ -725,18 +726,59 @@ export default function ManagerStaffPage() {
                             : 'chuyến đang phụ trách'}
                         </span>
                       ) : (
-                        <span className="text-[#5F6977] font-medium">— {t('manager.staff.standbyReady', 'Sẵn sàng')} —</span>
+                        <span className="text-[#5F6977] font-medium whitespace-nowrap">— {t('manager.staff.standbyReady', 'Sẵn sàng')} —</span>
                       )}
                     </td>
 
                     <td className="px-6 py-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => openShiftModal(staff)}
-                        className="px-3.5 py-1.5 bg-white border border-[#D8CEBE] hover:border-[#A67C2E] text-[#181A17] hover:text-[#A67C2E] font-bold text-xs rounded-xl shadow-sm transition-colors cursor-pointer"
-                      >
-                        {t('manager.staff.assignShiftBtn', 'Phân Ca Trực')}
-                      </button>
+                      <div className="inline-flex items-center justify-end gap-2">
+                        {staff.activeTripsCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const numericId = Number(staff.id);
+                              if (!Number.isInteger(numericId) || numericId <= 0) return;
+                              try {
+                                await apiClient(`/fleet/staff/${numericId}/shift`, {
+                                  method: 'PATCH',
+                                  body: JSON.stringify({
+                                    currentShift: staff.currentShift,
+                                    dutyStatus: 'ON_DUTY',
+                                    releaseActiveTrips: true,
+                                  }),
+                                });
+                                setStaffList((prev) =>
+                                  prev.map((s) =>
+                                    s.id === staff.id
+                                      ? { ...s, dutyStatus: 'ON_DUTY', activeTripsCount: 0, activeTrip: null }
+                                      : s
+                                  )
+                                );
+                                toast.success(
+                                  language === 'en'
+                                    ? `${staff.name} is now available (0 active trips)!`
+                                    : `Đã chuyển ${staff.name} về trạng thái Rảnh (0 chuyến)!`
+                                );
+                              } catch (err: any) {
+                                toast.error(
+                                  err?.message ||
+                                    (language === 'en' ? 'Failed to release staff.' : 'Không thể chuyển trạng thái nhân sự.')
+                                );
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-[#E8F2EB] border border-[#287653]/30 hover:bg-[#287653] text-[#287653] hover:text-white font-bold text-xs rounded-xl shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            {language === 'en' ? 'Set Available' : 'Chuyển về Rảnh'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openShiftModal(staff)}
+                          className="px-3.5 py-1.5 bg-white border border-[#D8CEBE] hover:border-[#A67C2E] text-[#181A17] hover:text-[#A67C2E] font-bold text-xs rounded-xl shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          {t('manager.staff.assignShiftBtn', 'Phân Ca Trực')}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -801,20 +843,6 @@ export default function ManagerStaffPage() {
                   </button>
                 ))}
               </div>
-            </div>
-
-            <div>
-              <label htmlFor="staff-trip-code" className="text-xs font-bold text-[#181A17] uppercase tracking-wider block mb-1.5">
-                {t('manager.staff.tripAssignLabel', 'Gán Chuyến Đi Hiện Tại')}
-              </label>
-              <input
-                id="staff-trip-code"
-                type="text"
-                value={newTrip}
-                onChange={(e) => setNewTrip(e.target.value)}
-                placeholder={t('manager.staff.tripPlaceholder', 'VD: REQ-2026-001 hoặc để trống nếu chưa gán')}
-                className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-sm font-mono outline-none focus:ring-2 focus:ring-[#A67C2E]/20 focus:border-[#A67C2E]"
-              />
             </div>
 
             <div className="flex flex-wrap justify-end gap-3 mt-3 pt-3 border-t border-[#E8E2D8]">

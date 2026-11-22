@@ -449,25 +449,7 @@ function CreateTransportRequestForm() {
       }
 
       const currentUser = getCurrentUser();
-      const legChain =
-        routeData?.legs && routeData.legs.length > 0
-          ? routeData.legs
-              .map(
-                (l) =>
-                  `Chặng ${l.sequenceNo} (${l.type === 'road' ? 'Xe thùng' : 'Hàng không'}): ${l.fromName} -> ${l.toName}`
-              )
-              .join(' > ')
-          : '';
-      const routeNote = routeData
-        ? `[Lộ trình: ${
-            routeData.mode === 'air'
-              ? `Đa phương thức (${legChain || 'Xe thùng + Hàng không'})`
-              : 'Xe thùng đường bộ'
-          }, ${routeData.distanceKm} km, ~${routeData.durationHours}h]`
-        : '';
-      const typeNote = `[Hình thức: ${data.transportType === 'International' ? 'Quốc tế' : 'Nội địa'}]`;
-      const titleNote = data.title ? `[Tiêu đề: ${data.title.trim()}]` : '';
-      const combinedReqs = [titleNote, typeNote, data.specialReqs, routeNote].filter(Boolean).join(' | ');
+      const combinedReqs = data.specialReqs?.trim() || '';
 
       const payload = {
         bookingType,

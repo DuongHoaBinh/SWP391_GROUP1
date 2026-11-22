@@ -23,7 +23,15 @@ import {
   MasterStopItem,
   RouteDetail
 } from '@/features/routes/api/routes.api';
-import { buildEquineRoute, isAirportLocationText, normalizeVietnamese } from '@/lib/geo-corridors';
+import { 
+  buildEquineRoute, 
+  isAirportLocationText, 
+  normalizeVietnamese,
+  estimateLegDistanceAndDuration,
+  geocodeAddress,
+  type GeocodedLocation,
+} from '@/lib/geo-corridors';
+import { AddressAutocompleteInput } from '@/components/ui/AddressAutocompleteInput';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { bookingName, type BookingType } from '@/features/orders/booking-policy';
 import { RoadTripPicker, LegScheduleFields } from '@/features/routes/components/RoadTripPicker';
@@ -409,7 +417,7 @@ function RoutePlanningContent() {
       }
     }
 
-    // 2. Sân bay hạ cánh gần điểm đến nhất - ƯU TIÊN 1: Manager Plan -> ƯU TIÊN 2: Trạm kiểm dịch sân bay -> ƯU TIÊN 3: Nearest Airport từ Geo Engine
+    // 2. Sân bay hạ cánh gần điểm đến nhất - ƯU TIÊN 1: Manager Plan -> ƯU TIÊN 2: Nearest Airport từ Geo Engine
     let arrName = '';
     const arrId = routeDetail?.managerArrivalAirportId;
     const arrCode = routeDetail?.managerArrivalAirportCode;
@@ -418,22 +426,6 @@ function RoutePlanningContent() {
     );
     if (arrAp) {
       arrName = `${arrAp.name} (${arrAp.iataCode})`;
-    }
-
-    if (!arrName && templateStops && templateStops.length > 0) {
-      const stopList = templateStops as Array<{ name?: string; locationName?: string; country?: string }>;
-      const airportStop =
-        stopList.find((s) => {
-          const n = (s.locationName || s.name || '').toLowerCase();
-          return n.includes('sân bay') && !n.includes('tân sơn nhất') && !n.includes('nội bài');
-        }) ||
-        stopList.find((s) => {
-          const c = (s.country || '').toLowerCase();
-          return c && !c.includes('việt nam') && !c.includes('vietnam');
-        });
-      if (airportStop) {
-        arrName = airportStop.locationName || airportStop.name || '';
-      }
     }
 
     if (!arrName && geoPreview?.destination?.nearestAirport) {
@@ -446,7 +438,7 @@ function RoutePlanningContent() {
     }
 
     if (!arrName) {
-      arrName = language === 'en' ? 'Nearest Arrival International Airport' : 'Sân bay Quốc tế gần điểm đến';
+      arrName = language === 'en' ? 'Changi International Airport (SIN)' : 'Sân bay Quốc tế Changi (SIN)';
     }
 
     const airlineName =
@@ -548,6 +540,58 @@ function RoutePlanningContent() {
     };
   };
 
+  const endpointCoordsRef = useRef<Record<string, [number, number]>>({});
+
+  const applyAutoDistanceToLeg = (legItem: RouteLegItem): RouteLegItem => {
+    const oKey = (legItem.originLocation || '').trim().toLowerCase();
+    const dKey = (legItem.destinationLocation || '').trim().toLowerCase();
+    const est = estimateLegDistanceAndDuration(
+      legItem.originLocation,
+      legItem.destinationLocation,
+      legItem.legType === 'flight' ? 'flight' : 'road',
+      endpointCoordsRef.current[oKey] ?? null,
+      endpointCoordsRef.current[dKey] ?? null
+    );
+    if (!est) return legItem;
+    return {
+      ...legItem,
+      distanceKm: est.distanceKm,
+      durationHours: est.durationHours,
+    };
+  };
+
+  const triggerAsyncGeocodeForLeg = (legIndex: number, originText: string, destText: string) => {
+    const oTrim = (originText || '').trim();
+    const dTrim = (destText || '').trim();
+    if (oTrim.length < 3 || dTrim.length < 3) return;
+    void (async () => {
+      const oKey = oTrim.toLowerCase();
+      const dKey = dTrim.toLowerCase();
+      if (!endpointCoordsRef.current[oKey]) {
+        const g1 = await geocodeAddress(oTrim);
+        if (g1?.coords) endpointCoordsRef.current[oKey] = g1.coords;
+      }
+      if (!endpointCoordsRef.current[dKey]) {
+        const g2 = await geocodeAddress(dTrim);
+        if (g2?.coords) endpointCoordsRef.current[dKey] = g2.coords;
+      }
+      setLegs((prev) => {
+        const target = prev[legIndex];
+        if (!target) return prev;
+        const recalculated = applyAutoDistanceToLeg(target);
+        if (
+          recalculated.distanceKm === target.distanceKm &&
+          recalculated.durationHours === target.durationHours
+        ) {
+          return prev;
+        }
+        const nextLegs = prev.map((it, i) => (i === legIndex ? recalculated : it));
+        setPlanTotalDistanceKm((curTotal) => sumLegsDistanceKm(nextLegs, curTotal));
+        return nextLegs;
+      });
+    })();
+  };
+
   // Tự động điền khung giờ khởi hành / đến dự kiến nối tiếp nhau theo ngày vận chuyển của đơn hàng
   const applyDefaultScheduleToLegs = (rawLegs: RouteLegItem[], order?: PlanningOrder | null): RouteLegItem[] => {
     const now = Date.now();
@@ -628,21 +672,24 @@ function RoutePlanningContent() {
     );
 
     if (!isAirportLocationText(originText)) {
+      const pickupEst = estimateLegDistanceAndDuration(originText, depCargoName, 'road');
       result.push({
         sequenceNo: seq++,
         legType: 'road',
         originLocation: originText,
         destinationLocation: depCargoName,
-        distanceKm: pickupPreview?.distanceKm ?? 45,
-        durationHours: pickupPreview?.durationHours ?? 2,
+        distanceKm: pickupEst?.distanceKm ?? pickupPreview?.distanceKm ?? 20,
+        durationHours: pickupEst?.durationHours ?? pickupPreview?.durationHours ?? 1,
         vehiclePlate: defaultVehicle.vehiclePlate,
         vehicleId: defaultVehicle.vehicleId,
       });
     }
 
+    const flightEst = estimateLegDistanceAndDuration(depName, arrName, 'flight');
     const flightDistanceKm =
+      flightEst?.distanceKm ??
       flightPreview?.distanceKm ??
-      Math.max(500, (geoRoute?.distanceKm || 1200) - (pickupPreview?.distanceKm ?? 45) - (deliveryPreview?.distanceKm ?? 35));
+      Math.max(500, (geoRoute?.distanceKm || 1200) - (pickupPreview?.distanceKm ?? 20) - (deliveryPreview?.distanceKm ?? 25));
 
     result.push({
       sequenceNo: seq++,
@@ -659,22 +706,25 @@ function RoutePlanningContent() {
       bookingReference: `AWB-${order?.requestCode || 'AIR'}-${arrAirportMeta.iataCode}`,
       stallsBooked: horseCount || 1,
       distanceKm: flightDistanceKm,
-      durationHours: flightHoursOverride ?? flightPreview?.durationHours ?? 2.5,
+      durationHours: flightHoursOverride ?? flightEst?.durationHours ?? flightPreview?.durationHours ?? 2.5,
     });
 
     if (!isAirportLocationText(destText)) {
       const destClean = destText.split(',')[0].trim();
+      const deliveryEst = estimateLegDistanceAndDuration(arrName, destText, 'road');
+      const isDomesticArrival = Boolean(geoRoute?.isDomestic);
       result.push({
         sequenceNo: seq++,
         legType: 'road',
         originLocation: arrName,
         destinationLocation: destText,
-        distanceKm: deliveryPreview?.distanceKm ?? 35,
-        durationHours: deliveryPreview?.durationHours ?? 1.5,
-        vehicleId: null,
+        distanceKm: deliveryEst?.distanceKm ?? deliveryPreview?.distanceKm ?? 25,
+        durationHours: deliveryEst?.durationHours ?? deliveryPreview?.durationHours ?? 1,
+        vehicleId: isDomesticArrival ? defaultVehicle.vehicleId : null,
         roadTripId: null,
-        vehiclePlate:
-          language === 'en'
+        vehiclePlate: isDomesticArrival
+          ? defaultVehicle.vehiclePlate
+          : language === 'en'
             ? `Vehicle from ${destClean} - Consignee pickup`
             : `Xe từ ${destClean} đến đón (Bên nhận tự rước)`,
       });
@@ -746,12 +796,95 @@ function RoutePlanningContent() {
     toast.success(language === 'en' ? `Synced route "${template.name}"! You can edit vehicle plate and details below.` : `Đã đồng bộ tuyến "${template.name}"! Bạn có thể chỉnh sửa biển số xe và mọi thông tin bên dưới.`);
   };
 
-  // Open Step 1b Detail Plan Builder (with smart template matching when origin & destination match)
+  // Tự động gợi ý tuyến đường, chặng bay và chặng đường bộ từ Điểm đón, Điểm đến & Phương thức vận chuyển
+  const applySmartRouteSuggestion = (
+    order: PlanningOrder,
+    modeOverride?: 'road' | 'air',
+    showToast = false
+  ) => {
+    const hasManagerAirConfig = Boolean(
+      order.routeDetail?.managerAirlineId ||
+      order.routeDetail?.managerAirlineName ||
+      order.routeDetail?.managerDepartureAirportId ||
+      order.routeDetail?.managerArrivalAirportId ||
+      order.routeDetail?.managerDepartureAirportCode ||
+      order.routeDetail?.managerArrivalAirportCode
+    );
+    const preferredMode: 'road' | 'air' =
+      modeOverride ??
+      (hasManagerAirConfig || order.transportMode === 'air'
+        ? 'air'
+        : order.transportMode === 'road'
+          ? 'road'
+          : 'air');
+
+    const geoPreview = buildEquineRoute(order.origin, order.destination, preferredMode);
+    const shouldUseAir =
+      modeOverride !== undefined
+        ? modeOverride === 'air'
+        : hasManagerAirConfig ||
+          order.transportMode === 'air' ||
+          (order.transportMode !== 'road' && (geoPreview.mode === 'air' || !geoPreview.isDomestic));
+
+    const originShort = (order.origin || '').split(',')[0].trim() || 'Điểm đón';
+    const destShort = (order.destination || '').split(',')[0].trim() || 'Điểm đến';
+
+    if (!shouldUseAir) {
+      const defaultVehicle = pickDefaultRoadVehicle(order);
+      const roadEst = estimateLegDistanceAndDuration(order.origin, order.destination, 'road');
+      const roadDist = roadEst?.distanceKm ?? geoPreview.distanceKm ?? (geoPreview.isDomestic ? 250 : 850);
+      const roadDur = roadEst?.durationHours ?? Math.max(1, Math.round(geoPreview.durationHours || 3));
+      const singleRoadLeg: RouteLegItem = {
+        sequenceNo: 1,
+        legType: 'road',
+        originLocation: order.origin,
+        destinationLocation: order.destination,
+        distanceKm: roadDist,
+        durationHours: roadDur,
+        vehiclePlate: defaultVehicle.vehiclePlate,
+        vehicleId: defaultVehicle.vehicleId,
+      };
+      const scheduled = applyDefaultScheduleToLegs([singleRoadLeg], order);
+      setPlanRouteName(`Hành lang Đường bộ: ${originShort} → ${destShort}`);
+      setLegs(scheduled);
+      setPlanTotalDistanceKm(sumLegsDistanceKm(scheduled, roadDist));
+      setStops([]);
+      if (showToast) {
+        toast.success(
+          language === 'en'
+            ? `Suggested direct road route: ${originShort} → ${destShort} (${roadDist} km)`
+            : `Đã tự động gợi ý lộ trình Đường bộ: ${originShort} → ${destShort} (${roadDist} km)`
+        );
+      }
+    } else {
+      const { depName, arrName } = resolveAirLegLocations(order);
+      const depCode = extractIataCode(depName) || order.routeDetail?.managerDepartureAirportCode || 'SGN';
+      const arrCode = extractIataCode(arrName) || order.routeDetail?.managerArrivalAirportCode || 'SIN';
+      const builtLegs = buildMultimodalAirLegs(
+        order.origin,
+        order.destination,
+        order.horseCount,
+        order
+      );
+      const totalKm = sumLegsDistanceKm(builtLegs, geoPreview.distanceKm || 1200);
+      setPlanRouteName(`Hành lang Đa phương thức: ${originShort} → ${depCode} ✈️ ${arrCode} → ${destShort}`);
+      setLegs(builtLegs);
+      setPlanTotalDistanceKm(totalKm);
+      setStops([]);
+      if (showToast) {
+        toast.success(
+          language === 'en'
+            ? `Suggested multimodal air + road route (${builtLegs.length} legs • ${totalKm} km)`
+            : `Đã tự động gợi ý lộ trình Đa phương thức Bay + Đường bộ (${builtLegs.length} chặng • ${totalKm} km)`
+        );
+      }
+    }
+  };
   const handleOpenDetailModal = (order: PlanningOrder, templateToApply?: RouteItem) => {
     setSelectedPlanningOrder(order);
     const existingRoute = order.routeDetail;
 
-    setNotes(existingRoute?.strategicNotes || (language === 'en' ? 'Compartment temperature 18°C. Provide electrolyte water every 3 hours.' : 'Nhiệt độ khoang xe 18°C. Cung cấp nước điện giải sau mỗi 3 giờ.'));
+    setNotes(existingRoute?.strategicNotes || '');
 
     // If order already has saved legs in DB, preserve them but sanitize any generic airport placeholder
     if (existingRoute?.legs && existingRoute.legs.length > 0) {
@@ -810,155 +943,10 @@ function RoutePlanningContent() {
       setLegs(scheduledExisting);
       setPlanTotalDistanceKm(sumLegsDistanceKm(scheduledExisting, existingRoute.totalDistanceKm || 500));
       setStops(existingRoute.stops && existingRoute.stops.length > 0 ? existingRoute.stops : []);
+    } else if (templateToApply) {
+      handleApplyTemplate(templateToApply);
     } else {
-      // Check if template was passed OR matches origin and destination!
-      const matched = templateToApply || routes.find((r) => isRouteMatchingOrder(r, order));
-
-      if (matched) {
-        setPlanRouteName(matched.name);
-
-        const geoCheck = buildEquineRoute(
-          order.origin,
-          order.destination,
-          order.transportMode === 'road' ? 'road' : 'air'
-        );
-        const normName = normalizeVietnamese(matched.name);
-        const isFlight =
-          order.transportMode === 'air' ||
-          (order.transportMode !== 'road' &&
-            (normName.includes('hang khong') ||
-              normName.includes('air') ||
-              normName.includes('bay') ||
-              geoCheck.mode === 'air'));
-
-        if (!isFlight) {
-          const defaultVehicle = pickDefaultRoadVehicle(order);
-          const singleRoadLeg: RouteLegItem = {
-            sequenceNo: 1,
-            legType: 'road',
-            originLocation: order.origin,
-            destinationLocation: order.destination,
-            distanceKm: matched.distanceKm,
-            durationHours: Math.max(1, Math.round(matched.distanceKm / 60)),
-            vehiclePlate: defaultVehicle.vehiclePlate,
-            vehicleId: defaultVehicle.vehicleId,
-          };
-          const scheduled = applyDefaultScheduleToLegs([singleRoadLeg], order);
-          setLegs(scheduled);
-          setPlanTotalDistanceKm(sumLegsDistanceKm(scheduled, matched.distanceKm));
-        } else {
-          const built = buildMultimodalAirLegs(
-            order.origin,
-            order.destination,
-            order.horseCount,
-            order,
-            matched.stops
-          );
-          setLegs(built);
-          setPlanTotalDistanceKm(sumLegsDistanceKm(built, matched.distanceKm));
-        }
-
-        // Sync stops: match template stops exactly, clear if template has 0 stops
-        if (matched.stops && matched.stops.length > 0) {
-          setStops(
-            matched.stops.map((s, idx) => ({
-              sequenceNo: idx + 1,
-              stopType: s.type === 'Quarantine' ? 'quarantine' : s.type === 'Border Gate' ? 'border_check' : 'rest',
-              locationName: s.name,
-              country: s.country,
-            }))
-          );
-        } else {
-          setStops([]);
-        }
-      } else {
-        const geoPreview = buildEquineRoute(
-          order.origin,
-          order.destination,
-          order.transportMode === 'road' ? 'road' : 'air'
-        );
-        const shouldUseAir =
-          geoPreview.mode === 'air' &&
-          (order.transportMode === 'air' || (order.transportMode !== 'road' && !geoPreview.isDomestic));
-
-        setPlanRouteName(`Hành lang vận chuyển: ${(order.origin || '').split(',')[0]} → ${(order.destination || '').split(',')[0]}`);
-
-        if (!shouldUseAir) {
-          const defaultVehicle = pickDefaultRoadVehicle(order);
-          const roadDist = geoPreview.distanceKm || (geoPreview.isDomestic ? 250 : 850);
-          const singleRoadLeg: RouteLegItem = {
-            sequenceNo: 1,
-            legType: 'road',
-            originLocation: order.origin,
-            destinationLocation: order.destination,
-            distanceKm: roadDist,
-            durationHours: Math.max(2, Math.round(geoPreview.durationHours || 3)),
-            vehiclePlate: defaultVehicle.vehiclePlate,
-            vehicleId: defaultVehicle.vehicleId,
-          };
-          const scheduled = applyDefaultScheduleToLegs([singleRoadLeg], order);
-          setLegs(scheduled);
-          setPlanTotalDistanceKm(sumLegsDistanceKm(scheduled, roadDist));
-
-          const inferredStops: RouteStopItem[] = geoPreview.waypoints
-            .filter((w) => w.type === 'checkpoint' || w.type === 'rest')
-            .map((w, idx) => ({
-              sequenceNo: idx + 1,
-              stopType: w.type === 'checkpoint' ? 'border_check' : 'rest',
-              locationName: w.name,
-              country: w.country,
-            }));
-          setStops(inferredStops);
-        } else {
-          const { depName, arrName } = resolveAirLegLocations(order);
-          const airLeg = geoPreview.legs.find((l) => l.type === 'air');
-          const builtLegs = buildMultimodalAirLegs(
-            order.origin,
-            order.destination,
-            order.horseCount,
-            order,
-            undefined,
-            airLeg?.durationHours ?? 2.5
-          );
-          setLegs(builtLegs);
-          setPlanTotalDistanceKm(sumLegsDistanceKm(builtLegs, geoPreview.distanceKm || 1200));
-
-          const defaultStops: RouteStopItem[] = [];
-          let stopSeq = 1;
-          if (!isAirportLocationText(order.origin)) {
-            defaultStops.push({
-              sequenceNo: stopSeq++,
-              stopType: 'rest',
-              locationName:
-                language === 'en'
-                  ? `${order.origin.split(',')[0].trim()} Pickup & Prep`
-                  : `Điểm tập kết ${(order.origin || '').split(',')[0].trim()} - Đón & tải ngựa lên xe thùng`,
-              country: geoPreview.origin.country || (language === 'en' ? 'Vietnam' : 'Việt Nam'),
-            });
-          }
-          defaultStops.push({
-            sequenceNo: stopSeq++,
-            stopType: 'quarantine',
-            locationName:
-              language === 'en'
-                ? `${depName} Animal Quarantine Center`
-                : `Trung tâm Kiểm dịch Động vật ${depName}`,
-            country: geoPreview.origin.country || (language === 'en' ? 'Vietnam' : 'Việt Nam'),
-          });
-          if (!geoPreview.isDomestic) {
-            defaultStops.push({
-              sequenceNo: stopSeq++,
-              stopType: 'border_check',
-              locationName:
-                language === 'en'
-                  ? `${arrName} Border Quarantine Gate`
-                  : `Trạm Kiểm dịch Cửa khẩu ${arrName}`,
-              country: geoPreview.destination.country || 'International',
-            });
-          }
-          setStops(defaultStops);
-        }
-      }
+      applySmartRouteSuggestion(order);
     }
 
     setIsDetailModalOpen(true);
@@ -1100,8 +1088,8 @@ function RoutePlanningContent() {
         {
           sequenceNo: nextSeq,
           stopType: 'rest',
-          locationName: language === 'en' ? 'New Rest Stop' : 'Trạm dừng nghỉ mới',
-          country: 'Vietnam',
+          locationName: '',
+          country: '',
         },
       ]);
     }
@@ -1260,7 +1248,7 @@ function RoutePlanningContent() {
           return;
         }
 
-        if (l.vehiclePlate) {
+        if (l.vehiclePlate && !l.roadTripId) {
           const matchedVehicle = vehicles.find((v) => v.code === l.vehiclePlate || (l.vehicleId && String(v.id) === String(l.vehicleId)));
           if (matchedVehicle) {
             const isCurrentTrip = Boolean(matchedVehicle.assignedTripCode) && matchedVehicle.assignedTripCode === selectedPlanningOrder?.requestCode;
@@ -1304,11 +1292,12 @@ function RoutePlanningContent() {
     }
 
     // Kiểm tra an toàn sức khỏe ngựa trên chặng đường bộ dài (> 350km hoặc > 4.5 giờ)
+    const hasSharedRoadTrip = legs.some((leg) => leg.legType === 'road' && Boolean(leg.roadTripId));
     const hasLongRoadLeg = legs.some(
       (leg) => leg.legType === 'road' && (Number(leg.distanceKm) > 350 || Number(leg.durationHours) > 4.5)
     );
     const hasRestStop = stops.some((s) => s.stopType === 'rest');
-    if (hasLongRoadLeg && !hasRestStop) {
+    if (hasLongRoadLeg && !hasRestStop && !(hasSharedRoadTrip && stops.length === 0)) {
       toast.error(
         language === 'en'
           ? 'Equine Welfare Check: Any road leg exceeding 350km or 4.5 hours requires at least 1 Rest stop for hydration and vital checks!'
@@ -2331,12 +2320,34 @@ function RoutePlanningContent() {
                       <Compass size={15} className="text-[#A67C2E]" />
                       {t('coordinator.routes.coordinatorSetupMode', 'Chế Độ Thiết Lập Tuyến Cho Điều Phối Viên')}
                     </div>
-                    <p className="text-[11px] text-slate-500 m-0 mt-0.5">
-                      {t('coordinator.routes.coordinatorSetupDesc', 'Điều phối viên có thể tự do điền mọi thông số trực tiếp bên dưới, hoặc đồng bộ từ Tuyến Mẫu rồi chỉnh sửa theo ý muốn.')}
+                    <p className="text-[11px] text-slate-600 m-0 mt-1">
+                      <strong>{language === 'en' ? 'Pickup:' : 'Điểm đón:'}</strong> {selectedPlanningOrder.origin}{' '}
+                      <span className="text-[#A67C2E] font-bold">➔</span>{' '}
+                      <strong>{language === 'en' ? 'Destination:' : 'Điểm đến:'}</strong> {selectedPlanningOrder.destination}
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => applySmartRouteSuggestion(selectedPlanningOrder, 'air', true)}
+                      className="text-xs text-[#181A17] border-[#D4C5A3] bg-white hover:bg-[#FAF5EB] flex items-center gap-1 font-bold shadow-sm"
+                    >
+                      <Plane size={12} className="text-[#A67C2E]" />
+                      <span>{language === 'en' ? 'Suggest Air + Road' : 'Gợi ý Bay + Đường bộ'}</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => applySmartRouteSuggestion(selectedPlanningOrder, 'road', true)}
+                      className="text-xs text-emerald-800 border-emerald-300 bg-white hover:bg-emerald-50 flex items-center gap-1 font-bold shadow-sm"
+                    >
+                      <Truck size={12} className="text-emerald-700" />
+                      <span>{language === 'en' ? 'Suggest Road Only' : 'Gợi ý Đường bộ'}</span>
+                    </Button>
                     <Button
                       type="button"
                       variant="outline"
@@ -2655,70 +2666,112 @@ function RoutePlanningContent() {
                         </div>
                         <div>
                           <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.legOriginLabel', 'Điểm Xuất Phát Chặng')}</label>
-                          <input
-                            type="text"
+                          <AddressAutocompleteInput
+                            id={`leg-road-origin-${idx}`}
                             value={leg.originLocation}
-                            onChange={(e) => {
-                              const val = e.target.value;
+                            icon="origin"
+                            language={language}
+                            placeholder={t('coordinator.routes.legOriginLabel', 'Điểm Xuất Phát Chặng')}
+                            onChangeText={(val) => {
                               const targetSeq = leg.sequenceNo - 1;
-                              setLegs((prev) =>
-                                prev.map((item, i) => {
-                                  if (i === idx) return { ...item, originLocation: val };
+                              setLegs((prev) => {
+                                const updated = prev.map((item, i) => {
+                                  if (i === idx) return applyAutoDistanceToLeg({ ...item, originLocation: val });
                                   if (item.sequenceNo === targetSeq && item.legType === 'flight') {
                                     const arrMeta = resolveAirportMeta(val, item.arrivalAirportId, item.arrivalAirportCode, false);
-                                    return {
+                                    return applyAutoDistanceToLeg({
                                       ...item,
                                       destinationLocation: val,
                                       arrivalAirportId: arrMeta.airportId,
                                       arrivalAirportCode: arrMeta.iataCode,
-                                    };
+                                    });
                                   }
                                   return item;
-                                })
-                              );
-
-                              setStops((prevStops) =>
-                                prevStops.map((st) => {
-                                  const isArrAirportStop =
-                                    (st.locationName || '').toLowerCase().includes('sân bay') &&
-                                    !(st.locationName || '').toLowerCase().includes('tân sơn nhất') &&
-                                    !(st.locationName || '').toLowerCase().includes('nội bài');
-                                  if (isArrAirportStop) {
-                                    return { ...st, locationName: val };
-                                  }
-                                  return st;
-                                })
-                              );
+                                });
+                                setPlanTotalDistanceKm((cur) => sumLegsDistanceKm(updated, cur));
+                                return updated;
+                              });
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium disabled:bg-slate-50"
+                            onSelectSuggestion={(val, geo: GeocodedLocation) => {
+                              if (geo?.coords) {
+                                endpointCoordsRef.current[val.trim().toLowerCase()] = geo.coords;
+                              }
+                              const targetSeq = leg.sequenceNo - 1;
+                              setLegs((prev) => {
+                                const updated = prev.map((item, i) => {
+                                  if (i === idx) return applyAutoDistanceToLeg({ ...item, originLocation: val });
+                                  if (item.sequenceNo === targetSeq && item.legType === 'flight') {
+                                    const arrMeta = resolveAirportMeta(val, item.arrivalAirportId, item.arrivalAirportCode, false);
+                                    return applyAutoDistanceToLeg({
+                                      ...item,
+                                      destinationLocation: val,
+                                      arrivalAirportId: arrMeta.airportId,
+                                      arrivalAirportCode: arrMeta.iataCode,
+                                    });
+                                  }
+                                  return item;
+                                });
+                                setPlanTotalDistanceKm((cur) => sumLegsDistanceKm(updated, cur));
+                                return updated;
+                              });
+                            }}
+                            onBlur={() => triggerAsyncGeocodeForLeg(idx, leg.originLocation, leg.destinationLocation)}
                           />
                         </div>
                         <div>
                           <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.legDestLabel', 'Điểm Đến Chặng')}</label>
-                          <input
-                            type="text"
+                          <AddressAutocompleteInput
+                            id={`leg-road-dest-${idx}`}
                             value={leg.destinationLocation}
-                            onChange={(e) => {
-                              const val = e.target.value;
+                            icon="destination"
+                            language={language}
+                            placeholder={t('coordinator.routes.legDestLabel', 'Điểm Đến Chặng')}
+                            onChangeText={(val) => {
                               const targetSeq = leg.sequenceNo + 1;
-                              setLegs((prev) =>
-                                prev.map((item, i) => {
-                                  if (i === idx) return { ...item, destinationLocation: val };
+                              setLegs((prev) => {
+                                const updated = prev.map((item, i) => {
+                                  if (i === idx) return applyAutoDistanceToLeg({ ...item, destinationLocation: val });
                                   if (item.sequenceNo === targetSeq && item.legType === 'flight') {
                                     const cleanOrigin = val.replace(' Cargo Terminal', '');
                                     const depMeta = resolveAirportMeta(cleanOrigin, item.departureAirportId, item.departureAirportCode, true);
-                                    return {
+                                    return applyAutoDistanceToLeg({
                                       ...item,
                                       originLocation: cleanOrigin,
                                       departureAirportId: depMeta.airportId,
                                       departureAirportCode: depMeta.iataCode,
-                                    };
+                                    });
                                   }
                                   return item;
-                                })
-                              );
+                                });
+                                setPlanTotalDistanceKm((cur) => sumLegsDistanceKm(updated, cur));
+                                return updated;
+                              });
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium disabled:bg-slate-50"
+                            onSelectSuggestion={(val, geo: GeocodedLocation) => {
+                              if (geo?.coords) {
+                                endpointCoordsRef.current[val.trim().toLowerCase()] = geo.coords;
+                              }
+                              const targetSeq = leg.sequenceNo + 1;
+                              setLegs((prev) => {
+                                const updated = prev.map((item, i) => {
+                                  if (i === idx) return applyAutoDistanceToLeg({ ...item, destinationLocation: val });
+                                  if (item.sequenceNo === targetSeq && item.legType === 'flight') {
+                                    const cleanOrigin = val.replace(' Cargo Terminal', '');
+                                    const depMeta = resolveAirportMeta(cleanOrigin, item.departureAirportId, item.departureAirportCode, true);
+                                    return applyAutoDistanceToLeg({
+                                      ...item,
+                                      originLocation: cleanOrigin,
+                                      departureAirportId: depMeta.airportId,
+                                      departureAirportCode: depMeta.iataCode,
+                                    });
+                                  }
+                                  return item;
+                                });
+                                setPlanTotalDistanceKm((cur) => sumLegsDistanceKm(updated, cur));
+                                return updated;
+                              });
+                            }}
+                            onBlur={() => triggerAsyncGeocodeForLeg(idx, leg.originLocation, leg.destinationLocation)}
                           />
                         </div>
                         <div>
@@ -2822,87 +2875,125 @@ function RoutePlanningContent() {
                         </div>
                         <div>
                           <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.depAirportLabel', 'Sân bay cất cánh')}</label>
-                          <input
-                            type="text"
-                            placeholder={t('coordinator.routes.depAirportPlaceholder', 'Ví dụ: Sân bay Tân Sơn Nhất (SGN)')}
+                          <AddressAutocompleteInput
+                            id={`leg-air-origin-${idx}`}
                             value={leg.originLocation}
-                            onChange={(e) => {
-                              const val = e.target.value;
+                            icon="origin"
+                            language={language}
+                            placeholder={t('coordinator.routes.depAirportPlaceholder', 'Ví dụ: Sân bay Tân Sơn Nhất (SGN)')}
+                            onChangeText={(val) => {
                               const prevSeq = leg.sequenceNo - 1;
                               const depMeta = resolveAirportMeta(val, leg.departureAirportId, leg.departureAirportCode, true);
-                              setLegs((prev) =>
-                                prev.map((item, i) => {
+                              setLegs((prev) => {
+                                const updated = prev.map((item, i) => {
                                   if (i === idx) {
-                                    return {
+                                    return applyAutoDistanceToLeg({
                                       ...item,
                                       originLocation: val,
                                       departureAirportId: depMeta.airportId,
                                       departureAirportCode: depMeta.iataCode,
-                                    };
+                                    });
                                   }
                                   if (item.sequenceNo === prevSeq && item.legType === 'road') {
-                                    return {
+                                    return applyAutoDistanceToLeg({
                                       ...item,
                                       destinationLocation: val.includes('Cargo') ? val : `${val} Cargo Terminal`,
-                                    };
+                                    });
                                   }
                                   return item;
-                                })
-                              );
+                                });
+                                setPlanTotalDistanceKm((cur) => sumLegsDistanceKm(updated, cur));
+                                return updated;
+                              });
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium disabled:bg-slate-50"
+                            onSelectSuggestion={(val, geo: GeocodedLocation) => {
+                              if (geo?.coords) {
+                                endpointCoordsRef.current[val.trim().toLowerCase()] = geo.coords;
+                              }
+                              const prevSeq = leg.sequenceNo - 1;
+                              const depMeta = resolveAirportMeta(val, leg.departureAirportId, leg.departureAirportCode, true);
+                              setLegs((prev) => {
+                                const updated = prev.map((item, i) => {
+                                  if (i === idx) {
+                                    return applyAutoDistanceToLeg({
+                                      ...item,
+                                      originLocation: val,
+                                      departureAirportId: depMeta.airportId,
+                                      departureAirportCode: depMeta.iataCode,
+                                    });
+                                  }
+                                  if (item.sequenceNo === prevSeq && item.legType === 'road') {
+                                    return applyAutoDistanceToLeg({
+                                      ...item,
+                                      destinationLocation: val.includes('Cargo') ? val : `${val} Cargo Terminal`,
+                                    });
+                                  }
+                                  return item;
+                                });
+                                setPlanTotalDistanceKm((cur) => sumLegsDistanceKm(updated, cur));
+                                return updated;
+                              });
+                            }}
+                            onBlur={() => triggerAsyncGeocodeForLeg(idx, leg.originLocation, leg.destinationLocation)}
                           />
                         </div>
                         <div>
                           <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.arrAirportLabel', 'Sân bay hạ cánh')}</label>
-                          <input
-                            type="text"
-                            placeholder={t('coordinator.routes.arrAirportPlaceholder', 'Ví dụ: Sân bay Changi (SIN Cargo Terminal)')}
+                          <AddressAutocompleteInput
+                            id={`leg-air-dest-${idx}`}
                             value={leg.destinationLocation}
-                            onChange={(e) => {
-                              const val = e.target.value;
+                            icon="destination"
+                            language={language}
+                            placeholder={t('coordinator.routes.arrAirportPlaceholder', 'Ví dụ: Sân bay Changi (SIN Cargo Terminal)')}
+                            onChangeText={(val) => {
                               const nextSeq = leg.sequenceNo + 1;
                               const arrMeta = resolveAirportMeta(val, leg.arrivalAirportId, leg.arrivalAirportCode, false);
-                              setLegs((prev) =>
-                                prev.map((item, i) => {
+                              setLegs((prev) => {
+                                const updated = prev.map((item, i) => {
                                   if (i === idx) {
-                                    return {
+                                    return applyAutoDistanceToLeg({
                                       ...item,
                                       destinationLocation: val,
                                       arrivalAirportId: arrMeta.airportId,
                                       arrivalAirportCode: arrMeta.iataCode,
-                                    };
+                                    });
                                   }
                                   if (item.sequenceNo === nextSeq && item.legType === 'road') {
-                                    return { ...item, originLocation: val };
+                                    return applyAutoDistanceToLeg({ ...item, originLocation: val });
                                   }
                                   return item;
-                                })
-                              );
-
-                              setStops((prevStops) =>
-                                prevStops.map((st) => {
-                                  const isArrAirportStop =
-                                    (st.locationName || '').toLowerCase().includes('sân bay') &&
-                                    !(st.locationName || '').toLowerCase().includes('tân sơn nhất') &&
-                                    !(st.locationName || '').toLowerCase().includes('nội bài');
-                                  if (isArrAirportStop) {
-                                    return { ...st, locationName: val };
-                                  }
-                                  return st;
-                                })
-                              );
+                                });
+                                setPlanTotalDistanceKm((cur) => sumLegsDistanceKm(updated, cur));
+                                return updated;
+                              });
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium disabled:bg-slate-50"
-                            list={`suggested-airports-list-${idx}`}
+                            onSelectSuggestion={(val, geo: GeocodedLocation) => {
+                              if (geo?.coords) {
+                                endpointCoordsRef.current[val.trim().toLowerCase()] = geo.coords;
+                              }
+                              const nextSeq = leg.sequenceNo + 1;
+                              const arrMeta = resolveAirportMeta(val, leg.arrivalAirportId, leg.arrivalAirportCode, false);
+                              setLegs((prev) => {
+                                const updated = prev.map((item, i) => {
+                                  if (i === idx) {
+                                    return applyAutoDistanceToLeg({
+                                      ...item,
+                                      destinationLocation: val,
+                                      arrivalAirportId: arrMeta.airportId,
+                                      arrivalAirportCode: arrMeta.iataCode,
+                                    });
+                                  }
+                                  if (item.sequenceNo === nextSeq && item.legType === 'road') {
+                                    return applyAutoDistanceToLeg({ ...item, originLocation: val });
+                                  }
+                                  return item;
+                                });
+                                setPlanTotalDistanceKm((cur) => sumLegsDistanceKm(updated, cur));
+                                return updated;
+                              });
+                            }}
+                            onBlur={() => triggerAsyncGeocodeForLeg(idx, leg.originLocation, leg.destinationLocation)}
                           />
-                          <datalist id={`suggested-airports-list-${idx}`}>
-                            {airports.map((ap) => (
-                              <option key={ap.id} value={`${ap.name} (${ap.iataCode})`}>
-                                {ap.iataCode} - {ap.country}
-                              </option>
-                            ))}
-                          </datalist>
                         </div>
                         <div>
                           <div className="grid grid-cols-3 gap-2">
@@ -2984,27 +3075,6 @@ function RoutePlanningContent() {
                 )}
               </div>
 
-              {/* Master Stops Quick Picker */}
-              {!isReadOnlyModal && (
-                <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-xl">
-                  <span className="text-[11px] font-bold text-amber-900 uppercase block mb-1.5">
-                    {t('coordinator.routes.quickMasterStopsLabel', 'Chọn nhanh từ Danh mục Trạm Kiểm dịch & Trạm dừng tiêu chuẩn:')}
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {masterStops.map((ms) => (
-                      <button
-                        key={ms.id}
-                        type="button"
-                        onClick={() => handleAddStop(ms)}
-                        className="px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
-                      >
-                        <Plus size={11} /> {ms.name} ({translateStopType(ms.stopType)})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Stops Table */}
               <fieldset disabled={isReadOnlyModal} className="m-0 p-0 border-0">
               <div className="border border-slate-200 rounded-xl overflow-x-auto">
@@ -3059,7 +3129,8 @@ function RoutePlanningContent() {
                         <td className="p-2.5">
                           <input
                             type="text"
-                            value={stop.country || 'Vietnam'}
+                            value={stop.country ?? ''}
+                            placeholder={language === 'en' ? 'Country...' : 'Nhập quốc gia...'}
                             onChange={(e) => {
                               const val = e.target.value;
                               setStops((prev) =>
@@ -3174,11 +3245,7 @@ function RoutePlanningContent() {
             }
 
             return (
-              <div className="sticky -bottom-6 -mx-6 px-6 py-3.5 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 z-10">
-                <span className="text-xs text-slate-500">
-                  {t('coordinator.routes.submitNotice', 'Kế hoạch sau khi gửi sẽ được chuyển đến Logistics Manager để xem xét và phê duyệt.')}
-                </span>
-
+              <div className="sticky -bottom-6 -mx-6 px-6 py-3.5 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-end gap-3 mt-4 z-10">
                 <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                   <Button
                     type="button"

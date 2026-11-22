@@ -564,15 +564,7 @@ export default function ManagerPlanningPage() {
         : coordinators[0]?.id
         ? String(coordinators[0].id)
         : '',
-      strategicNotes:
-        existing?.strategicNotes ||
-        (initialAirEnabled
-          ? isEn
-            ? 'Maintain cabin temp at 18°C, provide timothy hay bedding and pre-flight electrolytes.'
-            : 'Bảo đảm nhiệt độ khoang 18°C, chuẩn bị đệm rơm timothy và bổ sung điện giải trước giờ cất cánh.'
-          : isEn
-          ? 'Maintain truck stall temp at 18°C - 20°C, inspect equine vitals and supply electrolyte water at stops.'
-          : 'Bảo đảm nhiệt độ thùng xe 18°C - 20°C, kiểm tra thể trạng ngựa và bổ sung nước điện giải tại các trạm dừng.'),
+      strategicNotes: existing?.strategicNotes || '',
     });
     setIsFrameworkModalOpen(true);
   };
@@ -652,8 +644,12 @@ export default function ManagerPlanningPage() {
 
     setIsSubmittingReview(true);
     try {
+      const parsedCost = Number(reviewTransportCost);
       await routesApi.reviewTripPlan(selectedOrderForReview.id, {
         status: 'approved',
+        ...(Number.isFinite(parsedCost) && parsedCost >= 0
+          ? { transportCost: Math.round(parsedCost) }
+          : {}),
       });
       toast.success(
         t(
@@ -1557,24 +1553,8 @@ export default function ManagerPlanningPage() {
                   </strong>
                 </span>
               </div>
-              {selectedOrderForFramework.specialRequirements && (
-                <div className="text-[11px] text-[#7A591C] bg-[#F8F0DF] p-2 rounded border border-[#DFCA9A]">
-                  <span className="font-bold">
-                    {t('manager.common.specialRequirements', 'Ghi chú & Lộ trình yêu cầu:')}{' '}
-                  </span>
-                  {selectedOrderForFramework.specialRequirements}
-                </div>
-              )}
             </div>
           )}
-
-          <div className="bg-[#FAF8F4] border border-[#EAE5DA] p-3 rounded-lg text-[#181A17] leading-relaxed">
-            <strong>{t('manager.planning.modalFrameworkTipTitle', 'Vai trò Logistics Manager:')}</strong>{' '}
-            {t(
-              'manager.planning.modalFrameworkTipDesc',
-              'Bạn định hướng loại phương tiện, hãng hàng không, cặp sân bay và chỉ định Coordinator. Coordinator sẽ căn cứ vào đây để chọn xe cụ thể, đặt booking và dựng từng chặng chi tiết.'
-            )}
-          </div>
 
           <div>
             <label htmlFor="planning-vehicle-type" className="font-bold text-[#242722] block mb-1">
@@ -1810,16 +1790,6 @@ export default function ManagerPlanningPage() {
                     </optgroup>
                   </select>
                 </div>
-              </div>
-
-              <div className="text-[11px] text-[#7A591C] bg-[#F8F0DF] p-2.5 rounded border border-[#DFCA9A] leading-snug">
-                <strong>
-                  {isEn ? 'International Hub Standard:' : 'Quy chuẩn Hub trung chuyển quốc tế:'}
-                </strong>{' '}
-                {t(
-                  'manager.planning.airHubNotice',
-                  'Máy bay chở ngựa chỉ hạ cánh tại các Cảng hàng không trung chuyển động vật sống đạt chuẩn IATA có trạm kiểm dịch thú y. Nếu địa phương/quốc gia đích chưa có sân bay trực tiếp, chuyến bay sẽ hạ cánh tại Hub gần nhất của khu vực, sau đó Coordinator sẽ phân công xe thùng điều hòa chuyên dụng chở tiếp chặng cuối về tận chuồng nuôi đích.'
-                )}
               </div>
             </div>
           )}
@@ -2089,8 +2059,8 @@ export default function ManagerPlanningPage() {
                     <div className="flex flex-wrap justify-between items-center gap-2 mb-1.5">
                       <span className="font-bold text-[#181A17] text-xs">
                         {isEn
-                          ? 'Locked Freight Quote (Flow 1 Reference)'
-                          : 'Đối chiếu cước vận chuyển đã chốt (từ Flow 1)'}
+                          ? 'Freight Quote Reconciliation'
+                          : 'Đối chiếu cước vận chuyển đã chốt'}
                       </span>
                       <span className="text-[11px] text-[#287653] font-semibold">
                         {selectedOrderForReview?.bookingType === 'dedicated_charter'
@@ -2108,20 +2078,19 @@ export default function ManagerPlanningPage() {
                           htmlFor="review-freight-cost"
                           className="block text-[11px] font-semibold text-[#181A17] mb-1"
                         >
-                          {isEn ? 'Transport Freight (Locked, VND)' : 'Cước vận chuyển đã chốt (VNĐ)'}
+                          {isEn ? 'Transport Freight (VND)' : 'Cước vận chuyển đã chốt (VNĐ)'}
                         </label>
                         <input
                           id="review-freight-cost"
                           type="number"
-                          readOnly
-                          disabled
+                          min={0}
                           value={reviewTransportCost}
-                          className="w-full px-3 py-1.5 text-xs font-bold text-[#5C6658] bg-[#F7F4EE] border border-[#D8CEBE] rounded-lg cursor-not-allowed"
+                          onChange={(e) => setReviewTransportCost(e.target.value)}
+                          className="w-full px-3 py-1.5 text-xs font-bold text-[#181A17] bg-white border border-[#D8CEBE] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#287653]/30 focus:border-[#287653]"
                         />
                         <span className="text-[10px] text-[#5C6658] mt-0.5 block">
                           {isEn ? 'Actual distance:' : 'Quãng đường thực tế:'}{' '}
-                          {detailedRoute.totalDistanceKm || 0} km •{' '}
-                          {isEn ? 'Immutable after Flow 1 approval' : 'Cố định từ phê duyệt Flow 1'}
+                          {detailedRoute.totalDistanceKm || 0} km
                         </span>
                       </div>
                       <div className="text-[11px] text-[#5C6658] space-y-1">
@@ -2285,44 +2254,6 @@ export default function ManagerPlanningPage() {
                   )}
                 </div>
               )}
-
-              <div className="bg-[#FAF8F4] border border-[#EAE5DA] p-3.5 rounded-xl text-[#181A17] leading-relaxed">
-                {isAssignAirShipment ? (
-                  <div>
-                    <div className="flex items-center gap-1.5 font-bold text-[#966516] mb-1">
-                      <Plane size={14} className="shrink-0" />
-                      <span>
-                        {isEn
-                          ? 'Multimodal Air Cargo Personnel Allocation'
-                          : 'Quy tắc phân bổ nhân sự Vận chuyển Hàng không (Đa phương thức)'}
-                      </span>
-                    </div>
-                    <p className="m-0 text-[#5C6658]">
-                      {isEn
-                        ? '• Road Truck Driver: Operates Leg 1 (specialized truck transfer from farm/stable to departure airport cargo terminal). Released after airport handover.'
-                        : '• Tài xế xe thùng (Driver): Chỉ điều khiển xe chuyên dụng chở ngựa từ trang trại ra sân bay xuất cảnh (Chặng 1). Sau khi bàn giao tại sân bay, tài xế hoàn tất nhiệm vụ chặng đường bộ.'}
-                    </p>
-                    <p className="mt-1 mb-0 text-[#181A17] font-semibold">
-                      {isEn
-                        ? '• Equine Vet / Flight Escort (Mandatory *): Accompanies horses inside the aircraft cargo cabin, monitors vitals in-flight, and handles arrival customs clearance & final handover.'
-                        : '• Bác sĩ thú y / Hộ tống bay (Bắt buộc *): Trực tiếp đi cùng khoang bay chăm sóc ngựa, ghi nhận sinh hiệu trên không, làm thủ tục thông quan tại sân bay đến và bàn giao tại đích.'}
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    {t(
-                      'manager.planning.assignTip',
-                      'Phân công nhân sự: Chọn tài xế chính và người hộ tống. Sau khi bạn bấm lưu, hệ thống sẽ tự động gửi thông báo đến tài xế để họ bấm xác nhận nhận chuyến trên ứng dụng.'
-                    )}
-                    <p className="mt-1.5 text-[#287653] font-semibold mb-0">
-                      <strong>{isEn ? 'Shared-stall auto-sync:' : 'Tự động đồng bộ ghép chuồng:'}</strong>{' '}
-                      {isEn
-                        ? 'Assigning crew to this shipment automatically syncs the crew to sibling orders consolidated on the same vehicle trip.'
-                        : 'Khi bạn phân công tài xế cho đơn này, hệ thống sẽ tự động áp dụng luôn cho các đơn hàng khác đi cùng chuyến xe mà bạn không cần phải phân công lại!'}
-                    </p>
-                  </>
-                )}
-              </div>
 
               {assignEffectiveLegs.length > 0 && (
                 <div className="border border-[#E5DDD0] bg-white rounded-xl p-3">

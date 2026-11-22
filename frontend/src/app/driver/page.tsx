@@ -8,7 +8,6 @@ import {
   Crosshair,
   AlertTriangle,
   ChevronRight,
-  PhoneCall,
   Stethoscope,
   RefreshCw,
   HeartPulse,
@@ -219,14 +218,6 @@ export default function DriverDashboardPage() {
           <h1 className="text-2xl sm:text-3xl font-extrabold text-[#181A17] m-0 tracking-tight">
             {t('driver.dashboard.title', language === 'en' ? 'Field Operations & Trip Monitoring' : 'Bảng Điều Khiển Thực Địa & Giám Sát Chuyến Đi')}
           </h1>
-          <p className="text-sm text-[#5F6977] mt-1.5 mb-0 max-w-2xl">
-            {t(
-              'driver.dashboard.subtitle',
-              language === 'en'
-                ? 'Track transit routes, check in at quarantine stops and borders, and monitor equine vitals.'
-                : 'Theo dõi lộ trình, cập nhật mốc qua các trạm dừng / cửa khẩu và ghi nhận sinh hiệu chiến mã.'
-            )}
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
@@ -273,7 +264,7 @@ export default function DriverDashboardPage() {
       )}
 
       {/* 2. STATS KPI CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="p-4 rounded-2xl bg-white border border-[#E5DDD0] shadow-sm flex items-center justify-between gap-3">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-[#5F6977] m-0">
@@ -326,24 +317,6 @@ export default function DriverDashboardPage() {
             <Crosshair size={22} aria-hidden="true" />
           </div>
         </div>
-
-        <a
-          href="tel:19006868"
-          className="p-4 rounded-2xl bg-white border border-[#D8CEBE] hover:border-[#9E3B3B]/45 shadow-sm flex items-center justify-between gap-3 no-underline transition-colors min-h-[44px]"
-        >
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[#57564E] m-0">
-              {t('driver.emergencyHotline', language === 'en' ? '24/7 Rescue Hotline' : 'Đường dây cứu hộ 24/7')}
-            </p>
-            <p className="text-xl font-black text-[#9E3B3B] m-0 mt-1">1900-6868</p>
-            <span className="text-[11px] text-[#747D88] mt-0.5 block">
-              {language === 'en' ? 'Tap to call Emergency Dispatch' : 'Chạm để gọi cứu hộ trực tiếp'}
-            </span>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-rose-50 text-[#9E3B3B] flex items-center justify-center shrink-0 border border-rose-200">
-            <PhoneCall size={22} aria-hidden="true" />
-          </div>
-        </a>
       </div>
 
       {/* 3. ACTIVE TRIP SECTION */}
@@ -768,18 +741,6 @@ export default function DriverDashboardPage() {
               className="w-full p-3 rounded-xl border border-[#D8CEBE] text-xs outline-none focus:border-[#9E3B3B] font-medium"
             />
           </div>
-
-          <a
-            href="tel:19006868"
-            className="p-3 bg-[#FAF8F4] border border-[#D8CEBE] hover:border-[#9E3B3B]/45 rounded-xl no-underline block"
-          >
-            <span className="font-bold text-[#181A17] block mb-0.5">
-              {t('driver.dashboard.hotline247', language === 'en' ? '24/7 Operations Hotline:' : 'Hotline Điều Hành Trực Tiếp 24/7:')}
-            </span>
-            <span className="text-sm font-black text-[#9E3B3B] block">
-              1900-6868 ({t('driver.dashboard.hotlineBranch', language === 'en' ? 'Ext. 1 for Rescue Team' : 'Bấm nhánh 1 cho Đội Cứu Hộ')})
-            </span>
-          </a>
 
           <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-[#EAE5DA]">
             <Button

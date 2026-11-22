@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Search,
@@ -552,19 +552,53 @@ export default function ManagerRequestsPage() {
     fetchOrders();
   }, [fetchOrders]);
 
-  // Client-side search filtering
-  const displayedOrders = orders.filter((o) => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      String(o.id).includes(q) ||
-      (o.requestCode && o.requestCode.toLowerCase().includes(q)) ||
-      (o.contactName && o.contactName.toLowerCase().includes(q)) ||
-      (o.contactEmail && o.contactEmail.toLowerCase().includes(q)) ||
-      (o.originLocation && o.originLocation.toLowerCase().includes(q)) ||
-      (o.destinationLocation && o.destinationLocation.toLowerCase().includes(q))
-    );
-  });
+  // Client-side search, date filtering & sorting
+  const filteredAndSortedOrders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = orders.filter((o) => {
+      if (filterStatus && filterStatus !== 'all' && o.status !== filterStatus) {
+        return false;
+      }
+      if (departureDateFrom || departureDateTo) {
+        const rawDate = o.requestedDate;
+        const dateStr = rawDate ? new Date(rawDate).toISOString().split('T')[0] : '';
+        if (departureDateFrom && (!dateStr || dateStr < departureDateFrom)) return false;
+        if (departureDateTo && (!dateStr || dateStr > departureDateTo)) return false;
+      }
+      if (!q) return true;
+      return (
+        String(o.id).includes(q) ||
+        (o.requestCode && o.requestCode.toLowerCase().includes(q)) ||
+        (o.contactName && o.contactName.toLowerCase().includes(q)) ||
+        (o.contactEmail && o.contactEmail.toLowerCase().includes(q)) ||
+        (o.originLocation && o.originLocation.toLowerCase().includes(q)) ||
+        (o.destinationLocation && o.destinationLocation.toLowerCase().includes(q))
+      );
+    });
+
+    return [...filtered].sort((a, b) => {
+      const dir = sortOrder === 'asc' ? 1 : -1;
+      if (sortBy === 'id') {
+        return (Number(a.id) - Number(b.id)) * dir;
+      }
+      if (sortBy === 'totalCost') {
+        return ((Number(a.totalCost) || 0) - (Number(b.totalCost) || 0)) * dir;
+      }
+      if (sortBy === 'status') {
+        return String(a.status || '').localeCompare(String(b.status || '')) * dir;
+      }
+      if (sortBy === 'requestedDate') {
+        const tA = new Date(a.requestedDate || 0).getTime() || 0;
+        const tB = new Date(b.requestedDate || 0).getTime() || 0;
+        return (tA - tB) * dir;
+      }
+      const cA = new Date(a.createdAt || 0).getTime() || Number(a.id) || 0;
+      const cB = new Date(b.createdAt || 0).getTime() || Number(b.id) || 0;
+      return (cA - cB) * dir;
+    });
+  }, [orders, search, filterStatus, departureDateFrom, departureDateTo, sortBy, sortOrder]);
+
+  const displayedOrders = filteredAndSortedOrders;
 
   const handleSort = (field: SortField) => {
     if (sortBy === field) {
@@ -860,23 +894,23 @@ export default function ManagerRequestsPage() {
                 <th
                   aria-sort={sortBy === 'id' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                   onClick={() => handleSort('id')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
                 >
                   <div className="flex items-center gap-1">
                     {t('manager.requests.colId', 'MÃ ĐƠN')}
                     <SortIcon field="id" />
                   </div>
                 </th>
-                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600">
+                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 whitespace-nowrap">
                   {t('manager.requests.colCustomer', 'KHÁCH HÀNG')}
                 </th>
-                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600">
+                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 whitespace-nowrap">
                   {t('manager.requests.colRoute', 'LỘ TRÌNH VẬN CHUYỂN')}
                 </th>
                 <th
                   aria-sort={sortBy === 'requestedDate' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                   onClick={() => handleSort('requestedDate')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
                 >
                   <div className="flex items-center gap-1">
                     {t('manager.requests.colDeparture', 'NGÀY KHỞI HÀNH')}
@@ -886,7 +920,7 @@ export default function ManagerRequestsPage() {
                 <th
                   aria-sort={sortBy === 'totalCost' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                   onClick={() => handleSort('totalCost')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
                 >
                   <div className="flex items-center gap-1">
                     {t('manager.requests.colPrice', 'BÁO GIÁ')}
@@ -896,7 +930,7 @@ export default function ManagerRequestsPage() {
                 <th
                   aria-sort={sortBy === 'status' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                   onClick={() => handleSort('status')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
                 >
                   <div className="flex items-center gap-1">
                     {t('manager.requests.colStatus', 'TRẠNG THÁI')}
@@ -906,14 +940,14 @@ export default function ManagerRequestsPage() {
                 <th
                   aria-sort={sortBy === 'createdAt' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                   onClick={() => handleSort('createdAt')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none"
+                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
                 >
                   <div className="flex items-center gap-1">
                     {t('manager.requests.colCreated', 'NGÀY TẠO')}
                     <SortIcon field="createdAt" />
                   </div>
                 </th>
-                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 text-right">
+                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 text-right whitespace-nowrap">
                   {t('manager.requests.colActions', 'THAO TÁC')}
                 </th>
               </tr>
@@ -1224,11 +1258,19 @@ export default function ManagerRequestsPage() {
             </div>
 
             {/* Special Requirements */}
-            {viewOrder.specialRequirements && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
-                <span className="font-bold">{t('manager.requests.specialReq', 'Yêu cầu đặc biệt:')}</span> {viewOrder.specialRequirements}
-              </div>
-            )}
+            {(() => {
+              const cleaned = (viewOrder.specialRequirements || '')
+                .split('|')
+                .map((s) => s.trim())
+                .filter((s) => s && !/^\[(Tiêu đề|Hình thức|Lộ trình):/i.test(s))
+                .join(' | ');
+              if (!cleaned) return null;
+              return (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+                  <span className="font-bold">{t('manager.requests.specialReq', 'Yêu cầu đặc biệt:')}</span> {cleaned}
+                </div>
+              );
+            })()}
 
             {/* Rejection / Note */}
             {viewOrder.rejectionReason && (
@@ -1335,24 +1377,6 @@ export default function ManagerRequestsPage() {
                 </div>
               </div>
 
-              {/* Suggested Freight Basis Card */}
-              <ManagerFreightSuggestionCard
-                transportMode={selectedTransportMode}
-                bookingType={approveOrder.bookingType}
-                horseCount={approveOrder.requestedHorseCount || approveOrder.horses?.length || 1}
-                distanceKm={routeInfo.distanceKm}
-                customsCount={routeInfo.customsCount}
-                usdToVndRate={usdToVndRate}
-                currentInput={totalCostInput}
-                currency={costCurrency}
-                onApplySuggestion={(sug) => {
-                  setTotalCostInput(
-                    String(costCurrency === 'USD' ? sug.suggestedInputUsd : sug.suggestedInputVnd)
-                  );
-                  setOperatingCostInput(String(sug.suggestedOperatingCostVnd));
-                }}
-              />
-
               {/* Booking Quote & Insurance Summary */}
               <BookingQuoteSummary
                 input={totalCostInput}
@@ -1424,23 +1448,6 @@ export default function ManagerRequestsPage() {
                     'Báo giá dự kiến được lưu bằng VND, gồm cước cơ bản và bảo hiểm. Hóa đơn và thanh toán SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.'
                   )}
                 </p>
-              </div>
-
-              {/* Operating Cost Input (Internal) */}
-              <div>
-                <label htmlFor="requests-operating-cost" className="text-xs font-bold text-slate-700 block mb-1.5">
-                  {t('manager.requests.fieldOperatingCost', 'Chi Phí Vận Hành Ước Tính (VND)')}{' '}
-                  <span className="text-slate-500 font-normal">{t('manager.requests.internalOnlyNote', '(Nội bộ Manager)')}</span>
-                </label>
-                <input
-                  id="requests-operating-cost"
-                  type="number"
-                  min={0}
-                  value={operatingCostInput}
-                  onChange={(e) => setOperatingCostInput(e.target.value)}
-                  placeholder="VD: 35000000"
-                  className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-slate-900 text-sm outline-none focus:ring-2 focus:ring-[#C4B38E]/20 focus:border-[#181A17]"
-                />
               </div>
 
               <div className="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-[#F0EEE8] mt-2">

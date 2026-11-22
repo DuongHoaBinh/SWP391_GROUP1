@@ -274,16 +274,11 @@ function TripMonitoringContent() {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-bold text-[#181A17] m-0">
-              {t('monitoring.title', 'Giám sát Hành trình & Nhật ký Lộ trình')}
-            </h1>
-            <span className="text-xs font-bold text-[#181A17] bg-[#FAF8F4] border border-[#EAE5DA] px-2.5 py-0.5 rounded-full">
-              Coordinator Control
-            </span>
-          </div>
+          <h1 className="text-2xl font-bold text-[#181A17] m-0">
+            {t('monitoring.title', 'Giám sát Hành trình & Nhật ký Lộ trình')}
+          </h1>
           <p className="text-sm text-slate-500 mt-1">
-            {t('monitoring.subtitle', 'Theo dõi vị trí suy diễn từ các mốc lộ trình và hồ sơ sinh trắc học ngựa.')}
+            {t('monitoring.subtitle', 'Theo dõi tiến độ các mốc lộ trình và hồ sơ sức khỏe ngựa.')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -297,20 +292,6 @@ function TripMonitoringContent() {
           >
             <RefreshCw size={14} className={refreshing ? 'animate-spin text-[#A67C2E]' : 'text-slate-600'} />
             <span>{refreshing ? t('common.syncing', 'Đang đồng bộ...') : t('common.refresh', 'Làm mới')}</span>
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setShowIncidentModal(true)}
-            className="text-red-700 border-red-200 bg-red-50 hover:bg-red-100 font-bold"
-          >
-            <AlertTriangle size={15} className="mr-1.5 text-red-600" /> {t('incidents.reportIncident', 'Báo sự cố')}
-          </Button>
-
-          <Button type="button" variant="outline" size="sm" onClick={handleExportCSV} disabled={!trackingDetails}>
-            <FileSpreadsheet size={16} className="mr-1.5 text-emerald-600" /> {t('common.exportCSV', 'Xuất CSV')}
           </Button>
         </div>
       </div>
@@ -391,17 +372,17 @@ function TripMonitoringContent() {
                     <span className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-md">
                       <Truck size={13} className="text-slate-500 shrink-0" />
                       {t('monitoring.vehicleLabel', 'Phương tiện:')}{' '}
-                      <strong>{trackingDetails?.assignedVehicle || t('monitoring.dedicatedTruck', 'Xe thùng chuyên dụng điều hòa')}</strong>
+                      <strong>{trackingDetails?.assignedVehicle || t('common.unassigned', 'Chưa gán')}</strong>
                     </span>
                     <span className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-md">
                       <UserCheck size={13} className="text-[#A67C2E] shrink-0" />
                       {t('monitoring.driverLabel', 'Tài xế:')}{' '}
-                      <strong>{trackingDetails?.assignedDriver || t('monitoring.assigned', 'Đã phân công')}</strong>
+                      <strong>{trackingDetails?.assignedDriver || t('common.unassigned', 'Chưa gán')}</strong>
                     </span>
                     <span className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-md">
                       <Heart size={13} className="text-red-500 shrink-0" />
                       {t('monitoring.escortLabel', 'Áp tải / Thú y:')}{' '}
-                      <strong>{trackingDetails?.assignedEscort || t('monitoring.vetSpecialist', 'Chuyên viên thú y')}</strong>
+                      <strong>{trackingDetails?.assignedEscort || t('common.unassigned', 'Chưa gán')}</strong>
                     </span>
                   </div>
 
@@ -422,80 +403,15 @@ function TripMonitoringContent() {
                   )}
                 </div>
 
-                <div className="sm:text-right shrink-0">
+                <div className="sm:text-right shrink-0 flex flex-col sm:items-end gap-1.5">
                   <div className="bg-[#FAF8F4] text-[#181A17] border border-[#EAE5DA] px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5">
                     <Activity size={14} className="text-[#A67C2E]" />
                     <span>{t('monitoring.routeDistance', 'Lộ trình: {dist} km', { dist: trackingDetails?.totalDistanceKm || 0 })}</span>
                   </div>
-                  <span className="block text-[11px] text-slate-400 mt-1">
-                    {t('monitoring.updatedAt', 'Cập nhật: {time}', { time: nowFormatted })}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Simulated Derived GPS Radar Banner */}
-            <div className="bg-slate-900 rounded-xl p-5 sm:p-8 text-white flex flex-col justify-between shadow-lg relative overflow-hidden min-h-[220px]">
-              <div className="relative z-10">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs uppercase font-extrabold tracking-widest text-emerald-400 flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block shrink-0" />
-                    {t('monitoring.currentInferredLocation', 'Vị trí hiện tại (Suy diễn từ mốc cập nhật gần nhất)')}
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    {t('monitoring.completedMilestones', 'Mốc đã hoàn thành:')} <strong className="text-white">{completedCount} / {totalCount}</strong> ({progressPct}%)
-                  </span>
-                </div>
-                <h3 className="text-xl sm:text-2xl font-bold mt-2 mb-2 text-white flex items-center gap-2">
-                  <MapPin size={22} className="text-emerald-400 shrink-0" />
-                  <span>{trackingDetails?.currentMilestone || translateStatus('ready_to_depart')}</span>
-                </h3>
-                <p className="text-sm text-slate-400 flex items-center gap-2 m-0">
-                  <Clock size={16} className="shrink-0" /> {t('monitoring.etaLabel', 'Dự kiến đến đích:')}{' '}
-                  <strong className="text-emerald-300">
-                    {trackingDetails?.eta
-                      ? (Number.isNaN(Date.parse(trackingDetails.eta))
-                          ? trackingDetails.eta
-                          : new Date(trackingDetails.eta).toLocaleString('vi-VN'))
-                      : t('monitoring.onSchedule', 'Đúng tiến độ')}
-                  </strong>
-                </p>
-              </div>
-
-              <div className="w-full bg-slate-800 h-2 rounded-full mt-4 overflow-hidden">
-                <div
-                  className="bg-gradient-to-r from-emerald-500 to-[#A67C2E] h-full transition-all duration-500"
-                  style={{ width: `${Math.max(8, progressPct)}%` }}
-                />
-              </div>
-
-              {/* Waypoint Grid */}
-              <div className="relative z-10 mt-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-                {trackingDetails?.milestones.map((m, idx) => (
-                  <div
-                    key={m.id}
-                    className={`p-2.5 rounded-lg border text-xs flex flex-col justify-between ${
-                      m.status === 'COMPLETED'
-                        ? 'bg-emerald-950/60 border-emerald-800 text-emerald-200'
-                        : m.status === 'CURRENT'
-                        ? 'bg-[#181A17]/80 border-[#A67C2E] text-[#FAF8F4] ring-2 ring-[#C4B38E]/50'
-                        : 'bg-slate-800/50 border-slate-700 text-slate-400'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-extrabold text-[10px]">#{idx + 1}</span>
-                      <span className="text-[10px] font-bold">
-                        {m.status === 'COMPLETED'
-                          ? t('monitoring.milestoneCompleted', '✓ Đã qua')
-                          : m.status === 'CURRENT'
-                          ? t('monitoring.milestoneCurrent', '● Hiện tại')
-                          : t('monitoring.milestonePending', 'Chờ')}
-                      </span>
-                    </div>
-                    <span className="font-semibold truncate">{m.title}</span>
-                    <span className="text-[10px] text-slate-400 truncate mt-0.5">{m.location}</span>
+                  <div className="text-xs text-slate-600 font-semibold">
+                    {t('monitoring.completedMilestones', 'Tiến độ:')} <strong>{completedCount}/{totalCount}</strong> ({progressPct}%)
                   </div>
-                ))}
+                </div>
               </div>
             </div>
 
@@ -511,17 +427,6 @@ function TripMonitoringContent() {
                     {t('monitoring.legsCheckpointsDesc', 'Điều phối viên có thể cập nhật thay tài xế nếu mất tín hiệu hoặc nhận tin qua điện thoại/bộ đàm.')}
                   </p>
                 </div>
-                {allMilestonesCompleted && trackingDetails?.shipmentStatus !== 'completed' && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shrink-0"
-                    onClick={handleCompleteShipment}
-                  >
-                    <CheckCircle2 size={16} className="mr-1.5" />
-                    <span>{t('monitoring.completeTripBtn', 'Hoàn tất chuyến đi')}</span>
-                  </Button>
-                )}
               </div>
 
               <div className="flex flex-col gap-3">
@@ -761,11 +666,6 @@ function TripMonitoringContent() {
                           <span className="font-extrabold text-slate-900 text-sm block">
                             {log.temperatureC ? `${log.temperatureC}°C` : '--'} • {log.heartRateBpm ? `${log.heartRateBpm} bpm` : '--'}
                           </span>
-                          <span className="text-[10px] text-emerald-600 font-bold">
-                            {t('monitoring.temperatureLabel', 'Thân nhiệt: {status}', {
-                              status: log.temperatureC && log.temperatureC <= 38.5 ? t('monitoring.tempNormal', 'Bình thường') : t('monitoring.tempMonitor', 'Theo dõi'),
-                            })}
-                          </span>
                         </div>
                       </div>
                     );
@@ -782,7 +682,7 @@ function TripMonitoringContent() {
                 {t('monitoring.tripsListTitle', 'Danh sách Chuyến đi')}
               </h3>
               <p className="text-xs text-slate-500 mt-1 mb-0">
-                {t('monitoring.tripsListSubtitle', 'Chọn chuyến đi để theo dõi dòng telemetry và mốc lộ trình tương ứng.')}
+                {t('monitoring.tripsListSubtitle', 'Chọn chuyến đi để theo dõi mốc lộ trình và nhật ký sức khỏe tương ứng.')}
               </p>
             </div>
 
@@ -931,102 +831,6 @@ function TripMonitoringContent() {
             </div>
           </div>
         )}
-      </Modal>
-
-      {/* Modal 2: Confirm Complete Trip */}
-      <Modal
-        isOpen={isConfirmCompleteOpen && Boolean(trackingDetails)}
-        onClose={() => {
-          if (!isCompleting) setIsConfirmCompleteOpen(false);
-        }}
-        closeDisabled={isCompleting}
-        title={t('monitoring.modalCompleteTripTitle', 'Xác Nhận Hoàn Tất Chuyến Đi')}
-        maxWidth="460px"
-      >
-        {trackingDetails && (
-          <div className="flex flex-col gap-4">
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900">
-              <p className="font-bold m-0">{t('monitoring.modalBillOfLading', 'Mã vận đơn: {code}', { code: trackingDetails.requestCode })}</p>
-              <p className="mt-1 m-0">
-                {(trackingDetails.origin || '').split(',')[0]} → {(trackingDetails.destination || '').split(',')[0]}
-              </p>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed m-0">
-              {t('monitoring.modalCompleteTripDesc', 'Xác nhận rằng phương tiện đã đến điểm đích an toàn, tất cả ngựa đua đã được bàn giao cho người nhận và các thủ tục pháp lý/kiểm dịch đã hoàn tất.')}
-            </p>
-
-            <div className="flex flex-wrap justify-end gap-3 pt-3 border-t border-slate-100">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsConfirmCompleteOpen(false)}
-                disabled={isCompleting}
-              >
-                {t('common.cancel', 'Hủy bỏ')}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => void handleConfirmCompleteSubmit()}
-                disabled={isCompleting}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-              >
-                {isCompleting ? t('common.updating', 'Đang cập nhật...') : t('monitoring.btnConfirmComplete', 'Xác nhận hoàn tất')}
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Modal 3: Emergency Incident & Reroute Dispatch */}
-      <Modal
-        isOpen={showIncidentModal}
-        onClose={() => setShowIncidentModal(false)}
-        title={t('monitoring.reportIncidentTitle', 'Báo cáo Sự cố Lộ trình')}
-        maxWidth="480px"
-      >
-        <div className="flex flex-col gap-4">
-          <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-900">
-            <p className="font-bold m-0 flex items-center gap-1.5">
-              <AlertTriangle size={15} className="text-red-600 shrink-0" />
-              {t('monitoring.rescueCenterTitle', 'Trung tâm Điều phối Cứu hộ Khẩn cấp')}
-            </p>
-            <p className="mt-1.5 m-0">
-              {t('monitoring.rescueBody1', 'Tính năng xử lý biến cố lộ trình (đổi tuyến xe, chuyển viện thú y khẩn cấp, chuyến bay trễ).')}
-            </p>
-          </div>
-
-          <p className="text-xs text-slate-600 m-0 leading-relaxed">
-            {t('monitoring.rescueBody2', 'Hiện tại, nếu ngựa có dấu hiệu mệt mỏi, stress hoặc bỏ ăn, hệ thống đã tự động gửi cảnh báo cho Điều phối viên và Khách hàng để theo dõi sát.')}
-          </p>
-
-          <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-slate-100">
-            <div className="flex flex-wrap items-center gap-2">
-              {selectedShipmentId && (
-                <Link
-                  href={`/coordinator/routes?shipmentId=${selectedShipmentId}`}
-                  onClick={() => setShowIncidentModal(false)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#181A17] hover:bg-[#2C2F2A] text-[#C4B38E] text-xs font-bold no-underline"
-                >
-                  <span>{language === 'en' ? 'Reroute / Adjust Legs' : 'Hiệu chỉnh lộ trình'}</span>
-                  <ArrowRight size={13} />
-                </Link>
-              )}
-              <Link
-                href="/coordinator/alerts"
-                onClick={() => setShowIncidentModal(false)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#D8CEBE] bg-[#FAF8F4] hover:bg-[#F3EFE4] text-[#181A17] text-xs font-bold no-underline"
-              >
-                <span>{language === 'en' ? 'Open Ops Alerts' : 'Mở Cảnh báo Vận hành'}</span>
-              </Link>
-            </div>
-            <Button type="button" size="sm" variant="outline" onClick={() => setShowIncidentModal(false)}>
-              {t('common.close', 'Đóng')}
-            </Button>
-          </div>
-        </div>
       </Modal>
     </div>
   );

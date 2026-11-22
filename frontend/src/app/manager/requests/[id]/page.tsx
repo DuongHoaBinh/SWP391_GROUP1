@@ -694,16 +694,24 @@ export default function ManagerRequestDetailPage() {
                 </div>
               </div>
 
-              {order.specialRequirements && (
-                <div className="sm:col-span-2 pt-2 border-t border-[#F0EEE8]">
-                  <span className="text-xs font-semibold text-[#7E867B] block uppercase mb-1">
-                    {t('manager.requests.specialReq', 'Ghi Chú & Yêu Cầu Đặc Biệt')}
-                  </span>
-                  <p className="text-xs text-[#7A591C] bg-[#F8F0DF]/70 border border-[#DFCA9A] p-3 rounded-lg leading-relaxed m-0">
-                    {order.specialRequirements}
-                  </p>
-                </div>
-              )}
+              {(() => {
+                const cleaned = String(order.specialRequirements || '')
+                  .split('|')
+                  .map((s: string) => s.trim())
+                  .filter((s: string) => s && !/^\[(Tiêu đề|Hình thức|Lộ trình):/i.test(s))
+                  .join(' | ');
+                if (!cleaned) return null;
+                return (
+                  <div className="sm:col-span-2 pt-2 border-t border-[#F0EEE8]">
+                    <span className="text-xs font-semibold text-[#7E867B] block uppercase mb-1">
+                      {t('manager.requests.specialReq', 'Ghi Chú & Yêu Cầu Đặc Biệt')}
+                    </span>
+                    <p className="text-xs text-[#7A591C] bg-[#F8F0DF]/70 border border-[#DFCA9A] p-3 rounded-lg leading-relaxed m-0">
+                      {cleaned}
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
@@ -1096,22 +1104,6 @@ export default function ManagerRequestDetailPage() {
                     </span>
                   </div>
                 </div>
-
-                <ManagerFreightSuggestionCard
-                  transportMode={selectedTransportMode}
-                  bookingType={order.bookingType}
-                  horseCount={Number(order.requestedHorseCount ?? 1)}
-                  distanceKm={routeMetrics.distanceKm}
-                  customsCount={(routeMetrics as any).customsCount ?? (isDomestic ? 1 : 2)}
-                  usdToVndRate={usdToVndRate}
-                  currentInput={inputValue}
-                  currency={costCurrency}
-                  onApplySuggestion={(sug) =>
-                    setInputValue(
-                      String(costCurrency === 'USD' ? sug.suggestedInputUsd : sug.suggestedInputVnd)
-                    )
-                  }
-                />
 
                 <BookingQuoteSummary
                   input={inputValue}

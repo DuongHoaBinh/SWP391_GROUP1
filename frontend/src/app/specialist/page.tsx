@@ -820,27 +820,8 @@ export default function SpecialistDashboardPage() {
                   </div>
                 )}
 
-                {/* Expiry Date & Auditor Notes Fields */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label
-                      htmlFor="specialist-expiry-date"
-                      className="block text-xs font-bold text-[#242722] mb-1.5 uppercase tracking-wider"
-                    >
-                      {t('specialist.validityPeriod', 'Thời hạn hiệu lực hồ sơ kiểm dịch')}:
-                    </label>
-                    <input
-                      id="specialist-expiry-date"
-                      type="date"
-                      value={expiryDate}
-                      onChange={(e) => setExpiryDate(e.target.value)}
-                      className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] bg-white text-sm text-[#181A17] focus:outline-none focus:ring-2 focus:ring-[#C4B38E]/25 focus:border-[#A67C2E] transition-all"
-                    />
-                    <p className="text-[11px] text-[#5F6977] mt-1 mb-0">
-                      {t('specialist.autoExpiryDesc', 'Tự động tính toán theo quy chuẩn cửa khẩu quốc tế.')}
-                    </p>
-                  </div>
-
+                {/* Auditor Notes Field */}
+                <div className="mb-6">
                   <div>
                     <label
                       htmlFor="specialist-audit-note"

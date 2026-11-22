@@ -53,6 +53,16 @@ function DriverStatusContent() {
   const [incidentType, setIncidentType] = useState('traffic_delay');
   const [activeIncident, setActiveIncident] = useState<any>(null);
 
+  // Quick Health Report Modal (required before reporting a milestone)
+  const [isQuickHealthOpen, setIsQuickHealthOpen] = useState(false);
+  const [healthMilestone, setHealthMilestone] = useState<TrackingMilestoneItem | null>(null);
+  const [healthHorseId, setHealthHorseId] = useState('');
+  const [healthCondition, setHealthCondition] = useState<'stable' | 'not_eating' | 'stressed' | 'climate_change' | 'other'>('stable');
+  const [healthTemp, setHealthTemp] = useState('38.0');
+  const [healthHr, setHealthHr] = useState('40');
+  const [healthNotes, setHealthNotes] = useState('');
+  const [isSavingHealth, setIsSavingHealth] = useState(false);
+
   const isEscort =
     currentUser?.persona === 'escort' ||
     currentUser?.specialization === 'escort' ||
@@ -150,7 +160,108 @@ function DriverStatusContent() {
     return { time, date };
   };
 
+  const hasHealthLogForMilestone = (milestone: TrackingMilestoneItem) => {
+    const logs = trackingDetails?.healthLogs || [];
+    const prefixDash = `#${milestone.seq} -`;
+    const prefixColon = `#${milestone.seq}:`;
+    return logs.some((log) => {
+      const ln = String(log.legName || '').trim();
+      return (
+        ln === `#${milestone.seq} - ${milestone.title}` ||
+        ln.startsWith(prefixDash) ||
+        ln.startsWith(prefixColon)
+      );
+    });
+  };
+
+  const openQuickHealthModal = (milestone: TrackingMilestoneItem) => {
+    const horses = trackingDetails?.assignedHorses || [];
+    const firstHorse = horses[0];
+    setHealthMilestone(milestone);
+    setHealthHorseId(firstHorse ? String(firstHorse.id) : '');
+    setHealthCondition('stable');
+    setHealthTemp('38.0');
+    setHealthHr('40');
+    setHealthNotes('');
+    setIsQuickHealthOpen(true);
+  };
+
+  const closeQuickHealthModal = () => {
+    if (isSavingHealth) return;
+    setIsQuickHealthOpen(false);
+    setHealthMilestone(null);
+    setHealthNotes('');
+  };
+
+  const handleSaveQuickHealth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedShipmentId || !healthMilestone || isSavingHealth) return;
+
+    const horses = trackingDetails?.assignedHorses || [];
+    const matchedHorse = horses.find((h) => String(h.id) === healthHorseId) || horses[0];
+    const parsedTemp = healthTemp.trim() ? Number(healthTemp) : undefined;
+    const parsedHr = healthHr.trim() ? Number(healthHr) : undefined;
+
+    if (parsedTemp !== undefined && (!Number.isFinite(parsedTemp) || parsedTemp < 30 || parsedTemp > 45)) {
+      toast.error(
+        language === 'en'
+          ? 'Please enter a valid body temperature (30 - 45 °C).'
+          : 'Vui lòng nhập thân nhiệt hợp lệ (30 - 45 °C).'
+      );
+      return;
+    }
+    if (parsedHr !== undefined && (!Number.isFinite(parsedHr) || parsedHr < 15 || parsedHr > 160)) {
+      toast.error(
+        language === 'en'
+          ? 'Please enter a valid heart rate (15 - 160 BPM).'
+          : 'Vui lòng nhập nhịp tim hợp lệ (15 - 160 BPM).'
+      );
+      return;
+    }
+
+    setIsSavingHealth(true);
+    try {
+      await trackingApi.createHealthLog(selectedShipmentId, {
+        horseId: matchedHorse?.id,
+        horseName: matchedHorse?.name || 'Ngựa vận chuyển',
+        legName: `#${healthMilestone.seq} - ${healthMilestone.title}`,
+        conditionStatus: healthCondition,
+        temperatureC: parsedTemp,
+        heartRateBpm: parsedHr,
+        notes: healthNotes.trim() || undefined,
+      });
+      await loadDetails(selectedShipmentId);
+      setIsQuickHealthOpen(false);
+      setHealthNotes('');
+      toast.success(
+        language === 'en'
+          ? `Health report recorded for Milestone #${healthMilestone.seq}. You can now report this milestone.`
+          : `Đã ghi nhận sức khỏe ngựa cho Mốc #${healthMilestone.seq}! Bạn có thể báo cáo mốc ngay bây giờ.`
+      );
+      setHealthMilestone(null);
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          (language === 'en' ? 'Unable to save horse health report.' : 'Không thể lưu báo cáo sức khỏe ngựa.')
+      );
+    } finally {
+      setIsSavingHealth(false);
+    }
+  };
+
   const handleOpenCheckin = (milestone: TrackingMilestoneItem) => {
+    if (!hasHealthLogForMilestone(milestone)) {
+      toast.error(
+        t(
+          'driver.status.healthRequiredBeforeCheckin',
+          language === 'en'
+            ? `Please submit a horse health report for Milestone #${milestone.seq} before reporting this milestone.`
+            : `Vui lòng báo cáo sức khỏe ngựa cho Mốc #${milestone.seq} trước khi báo cáo mốc!`
+        )
+      );
+      openQuickHealthModal(milestone);
+      return;
+    }
     setActiveMilestone(milestone);
     const defaultAction = milestone.allowedActions[0] || 'arrive_stop';
     setSelectedAction(defaultAction);
@@ -181,6 +292,19 @@ function DriverStatusContent() {
 
   const handleConfirmCheckin = async () => {
     if (!activeMilestone || !selectedShipmentId || isSubmitting) return;
+    if (!hasHealthLogForMilestone(activeMilestone)) {
+      toast.error(
+        t(
+          'driver.status.healthRequiredBeforeCheckin',
+          language === 'en'
+            ? `Please submit a horse health report for Milestone #${activeMilestone.seq} before reporting this milestone.`
+            : `Vui lòng báo cáo sức khỏe ngựa cho Mốc #${activeMilestone.seq} trước khi báo cáo mốc!`
+        )
+      );
+      setIsCheckInOpen(false);
+      openQuickHealthModal(activeMilestone);
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -265,6 +389,10 @@ function DriverStatusContent() {
     firstLegMilestone.status !== 'COMPLETED';
 
   const canUserCheckinMilestone = (m: TrackingMilestoneItem) => {
+    const curStatus = trackingDetails?.shipmentStatus || currentTrip?.shipment_status || '';
+    if (['confirmed', 'approved', 'planning', 'completed', 'cancelled', 'rejected'].includes(curStatus)) {
+      return false;
+    }
     if (isEscort) return true;
     const hasFlight = milestones.some((item) => item.legType === 'flight');
     if (hasFlight) {
@@ -522,6 +650,24 @@ function DriverStatusContent() {
           )}
 
           {/* Official Start Trip Action Card when at customer's farm */}
+          {(trackingDetails?.shipmentStatus === 'confirmed' || currentTrip?.shipment_status === 'confirmed') && (
+            <div className="p-4 rounded-2xl border border-[#DFCA9A] bg-[#FAF5EB] text-xs text-[#8C6621] flex items-start gap-3">
+              <AlertTriangle size={18} className="text-[#A67C2E] shrink-0 mt-0.5" aria-hidden="true" />
+              <div>
+                <p className="font-bold text-sm text-[#181A17] m-0">
+                  {language === 'en'
+                    ? 'Awaiting Customer Payment & Departure Clearance (Read-Only Route)'
+                    : 'Chờ khách hàng hoàn tất thanh toán & đủ điều kiện xuất phát (Chỉ xem lộ trình)'}
+                </p>
+                <p className="m-0 mt-1 text-[#57564E]">
+                  {language === 'en'
+                    ? 'You have confirmed this assignment. Milestone check-ins will unlock automatically once payment and quarantine compliance reach Ready to Depart.'
+                    : 'Bạn đã nhận chuyến đi này. Các nút cập nhật mốc hành trình và nhật ký sẽ tự động mở khóa ngay khi khách hàng thanh toán xong và đơn chuyển sang Sẵn sàng xuất phát.'}
+                </p>
+              </div>
+            </div>
+          )}
+
           {isTripReadyToDepart && firstLegMilestone && (
             <div className="p-5 rounded-2xl border-2 border-[#2D5A3F] bg-gradient-to-r from-[#E8F2EB] via-[#F4F8F5] to-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-start gap-3.5">
@@ -677,30 +823,62 @@ function DriverStatusContent() {
 
                         {isCurrent && (
                           <div className="flex items-center gap-2 flex-wrap shrink-0">
-                            {canUserCheckinMilestone(m) && (m.allowedActions || []).length > 0 && (
-                              <Button
-                                type="button"
-                                variant="primary"
-                                onClick={() => handleOpenCheckin(m)}
-                                className={`min-h-[44px] font-bold text-xs shrink-0 shadow-sm transition-all cursor-pointer ${
-                                  m.itemType === 'leg_start' && m.seq === 1
-                                    ? 'bg-[#2D5A3F] hover:bg-[#234731] text-white px-4'
-                                    : 'bg-[#181A17] hover:bg-[#2C2F2A] text-[#F7F7F4] px-4'
-                                }`}
-                              >
-                                {m.itemType === 'leg_start' && m.seq === 1 ? (
-                                  <>
-                                    <Play size={14} fill="currentColor" className="mr-1.5" aria-hidden="true" />
-                                    {t('driver.status.startTripBtn', language === 'en' ? 'Start Trip' : 'Bắt đầu chuyến đi')}
-                                  </>
-                                ) : (
-                                  <>
-                                    <CheckCircle2 size={15} className="mr-1.5" aria-hidden="true" />
-                                    {t('driver.status.reportMilestoneBtn', language === 'en' ? 'Check-in Milestone' : 'Báo cáo mốc này')}
-                                  </>
-                                )}
-                              </Button>
-                            )}
+                            {canUserCheckinMilestone(m) && (m.allowedActions || []).length > 0 && (() => {
+                              const healthReady = hasHealthLogForMilestone(m);
+                              return (
+                                <>
+                                  {healthReady ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#E8F2EB] text-[#2D5A3F] border border-[#2D5A3F]/25 text-[11px] font-bold">
+                                      <Stethoscope size={13} aria-hidden="true" />
+                                      {language === 'en' ? 'Health logged' : 'Đã báo cáo sức khỏe'}
+                                    </span>
+                                  ) : (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      onClick={() => openQuickHealthModal(m)}
+                                      className="min-h-[44px] px-3.5 border-[#A67C2E] bg-[#FAF5EB] hover:bg-[#F3E9D2] text-[#8A5A11] font-bold text-xs shrink-0 flex items-center gap-1.5 cursor-pointer"
+                                    >
+                                      <Stethoscope size={14} aria-hidden="true" />
+                                      <span>
+                                        {language === 'en' ? 'Log Health (Required)' : 'Báo cáo sức khỏe (Bắt buộc)'}
+                                      </span>
+                                    </Button>
+                                  )}
+                                  <Button
+                                    type="button"
+                                    variant="primary"
+                                    onClick={() => handleOpenCheckin(m)}
+                                    title={
+                                      !healthReady
+                                        ? language === 'en'
+                                          ? 'Submit horse health report for this milestone first'
+                                          : 'Cần báo cáo sức khỏe ngựa trước khi báo cáo mốc này'
+                                        : undefined
+                                    }
+                                    className={`min-h-[44px] font-bold text-xs shrink-0 shadow-sm transition-all cursor-pointer ${
+                                      !healthReady
+                                        ? 'bg-[#EAE5DA] hover:bg-[#DFD8C8] text-[#57564E] border border-[#C8BFA8] px-4'
+                                        : m.itemType === 'leg_start' && m.seq === 1
+                                        ? 'bg-[#2D5A3F] hover:bg-[#234731] text-white px-4'
+                                        : 'bg-[#181A17] hover:bg-[#2C2F2A] text-[#F7F7F4] px-4'
+                                    }`}
+                                  >
+                                    {m.itemType === 'leg_start' && m.seq === 1 ? (
+                                      <>
+                                        <Play size={14} fill="currentColor" className="mr-1.5" aria-hidden="true" />
+                                        {t('driver.status.startTripBtn', language === 'en' ? 'Start Trip' : 'Bắt đầu chuyến đi')}
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CheckCircle2 size={15} className="mr-1.5" aria-hidden="true" />
+                                        {t('driver.status.reportMilestoneBtn', language === 'en' ? 'Check-in Milestone' : 'Báo cáo mốc này')}
+                                      </>
+                                    )}
+                                  </Button>
+                                </>
+                              );
+                            })()}
                             <Button
                               type="button"
                               variant="outline"
@@ -1006,6 +1184,164 @@ function DriverStatusContent() {
                   {isSubmitting
                     ? t('common.sending', language === 'en' ? 'Sending...' : 'Đang gửi...')
                     : t('driver.status.submitIncidentReroute', language === 'en' ? 'Send Alert & Request Reroute' : 'Gửi cảnh báo & Yêu cầu đổi tuyến')}
+                </span>
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Quick Health Report Modal (required before milestone check-in) */}
+      {isQuickHealthOpen && healthMilestone && (
+        <Modal
+          isOpen={isQuickHealthOpen}
+          onClose={closeQuickHealthModal}
+          closeDisabled={isSavingHealth}
+          title={
+            language === 'en'
+              ? `Horse Health Check — Milestone #${healthMilestone.seq}`
+              : `Báo cáo sức khỏe ngựa — Mốc #${healthMilestone.seq}`
+          }
+          maxWidth="520px"
+        >
+          <form onSubmit={handleSaveQuickHealth} className="flex flex-col gap-4 text-xs">
+            <div className="p-3 bg-[#FAF5EB] border border-[#D4C5A3] rounded-xl text-[#57564E] space-y-1">
+              <div className="font-bold text-[#181A17] flex items-center gap-1.5">
+                <Stethoscope size={14} className="text-[#A67C2E]" aria-hidden="true" />
+                <span>
+                  {language === 'en'
+                    ? 'Mandatory pre-milestone health log'
+                    : 'Bắt buộc ghi nhận tình trạng sức khỏe ngựa trước khi báo cáo mốc'}
+                </span>
+              </div>
+              <p className="m-0 text-[11px] text-[#57564E]">
+                #{healthMilestone.seq} - {healthMilestone.title}
+              </p>
+            </div>
+
+            {(trackingDetails?.assignedHorses || []).length > 0 && (
+              <div>
+                <label htmlFor="quick-health-horse" className="font-bold text-[#181A17] block mb-1.5">
+                  {language === 'en' ? 'Horse' : 'Chiến mã được kiểm tra'} *
+                </label>
+                <select
+                  id="quick-health-horse"
+                  value={healthHorseId}
+                  onChange={(e) => setHealthHorseId(e.target.value)}
+                  className="w-full min-h-[44px] px-3 border border-[#D8CEBE] rounded-xl text-xs font-semibold bg-white outline-none focus:border-[#A67C2E] shadow-sm"
+                >
+                  {(trackingDetails?.assignedHorses || []).map((horse) => (
+                    <option key={horse.id} value={String(horse.id)}>
+                      {horse.name}
+                      {horse.microchipNo ? ` (Chip: ${horse.microchipNo})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="quick-health-condition" className="font-bold text-[#181A17] block mb-1.5">
+                {language === 'en' ? 'Clinical condition' : 'Tình trạng thực tế'} *
+              </label>
+              <select
+                id="quick-health-condition"
+                value={healthCondition}
+                onChange={(e) => setHealthCondition(e.target.value as typeof healthCondition)}
+                className="w-full min-h-[44px] px-3 border border-[#D8CEBE] rounded-xl text-xs font-semibold bg-white outline-none focus:border-[#A67C2E] shadow-sm"
+              >
+                <option value="stable">
+                  {language === 'en' ? 'Stable / Healthy' : 'Ổn định / Khỏe mạnh'}
+                </option>
+                <option value="not_eating">
+                  {language === 'en' ? 'Loss of appetite / Not eating' : 'Chán ăn / Bỏ ăn'}
+                </option>
+                <option value="stressed">
+                  {language === 'en' ? 'Stressed / Agitated' : 'Căng thẳng / Bồn chồn'}
+                </option>
+                <option value="climate_change">
+                  {language === 'en' ? 'Thermal stress / Climate change' : 'Sốc nhiệt / Thay đổi khí hậu'}
+                </option>
+                <option value="other">
+                  {language === 'en' ? 'Other symptom' : 'Triệu chứng khác'}
+                </option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="quick-health-temp" className="font-bold text-[#181A17] block mb-1.5">
+                  {language === 'en' ? 'Temperature (°C)' : 'Thân nhiệt (°C)'}
+                </label>
+                <input
+                  id="quick-health-temp"
+                  type="number"
+                  step="0.1"
+                  min="30"
+                  max="45"
+                  value={healthTemp}
+                  onChange={(e) => setHealthTemp(e.target.value)}
+                  className="w-full min-h-[44px] px-3 border border-[#D8CEBE] rounded-xl text-xs font-semibold bg-white outline-none focus:border-[#A67C2E]"
+                />
+              </div>
+              <div>
+                <label htmlFor="quick-health-hr" className="font-bold text-[#181A17] block mb-1.5">
+                  {language === 'en' ? 'Heart Rate (BPM)' : 'Nhịp tim (nhịp/phút)'}
+                </label>
+                <input
+                  id="quick-health-hr"
+                  type="number"
+                  step="1"
+                  min="15"
+                  max="160"
+                  value={healthHr}
+                  onChange={(e) => setHealthHr(e.target.value)}
+                  className="w-full min-h-[44px] px-3 border border-[#D8CEBE] rounded-xl text-xs font-semibold bg-white outline-none focus:border-[#A67C2E]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="quick-health-notes" className="font-bold text-[#181A17] block mb-1.5">
+                {language === 'en' ? 'Health observations' : 'Ghi chú quan sát sức khỏe'}
+              </label>
+              <textarea
+                id="quick-health-notes"
+                rows={3}
+                value={healthNotes}
+                onChange={(e) => setHealthNotes(e.target.value)}
+                placeholder={
+                  language === 'en'
+                    ? 'e.g. Horse alert, drinking normally, cabin climate stable...'
+                    : 'Ví dụ: Ngựa tỉnh táo, uống nước đều, không có dấu hiệu bất thường trước khi qua mốc...'
+                }
+                className="w-full p-3 border border-[#D8CEBE] rounded-xl outline-none focus:border-[#A67C2E] text-xs"
+              />
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-[#EAE5DA]">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSavingHealth}
+                onClick={closeQuickHealthModal}
+                className="min-h-[44px] border-[#D8CEBE]"
+              >
+                {t('common.cancel', language === 'en' ? 'Cancel' : 'Hủy')}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={isSavingHealth}
+                className="min-h-[44px] px-5 bg-[#2D5A3F] hover:bg-[#234731] text-white font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Stethoscope size={14} aria-hidden="true" />
+                <span>
+                  {isSavingHealth
+                    ? t('common.saving', language === 'en' ? 'Saving...' : 'Đang lưu...')
+                    : language === 'en'
+                    ? 'Save Health Report'
+                    : 'Lưu báo cáo sức khỏe'}
                 </span>
               </Button>
             </div>

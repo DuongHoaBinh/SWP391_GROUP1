@@ -837,32 +837,18 @@ export default function RequestDetailPage() {
 
       {/* Official Quotation Strip */}
       {hasQuotation && (
-        <div
-          className={`rounded-2xl px-5 py-3.5 border flex flex-wrap items-center justify-between gap-3 ${
-            isQuotationAccepted
-              ? 'bg-[#E8F2EB]/60 border-[#B7DBC4]'
-              : 'bg-[#FAF8F4] border-[#E5DDD0]'
-          }`}
-        >
+        <div className="rounded-2xl px-5 py-3.5 border flex flex-wrap items-center justify-between gap-3 bg-[#E8F2EB]/60 border-[#B7DBC4]">
           <div className="flex flex-wrap items-center gap-3 min-w-0">
             <span className="text-xs font-semibold text-[#5F6977]">
-              {isQuotationAccepted
-                ? t('requestDetail.quotationApproved', 'Báo giá đã được chấp thuận')
-                : t('requestDetail.officialQuotation', 'Báo giá vận chuyển')}
+              {t('requestDetail.officialQuotation', 'Báo giá vận chuyển')}
             </span>
             <strong className="text-base font-extrabold text-[#181A17] tabular-nums">
               {Number(request.totalCost) > 0
                 ? `${Number(request.totalCost).toLocaleString('vi-VN')} VNĐ`
                 : t('requestDetail.preparingQuotation', 'Đang chuẩn bị báo giá')}
             </strong>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                isQuotationAccepted
-                  ? 'bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]'
-                  : 'bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A]'
-              }`}
-            >
-              {isQuotationAccepted ? t('requestDetail.confirmed', 'Đã xác nhận') : t('requestDetail.actionRequired', 'Cần phản hồi')}
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]">
+              {t('requestDetail.confirmed', 'Đã xác nhận')}
             </span>
           </div>
 
@@ -875,39 +861,13 @@ export default function RequestDetailPage() {
                 <CreditCard size={14} className="text-[#C4B38E]" aria-hidden="true" /> {t('requestDetail.payViaSepay', 'Thanh toán SePay VietQR')}
               </Link>
             )}
-            {!isQuotationAccepted ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNegotiateNotes('');
-                    setIsNegotiateModalOpen(true);
-                  }}
-                  className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] cursor-pointer transition-colors"
-                >
-                  {t('requestDetail.negotiateBtn', 'Thương thảo giá')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsQuotationAccepted(true);
-                    setActiveTab('quotation');
-                    toast.success(t('requestDetail.quotationAcceptedToast', 'Báo giá đã được chấp thuận! Bạn có thể thanh toán trực tiếp qua cổng SePay VietQR bên dưới.'));
-                  }}
-                  className="px-4 py-2 rounded-xl bg-[#287653] hover:bg-[#205F43] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
-                >
-                  <Check size={14} strokeWidth={3} aria-hidden="true" /> {t('requestDetail.acceptQuotationBtn', 'Chấp Thuận Báo Giá')}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setActiveTab('quotation')}
-                className="px-3.5 py-2 rounded-xl border border-[#B7DBC4] bg-white hover:bg-[#FAF8F4] text-xs font-bold text-[#287653] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-              >
-                <CreditCard size={14} aria-hidden="true" /> {t('requestDetail.proceedPaymentBtn', 'Xem báo giá')}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setActiveTab('quotation')}
+              className="px-3.5 py-2 rounded-xl border border-[#B7DBC4] bg-white hover:bg-[#FAF8F4] text-xs font-bold text-[#287653] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <CreditCard size={14} aria-hidden="true" /> {t('requestDetail.proceedPaymentBtn', 'Xem báo giá')}
+            </button>
           </div>
         </div>
       )}
@@ -1378,8 +1338,8 @@ export default function RequestDetailPage() {
 
       {/* ─── TAB 3: HỒ SƠ KIỂM DỊCH & GIẤY TỜ ──────────────────────── */}
       {activeTab === 'documents' && (
-        <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6 items-start">
-          <div className="lg:col-span-2 flex flex-col gap-6">
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-6">
             <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
               <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -1753,78 +1713,6 @@ export default function RequestDetailPage() {
               )}
             </div>
           </div>
-
-          {/* Right column: Missing docs alert card */}
-          <div className="lg:col-span-1 flex flex-col gap-6">
-            {hasMissingDocs ? (
-              <div
-                style={{
-                  backgroundColor: '#ffffff',
-                  border: '2px solid #dc2626',
-                  borderRadius: '16px',
-                  padding: '20px',
-                  boxShadow: 'var(--shadow-md)',
-                  position: 'relative',
-                  overflow: 'hidden',
-                }}
-              >
-                <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '6px', backgroundColor: '#dc2626' }} />
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <AlertTriangle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
-                  <div>
-                    <h4 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                      {t('documents.requiredDocsTitle', `Hồ sơ cần nộp ({count} mục)`, { count: totalMissingCount })}
-                    </h4>
-                    <p style={{ fontSize: '12.5px', color: '#475569', margin: '6px 0 16px 0', lineHeight: 1.4 }}>
-                      {t('documents.requiredDocsNotice', `Chuyên viên kiểm dịch đã phát hành yêu cầu. Còn {count} mục tài liệu cần nộp để đủ điều kiện xét duyệt.`, { count: totalMissingCount })}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenBatchUpload()}
-                      style={{
-                        width: '100%',
-                        padding: '10px',
-                        borderRadius: '8px',
-                        backgroundColor: '#dc2626',
-                        color: '#ffffff',
-                        fontSize: '13px',
-                        fontWeight: 700,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        border: 'none',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <Upload size={14} aria-hidden="true" /> {t('requestDetail.batchUploadBtn', 'Nộp trọn bộ hồ sơ')}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : checklist?.isFullyCompliant ? (
-              <div
-                style={{
-                  backgroundColor: '#f0fdf4',
-                  borderRadius: '16px',
-                  border: '1px solid #bbf7d0',
-                  padding: '20px',
-                }}
-              >
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <CheckCircle2 size={20} color="#16a34a" style={{ flexShrink: 0, marginTop: '2px' }} />
-                  <div>
-                    <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#166534', margin: 0 }}>
-                      {t('requestDetail.fullDossierComplete', 'Hồ sơ đạt chuẩn 100%')}
-                    </h4>
-                    <p style={{ fontSize: '12.5px', color: '#15803d', margin: '6px 0 0 0', lineHeight: 1.4 }}>
-                      {t('requestDetail.allDocsApprovedDesc', 'Tất cả các tài liệu kiểm dịch và pháp lý đã được duyệt hợp lệ.')}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </div>
         </div>
       )}
 
@@ -1856,52 +1744,6 @@ export default function RequestDetailPage() {
                         ? `${Number(request.totalCost).toLocaleString('vi-VN')} VNĐ`
                         : t('requestDetail.awaitingManagerConfirmation', 'Đang chờ quản lý xác nhận')}
                     </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                    {!isQuotationAccepted && Number(request.totalCost) > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsQuotationAccepted(true);
-                          toast.success(t('requestDetail.quotationAcceptedToast', 'Báo giá đã được chấp thuận! Bạn có thể thanh toán trực tiếp qua cổng SePay VietQR bên dưới.'));
-                        }}
-                        style={{
-                          padding: '10px 20px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          backgroundColor: '#287653',
-                          color: '#ffffff',
-                          fontWeight: 700,
-                          fontSize: '13.5px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          boxShadow: '0 2px 8px rgba(40, 118, 83, 0.25)',
-                        }}
-                      >
-                        <Check size={16} strokeWidth={3} aria-hidden="true" /> {t('requestDetail.acceptQuotationBtn', 'Chấp Thuận Báo Giá')}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNegotiateNotes('');
-                        setIsNegotiateModalOpen(true);
-                      }}
-                      style={{
-                        padding: '10px 16px',
-                        borderRadius: '8px',
-                        border: '1px solid #D8CEBE',
-                        backgroundColor: '#ffffff',
-                        color: '#334155',
-                        fontWeight: 600,
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {t('requestDetail.negotiateBtn', 'Yêu cầu thương thảo giá')}
-                    </button>
                   </div>
                 </div>
 

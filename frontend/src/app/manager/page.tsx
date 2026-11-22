@@ -441,14 +441,6 @@ export default function ManagerDashboardPage() {
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <Link
-            href="/manager/reports"
-            className="no-underline px-4 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] text-xs font-bold border border-[#D8CEBE] inline-flex items-center gap-1.5 transition-colors"
-          >
-            <BarChart3 className="w-3.5 h-3.5 text-[#966516]" />
-            <span>{t('manager.dashboard.qaReportsTitle', 'Báo Cáo Vận Hành')}</span>
-          </Link>
-
-          <Link
             href="/manager/planning"
             className="no-underline px-4 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] text-xs font-bold border border-[#D8CEBE] inline-flex items-center gap-1.5 transition-colors"
           >
@@ -587,7 +579,7 @@ export default function ManagerDashboardPage() {
 
         {/* KPI 4: Completion Rate */}
         <Link
-          href="/manager/reports"
+          href="/manager/requests"
           className="no-underline bg-white rounded-2xl p-5 border border-[#E5DDD0] hover:border-[#B7DBC4] shadow-sm flex flex-col justify-between group transition-all hover:shadow-md"
         >
           <div className="flex items-center justify-between mb-3">
@@ -1046,82 +1038,6 @@ export default function ManagerDashboardPage() {
               </div>
             )}
           </div>
-
-          {/* REPORTS / ANALYTICS (Live Order Data) */}
-          <div className="bg-white rounded-2xl border border-[#E5DDD0] shadow-sm overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-[#EAE5DA] flex justify-between items-center bg-[#FAF8F4]">
-              <h2 className="text-sm font-bold text-[#181A17] m-0">
-                {t('manager.dashboard.analyticsTitle', 'Tổng Hợp Doanh Thu & Đơn Hàng')}
-              </h2>
-              <Link
-                href="/manager/reports"
-                aria-label={t('manager.dashboard.viewFullReport', 'Xem Báo Cáo Đầy Đủ')}
-                className="text-[#7E867B] hover:text-[#181A17]"
-              >
-                <BarChart3 size={16} />
-              </Link>
-            </div>
-
-            <div className="p-5 flex flex-col gap-3.5">
-              {/* Approved Revenue */}
-              <div className="flex items-center justify-between pb-2.5 border-b border-[#F0EEE8]">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-[#E8F2EB] text-[#287653] flex items-center justify-center shrink-0">
-                    <DollarSign size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[11px] text-[#5F6977] m-0 font-medium">
-                      {t('manager.dashboard.totalQuotedValue', 'Giá Trị Đơn Đã Duyệt')}
-                    </p>
-                    <p className="text-sm font-bold text-[#181A17] m-0 tabular-nums truncate">
-                      {formatVndCompact(totalApprovedRevenueVnd)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Total Orders */}
-              <div className="flex items-center justify-between pb-2.5 border-b border-[#F0EEE8]">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-[#F8F0DF] text-[#966516] flex items-center justify-center shrink-0">
-                    <PieChart size={16} />
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-[#5F6977] m-0 font-medium">
-                      {t('manager.dashboard.totalSystemOrders', 'Tổng Đơn Vận Chuyển')}
-                    </p>
-                    <p className="text-sm font-bold text-[#181A17] m-0 tabular-nums">
-                      {allOrders.length} {t('manager.requests.totalUnit', 'đơn')}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Active Fleet Pipeline */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-[#FAF8F4] border border-[#EAE5DA] text-[#A67C2E] flex items-center justify-center shrink-0">
-                    <Plane size={16} />
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-[#5F6977] m-0 font-medium">
-                      {t('manager.dashboard.pipelineActive', 'Tiến Trình Đang Vận Hành')}
-                    </p>
-                    <p className="text-sm font-bold text-[#181A17] m-0 tabular-nums">
-                      {activeCount + upcomingCount} {t('manager.requests.totalUnit', 'đơn')}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <Link
-                href="/manager/reports"
-                className="no-underline w-full mt-1.5 py-2.5 text-center text-[13px] font-semibold text-[#7A591C] bg-[#F4F1E9] hover:bg-[#FAF8F4] border border-[#D8CEBE] rounded-lg transition-colors"
-              >
-                {t('manager.dashboard.viewFullReport', 'Xem Báo Cáo Đầy Đủ')}
-              </Link>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -1205,19 +1121,6 @@ export default function ManagerDashboardPage() {
                         </strong>
                       </div>
                     </div>
-
-                    <ManagerFreightSuggestionCard
-                      transportMode={approveTransportMode}
-                      bookingType={selectedOrder.bookingType}
-                      horseCount={horseCount}
-                      distanceKm={routeInfo.distanceKm}
-                      customsCount={routeInfo.customsCount}
-                      currentInput={approveQuotedPrice}
-                      currency="VND"
-                      onApplySuggestion={(sug) =>
-                        setApproveQuotedPrice(String(sug.suggestedInputVnd))
-                      }
-                    />
                   </>
                 );
               })()}
