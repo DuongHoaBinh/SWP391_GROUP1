@@ -657,6 +657,13 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       }
       for (const roadTripId of [...affectedRoadTripIds].sort((a, b) => a - b)) {
         await this.consolidateSharedRoadTripWaypoints(roadTripId, db, routeId);
+        const [remainingLegs] = await db.execute<RowDataPacket[]>(
+          'SELECT 1 FROM route_leg WHERE road_trip_id = ? LIMIT 1',
+          [roadTripId],
+        );
+        if (remainingLegs.length === 0) {
+          await db.execute('DELETE FROM road_trip WHERE road_trip_id = ?', [roadTripId]);
+        }
       }
       await db.execute('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [shipmentId]);
       for (const id of new Set(legs.filter(l => l.legType === 'road' && l.vehicleId).map(l => l.vehicleId!))) {
@@ -773,7 +780,17 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     preferredRouteId?: number,
   ): Promise<void> {
     const [legRows] = await db.execute<RowDataPacket[]>(
-      `SELECT s.shipment_id, s.origin_location, s.destination_location,
+      `SELECT s.shipment_id,
+              CASE
+                WHEN EXISTS (SELECT 1 FROM route_leg rl_f WHERE rl_f.route_id = r.route_id AND rl_f.leg_type = 'flight')
+                THEN rl.origin_location
+                ELSE s.origin_location
+              END AS origin_location,
+              CASE
+                WHEN EXISTS (SELECT 1 FROM route_leg rl_f WHERE rl_f.route_id = r.route_id AND rl_f.leg_type = 'flight')
+                THEN rl.destination_location
+                ELSE s.destination_location
+              END AS destination_location,
               CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) AS request_code,
               r.route_id, rl.leg_id, rl.origin_location AS leg_origin, rl.destination_location AS leg_dest
        FROM route_leg rl
@@ -874,13 +891,14 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           usedIds.add(Number(match.route_stop_id));
           await db.execute(
             `UPDATE route_stop
-             SET sequence_no = ?, stop_type = ?, leg_id = ?, country = COALESCE(country, ?),
+             SET sequence_no = ?, stop_type = ?, leg_id = ?, location_name = ?, country = COALESCE(country, ?),
                  notes = COALESCE(notes, ?)
              WHERE route_stop_id = ?`,
             [
               stop.sequenceNo,
               stop.stopType,
               legId,
+              stop.locationName,
               stop.country ?? null,
               stop.notes ?? null,
               Number(match.route_stop_id),

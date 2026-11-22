@@ -26,10 +26,43 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
 
   async list() {
     const [rows] = await this.pool.execute<RowDataPacket[]>(`SELECT t.*, v.plate_or_code, v.capacity,
-      COALESCE(SUM(CASE WHEN s.status NOT IN ('cancelled','cancelled_operational','rejected') THEN l.stalls_booked ELSE 0 END), 0) AS booked_stalls
+      COALESCE(SUM(CASE WHEN s.status NOT IN ('completed','cancelled','cancelled_operational','rejected') THEN l.stalls_booked ELSE 0 END), 0) AS booked_stalls
       FROM road_trip t JOIN vehicle v ON v.vehicle_id = t.vehicle_id
       LEFT JOIN route_leg l ON l.road_trip_id = t.road_trip_id
       LEFT JOIN route r ON r.route_id = l.route_id LEFT JOIN shipment s ON s.shipment_id = r.shipment_id
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM route_leg l_run
+        JOIN route r_run ON r_run.route_id = l_run.route_id
+        JOIN shipment s_run ON s_run.shipment_id = r_run.shipment_id
+        WHERE l_run.road_trip_id = t.road_trip_id
+          AND s_run.status = 'in_transit'
+      )
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM route_leg l_act
+          JOIN route r_act ON r_act.route_id = l_act.route_id
+          JOIN shipment s_act ON s_act.shipment_id = r_act.shipment_id
+          WHERE l_act.road_trip_id = t.road_trip_id
+            AND s_act.status NOT IN ('completed','cancelled','cancelled_operational','rejected')
+        )
+        OR (
+          NOT EXISTS (SELECT 1 FROM route_leg l_any WHERE l_any.road_trip_id = t.road_trip_id)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM route_leg l_conf
+            JOIN route r_conf ON r_conf.route_id = l_conf.route_id
+            JOIN shipment s_conf ON s_conf.shipment_id = r_conf.shipment_id
+            WHERE l_conf.vehicle_id = t.vehicle_id
+              AND s_conf.status NOT IN ('completed','cancelled','cancelled_operational','rejected')
+              AND l_conf.planned_departure IS NOT NULL
+              AND l_conf.planned_arrival IS NOT NULL
+              AND l_conf.planned_departure < t.planned_arrival
+              AND l_conf.planned_arrival > t.planned_departure
+          )
+        )
+      )
       GROUP BY t.road_trip_id, v.vehicle_id ORDER BY t.planned_departure, t.road_trip_id`);
     return rows.map(t => ({ id: Number(t.road_trip_id), vehicleId: Number(t.vehicle_id), vehiclePlate: t.plate_or_code,
       capacity: Number(t.capacity), bookedStalls: Number(t.booked_stalls), bookingType: t.booking_type,
@@ -105,7 +138,7 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
       const start = new Date(leg.plannedDeparture), end = new Date(leg.plannedArrival);
       if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) throw new BadRequestException('Khoảng thời gian giữ chỗ xe không hợp lệ');
       if (leg.roadTripId && usedTrips.has(leg.roadTripId)) throw new BadRequestException('Một đơn chỉ được có một phân bổ trên cùng chuyến đường bộ');
-      const [conflicts] = await db.execute<RowDataPacket[]>(`SELECT l.road_trip_id, l.stalls_booked, s.booking_type, s.requested_horse_count
+      const [conflicts] = await db.execute<RowDataPacket[]>(`SELECT l.road_trip_id, l.stalls_booked, s.booking_type, s.requested_horse_count, s.status AS shipment_status
         FROM route_leg l JOIN route r ON r.route_id = l.route_id JOIN shipment s ON s.shipment_id = r.shipment_id
         WHERE l.vehicle_id = ? AND s.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected')
         AND (
@@ -121,6 +154,9 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
       if (conflicts.some(c => !leg.roadTripId || Number(c.road_trip_id) !== leg.roadTripId ||
         c.booking_type === 'dedicated_charter' || order.booking_type === 'dedicated_charter')) {
         throw new ConflictException('Xe đã có chuyến khác trùng thời gian hoặc đang được bao riêng');
+      }
+      if (leg.roadTripId && order.status !== 'in_transit' && conflicts.some(c => Number(c.road_trip_id) === leg.roadTripId && c.shipment_status === 'in_transit')) {
+        throw new ConflictException('Chuyến đường bộ đã bắt đầu di chuyển, không thể ghép thêm đơn mới');
       }
       const booked = conflicts.reduce((n, c) => n + Number(c.stalls_booked || c.requested_horse_count), 0);
       if (booked + Number(order.requested_horse_count) > Number(vehicle.capacity)) throw new ConflictException('Chuyến đường bộ không còn đủ ô chuồng');

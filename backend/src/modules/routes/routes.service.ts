@@ -467,12 +467,21 @@ export class RoutesService implements OnModuleInit {
 
     if (dto.status === 'approved') {
       if (dto.transportCost !== undefined && dto.transportCost !== null) {
+        const nextTransportCost = Math.round(Number(dto.transportCost));
         const currentTransportCost = Math.round(
           Number(order.transportCost ?? Math.max(0, Number(order.totalCost || 0) - Number(order.insuranceFee || 0))),
         );
-        if (Math.round(Number(dto.transportCost)) !== currentTransportCost) {
-          throw new ConflictException(
-            'Không được thay đổi cước vận chuyển đã chốt tại Flow 1 khi duyệt lộ trình Flow 3',
+        if (
+          Number.isFinite(nextTransportCost) &&
+          nextTransportCost >= 0 &&
+          nextTransportCost !== currentTransportCost &&
+          typeof this.ordersStore.updatePricing === 'function'
+        ) {
+          const insuranceFee = Math.round(Number(order.insuranceFee || 0));
+          await this.ordersStore.updatePricing(
+            shipmentId,
+            nextTransportCost,
+            nextTransportCost + insuranceFee,
           );
         }
       }

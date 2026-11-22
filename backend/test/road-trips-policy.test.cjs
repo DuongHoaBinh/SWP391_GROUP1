@@ -36,3 +36,14 @@ test('road capacity is enforced for every selected leg and no guessed schedule r
   await assert.rejects(new RoadTripsStore().prepareLegs(database([], 1), order, [leg], 9), /đủ ô/);
   await assert.rejects(new RoadTripsStore().prepareLegs(database(), order, [{ ...leg, roadTripId: undefined, vehicleId: 1 }], 9), /giờ đi/);
 });
+test('new planning order cannot join a shared road trip whose sibling is already in_transit', async () => {
+  await assert.rejects(
+    new RoadTripsStore().prepareLegs(
+      database([{ road_trip_id: 11, stalls_booked: 1, booking_type: 'shared_stall', shipment_status: 'in_transit' }]),
+      { ...order, status: 'planning' },
+      [leg],
+      9,
+    ),
+    /đã bắt đầu di chuyển/,
+  );
+});

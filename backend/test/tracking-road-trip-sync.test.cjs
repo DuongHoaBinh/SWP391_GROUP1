@@ -132,6 +132,45 @@ test('shared road_trip syncs leg start, stop check-in and leg completion across 
   assert.ok(notifications.some(n => n[0] === 6 && n[4] === 127));
 });
 
+test('syncSiblingStopCheckIn matches normalized locations and checkInLegArrival rejects completed shipments', async () => {
+  const stopUpdates = [];
+  const primaryStops = [{ route_stop_id: 17, route_id: 8, leg_id: 11, sequence_no: 1, stop_type: 'rest', location_name: 'Cam Ranh, Vietnam', country: 'Vietnam', status: 'pending' }];
+  const siblingStops = [{ route_stop_id: 21, route_id: 7, leg_id: 12, sequence_no: 1, stop_type: 'rest', location_name: 'Cam Ranh', country: 'Vietnam', status: 'pending' }];
+  const primaryLeg = { leg_id: 11, route_id: 8, shipment_id: 125, sequence_no: 1, leg_type: 'road', vehicle_id: 3, road_trip_id: 1, status: 'active', actual_departure: new Date() };
+  const siblingLeg = { leg_id: 12, route_id: 7, shipment_id: 127, sequence_no: 1, leg_type: 'road', vehicle_id: 3, road_trip_id: 1, status: 'active', actual_departure: new Date(), shipment_status: 'in_transit', customer_id: 6, request_code: 'REQ-127' };
+  const completedShipment = { shipment_id: 128, customer_id: 7, status: 'completed', request_code: 'REQ-128' };
+
+  const store = {
+    findShipmentById: async (id) => (id === 128 ? completedShipment : { shipment_id: id, customer_id: 13, status: 'in_transit', request_code: `REQ-${id}` }),
+    findRouteByShipmentId: async (id) => ({ route_id: id === 128 ? 9 : 8, plan_status: 'in_transit' }),
+    findLegsByRouteId: async (routeId) => (routeId === 9 ? [{ leg_id: 13, sequence_no: 1, leg_type: 'road', status: 'completed', actual_departure: new Date() }] : [primaryLeg]),
+    findStopsByRouteId: async (routeId) => (routeId === 8 ? primaryStops : siblingStops),
+    findSiblingLegsByRoadTrip: async () => [siblingLeg],
+    updateStopStatus: async (stopId, status) => {
+      stopUpdates.push({ stopId, status });
+      const target = stopId === 17 ? primaryStops[0] : siblingStops[0];
+      target.status = status;
+    },
+    recordTripStatusLog: async () => {},
+    findAssignedStaff: async () => [{ user_id: 5, role_in_shipment: 'driver' }],
+    findAssignedHorses: async () => [],
+    findHorseHealthLogs: async () => [],
+    findTripStatusLogs: async () => [],
+  };
+
+  const service = new TrackingService(store, { createNotification: async () => {}, notifyRole: async () => {} }, {});
+  await service.checkInStop(driverUser, 125, 17, { action: 'arrived' });
+  assert.deepEqual(stopUpdates, [
+    { stopId: 17, status: 'arrived' },
+    { stopId: 21, status: 'arrived' },
+  ]);
+
+  await assert.rejects(
+    service.checkInLegArrival(driverUser, 128, 13, {}),
+    /hoàn thành trước đó/,
+  );
+});
+
 test('buildConsolidatedRoadItinerary orders farther->closer pickups and closer->farther dropoffs cleanly', () => {
   // Case 1: 2 origins -> 1 shared destination (reversed input order)
   const oneDest = buildConsolidatedRoadItinerary({

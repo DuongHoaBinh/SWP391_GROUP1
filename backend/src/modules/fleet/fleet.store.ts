@@ -332,7 +332,14 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
              AND s.shipment_id <> ?
              AND s.status IN ('planning', 'ready_to_depart', 'in_transit')
              AND (sa.confirmation_notes IS NULL OR sa.confirmation_notes NOT LIKE 'TỪ CHỐI%')
-             AND (sa.role_in_shipment <> 'driver' OR ol.leg_type = 'road')
+             AND (
+               sa.role_in_shipment <> 'driver'
+               OR (
+                 ol.leg_type = 'road'
+                 AND ol.status <> 'completed'
+                 AND (ol.vehicle_id IS NOT NULL OR ol.sequence_no = 1)
+               )
+             )
              AND ol.planned_departure IS NOT NULL AND ol.planned_arrival IS NOT NULL
              AND ol.planned_departure < ? AND ol.planned_arrival > ?`,
           [u.user_id, shipmentId, leg.planned_arrival, leg.planned_departure],
@@ -513,10 +520,36 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
                 WHERE sa.user_id = u.user_id
                   AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')
                   AND (sa.confirmation_notes IS NULL OR sa.confirmation_notes NOT LIKE 'TỪ CHỐI%')
+                  AND NOT (
+                    sa.role_in_shipment = 'driver'
+                    AND EXISTS (
+                      SELECT 1
+                      FROM route r_fl
+                      JOIN route_leg rl_fl ON rl_fl.route_id = r_fl.route_id
+                      WHERE r_fl.shipment_id = s.shipment_id AND rl_fl.leg_type = 'flight'
+                    )
+                    AND EXISTS (
+                      SELECT 1
+                      FROM route r_rd
+                      JOIN route_leg rl_rd ON rl_rd.route_id = r_rd.route_id
+                      WHERE r_rd.shipment_id = s.shipment_id
+                        AND rl_rd.leg_type = 'road'
+                        AND (rl_rd.sequence_no = 1 OR rl_rd.vehicle_id IS NOT NULL)
+                    )
+                    AND NOT EXISTS (
+                      SELECT 1
+                      FROM route r_open
+                      JOIN route_leg rl_open ON rl_open.route_id = r_open.route_id
+                      WHERE r_open.shipment_id = s.shipment_id
+                        AND rl_open.leg_type = 'road'
+                        AND (rl_open.sequence_no = 1 OR rl_open.vehicle_id IS NOT NULL)
+                        AND rl_open.status <> 'completed'
+                    )
+                  )
               ) AS active_trips_count
        FROM \`user\` u
        JOIN \`role\` r ON u.role_id = r.role_id
-       WHERE r.role_name != 'Customer' AND u.role_id != 6
+       WHERE r.role_name NOT IN ('Customer', 'Admin', 'Logistics Manager') AND u.role_id NOT IN (1, 2, 6)
        ORDER BY r.role_name ASC, u.full_name ASC`,
     );
 
@@ -535,11 +568,26 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     }));
   }
 
-  async updateStaffShift(userId: number, currentShift: string, dutyStatus: string): Promise<boolean> {
+  async updateStaffShift(
+    userId: number,
+    currentShift: string,
+    dutyStatus: string,
+    releaseActiveTrips = false,
+  ): Promise<boolean> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       'UPDATE `user` SET current_shift = ?, duty_status = ? WHERE user_id = ?',
       [currentShift.trim(), dutyStatus, userId],
     );
+    if (result.affectedRows > 0 && releaseActiveTrips) {
+      await this.pool.execute(
+        `DELETE sa
+         FROM shipment_assignment sa
+         JOIN shipment s ON sa.shipment_id = s.shipment_id
+         WHERE sa.user_id = ?
+           AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')`,
+        [userId],
+      );
+    }
     return result.affectedRows > 0;
   }
 

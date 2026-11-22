@@ -406,27 +406,59 @@ export class TrackingService {
     return items;
   }
 
+  private classifyMultimodalStops(legs: any[], stops: any[]): {
+    legRoad1: any;
+    legFlight: any;
+    legRoadLast: any;
+    stopExport: any | null;
+    stopImport: any | null;
+  } {
+    const legRoad1 = legs[0];
+    const legFlight = legs.find((l) => l.leg_type === 'flight') || legs[1];
+    const legRoadLast = legs[legs.length - 1];
+
+    const isVnStop = (s: any) => {
+      const c = (s.country || '').toLowerCase();
+      const loc = (s.location_name || '').toLowerCase();
+      return (
+        c.includes('vietnam') ||
+        c.includes('việt nam') ||
+        loc.includes('tân sơn nhất') ||
+        loc.includes('nội bài') ||
+        loc.includes('việt nam')
+      );
+    };
+
+    const stopExport =
+      stops.find((s) => s.leg_id && legRoad1 && Number(s.leg_id) === Number(legRoad1.leg_id)) ||
+      stops.find((s) => isVnStop(s)) ||
+      (stops.length >= 2 && (!stops[0].leg_id || Number(stops[0].leg_id) === Number(legRoad1?.leg_id))
+        ? stops[0]
+        : stops.length === 1 && !stops[0].country && !stops[0].leg_id
+          ? stops[0]
+          : null);
+
+    const stopImport =
+      stops.find(
+        (s) =>
+          s.route_stop_id !== stopExport?.route_stop_id &&
+          s.leg_id &&
+          legRoadLast &&
+          Number(s.leg_id) === Number(legRoadLast.leg_id),
+      ) ||
+      stops.find((s) => s.route_stop_id !== stopExport?.route_stop_id) ||
+      null;
+
+    return { legRoad1, legFlight, legRoadLast, stopExport, stopImport };
+  }
+
   // 6 Mốc Tinh Gọn dành riêng cho Tuyến Đa Phương Thức (Đường bộ VN -> Bay Quốc Tế -> Đường bộ Nước Ngoài)
   private buildSimplifiedMultiModalMilestones(legs: any[], stops: any[]): TrackingMilestoneItem[] {
     const items: TrackingMilestoneItem[] = [];
     let foundFirstIncomplete = false;
 
-    const legRoad1 = legs[0];
-    const legFlight = legs.find((l) => l.leg_type === 'flight') || legs[1];
-    const legRoadLast = legs[legs.length - 1];
-
-    const stopExport =
-      stops.find(
-        (s) =>
-          (s.country || '').toLowerCase().includes('vietnam') ||
-          (s.country || '').toLowerCase().includes('việt nam') ||
-          (s.location_name || '').toLowerCase().includes('tân sơn nhất') ||
-          (s.location_name || '').toLowerCase().includes('nội bài') ||
-          s.sequence_no === 1,
-      ) || stops[0];
-
-    const stopImport =
-      stops.find((s) => s.route_stop_id !== stopExport?.route_stop_id) || stops[1] || stops[0];
+    const { legRoad1, legFlight, legRoadLast, stopExport, stopImport } =
+      this.classifyMultimodalStops(legs, stops);
 
     // --- MỐC 1: Xe xuất phát tại trang trại khách hàng ---
     const isM1Done =
@@ -598,7 +630,7 @@ export class TrackingService {
       stopId: stopImport?.route_stop_id || null,
       seq: 5,
       title: `Ngựa đã vượt qua hải quan & kiểm dịch sân bay đến: ${stopImport ? stopImport.location_name : legRoadLast.origin_location}`,
-      location: stopImport ? `${stopImport.location_name}, ${stopImport.country || 'Indonesia'}` : legRoadLast.origin_location,
+      location: stopImport ? `${stopImport.location_name}, ${stopImport.country || 'Quốc tế'}` : legRoadLast.origin_location,
       status: m5Status,
       plannedTime: stopImport?.planned_arrival ? new Date(stopImport.planned_arrival).toISOString() : (legRoadLast.planned_departure ? new Date(legRoadLast.planned_departure).toISOString() : null),
       actualTime: stopImport?.actual_departure
@@ -966,13 +998,31 @@ export class TrackingService {
     if (!targetStop) throw new NotFoundException(`Không tìm thấy trạm dừng #${stopId}`);
 
     const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
-    const parentLeg = legs.find((l) => l.leg_id === targetStop.leg_id) || (legs.length === 1 ? legs[0] : (legs.find((l) => l.leg_type !== 'flight') || legs[0]));
+    const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
+    const classifiedStops = isMultiModalFlight ? this.classifyMultimodalStops(legs, stops) : null;
+    const isImportStop = Boolean(
+      classifiedStops?.stopImport && targetStop.route_stop_id === classifiedStops.stopImport.route_stop_id,
+    );
+
+    const parentLeg =
+      legs.find((l) => l.leg_id === targetStop.leg_id) ||
+      (isMultiModalFlight && isImportStop
+        ? classifiedStops!.legRoadLast
+        : isMultiModalFlight
+          ? classifiedStops!.legRoad1
+          : legs.length === 1
+            ? legs[0]
+            : legs.find((l) => l.leg_type !== 'flight') || legs[0]);
 
     // DEC-07: Driver & Escort đều được phép check-in chéo dự phòng nếu đã được phân công chuyến; ghi rõ updated_by_role.
     const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
 
-    // Rule: Chặng phải bắt đầu rồi mới được check-in trạm dừng
-    if (!parentLeg || (!parentLeg.actual_departure && parentLeg.status === 'pending')) {
+    // Rule: Chặng phải bắt đầu rồi mới được check-in trạm dừng (riêng trạm nhập cảnh sau chặng bay chỉ cần chặng bay đã hạ cánh)
+    const flightCompletedForImportStop =
+      isMultiModalFlight &&
+      isImportStop &&
+      (classifiedStops?.legFlight?.status === 'completed' || classifiedStops?.legFlight?.actual_arrival !== null);
+    if (!parentLeg || (!parentLeg.actual_departure && parentLeg.status === 'pending' && !flightCompletedForImportStop)) {
       throw new ConflictException('Chặng vận chuyển chưa xuất phát! Vui lòng bấm "Xuất phát" chặng trước khi cập nhật trạm dừng.');
     }
 
@@ -1034,13 +1084,17 @@ export class TrackingService {
       isBackdated,
     );
 
-    // Tuyến đa phương thức: Chỉ khi có chặng bay, việc hoàn tất thông quan/rời trạm bàn giao sân bay mới tự động hoàn tất chặng đường bộ 1
-    const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
-    if (isMultiModalFlight && parentLeg && parentLeg.sequence_no === 1 && parentLeg.leg_type === 'road' &&
-        (dto.action === 'customs_cleared' || dto.action === 'departed')) {
-      await this.trackingStore.updateLegStatus(parentLeg.leg_id, 'completed', undefined, now);
-      if (parentLeg.vehicle_id) {
-        await this.trackingStore.updateVehicleStatus(parentLeg.vehicle_id, 'available');
+    // Tuyến đa phương thức:
+    // - Trạm xuất cảnh hoàn tất -> hoàn tất chặng đường bộ 1 & giải phóng xe tải về available.
+    // - Trạm nhập cảnh hoàn tất -> kích hoạt chặng đường bộ cuối để hoàn tất Mốc #6.
+    if (isMultiModalFlight && (dto.action === 'customs_cleared' || dto.action === 'departed')) {
+      if (!isImportStop && parentLeg && parentLeg.sequence_no === 1 && parentLeg.leg_type === 'road') {
+        await this.trackingStore.updateLegStatus(parentLeg.leg_id, 'completed', undefined, now);
+        if (parentLeg.vehicle_id) {
+          await this.trackingStore.updateVehicleStatus(parentLeg.vehicle_id, 'available');
+        }
+      } else if (isImportStop && classifiedStops?.legRoadLast && !classifiedStops.legRoadLast.actual_departure) {
+        await this.trackingStore.updateLegStatus(classifiedStops.legRoadLast.leg_id, 'active', now, null);
       }
     }
 
@@ -1097,16 +1151,31 @@ export class TrackingService {
     const targetLeg = legs.find((l) => l.leg_id === Number(legId));
     if (!targetLeg) throw new NotFoundException(`Không tìm thấy chặng #${legId}`);
 
+    if (shipment.status === 'completed' || targetLeg.status === 'completed') {
+      throw new ConflictException('Chặng vận chuyển này đã hoàn thành trước đó!');
+    }
+
     // Rule: Chặng phải bắt đầu rồi mới được bấm đến
     if (!targetLeg.actual_departure && targetLeg.status === 'pending') {
       throw new ConflictException('Không thể bấm "Đã đến" khi chặng này chưa bấm "Đã xuất phát"!');
     }
 
-    // Rule: Tất cả các trạm dừng trong chặng phải đã hoàn thành
+    // Rule: Tất cả các trạm dừng thuộc đúng chặng này phải đã hoàn thành
     const stops = await this.trackingStore.findStopsByRouteId(route.route_id);
+    const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
+    const classifiedStops = isMultiModalFlight ? this.classifyMultimodalStops(legs, stops) : null;
     const legStops = stops.filter((s) => {
       if (s.leg_id) return s.leg_id === Number(legId);
       if (legs.length === 1) return true;
+      if (classifiedStops) {
+        if (classifiedStops.legRoad1 && Number(legId) === Number(classifiedStops.legRoad1.leg_id)) {
+          return classifiedStops.stopExport?.route_stop_id === s.route_stop_id;
+        }
+        if (classifiedStops.legRoadLast && Number(legId) === Number(classifiedStops.legRoadLast.leg_id)) {
+          return classifiedStops.stopImport?.route_stop_id === s.route_stop_id;
+        }
+        return false;
+      }
       const firstRoadLeg = legs.find((l) => l.leg_type !== 'flight') || legs[0];
       return firstRoadLeg.leg_id === Number(legId);
     });
@@ -1131,11 +1200,11 @@ export class TrackingService {
       }
     }
 
-    // Tuyến đa phương thức: Khi chặng bay hạ cánh an toàn (Mốc 4), tự động kích hoạt chặng đường bộ tiếp theo
+    // Tuyến đa phương thức: Chặng đường bộ cuối sẽ do nhân sự xác nhận tại Mốc #5 (thông quan / khởi hành chặng cuối)
     if (targetLeg.leg_type === 'flight' && targetLeg.sequence_no < legs.length) {
       const nextLeg = legs.find((l) => l.sequence_no === targetLeg.sequence_no + 1);
       if (nextLeg && !nextLeg.actual_departure) {
-        await this.trackingStore.updateLegStatus(nextLeg.leg_id, 'active', now, null);
+        // Giữ nguyên trạng thái chờ tại Mốc #5 để không tự động nhảy cóc từ Mốc #4 sang Mốc #6
       }
     }
 
@@ -1282,6 +1351,11 @@ export class TrackingService {
     if (shipment.status === 'completed') {
       throw new ConflictException('Chuyến đi đã hoàn tất toàn bộ lộ trình, không thể ghi thêm nhật ký sức khỏe!');
     }
+    if (['confirmed', 'approved', 'planning', 'requested', 'change_requested'].includes(shipment.status)) {
+      throw new ConflictException(
+        'Chuyến đi chưa sẵn sàng xuất phát (đang chờ hoàn tất thanh toán / hồ sơ kiểm dịch), chưa thể ghi nhật ký sức khỏe hành trình!',
+      );
+    }
 
     // Luôn khóa cứng nhật ký sức khỏe theo mốc hiện tại đang diễn ra, không cho phép ghi nhận cho mốc quá khứ
     const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
@@ -1289,7 +1363,10 @@ export class TrackingService {
     if (route?.route_id) {
       const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
       const stops = await this.trackingStore.findStopsByRouteId(route.route_id);
-      const milestones = this.buildMilestonesTimeline(legs, stops);
+      const consolidationContext = legs.some((l) => Boolean(l.road_trip_id))
+        ? (await this.loadConsolidationContext(legs, stops)) ?? undefined
+        : undefined;
+      const milestones = this.buildMilestonesTimeline(legs, stops, undefined, consolidationContext);
       const activeM = milestones.find((m) => m.status === 'CURRENT');
       if (activeM) {
         finalLegName = `#${activeM.seq} - ${activeM.title}`;
@@ -1665,7 +1742,8 @@ export class TrackingService {
         const sibStop = sibStops.find(
           (s) =>
             (!s.leg_id || Number(s.leg_id) === Number(sib.leg_id)) &&
-            String(s.location_name || '').trim().toLowerCase() === targetName,
+            (areSameLocations(s.location_name, targetStop.location_name) ||
+              String(s.location_name || '').trim().toLowerCase() === targetName),
         );
         if (!sibStop || (rank[sibStop.status] ?? 0) >= targetRank) continue;
         await this.trackingStore.updateStopStatus(

@@ -473,7 +473,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
        JOIN shipment s ON sa.shipment_id = s.shipment_id
        LEFT JOIN route r ON r.shipment_id = s.shipment_id
        WHERE sa.user_id = ?
-         AND s.status IN ('ready_to_depart', 'in_transit', 'arrived', 'completed')
+         AND s.status IN ('confirmed', 'ready_to_depart', 'in_transit', 'arrived', 'completed')
        ORDER BY s.shipment_id DESC`,
       [userId],
     );

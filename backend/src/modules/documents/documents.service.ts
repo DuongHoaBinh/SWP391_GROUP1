@@ -674,10 +674,15 @@ export class DocumentsService {
     let totalApprovedDocs = 0;
     let hasExpiredDocuments = false;
 
+    const applicableRegMap = new Map(applicableRegulations.map((r) => [r.id, r]));
+
     for (const h of horsesInOrder) {
       const rawDocs = await this.documentsStore.findDocumentsByHorseId(h.horse_id);
-      const docs = rawDocs.map((d) => {
-        const reg = applicableRegulations.find((r) => r.id === d.regulationId);
+      const applicableRawDocs = rawDocs.filter(
+        (d) => !d.isArchived && applicableRegMap.has(d.regulationId),
+      );
+      const evalDocs = applicableRawDocs.map((d) => {
+        const reg = applicableRegMap.get(d.regulationId);
         const bufferHours =
           reg && reg.minValidityBufferHours !== undefined && reg.minValidityBufferHours !== null
             ? Number(reg.minValidityBufferHours)
@@ -685,9 +690,6 @@ export class DocumentsService {
               ? 48
               : 0;
         const expiryEval = this.evaluateDocumentExpiry(d.expiryDate, tripArrivalDateTime, bufferHours);
-        if (expiryEval.isExpiredForTrip) {
-          hasExpiredDocuments = true;
-        }
         let earlyIssuanceWarning: string | null = null;
         if (reg && (reg.docTier || 'A') === 'B' && d.issueDate && Number.isFinite(depMs)) {
           const issueMs = new Date(d.issueDate).getTime();
@@ -705,7 +707,25 @@ export class DocumentsService {
         };
       });
 
-      const applicableRegMap = new Map(applicableRegulations.map((r) => [r.id, r]));
+      // Giữ duy nhất 1 bản hồ sơ mới nhất / đạt chuẩn cho mỗi quy định áp dụng của đơn hàng này
+      const dedupedByReg = new Map<number, (typeof evalDocs)[number]>();
+      for (const d of evalDocs) {
+        const existing = dedupedByReg.get(d.regulationId);
+        if (!existing) {
+          dedupedByReg.set(d.regulationId, d);
+          continue;
+        }
+        const reg = applicableRegMap.get(d.regulationId);
+        const existingApproved = Boolean(reg) && this.isDocumentApprovedForCompliance(existing, reg);
+        const candidateApproved = Boolean(reg) && this.isDocumentApprovedForCompliance(d, reg);
+        if (!existingApproved && candidateApproved) {
+          dedupedByReg.set(d.regulationId, d);
+        }
+      }
+      const docs = Array.from(dedupedByReg.values());
+      if (docs.some((d) => d.isExpiredForTrip)) {
+        hasExpiredDocuments = true;
+      }
 
       // Tìm những quy định đã có tài liệu approved, đạt chuẩn cơ quan chức năng (2 tầng) VÀ còn hạn + biên an toàn
       const approvedRegIds = new Set(

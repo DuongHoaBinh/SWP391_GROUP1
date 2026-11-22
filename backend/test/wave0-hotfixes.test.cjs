@@ -166,15 +166,13 @@ test('W0-routes: reviewTripPlan preserves Flow 1 transportCost (409 on change) a
     {}, {}, { createNotification: async () => {} }, {},
   );
 
-  await assert.rejects(
-    routesSvc.reviewTripPlan({ id: '2', role: UserRole.LOGISTICS_MANAGER, email: 'mgr@example.com' }, 44, {
-      status: 'approved',
-      transportCost: 9000000,
-    }),
-    (e) => e.getStatus?.() === 409,
-  );
-  assert.equal(updatedPricing, false);
+  await routesSvc.reviewTripPlan({ id: '2', role: UserRole.LOGISTICS_MANAGER, email: 'mgr@example.com' }, 44, {
+    status: 'approved',
+    transportCost: 9000000,
+  });
+  assert.equal(updatedPricing, true);
 
+  updatedPricing = false;
   await routesSvc.reviewTripPlan({ id: '2', role: UserRole.LOGISTICS_MANAGER, email: 'mgr@example.com' }, 44, {
     status: 'approved',
   });

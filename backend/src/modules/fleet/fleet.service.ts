@@ -153,8 +153,9 @@ export class FleetService {
   async updateStaffShift(
     userId: number,
     dto: UpdateStaffShiftDto,
-  ): Promise<{ success: boolean; userId: number; currentShift: string; dutyStatus: string }> {
-    const ok = await this.fleetStore.updateStaffShift(userId, dto.currentShift, dto.dutyStatus);
+  ): Promise<{ success: boolean; userId: number; currentShift: string; dutyStatus: string; activeTrips: number }> {
+    const shouldRelease = dto.releaseActiveTrips === true || dto.dutyStatus === 'ON_DUTY';
+    const ok = await this.fleetStore.updateStaffShift(userId, dto.currentShift, dto.dutyStatus, shouldRelease);
     if (!ok) {
       throw new NotFoundException(`Không tìm thấy nhân sự #${userId}`);
     }
@@ -163,6 +164,7 @@ export class FleetService {
       userId,
       currentShift: dto.currentShift.trim(),
       dutyStatus: dto.dutyStatus,
+      activeTrips: shouldRelease ? 0 : undefined as any,
     };
   }
 
