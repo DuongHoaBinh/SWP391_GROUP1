@@ -344,6 +344,29 @@ export class RoutesService implements OnModuleInit {
       throw new BadRequestException('Kế hoạch chuyến đi phải có ít nhất 1 chặng vận chuyển (Leg)');
     }
 
+    // Step 5: Ràng buộc chặng hai chiều (direction) theo loại chuyến đi
+    const isRoundTripOrder = order.tripType === 'round_trip';
+    const returnLegs = dto.legs.filter((l) => l.direction === 'return');
+    if (isRoundTripOrder && returnLegs.length === 0) {
+      throw new BadRequestException('Đơn khứ hồi phải có ít nhất 1 chặng về (direction: return)');
+    }
+    if (!isRoundTripOrder && returnLegs.length > 0) {
+      throw new BadRequestException('Đơn vận chuyển một chiều không được có chặng về (direction: return)');
+    }
+    if (isRoundTripOrder && order.returnDepartureAt) {
+      const returnDepMinTime = new Date(order.returnDepartureAt).getTime();
+      for (const rLeg of returnLegs) {
+        if (rLeg.plannedDeparture) {
+          const rDepTime = new Date(rLeg.plannedDeparture).getTime();
+          if (rDepTime < returnDepMinTime) {
+            throw new BadRequestException(
+              `Chặng về #${rLeg.sequenceNo} có giờ xuất phát sớm hơn giờ hẹn đón chặng về (${new Date(returnDepMinTime).toISOString()})`,
+            );
+          }
+        }
+      }
+    }
+
     // BR-F3-03: Enforce unique sequenceNo, valid per-leg window & non-overlapping chronological order
     const explicitSeqs = dto.legs.map((l) => l.sequenceNo).filter((s) => s !== undefined && s !== null);
     if (explicitSeqs.length !== new Set(explicitSeqs).size) {

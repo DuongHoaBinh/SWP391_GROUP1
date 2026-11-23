@@ -144,5 +144,10 @@ export interface TripTrackingDetails {
   milestones: TrackingMilestoneItem[];
   healthLogs: HorseHealthLogEntity[];
   statusLogs: TripStatusLogEntity[];
+  tripType?: string;
+  returnStatus?: string | null;
+  returnDepartureAt?: string | null;
+  returnWaitMinutes?: number;
+  returnNoShow?: boolean;
   lastUpdated: string;
 }

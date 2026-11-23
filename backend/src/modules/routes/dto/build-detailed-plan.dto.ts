@@ -13,6 +13,11 @@ import {
 import { LegType, RouteStopType } from '../routes.types';
 
 export class RouteLegDto {
+  @ApiPropertyOptional({ enum: ['outbound', 'return'], default: 'outbound', description: 'Hướng chặng: outbound (chặng đi) hoặc return (chặng về)' })
+  @IsOptional()
+  @IsString()
+  direction?: 'outbound' | 'return';
+
   @ApiPropertyOptional({ description: 'Chuyến đường bộ do Coordinator chọn để ghép chỗ hoặc bao xe' })
   @IsOptional() @IsInt() @Min(1)
   roadTripId?: number;
@@ -121,6 +126,11 @@ export class RouteStopItemDto {
   @IsOptional()
   @IsInt()
   legSequenceNo?: number;
+
+  @ApiPropertyOptional({ enum: ['outbound', 'return'], default: 'outbound', description: 'Hướng chặng của điểm dừng' })
+  @IsOptional()
+  @IsString()
+  direction?: 'outbound' | 'return';
 
   @ApiProperty({ enum: RouteStopType, description: 'Loại điểm dừng (rest, quarantine, refuel, border_check)' })
   @IsEnum(RouteStopType)

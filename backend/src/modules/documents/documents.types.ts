@@ -12,7 +12,7 @@ export enum AuthorityApprovalStatus {
   REJECTED = 'rejected',
 }
 
-export type RegulationTransportMode = 'road' | 'air' | 'both';
+export type RegulationTransportMode = 'road' | 'air' | 'sea' | 'both';
 export type RegulationDocTier = 'A' | 'B';
 
 export interface Regulation {

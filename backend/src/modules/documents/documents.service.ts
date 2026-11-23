@@ -85,7 +85,7 @@ export class DocumentsService {
         const orderDetails = await this.documentsStore.findOrderDetails(orderId);
         const isComplete = await this.isFlow2CompletedForPayment(orderId);
 
-        if (orderDetails?.status === 'in_transit') {
+        if (orderDetails?.status === 'in_transit' || orderDetails?.status === 'return_pending') {
           if (!isComplete) {
             await this.flagInTransitComplianceAlert(orderId);
           } else if (orderDetails.in_transit_compliance_alert && typeof this.documentsStore.setInTransitComplianceAlert === 'function') {

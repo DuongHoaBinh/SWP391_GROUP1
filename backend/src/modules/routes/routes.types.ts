@@ -88,6 +88,7 @@ export interface RouteStopEntity {
   routeId: number;
   legId?: number | null;
   sequenceNo: number;
+  direction?: 'outbound' | 'return';
   stopType: RouteStopType;
   locationName: string;
   country: string | null;
@@ -108,6 +109,7 @@ export interface RouteStopUpdateEntity {
 }
 
 export interface RouteLegEntity {
+  direction?: 'outbound' | 'return';
   roadTripId?: number | null;
   id: number;
   routeId: number;

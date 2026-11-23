@@ -331,7 +331,8 @@ export class FleetService {
     if (
       order.status !== ShipmentStatus.APPROVED &&
       order.status !== ShipmentStatus.PLANNING &&
-      order.status !== ShipmentStatus.IN_TRANSIT
+      order.status !== ShipmentStatus.IN_TRANSIT &&
+      order.status !== ShipmentStatus.RETURN_PENDING
     ) {
       throw new BadRequestException(
         `Chỉ có thể phân công phương tiện cho đơn hàng đã duyệt hoặc đang lập kế hoạch (Trạng thái hiện tại: ${order.status})`,
@@ -389,7 +390,7 @@ export class FleetService {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
 
-    if (['in_transit', 'completed', 'cancelled', 'cancelled_operational', 'rejected'].includes(order.status)) {
+    if (['in_transit', 'return_pending', 'completed', 'cancelled', 'cancelled_operational', 'rejected'].includes(order.status)) {
       throw new ConflictException(
         `Không thể thay đổi phân công nhân sự khi đơn đang ở trạng thái "${order.status}"`,
       );

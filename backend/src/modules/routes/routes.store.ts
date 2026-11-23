@@ -407,6 +407,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       departureAirportCode: r.departure_airport_code,
       arrivalAirportId: r.arrival_airport_id,
       arrivalAirportCode: r.arrival_airport_code,
+      direction: (r as any).direction ?? 'outbound',
       bookingReference: r.booking_reference,
       stallsBooked: Number(r.stalls_booked || 0),
       status: r.status,
@@ -425,8 +426,8 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           distance_km, duration_hours, planned_departure, planned_arrival,
           vehicle_id, airline_id, airline_name, flight_number,
           departure_airport_id, departure_airport_code, arrival_airport_id, arrival_airport_code,
-          booking_reference, stalls_booked, road_trip_id, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+          booking_reference, stalls_booked, road_trip_id, status, direction
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         [
           routeId,
           leg.sequenceNo,
@@ -448,6 +449,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           leg.bookingReference ?? null,
           leg.stallsBooked ?? 0,
           leg.roadTripId ?? null,
+          leg.direction ?? 'outbound',
         ],
       );
     }
@@ -588,8 +590,8 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
               distance_km, duration_hours, planned_departure, planned_arrival,
               vehicle_id, airline_id, airline_name, flight_number,
               departure_airport_id, departure_airport_code, arrival_airport_id, arrival_airport_code,
-              booking_reference, stalls_booked, road_trip_id, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+              booking_reference, stalls_booked, road_trip_id, status, direction
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
             [
               routeId,
               leg.sequenceNo,
@@ -611,6 +613,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
               leg.bookingReference ?? null,
               leg.stallsBooked ?? 0,
               leg.roadTripId ?? null,
+              leg.direction ?? 'outbound',
             ],
           );
         }
@@ -628,8 +631,8 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           );
           if (isPreserved) continue;
           await db.execute(
-            `INSERT INTO route_stop (route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO route_stop (route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status, direction)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               routeId,
               fallbackLegId,
@@ -640,6 +643,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
               s.plannedArrival ? new Date(s.plannedArrival) : null,
               s.plannedDeparture ? new Date(s.plannedDeparture) : null,
               RouteStopStatus.PENDING,
+              s.direction ?? 'outbound',
             ],
           );
         }
@@ -725,7 +729,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
 
   async findStopsByRouteId(routeId: number): Promise<RouteStopEntity[]> {
     const [rows] = await this.pool.execute<RouteStopRow[]>(
-      'SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status FROM route_stop WHERE route_id = ? ORDER BY sequence_no ASC',
+      'SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status, direction FROM route_stop WHERE route_id = ? ORDER BY sequence_no ASC',
       [routeId],
     );
     return rows.map((r) => this.mapRouteStopRow(r));
@@ -733,7 +737,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
 
   async findStopById(stopId: number): Promise<RouteStopEntity | undefined> {
     const [rows] = await this.pool.execute<RouteStopRow[]>(
-      'SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status FROM route_stop WHERE route_stop_id = ? LIMIT 1',
+      'SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status, direction FROM route_stop WHERE route_stop_id = ? LIMIT 1',
       [stopId],
     );
     const r = rows[0];
@@ -1426,6 +1430,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       routeId: r.route_id,
       legId: r.leg_id,
       sequenceNo: Number(r.sequence_no),
+      direction: (r as any).direction ?? 'outbound',
       stopType: r.stop_type,
       locationName: r.location_name,
       country: r.country,

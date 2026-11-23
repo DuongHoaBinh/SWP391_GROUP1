@@ -156,7 +156,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
         FROM route_leg rl
         JOIN route r ON r.route_id = rl.route_id
         JOIN shipment s ON s.shipment_id = r.shipment_id
-        WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit')
+        WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit', 'return_pending')
           AND rl.vehicle_id IS NOT NULL
           AND rl.status != 'completed'
           AND rl.actual_arrival IS NULL
@@ -168,7 +168,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
         JOIN shipment s ON s.shipment_id = sv.shipment_id
         LEFT JOIN route r ON r.shipment_id = s.shipment_id
         LEFT JOIN route_leg rl ON rl.route_id = r.route_id AND rl.vehicle_id = sv.vehicle_id
-        WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit')
+        WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit', 'return_pending')
           AND (rl.leg_id IS NULL OR (rl.status != 'completed' AND rl.actual_arrival IS NULL))
         GROUP BY sv.vehicle_id
       ) active_sv ON active_sv.vehicle_id = v.vehicle_id
@@ -368,7 +368,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
            JOIN route_leg ol ON ol.route_id = r.route_id
            WHERE sa.user_id = ?
              AND s.shipment_id <> ?
-             AND s.status IN ('planning', 'ready_to_depart', 'in_transit')
+             AND s.status IN ('planning', 'ready_to_depart', 'in_transit', 'return_pending')
              AND (sa.confirmation_notes IS NULL OR sa.confirmation_notes NOT LIKE 'TỪ CHỐI%')
              AND (
                sa.role_in_shipment <> 'driver'

@@ -19,7 +19,7 @@ interface RegulationRow extends RowDataPacket {
   regulation_id: number;
   country: string;
   border_gate?: string | null;
-  transport_mode?: 'road' | 'air' | 'both' | null;
+  transport_mode?: 'road' | 'air' | 'sea' | 'both' | null;
   doc_tier?: 'A' | 'B' | null;
   lead_time_days?: number | null;
   requires_authority_approval?: number | boolean | null;
@@ -292,7 +292,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     effectiveDate?: string | null,
     meta?: {
       borderGate?: string | null;
-      transportMode?: 'road' | 'air' | 'both';
+      transportMode?: 'road' | 'air' | 'sea' | 'both';
       docTier?: 'A' | 'B';
       leadTimeDays?: number;
       requiresAuthorityApproval?: boolean;
@@ -1004,7 +1004,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
               (SELECT COUNT(*) FROM notification n WHERE n.shipment_id = s.shipment_id AND n.user_id = s.customer_id AND (n.notif_type = 'document_missing' OR n.title LIKE '%hồ sơ kiểm dịch%')) as req_sent_count
        FROM shipment s
        JOIN \`user\` u ON u.user_id = s.customer_id
-       WHERE s.status IN ('approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed')
+       WHERE s.status IN ('approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed')
        ORDER BY s.shipment_id DESC`,
     );
 

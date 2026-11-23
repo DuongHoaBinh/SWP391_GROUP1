@@ -20,7 +20,8 @@ import {
   buildConsolidatedRoadItinerary,
   ConsolidatedRoadItinerary,
 } from '../../common/road-trip-sequencing';
-import { verifyUploadedFileMagicBytes } from '../../common/utils/upload-validation';
+import { assertSafeExternalOrUploadUrl, verifyUploadedFileMagicBytes } from '../../common/utils/upload-validation';
+import { canMarkNoShow } from '../orders/return-policy';
 import {
   DEFAULT_EQUINE_VITAL_CONFIG,
   EquineVitalConfig,
@@ -307,6 +308,11 @@ export class TrackingService {
       milestones,
       healthLogs,
       statusLogs,
+      tripType: shipment.trip_type || 'one_way',
+      returnStatus: shipment.return_status || null,
+      returnDepartureAt: shipment.return_departure_at ? new Date(shipment.return_departure_at).toISOString() : null,
+      returnWaitMinutes: shipment.return_wait_minutes ?? 120,
+      returnNoShow: Boolean(shipment.return_no_show),
       lastUpdated: new Date().toISOString(),
     };
   }
@@ -898,10 +904,11 @@ export class TrackingService {
     } else if (
       targetLeg.sequence_no > 1 &&
       shipment.status !== 'ready_to_depart' &&
-      shipment.status !== 'in_transit'
+      shipment.status !== 'in_transit' &&
+      shipment.status !== 'return_pending'
     ) {
       throw new ConflictException(
-        `Chuyến đi đang ở trạng thái "${shipment.status}". Chỉ chuyến "Ready to depart" hoặc "In transit" mới có thể xuất phát chặng #${targetLeg.sequence_no}.`,
+        `Chuyến đi đang ở trạng thái "${shipment.status}". Chỉ chuyến "Ready to depart", "In transit" hoặc "Return pending" mới có thể xuất phát chặng #${targetLeg.sequence_no}.`,
       );
     }
 
@@ -917,6 +924,33 @@ export class TrackingService {
 
     const { eventTime: now, isBackdated } = this.evaluateEventTimestamp(dto.actualTime, dto.notes);
     const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
+
+    // Step 5: Nếu xuất phát chặng về (direction: return)
+    const legDirection = (targetLeg as any).direction || 'outbound';
+    if (legDirection === 'return') {
+      if ((shipment as any).return_status === 'cancelled') {
+        throw new ConflictException('Chặng về đã bị hủy, không thể xuất phát');
+      }
+      if ((shipment as any).return_status === 'no_show') {
+        throw new ConflictException('Chặng về đã bị đánh dấu no-show, không thể xuất phát');
+      }
+      await this.trackingStore.updateShipmentStatus(shipmentId, 'in_transit');
+      await this.trackingStore.updateShipmentReturnStatus(shipmentId, 'in_progress');
+      await this.trackingStore.updateRoutePlanStatus(route.route_id, 'in_transit');
+      await this.trackingStore.recordTripStatusLog({
+        shipmentId,
+        routeId: route.route_id,
+        legId: targetLeg.leg_id,
+        previousStatus: 'return_pending',
+        newStatus: 'in_transit',
+        milestoneType: 'leg_departure',
+        milestoneName: `Bắt đầu khởi hành chặng về #${targetLeg.sequence_no}`,
+        notes: `Bắt đầu khởi hành chặng về #${targetLeg.sequence_no} (${targetLeg.origin_location} → ${targetLeg.destination_location})`,
+        updatedBy: Number(user.id),
+        updatedByRole: actorRole || String(user.role),
+        isBackdated,
+      });
+    }
 
     // Update leg status to 'active'
     await this.trackingStore.updateLegStatus(legId, 'active', now, null);
@@ -1208,11 +1242,43 @@ export class TrackingService {
       }
     }
 
-    // Check if this is the final leg of the entire trip
+    // Step 5: Round-trip status handling
+    const isRoundTrip = (shipment as any).trip_type === 'round_trip';
+    const outboundLegs = legs.filter((l) => ((l as any).direction || 'outbound') === 'outbound');
+    const isLastOutboundLeg = outboundLegs.length > 0 && targetLeg.sequence_no === Math.max(...outboundLegs.map((l) => l.sequence_no));
     const isFinalLeg = targetLeg.sequence_no === legs.length;
-    if (isFinalLeg && shipment.status !== 'completed') {
-      // Step 7: Chuyển sang 'completed' (hoặc 'arrived' / chờ bàn giao)
+    const customerDest = shipment.destination_location || targetLeg.destination_location;
+
+    if (isRoundTrip && isLastOutboundLeg && !isFinalLeg) {
+      // Chặng đi hoàn thành đối với đơn khứ hồi: chuyển sang return_pending, giữ ngựa in_transit
+      await this.trackingStore.updateShipmentStatus(shipmentId, 'return_pending');
+      await this.trackingStore.recordTripStatusLog({
+        shipmentId,
+        routeId: route.route_id,
+        legId: targetLeg.leg_id,
+        previousStatus: 'in_transit',
+        newStatus: 'return_pending',
+        milestoneType: 'leg_arrival',
+        milestoneName: `Hoàn tất chặng đi #${targetLeg.sequence_no}: Đến ${customerDest}`,
+        notes: 'Chặng đi hoàn tất an toàn. Đang chờ xuất phát chặng về (return_pending).',
+        updatedBy: Number(user.id),
+        updatedByRole: actorRole || String(user.role),
+        isBackdated,
+      });
+
+      await this.notificationsService.createNotification(
+        shipment.customer_id,
+        'Chặng đi đã hoàn tất an toàn!',
+        `Chuyến vận chuyển #${shipment.request_code} đã hoàn tất chặng đi tại ${customerDest}. Ngựa tiếp tục được lưu giữ chăm sóc chờ khởi hành chặng về.`,
+        'status_update',
+        shipmentId,
+      );
+    } else if (isFinalLeg && shipment.status !== 'completed') {
+      // Hoàn tất toàn bộ chuyến (đơn một chiều hoặc chặng cuối đơn khứ hồi)
       await this.trackingStore.updateShipmentStatus(shipmentId, 'completed');
+      if (isRoundTrip) {
+        await this.trackingStore.updateShipmentReturnStatus(shipmentId, 'completed');
+      }
       await this.trackingStore.updateRoutePlanStatus(route.route_id, 'completed');
 
       // Send auto notification to Customer
@@ -1558,13 +1624,13 @@ export class TrackingService {
       currentStaff?.role_in_shipment === 'escort' ||
       currentStaff?.specialization === 'escort' ||
       user.specialization === 'escort' ||
-      user.email.toLowerCase().includes('escort');
+      (user.email ? user.email.toLowerCase().includes('escort') : false);
 
     const isDriverStaff =
       currentStaff?.role_in_shipment === 'driver' ||
       currentStaff?.specialization === 'driver' ||
       user.specialization === 'driver' ||
-      user.email.toLowerCase().includes('driver');
+      (user.email ? user.email.toLowerCase().includes('driver') : false);
 
     const actorRoleName = isEscortStaff
       ? 'Bác sĩ thú y / Nhân viên áp tải'
@@ -1921,5 +1987,93 @@ export class TrackingService {
     } catch (err) {
       this.logger.error('Lỗi đồng bộ đến đích chuyến ghép', err as Error);
     }
+  }
+
+  // --- Step 5: Đánh dấu no-show chặng về ---
+  async markReturnNoShow(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    dto: { notes?: string; evidenceUrls?: string[] },
+  ) {
+    const shipment = await this.trackingStore.findShipmentById(shipmentId);
+    if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
+
+    await this.assertAssignedForDriverEscort(user, shipmentId);
+
+    if ((shipment as any).trip_type !== 'round_trip') {
+      throw new BadRequestException('Chỉ có thể đánh dấu no-show cho chuyến khứ hồi');
+    }
+
+    if ((shipment as any).return_status === 'no_show' || (shipment as any).return_status === 'completed') {
+      throw new ConflictException('Chặng về đã kết thúc trước đó');
+    }
+
+    if (!shipment.return_departure_at) {
+      throw new BadRequestException('Chuyến đi chưa có thời điểm khởi hành chặng về');
+    }
+
+    const { allowed, allowedAt } = canMarkNoShow({
+      returnDepartureAt: new Date(shipment.return_departure_at),
+      waitMinutes: Number(shipment.return_wait_minutes ?? 120),
+      now: new Date(Date.now()),
+    });
+
+    if (!allowed) {
+      throw new ConflictException({
+        message: `Chưa đến thời điểm được phép đánh dấu no-show (cần chờ tối thiểu ${shipment.return_wait_minutes ?? 120} phút sau giờ đón). Sớm nhất lúc: ${allowedAt.toISOString()}`,
+        allowedAt: allowedAt.toISOString(),
+      });
+    }
+
+    for (const url of dto.evidenceUrls || []) {
+      assertSafeExternalOrUploadUrl(url);
+    }
+
+    await this.trackingStore.markReturnNoShow({
+      shipmentId,
+      actorId: Number(user.id),
+      notes: dto.notes,
+      evidenceUrls: dto.evidenceUrls,
+    });
+
+    const actor = await this.resolveStaffActor(shipmentId, user);
+    const logNotes = dto.notes ? `Khách không giao ngựa chặng về (no-show): ${dto.notes}` : 'Khách không giao ngựa chặng về (no-show)';
+    const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
+    const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
+    await this.trackingStore.recordTripStatusLog({
+      shipmentId,
+      routeId: route?.route_id || 0,
+      previousStatus: String(shipment.status),
+      newStatus: 'completed',
+      milestoneType: 'no_show',
+      milestoneName: 'No-show chặng về',
+      notes: logNotes,
+      updatedBy: Number(user.id),
+      updatedByRole: actorRole || String(user.role),
+    });
+
+    const code = shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`;
+    await this.notificationsService.createNotification(
+      shipment.customer_id,
+      `Đơn khứ hồi ${code} - Ghi nhận No-show chặng về`,
+      `Tài xế đã chờ quá thời gian quy định tại điểm đón chặng về nhưng không nhận được ngựa. Chuyến đi đã được đóng lại theo chính sách no-show (không hoàn cước chặng về).`,
+      'status_update',
+      shipmentId,
+    );
+
+    await this.notificationsService.notifyRole(
+      'Logistics Manager',
+      `Đơn ${code} - Tài xế đánh dấu no-show chặng về`,
+      `${actor.displayName} đã ghi nhận khách không giao ngựa tại điểm đón chặng về đơn ${code}. Chuyến đi đã hoàn tất.`,
+      'status_update',
+      shipmentId,
+    );
+
+    return {
+      success: true,
+      returnStatus: 'no_show',
+      shipmentStatus: 'completed',
+      returnNoShow: true,
+    };
   }
 }

@@ -85,7 +85,7 @@ export class HandoverService {
       if (!target) {
         throw new NotFoundException(`Không tìm thấy cá thể ngựa #${dto.shipmentHorseId} trong đơn #${shipmentId}`);
       }
-      if (!['in_transit', 'completed'].includes(target.shipmentStatus)) {
+      if (!['in_transit', 'return_pending', 'completed'].includes(target.shipmentStatus)) {
         throw new ConflictException(
           `Chuyến đi đang ở trạng thái "${target.shipmentStatus}". Chỉ tạo biên bản bàn giao khi đang vận chuyển hoặc đã đến đích.`,
         );

@@ -6,11 +6,12 @@ import { OrdersModule } from '../orders/orders.module';
 import { FleetModule } from '../fleet/fleet.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { DistanceModule } from './distance.module';
 
 @Module({
-  imports: [OrdersModule, FleetModule, NotificationsModule, DocumentsModule],
+  imports: [OrdersModule, FleetModule, NotificationsModule, DocumentsModule, DistanceModule],
   controllers: [RoutesController],
   providers: [RoutesService, RoutesStore],
-  exports: [RoutesService, RoutesStore],
+  exports: [RoutesService, RoutesStore, DistanceModule],
 })
 export class RoutesModule {}

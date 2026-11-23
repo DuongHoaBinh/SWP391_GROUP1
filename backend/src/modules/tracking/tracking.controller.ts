@@ -98,6 +98,17 @@ export class TrackingController {
     return this.trackingService.coordinatorOverrideMilestone(user, shipmentId, dto);
   }
 
+  @Post('shipments/:shipmentId/return/no-show')
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Tài xế đánh dấu no-show khi chờ quá thời gian tối đa ở điểm đón chặng về' })
+  async markReturnNoShow(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('shipmentId', ParseIntPipe) shipmentId: number,
+    @Body() dto: { notes?: string; evidenceUrls?: string[] },
+  ) {
+    return this.trackingService.markReturnNoShow(user, shipmentId, dto);
+  }
+
   @Get('vital-config')
   @ApiOperation({ summary: 'Lấy cấu hình ngưỡng sinh hiệu thú y 3 tầng (Xanh/Vàng/Đỏ) & cửa sổ 6h' })
   getVitalConfig() {

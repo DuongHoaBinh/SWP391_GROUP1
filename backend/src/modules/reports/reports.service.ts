@@ -81,7 +81,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
               COALESCE(SUM(insurance_fee), 0) AS quoted_insurance_revenue,
               COALESCE(SUM(total_cost), 0) AS quoted_active_revenue
        FROM shipment
-       WHERE status IN ('ready_to_depart', 'in_transit', 'completed')`,
+       WHERE status IN ('ready_to_depart', 'in_transit', 'return_pending', 'completed')`,
     );
     const completedTrips = Number(quotedRows[0]?.completed_trips || 0);
     const quotedTransportRevenue = Number(quotedRows[0]?.quoted_transport_revenue || 0);
@@ -157,7 +157,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       `SELECT COALESCE(SUM(COALESCE(sh.quantity, 1)), 0) AS total_horses
        FROM shipment_horse sh
        JOIN shipment s ON sh.shipment_id = s.shipment_id
-       WHERE s.status IN ('completed', 'in_transit', 'ready_to_depart')`,
+       WHERE s.status IN ('completed', 'in_transit', 'return_pending', 'ready_to_depart')`,
     );
     const totalHorses = Number(horseRows[0]?.total_horses || 0);
 
@@ -232,6 +232,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const statusMap: Record<string, { label: string; color: string }> = {
       completed: { label: 'Đã hoàn thành', color: '#16a34a' },
       in_transit: { label: 'Đang di chuyển', color: '#2563eb' },
+      return_pending: { label: 'Chờ chặng về', color: '#a855f7' },
       ready_to_depart: { label: 'Sẵn sàng xuất phát', color: '#0d9488' },
       confirmed: { label: 'Đã xác nhận (Chờ thanh toán)', color: '#0284c7' },
       planning: { label: 'Đang lập lộ trình', color: '#8b5cf6' },
@@ -253,7 +254,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
 
     const activeShipments = statusRows
       .filter((r: any) =>
-        ['in_transit', 'ready_to_depart', 'confirmed', 'planning', 'approved'].includes(String(r.status).toLowerCase()),
+        ['in_transit', 'return_pending', 'ready_to_depart', 'confirmed', 'planning', 'approved'].includes(String(r.status).toLowerCase()),
       )
       .reduce((acc: number, r: any) => acc + Number(r.count || 0), 0);
 

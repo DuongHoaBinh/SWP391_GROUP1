@@ -406,7 +406,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
                 r.route_id, r.route_name, r.plan_status as route_plan_status, r.total_distance_km
          FROM shipment s
          LEFT JOIN route r ON r.shipment_id = s.shipment_id
-         WHERE s.status IN ('ready_to_depart', 'in_transit', 'arrived', 'completed')
+         WHERE s.status IN ('ready_to_depart', 'in_transit', 'return_pending', 'arrived', 'completed')
          ORDER BY s.shipment_id DESC`,
       );
       return rows;
@@ -442,7 +442,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
          FROM shipment s
          LEFT JOIN route r ON r.shipment_id = s.shipment_id
          WHERE (s.customer_id = ? OR s.requested_by = ?)
-           AND s.status IN ('ready_to_depart', 'in_transit', 'arrived', 'completed')
+           AND s.status IN ('ready_to_depart', 'in_transit', 'return_pending', 'arrived', 'completed')
          ORDER BY s.shipment_id DESC`,
         [userId, userId],
       );
@@ -473,7 +473,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
        JOIN shipment s ON sa.shipment_id = s.shipment_id
        LEFT JOIN route r ON r.shipment_id = s.shipment_id
        WHERE sa.user_id = ?
-         AND s.status IN ('confirmed', 'ready_to_depart', 'in_transit', 'arrived', 'completed')
+         AND s.status IN ('confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'arrived', 'completed')
        ORDER BY s.shipment_id DESC`,
       [userId],
     );
@@ -543,7 +543,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
        JOIN shipment s ON s.shipment_id = r.shipment_id
        WHERE rl.road_trip_id = ?
          AND rl.leg_id <> ?
-         AND s.status IN ('ready_to_depart', 'in_transit')
+         AND s.status IN ('ready_to_depart', 'in_transit', 'return_pending')
        ORDER BY rl.leg_id ASC`,
       [roadTripId, excludeLegId],
     );
@@ -657,6 +657,69 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       'UPDATE shipment SET status = ? WHERE shipment_id = ?',
       [status, shipmentId],
     );
+  }
+
+  async updateShipmentReturnStatus(shipmentId: number, returnStatus: string): Promise<void> {
+    await this.pool.execute(
+      'UPDATE shipment SET return_status = ? WHERE shipment_id = ?',
+      [returnStatus, shipmentId],
+    );
+  }
+
+  async markReturnNoShow(data: {
+    shipmentId: number;
+    actorId: number;
+    notes?: string;
+    evidenceUrls?: string[];
+  }): Promise<void> {
+    // 1. Update shipment: return_status = 'no_show', return_no_show = true, status = 'completed'
+    await this.pool.execute(
+      `UPDATE shipment
+       SET return_status = 'no_show',
+           return_no_show = TRUE,
+           status = 'completed',
+           actual_arrival_date = NOW()
+       WHERE shipment_id = ?`,
+      [data.shipmentId],
+    );
+
+    // 2. Release horses to active
+    await this.pool.execute(
+      `UPDATE horse
+       SET status = 'active'
+       WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+         AND status NOT IN ('retired', 'deceased')`,
+      [data.shipmentId],
+    );
+
+    // 3. Release vehicles
+    await this.pool.execute(
+      `UPDATE vehicle v
+       SET v.status = 'available'
+       WHERE v.vehicle_id IN (
+         SELECT rl.vehicle_id
+         FROM route_leg rl
+         JOIN route r ON rl.route_id = r.route_id
+         WHERE r.shipment_id = ? AND rl.vehicle_id IS NOT NULL
+       )`,
+      [data.shipmentId],
+    );
+
+    // 4. Update route to completed
+    await this.pool.execute(
+      "UPDATE route SET status = 'completed', plan_status = 'completed' WHERE shipment_id = ?",
+      [data.shipmentId],
+    );
+
+    // 5. If evidenceUrls provided, save attachments
+    if (data.evidenceUrls && data.evidenceUrls.length > 0) {
+      for (const url of data.evidenceUrls) {
+        await this.pool.execute(
+          "INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'image', ?)",
+          [data.shipmentId, url, data.actorId],
+        );
+      }
+    }
   }
 
   async updateRoutePlanStatus(routeId: number, planStatus: string): Promise<void> {
