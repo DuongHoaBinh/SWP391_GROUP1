@@ -65,6 +65,7 @@ CREATE TABLE horse (
   owner_id INT NOT NULL,
   name VARCHAR(100) NOT NULL,
   breed VARCHAR(100),
+  -- gender, date_of_birth: ngừng dùng sau review 11/2026 (giữ cột cho dữ liệu cũ)
   gender ENUM('male','female','gelding'),
   date_of_birth DATE,
   age INT,
@@ -75,6 +76,8 @@ CREATE TABLE horse (
   weight VARCHAR(100),
   medical_status VARCHAR(255),
   special_requirements TEXT,
+  requires_private_stall BOOLEAN NOT NULL DEFAULT FALSE,
+  temperament ENUM('calm','normal','difficult') NOT NULL DEFAULT 'normal',
   status ENUM('active','in_transit','retired','deceased') NOT NULL DEFAULT 'active',
   quantity INT NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -96,10 +99,34 @@ CREATE TABLE regulation (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+CREATE TABLE document_type (
+  code VARCHAR(50) PRIMARY KEY,
+  name_vi VARCHAR(150) NOT NULL,
+  name_en VARCHAR(150) NOT NULL,
+  default_validity_days INT NULL,
+  is_identity BOOLEAN NOT NULL DEFAULT FALSE,
+  sort_order INT NOT NULL DEFAULT 0
+) ENGINE=InnoDB;
+
+INSERT INTO document_type (code, name_vi, name_en, default_validity_days, is_identity, sort_order) VALUES
+  ('horse_passport', 'Hộ chiếu ngựa', 'Horse passport', NULL, TRUE, 10),
+  ('microchip_certificate', 'Giấy chứng nhận vi mạch', 'Microchip certificate', NULL, TRUE, 20),
+  ('ownership_certificate', 'Giấy chứng nhận quyền sở hữu', 'Ownership certificate', NULL, TRUE, 30),
+  ('vaccination_influenza', 'Tiêm phòng cúm ngựa', 'Equine influenza vaccination', 180, FALSE, 40),
+  ('vaccination_certificate', 'Sổ tiêm phòng tổng hợp', 'Vaccination record', 365, FALSE, 45),
+  ('vaccination_tetanus', 'Tiêm phòng uốn ván', 'Tetanus vaccination', 365, FALSE, 50),
+  ('eia_coggins_test', 'Xét nghiệm EIA (Coggins)', 'EIA (Coggins) test', 180, FALSE, 60),
+  ('health_certificate', 'Giấy chứng nhận sức khỏe', 'Health certificate', 10, FALSE, 70),
+  ('export_quarantine_certificate', 'Giấy chứng nhận kiểm dịch xuất khẩu', 'Export quarantine certificate', 10, FALSE, 80),
+  ('quarantine_certificate', 'Giấy chứng nhận kiểm dịch', 'Quarantine certificate', 10, FALSE, 85),
+  ('import_permit', 'Giấy phép nhập khẩu', 'Import permit', 30, FALSE, 90),
+  ('customs_declaration', 'Tờ khai hải quan', 'Customs declaration', 30, FALSE, 95);
+
 CREATE TABLE transport_document (
   document_id INT AUTO_INCREMENT PRIMARY KEY,
   horse_id INT NOT NULL,
-  regulation_id INT NOT NULL,
+  regulation_id INT NULL,
+  document_type_code VARCHAR(50) NULL,
   uploaded_by INT NOT NULL,
   doc_type VARCHAR(100) NOT NULL,
   doc_number VARCHAR(100),
@@ -113,6 +140,7 @@ CREATE TABLE transport_document (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_doc_horse FOREIGN KEY (horse_id) REFERENCES horse(horse_id),
   CONSTRAINT fk_doc_regulation FOREIGN KEY (regulation_id) REFERENCES regulation(regulation_id),
+  CONSTRAINT fk_doc_document_type FOREIGN KEY (document_type_code) REFERENCES document_type(code),
   CONSTRAINT fk_doc_uploader FOREIGN KEY (uploaded_by) REFERENCES `user`(user_id)
 ) ENGINE=InnoDB;
 

@@ -105,6 +105,13 @@ export class DocumentsController {
     return this.documentsService.updateRegulation(user, id, dto);
   }
 
+  // --- Danh mục loại giấy tờ (khai báo trước ':id' để không bị ParseIntPipe bắt) ---
+  @Get('types')
+  @ApiOperation({ summary: 'Danh mục loại giấy tờ của ngựa (hộ chiếu, tiêm phòng, xét nghiệm...)' })
+  getDocumentTypes() {
+    return this.documentsService.getDocumentTypes();
+  }
+
   // --- Documents Upload & Viewing ---
   @Post('upload')
   @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)

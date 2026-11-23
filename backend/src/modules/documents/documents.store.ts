@@ -5,11 +5,11 @@ import {
   DocumentApproval,
   DocumentStatus,
   Regulation,
+  DocumentTypeDefinition,
   TransportDocument,
 } from './documents.types';
 import { CreateRegulationDto } from './dto/create-regulation.dto';
 import { UpdateRegulationDto } from './dto/update-regulation.dto';
-import { UploadDocumentDto } from './dto/upload-document.dto';
 import { RecordAuthorityApprovalDto } from './dto/record-authority-approval.dto';
 import { MYSQL_POOL } from '../../common/database/database.module';
 
@@ -33,7 +33,10 @@ interface RegulationRow extends RowDataPacket {
 interface DocumentRow extends RowDataPacket {
   document_id: number;
   horse_id: number;
-  regulation_id: number;
+  regulation_id: number | null;
+  document_type_code?: string | null;
+  document_type_name_vi?: string | null;
+  document_type_name_en?: string | null;
   uploaded_by: number;
   doc_type: string;
   doc_number: string | null;
@@ -55,6 +58,27 @@ interface DocumentRow extends RowDataPacket {
   request_code?: string;
   customer_request_code?: string;
   shipment_id?: number;
+}
+
+interface DocumentTypeRow extends RowDataPacket {
+  code: string;
+  name_vi: string;
+  name_en: string;
+  default_validity_days: number | null;
+  is_identity: number | boolean;
+  sort_order: number;
+}
+
+/** Dữ liệu tạo giấy tờ: từ luồng đơn hàng (có regulationId) hoặc kho giấy tờ của ngựa (regulationId = null). */
+export interface CreateDocumentInput {
+  horseId: number;
+  regulationId?: number | null;
+  docType: string;
+  documentTypeCode?: string | null;
+  docNumber?: string | null;
+  fileUrl?: string;
+  issueDate?: string | null;
+  expiryDate?: string | null;
 }
 
 interface ApprovalRow extends RowDataPacket {
@@ -454,17 +478,19 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
   }
 
   // --- Transport Documents ---
-  async createDocument(uploadedBy: number, dto: UploadDocumentDto): Promise<number> {
+  async createDocument(uploadedBy: number, dto: CreateDocumentInput): Promise<number> {
     const issueDate = this.toMysqlDateParam(dto.issueDate);
     const expiryDate = this.toMysqlDateParam(dto.expiryDate);
 
+    // document_type_code: chỉ gắn khi mã có trong danh mục (doc_type cũ dạng tự do vẫn hợp lệ)
     const [result] = await this.pool.execute(
       `INSERT INTO transport_document (
-        horse_id, regulation_id, uploaded_by, doc_type, doc_number, file_url, issue_date, expiry_date, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'submitted')`,
+        horse_id, regulation_id, document_type_code, uploaded_by, doc_type, doc_number, file_url, issue_date, expiry_date, status
+      ) VALUES (?, ?, (SELECT code FROM document_type WHERE code = ?), ?, ?, ?, ?, ?, ?, 'submitted')`,
       [
         dto.horseId,
-        dto.regulationId,
+        dto.regulationId ?? null,
+        dto.documentTypeCode ?? dto.docType,
         uploadedBy,
         dto.docType,
         dto.docNumber ?? null,
@@ -478,11 +504,12 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
 
   async findDocumentById(id: number): Promise<TransportDocument | undefined> {
     const [rows] = await this.pool.execute<DocumentRow[]>(
-      `SELECT d.*, h.name as horse_name, h.owner_id as horse_owner_id, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
+      `SELECT d.*, dt.name_vi as document_type_name_vi, dt.name_en as document_type_name_en, h.name as horse_name, h.owner_id as horse_owner_id, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
         (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id
        FROM transport_document d
        JOIN horse h ON h.horse_id = d.horse_id
-       JOIN regulation r ON r.regulation_id = d.regulation_id
+       LEFT JOIN regulation r ON r.regulation_id = d.regulation_id
+       LEFT JOIN document_type dt ON dt.code = d.document_type_code
        JOIN \`user\` u ON u.user_id = d.uploaded_by
        WHERE d.document_id = ?
        LIMIT 1`,
@@ -507,6 +534,9 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       uploaderName: r.uploader_name,
       uploaderEmail: r.uploader_email,
       docType: r.doc_type,
+      documentTypeCode: r.document_type_code ?? null,
+      documentTypeNameVi: r.document_type_name_vi ?? null,
+      documentTypeNameEn: r.document_type_name_en ?? null,
       docNumber: r.doc_number,
       fileUrl: r.file_url,
       issueDate: this.formatMysqlDateOnly(r.issue_date),
@@ -522,11 +552,12 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
 
   async findDocumentsByHorseId(horseId: number): Promise<TransportDocument[]> {
     const [rows] = await this.pool.execute<DocumentRow[]>(
-      `SELECT d.*, h.name as horse_name, h.owner_id as horse_owner_id, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
+      `SELECT d.*, dt.name_vi as document_type_name_vi, dt.name_en as document_type_name_en, h.name as horse_name, h.owner_id as horse_owner_id, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
         (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id
        FROM transport_document d
        JOIN horse h ON h.horse_id = d.horse_id
-       JOIN regulation r ON r.regulation_id = d.regulation_id
+       LEFT JOIN regulation r ON r.regulation_id = d.regulation_id
+       LEFT JOIN document_type dt ON dt.code = d.document_type_code
        JOIN \`user\` u ON u.user_id = d.uploaded_by
        WHERE d.horse_id = ?
          AND COALESCE(d.is_archived, 0) = 0
@@ -549,6 +580,9 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
         uploaderName: r.uploader_name,
         uploaderEmail: r.uploader_email,
         docType: r.doc_type,
+        documentTypeCode: r.document_type_code ?? null,
+        documentTypeNameVi: r.document_type_name_vi ?? null,
+        documentTypeNameEn: r.document_type_name_en ?? null,
         docNumber: r.doc_number,
         fileUrl: r.file_url,
         issueDate: this.formatMysqlDateOnly(r.issue_date),
@@ -570,7 +604,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     horseId?: number;
   }): Promise<TransportDocument[]> {
     let query = `
-      SELECT d.*, h.name as horse_name, h.owner_id as horse_owner_id, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
+      SELECT d.*, dt.name_vi as document_type_name_vi, dt.name_en as document_type_name_en, h.name as horse_name, h.owner_id as horse_owner_id, r.country, r.description as regulation_title, r.document_type as regulation_doc_type, u.full_name as uploader_name, u.email as uploader_email,
         (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1) as shipment_id,
         (SELECT CONCAT('REQ-', LPAD(
           (SELECT COUNT(*) FROM shipment sub WHERE sub.customer_id = s.customer_id AND sub.shipment_id <= s.shipment_id),
@@ -578,7 +612,8 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
         )) FROM shipment s WHERE s.shipment_id = (SELECT sh.shipment_id FROM shipment_horse sh WHERE sh.horse_id = d.horse_id ORDER BY sh.shipment_id DESC LIMIT 1)) as customer_request_code
       FROM transport_document d
       JOIN horse h ON h.horse_id = d.horse_id
-      JOIN regulation r ON r.regulation_id = d.regulation_id
+      LEFT JOIN regulation r ON r.regulation_id = d.regulation_id
+       LEFT JOIN document_type dt ON dt.code = d.document_type_code
       JOIN \`user\` u ON u.user_id = d.uploaded_by
     `;
     const conditions: string[] = ['COALESCE(d.is_archived, 0) = 0'];
@@ -627,6 +662,9 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
         uploaderName: r.uploader_name,
         uploaderEmail: r.uploader_email,
         docType: r.doc_type,
+        documentTypeCode: r.document_type_code ?? null,
+        documentTypeNameVi: r.document_type_name_vi ?? null,
+        documentTypeNameEn: r.document_type_name_en ?? null,
         docNumber: r.doc_number,
         fileUrl: r.file_url,
         issueDate: this.formatMysqlDateOnly(r.issue_date),
@@ -689,7 +727,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     try {
       await db.beginTransaction();
       const [rows] = await db.execute<RowDataPacket[]>(
-        `SELECT horse_id, regulation_id, doc_type, doc_number, issue_date, expiry_date
+        `SELECT horse_id, regulation_id, document_type_code, doc_type, doc_number, issue_date, expiry_date
          FROM transport_document
          WHERE document_id = ?
          FOR UPDATE`,
@@ -702,12 +740,13 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
 
       const [insertRes] = await db.execute(
         `INSERT INTO transport_document (
-          horse_id, regulation_id, uploaded_by, doc_type, doc_number, file_url,
+          horse_id, regulation_id, document_type_code, uploaded_by, doc_type, doc_number, file_url,
           issue_date, expiry_date, status, reviewer_notes, is_archived, superseded_by_document_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, FALSE, NULL)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, FALSE, NULL)`,
         [
           oldDoc.horse_id,
-          oldDoc.regulation_id,
+          oldDoc.regulation_id ?? null,
+          oldDoc.document_type_code ?? null,
           uploadedBy,
           oldDoc.doc_type,
           docNumber && docNumber.trim().length > 0 ? docNumber.trim() : oldDoc.doc_number,
@@ -735,6 +774,104 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     } finally {
       db.release();
     }
+  }
+
+  // --- Kho giấy tờ của ngựa (Step 2, review 11/2026) ---
+  async findDocumentTypes(): Promise<DocumentTypeDefinition[]> {
+    const [rows] = await this.pool.execute<DocumentTypeRow[]>(
+      'SELECT code, name_vi, name_en, default_validity_days, is_identity, sort_order FROM document_type ORDER BY sort_order, code',
+    );
+    return rows.map((r) => this.mapDocumentTypeRow(r));
+  }
+
+  async findDocumentTypeByCode(code: string): Promise<DocumentTypeDefinition | undefined> {
+    const [rows] = await this.pool.execute<DocumentTypeRow[]>(
+      'SELECT code, name_vi, name_en, default_validity_days, is_identity, sort_order FROM document_type WHERE code = ? LIMIT 1',
+      [code],
+    );
+    return rows[0] ? this.mapDocumentTypeRow(rows[0]) : undefined;
+  }
+
+  async findHorseOwnerId(horseId: number): Promise<number | undefined> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT owner_id FROM horse WHERE horse_id = ? LIMIT 1',
+      [horseId],
+    );
+    return rows[0] ? Number(rows[0].owner_id) : undefined;
+  }
+
+  /**
+   * Tạo giấy tờ chung của ngựa (regulation_id = NULL). Append-only: bản đang hiệu lực cùng loại
+   * của cùng ngựa bị lưu trữ (is_archived) và trỏ superseded_by_document_id sang bản mới.
+   */
+  async createHorseDocument(uploadedBy: number, input: CreateDocumentInput & { documentTypeCode: string }): Promise<number> {
+    const db = await this.pool.getConnection();
+    try {
+      await db.beginTransaction();
+      const [previousRows] = await db.execute<RowDataPacket[]>(
+        `SELECT document_id FROM transport_document
+         WHERE horse_id = ? AND document_type_code = ? AND regulation_id IS NULL
+           AND COALESCE(is_archived, 0) = 0
+         FOR UPDATE`,
+        [input.horseId, input.documentTypeCode],
+      );
+      const [insertRes] = await db.execute(
+        `INSERT INTO transport_document (
+          horse_id, regulation_id, document_type_code, uploaded_by, doc_type, doc_number, file_url, issue_date, expiry_date, status
+        ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 'submitted')`,
+        [
+          input.horseId,
+          input.documentTypeCode,
+          uploadedBy,
+          input.docType,
+          input.docNumber ?? null,
+          input.fileUrl ?? '',
+          this.toMysqlDateParam(input.issueDate),
+          this.toMysqlDateParam(input.expiryDate),
+        ],
+      );
+      const newId = (insertRes as { insertId: number }).insertId;
+      for (const row of previousRows) {
+        await db.execute(
+          'UPDATE transport_document SET is_archived = TRUE, superseded_by_document_id = ? WHERE document_id = ?',
+          [newId, row.document_id],
+        );
+      }
+      await db.commit();
+      return newId;
+    } catch (error) {
+      await db.rollback();
+      throw error;
+    } finally {
+      db.release();
+    }
+  }
+
+  /** Lịch sử phiên bản (gồm bản đã lưu trữ) của cùng loại giấy tờ trên một ngựa, mới nhất trước. */
+  async findDocumentHistory(horseId: number, documentTypeCode: string | null, docType: string): Promise<TransportDocument[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      documentTypeCode
+        ? `SELECT document_id FROM transport_document
+           WHERE horse_id = ? AND document_type_code = ?
+           ORDER BY created_at DESC, document_id DESC`
+        : `SELECT document_id FROM transport_document
+           WHERE horse_id = ? AND document_type_code IS NULL AND doc_type = ?
+           ORDER BY created_at DESC, document_id DESC`,
+      [horseId, documentTypeCode ?? docType],
+    );
+    const docs = await Promise.all(rows.map((r) => this.findDocumentById(Number(r.document_id))));
+    return docs.filter((d): d is TransportDocument => Boolean(d));
+  }
+
+  private mapDocumentTypeRow(r: DocumentTypeRow): DocumentTypeDefinition {
+    return {
+      code: r.code,
+      nameVi: r.name_vi,
+      nameEn: r.name_en,
+      defaultValidityDays: r.default_validity_days !== null ? Number(r.default_validity_days) : null,
+      isIdentity: Boolean(r.is_identity),
+      sortOrder: Number(r.sort_order ?? 0),
+    };
   }
 
   // --- Authority Approvals ---

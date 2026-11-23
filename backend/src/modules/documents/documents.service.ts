@@ -28,7 +28,14 @@ import {
   Regulation,
   RegulationTemplatePreset,
   TransportDocument,
+  DocumentTypeDefinition,
 } from './documents.types';
+import { UploadHorseDocumentDto } from './dto/upload-horse-document.dto';
+import {
+  computeDefaultExpiryDate,
+  computeDocumentValidity,
+  isExpiryBeforeIssue,
+} from './document-validity.policy';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -674,8 +681,10 @@ export class DocumentsService {
 
     for (const h of horsesInOrder) {
       const rawDocs = await this.documentsStore.findDocumentsByHorseId(h.horse_id);
+      // Giấy tờ chung của ngựa (regulationId = null) chưa được đối chiếu ở đây; Step 8 sẽ dùng lại theo document_type_code.
       const applicableRawDocs = rawDocs.filter(
-        (d) => !d.isArchived && applicableRegMap.has(d.regulationId),
+        (d): d is TransportDocument & { regulationId: number } =>
+          !d.isArchived && d.regulationId !== null && applicableRegMap.has(d.regulationId),
       );
       const evalDocs = applicableRawDocs.map((d) => {
         const reg = applicableRegMap.get(d.regulationId);
@@ -883,7 +892,7 @@ export class DocumentsService {
     }
 
     if (dto.status === DocumentStatus.APPROVED && dto.expiryDate) {
-      const reg = typeof this.documentsStore.findRegulationById === 'function'
+      const reg = doc.regulationId !== null && typeof this.documentsStore.findRegulationById === 'function'
         ? await this.documentsStore.findRegulationById(doc.regulationId)
         : undefined;
       const activeShipmentIds = await this.documentsStore.findActiveShipmentIdsByHorseId(doc.horseId);
@@ -1138,5 +1147,125 @@ export class DocumentsService {
     }
     await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
     return { success: true, message: `Tài liệu #${documentId} đã được lưu trữ thành công` };
+  }
+  // --- Kho giấy tờ của ngựa (Step 2, review 11/2026) ---
+  // Giấy tờ thuộc về con ngựa và dùng lại cho nhiều đơn; quyền truy cập kiểm tra theo chủ sở hữu ngựa.
+
+  async getDocumentTypes(): Promise<DocumentTypeDefinition[]> {
+    return this.documentsStore.findDocumentTypes();
+  }
+
+  private async assertHorseDocumentAccess(user: AuthenticatedUser, horseId: number): Promise<void> {
+    const ownerId = await this.documentsStore.findHorseOwnerId(horseId);
+    if (ownerId === undefined) {
+      throw new NotFoundException(`Ngựa #${horseId} không tồn tại`);
+    }
+    const isStaff = user.role === UserRole.LOGISTICS_MANAGER || user.role === UserRole.ADMIN;
+    if (!isStaff && ownerId !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ có thể truy cập giấy tờ của ngựa thuộc tài khoản của mình');
+    }
+  }
+
+  private withValidity(doc: TransportDocument): TransportDocument {
+    return { ...doc, ...computeDocumentValidity(doc.expiryDate) };
+  }
+
+  async listHorseDocuments(user: AuthenticatedUser, horseId: number): Promise<TransportDocument[]> {
+    await this.assertHorseDocumentAccess(user, horseId);
+    const docs = await this.documentsStore.findDocumentsByHorseId(horseId);
+    return docs.map((d) => this.withValidity(d));
+  }
+
+  async uploadHorseDocument(
+    user: AuthenticatedUser,
+    horseId: number,
+    dto: UploadHorseDocumentDto,
+    file?: Express.Multer.File,
+  ): Promise<TransportDocument> {
+    const discardFile = () => {
+      if (file?.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
+    };
+    try {
+      if (file) {
+        verifyUploadedFileMagicBytes(file, 'document');
+      }
+      await this.assertHorseDocumentAccess(user, horseId);
+
+      const docType = await this.documentsStore.findDocumentTypeByCode(dto.documentTypeCode);
+      if (!docType) {
+        throw new BadRequestException(`Loại giấy tờ "${dto.documentTypeCode}" không có trong danh mục`);
+      }
+
+      const expiryDate = dto.expiryDate ?? computeDefaultExpiryDate(dto.issueDate, docType.defaultValidityDays);
+      if (isExpiryBeforeIssue(dto.issueDate, expiryDate)) {
+        throw new BadRequestException('Ngày hết hạn không được trước ngày cấp');
+      }
+
+      let fileUrl = dto.fileUrl;
+      if (file) {
+        fileUrl = `/uploads/documents/${file.filename}`;
+      } else {
+        assertSafeExternalOrUploadUrl(dto.fileUrl);
+      }
+      if (!fileUrl || fileUrl.trim().length === 0) {
+        throw new BadRequestException('Vui lòng chọn file từ máy tính hoặc cung cấp fileUrl');
+      }
+
+      const documentId = await this.documentsStore.createHorseDocument(Number(user.id), {
+        horseId,
+        documentTypeCode: docType.code,
+        docType: docType.code,
+        docNumber: dto.docNumber?.trim() || null,
+        fileUrl,
+        issueDate: dto.issueDate ?? null,
+        expiryDate,
+      });
+      const created = await this.documentsStore.findDocumentById(documentId);
+      if (!created) {
+        throw new NotFoundException('Không tìm thấy giấy tờ sau khi tạo');
+      }
+      return this.withValidity(created);
+    } catch (error) {
+      discardFile();
+      throw error;
+    }
+  }
+
+  private async findHorseDocumentOrThrow(
+    user: AuthenticatedUser,
+    horseId: number,
+    documentId: number,
+  ): Promise<TransportDocument> {
+    await this.assertHorseDocumentAccess(user, horseId);
+    const doc = await this.documentsStore.findDocumentById(documentId);
+    if (!doc || doc.horseId !== horseId) {
+      throw new NotFoundException(`Giấy tờ #${documentId} không thuộc ngựa #${horseId}`);
+    }
+    return doc;
+  }
+
+  async getHorseDocumentHistory(
+    user: AuthenticatedUser,
+    horseId: number,
+    documentId: number,
+  ): Promise<TransportDocument[]> {
+    const doc = await this.findHorseDocumentOrThrow(user, horseId, documentId);
+    const history = await this.documentsStore.findDocumentHistory(
+      horseId,
+      doc.documentTypeCode ?? null,
+      doc.docType,
+    );
+    return history.map((d) => this.withValidity(d));
+  }
+
+  async getHorseDocumentFilePath(
+    user: AuthenticatedUser,
+    horseId: number,
+    documentId: number,
+  ): Promise<{ absolutePath: string; fileName: string; externalUrl?: string }> {
+    await this.findHorseDocumentOrThrow(user, horseId, documentId);
+    return this.getAuthorizedDocumentFilePath(user, documentId);
   }
 }

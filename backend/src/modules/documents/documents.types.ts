@@ -30,6 +30,19 @@ export interface Regulation {
   createdAt: string;
 }
 
+/** Danh mục loại giấy tờ (bảng document_type). */
+export interface DocumentTypeDefinition {
+  code: string;
+  nameVi: string;
+  nameEn: string;
+  defaultValidityDays: number | null;
+  isIdentity: boolean;
+  sortOrder: number;
+}
+
+/** Trạng thái hạn tính khi đọc: valid (xanh), expiring_soon (vàng, < 30 ngày), expired (đỏ), no_expiry. */
+export type DocumentValidityStatus = 'valid' | 'expiring_soon' | 'expired' | 'no_expiry';
+
 export interface DocumentApproval {
   id: number;
   documentId: number;
@@ -47,7 +60,13 @@ export interface TransportDocument {
   ownerId?: number;
   horseName?: string;
   requestCode?: string;
-  regulationId: number;
+  /** NULL với giấy tờ chung của ngựa (hộ chiếu...) không thuộc riêng quy định nào */
+  regulationId: number | null;
+  documentTypeCode?: string | null;
+  documentTypeNameVi?: string | null;
+  documentTypeNameEn?: string | null;
+  validityStatus?: DocumentValidityStatus;
+  daysUntilExpiry?: number | null;
   regulationCountry?: string;
   regulationDocType?: string;
   regulationTitle?: string;
