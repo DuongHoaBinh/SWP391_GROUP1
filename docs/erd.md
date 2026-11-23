@@ -110,6 +110,22 @@ The database schema is the executable source of truth; this document explains ow
 - `shipment.transport_mode ENUM('road','air') NULL`: the Manager's selected mode. This is independent of `transportation_type` (Domestic/International) and `booking_type` (Shared/Dedicated).
 - New approval writes the mode without overwriting geographic scope. Responses and invoice snapshots include the mode. Old rows remain null; older UI note-based inference remains a fallback, with no automatic historical rewrite.
 
+## Prepaid Flow Schema (Migration 034)
+
+- **`shipment`**:
+  - Mở rộng ENUM trạng thái: bổ sung `'awaiting_payment'`, `'paid_pending_review'`, `'refund_requested'`, `'refunded'`.
+  - Bổ sung `payment_flow ENUM('prepaid', 'postpaid_legacy') NOT NULL DEFAULT 'postpaid_legacy'`.
+  - Bổ sung `payment_due_at DATETIME(3) NULL` (SLA thanh toán 24h của đơn trả trước).
+  - Bổ sung `cancel_reason_code VARCHAR(50) NULL`.
+  - Bổ sung các cột thẩm định khả thi: `feasibility_reviewed_by INT NULL`, `feasibility_reviewed_at DATETIME(3) NULL`, `feasibility_cannot_fulfil_reason VARCHAR(100) NULL`, `feasibility_review_note TEXT NULL`.
+- **`shipment_status_history`** (Bảng mới):
+  - Lưu vết toàn bộ lịch sử chuyển trạng thái đơn hàng: `history_id`, `shipment_id`, `from_status`, `to_status`, `changed_by_user_id`, `reason`, `metadata`, `created_at`.
+- **`shipment_invoice`**:
+  - Cột `route_id` sửa thành NULLable (hóa đơn sơ bộ trả trước phát hành ngay khi tạo đơn trước khi có lộ trình).
+  - Cột sinh `active_primary_shipment_key` và khóa duy nhất `uq_active_primary_invoice_shipment` ngăn trùng hóa đơn sơ bộ active.
+- **`shipment_refund_record`**:
+  - Bổ sung thông tin tài khoản thụ hưởng và cam kết SLA: `recipient_bank_name VARCHAR(100) NULL`, `recipient_account_holder VARCHAR(150) NULL`, `customer_note TEXT NULL`, `form_submitted_at DATETIME(3) NULL`, `sla_due_at DATETIME(3) NULL`.
+
 ## Target Schema Extensions (BA Spec v3.1 — `Planned`, Chưa có Migration)
 
 > [!WARNING]

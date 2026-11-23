@@ -514,28 +514,28 @@ flowchart TD
 > Step lớn nhất về luồng. Chia nhỏ commit theo 7.1 → 7.5.
 
 **7.1 State machine mới**
-- [ ] Migration: thêm vào `shipment.status` các giá trị `quoted`, `awaiting_payment`, `paid_pending_review`, `refund_requested`, `refunded`, `return_pending`.
-- [ ] Một file `order-state-machine.ts` duy nhất khai báo các cặp chuyển trạng thái hợp lệ; mọi service gọi qua đây, ghi audit (actor, thời điểm, lý do). Chuyển sai trả `409`.
+- [x] Migration: thêm vào `shipment.status` các giá trị `awaiting_payment`, `paid_pending_review`, `refund_requested`, `refunded`, `return_pending`.
+- [x] Một file `order-state-machine.ts` duy nhất khai báo các cặp chuyển trạng thái hợp lệ; mọi service gọi qua đây, ghi audit (actor, thời điểm, lý do). Chuyển sai trả `409`.
 
 **7.2 Thanh toán ngay sau báo giá**
-- [ ] Tạo đơn từ `quote_id` → `awaiting_payment`, **phát hành hóa đơn ngay** (`shipment_invoice` snapshot breakdown) và trả mã VietQR SePay (tái sử dụng `sepay-payment.*`).
-- [ ] Webhook đủ tiền → `paid_pending_review`, giữ chỗ ngựa (`horse.status = in_transit` như quy tắc hiện tại).
-- [ ] Hết hạn thanh toán (cấu hình, mặc định 30 phút cho QR, 24 giờ cho đơn) → đơn quay về `quoted` hoặc hết hạn; nhả ngựa.
-- [ ] Gỡ bỏ việc Manager nhập `transport_cost` bằng tay (giữ endpoint cũ cho dữ liệu cũ, ẩn khỏi UI).
+- [x] Tạo đơn từ `quote_id` → `awaiting_payment`, **phát hành hóa đơn ngay** (`shipment_invoice` snapshot breakdown) và trả mã VietQR SePay (tái sử dụng `sepay-payment.*`).
+- [x] Webhook đủ tiền → `paid_pending_review`, giữ chỗ ngựa (`horse.status = in_transit` như quy tắc hiện tại).
+- [x] Hết hạn thanh toán (cấu hình, mặc định 30 phút cho QR, 24 giờ cho đơn) → đơn quay về `cancelled`; nhả ngựa; hóa đơn void.
+- [x] Gỡ bỏ việc Manager nhập `transport_cost` bằng tay (giữ endpoint cũ cho dữ liệu cũ, ẩn khỏi UI).
 
 **7.3 Hóa đơn dạng PDF**
-- [ ] Trang `customer/requests/[id]/invoice`: logo, mã hóa đơn, thông tin khách, tuyến, ngựa, breakdown cước, bảo hiểm, chính sách khứ hồi và hủy, mã giao dịch SePay, thời điểm thanh toán (ghi múi giờ UTC+7).
-- [ ] CSS `@media print` + nút **"Tải PDF"** dùng `window.print()` (đúng quyết định hiện tại: không xuất PDF ở backend). Có thể dùng thêm `@react-pdf/renderer` nếu cần file thật.
-- [ ] Dữ liệu chỉ lấy từ **snapshot hóa đơn** (không tính lại).
+- [x] Trang `customer/requests/[id]/invoice`: logo, mã hóa đơn, thông tin khách, tuyến, ngựa, breakdown cước, bảo hiểm, chính sách khứ hồi và hủy, mã giao dịch SePay, thời điểm thanh toán (ghi múi giờ UTC+7).
+- [x] CSS `@media print` + nút **"Tải PDF"** dùng `window.print()` (đúng quyết định hiện tại: không xuất PDF ở backend).
+- [x] Dữ liệu chỉ lấy từ **snapshot hóa đơn** (không tính lại).
 
 **7.4 Manager duyệt khả thi**
-- [ ] Màn `manager/requests` lọc `paid_pending_review`: xem tuyến, ngựa, giấy tờ (Step 8), phương án xe (Step 9).
-- [ ] Nút **Duyệt** → `approved`. Nút **Không đáp ứng được** (bắt buộc chọn lý do: hết xe, tuyến không hỗ trợ, quốc gia không nhận...) → `refund_requested`.
+- [x] Màn `manager/requests` lọc `paid_pending_review`: xem tuyến, ngựa, giấy tờ (Step 8), phương án xe (Step 9).
+- [x] Nút **Duyệt** → `approved` (hoặc `planning`). Nút **Không đáp ứng được** (bắt buộc chọn lý do: hết xe, tuyến không hỗ trợ, trạm quá tải, thời tiết...) → `refund_requested`.
 
 **7.5 Form hoàn tiền**
-- [ ] Khi `refund_requested`: gửi thông báo và email có link đến form `customer/requests/[id]/refund`: tên ngân hàng, số tài khoản, chủ tài khoản, xác nhận số tiền (**100% gồm bảo hiểm**, do lỗi công ty), ghi chú.
-- [ ] Lưu vào `shipment_refund_record` (đã có): Manager duyệt, **Admin chuyển** (SoD), tải ủy nhiệm chi → `refunded`, khách nhận thông báo kèm chứng từ.
-- [ ] Hạn xử lý (SLA) hoàn tiền hiển thị cho khách, ví dụ 3 ngày làm việc.
+- [x] Khi `refund_requested`: gửi thông báo và email có link đến form `customer/requests/[id]/refund`: tên ngân hàng, số tài khoản, chủ tài khoản, xác nhận số tiền (**100% gồm bảo hiểm**, do lỗi công ty), ghi chú.
+- [x] Lưu vào `shipment_refund_record` (đã có): Manager duyệt, **Admin chuyển** (SoD), tải ủy nhiệm chi → `refunded`, khách nhận thông báo kèm chứng từ.
+- [x] Hạn xử lý (SLA) hoàn tiền hiển thị cho khách (3-5 ngày làm việc qua `addBusinessDays`).
 
 **Hoàn thành khi:** demo được 2 kịch bản: (a) báo giá → trả tiền → in hóa đơn → được duyệt; (b) trả tiền → Manager từ chối → khách điền form → Admin chuyển → `refunded`. Người chuyển trùng người duyệt bị `403`.
 

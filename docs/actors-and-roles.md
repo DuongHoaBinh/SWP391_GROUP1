@@ -77,3 +77,7 @@ All authorization checks belong to `backend/src/modules/auth` and must be enforc
 | 17 | *(Optional — Flow 6)* Bàn giao tại điểm đích & ký xác nhận nghiệm thu | **R / A** *(Ký nhận/Tranh chấp)* | I | - | **R** *(Trình diện & Bàn giao)* |
 | 18 | *(Optional — Flow 6)* Giải quyết tranh chấp bàn giao | C | **R / A** | C *(nếu bồi thường)* | C |
 | 19 | Xử lý claim bồi thường bảo hiểm (Step 6) | **R** *(Gửi claim & bằng chứng)* | **R / A** *(Thẩm định & duyệt claim)* | **R** *(SoD chuyển khoản bồi thường)* | - |
+| 20 | Duyệt khả thi đơn trả trước (`PATCH /orders/:id/feasibility`) | I | **R / A** | - | - |
+| 21 | Gửi thông tin tài khoản nhận hoàn tiền 100% (`/refund`) | **R / A** | I | I | - |
+| 22 | Phê duyệt hoàn tiền do công ty không đáp ứng | I | **R / A** | C *(Dual-approval nếu ≥ 20tr)* | - |
+| 23 | Thực thi chuyển khoản hoàn tiền 100% (SoD `transferred_by != approved_by`) | I | I | **R / A** | - |

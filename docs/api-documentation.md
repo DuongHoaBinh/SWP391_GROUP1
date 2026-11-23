@@ -213,6 +213,102 @@ Requests modifications on a pending `requested` order with a mandatory explanati
 Customer updates editable order details (dates, route locations, horse info, special requirements) only while the owned order is `change_requested`, then resubmits it. Resets status back to `requested` for manager review. Other states return 400.
 - **Body:** Partial or full fields from `CreateOrderDto`.
 
+## Prepaid Flow Endpoints (Step 7: Báo giá → Thanh toán ngay → Hóa đơn PDF → Duyệt khả thi → Hoàn tiền 100%)
+
+### `PATCH /orders/:id/feasibility` (Logistics Manager / Admin)
+Thẩm định tính khả thi vận hành cho đơn hàng trả trước sau khi khách hàng đã thanh toán thành công (`paid_pending_review`).
+- **Headers:** `Authorization: Bearer <manager_or_admin_token>`
+- **Request Body (Phê duyệt khả thi):**
+```json
+{
+  "decision": "approve"
+}
+```
+*Kết quả:* Chuyển đơn sang `planning` (hoặc `approved`) để Coordinator lập lộ trình chi tiết. Khi xác nhận lộ trình ở Flow 3, hệ thống liên kết `route_id` vào hóa đơn hiện có mà không sinh thêm hóa đơn mới hay yêu cầu thanh toán lại.
+
+- **Request Body (Không thể đáp ứng):**
+```json
+{
+  "decision": "cannot_fulfil",
+  "reasonCode": "no_vehicle_available",
+  "note": "Toàn bộ xe chuyên dụng đã được phân bổ kín lịch trong tuần yêu cầu."
+}
+```
+*Các mã lý do hợp lệ (`reasonCode`):* `no_vehicle_available`, `route_restricted`, `quarantine_capacity_full`, `weather_or_force_majeure`, `other`.  
+*Quy tắc:* `note` bắt buộc tối thiểu 10 ký tự.  
+*Kết quả:* Chuyển đơn sang `refund_requested`. Khách hàng nhận thông báo điền thông tin ngân hàng để nhận hoàn tiền 100%.
+
+### `GET /orders/:id/invoice` (Customer owner, Logistics Manager, Admin)
+Lấy dữ liệu chi tiết hóa đơn điện tử A4 chuẩn cho đơn hàng (hóa đơn sơ bộ `route_id = NULL` hoặc hóa đơn sau lập tuyến).
+- **Headers:** `Authorization: Bearer <token>`
+- **Response Data:**
+```json
+{
+  "invoiceCode": "INV-2026-000100",
+  "invoiceType": "primary",
+  "status": "paid",
+  "issuedAt": "2026-11-23T10:00:00.000Z",
+  "totalAmount": 35000000,
+  "freightAmount": 32000000,
+  "insuranceAmount": 3000000,
+  "currency": "VND",
+  "amountInWords": "ba mươi lăm triệu đồng",
+  "customer": {
+    "name": "Nguyễn Văn A",
+    "phone": "0901234567",
+    "email": "customer@example.com",
+    "address": "TP. Hồ Chí Minh"
+  },
+  "route": {
+    "origin": "TP. Hồ Chí Minh",
+    "destination": "Hà Nội",
+    "transportMode": "road",
+    "distanceKm": 1720,
+    "departureDate": "2026-12-10"
+  },
+  "horses": [
+    {
+      "name": "Red Rum",
+      "declaredValue": 2000000000,
+      "package": "standard",
+      "fee": 3000000
+    }
+  ],
+  "sepayPayment": {
+    "transactionId": "TXN-889922",
+    "gateway": "SePay VietQR",
+    "paidAt": "2026-11-23T10:15:00.000Z",
+    "status": "succeeded"
+  }
+}
+```
+
+### `GET /orders/:id/refund-form` (Customer owner, Logistics Manager, Admin)
+Lấy thông tin đơn hàng và bản ghi hoàn tiền đang xử lý (nếu có) để hiển thị form hoàn tiền 100% khi công ty không đáp ứng được.
+- **Headers:** `Authorization: Bearer <token>`
+
+### `POST /orders/:id/refund-form` (Customer owner)
+Khách hàng gửi thông tin tài khoản ngân hàng để nhận hoàn tiền 100% khi đơn ở trạng thái `refund_requested`.
+- **Headers:** `Authorization: Bearer <customer_token>`
+- **Request Body:**
+```json
+{
+  "bankName": "Vietcombank",
+  "accountNumber": "0071001234567",
+  "accountHolder": "NGUYEN VAN A",
+  "confirmAmount": 35000000,
+  "note": "Mong công ty xử lý sớm"
+}
+```
+*Quy tắc:*
+- Chỉ chủ sở hữu đơn hàng mới được gửi (`403 Forbidden` nếu người khác gửi).
+- Đơn bắt buộc đang ở trạng thái `refund_requested` (`409 Conflict` nếu ở trạng thái khác).
+- `confirmAmount` phải khớp chính xác với tổng số tiền khách đã thanh toán (`409 Conflict` nếu sai lệch).
+- Không được gửi trùng nếu đã có yêu cầu hoàn tiền đang xử lý (`409 Conflict`).
+- Nếu số tiền ≥ 20.000.000 VND, tự động kích hoạt cờ `dual_approval_required = true`.
+- Hạn xử lý cam kết: SLA 3-5 ngày làm việc (`sla_due_at = addBusinessDays(now, 5)`).
+- Phân tách nhiệm vụ (SoD): Người duyệt hoàn tiền không được là người thực hiện lệnh chuyển khoản (`transferred_by != approved_by_1`).
+
 ## Pricing & Quotes endpoints (Step 4: Báo giá tự động & Bảng giá có phiên bản)
 
 Tự động tính khoảng cách qua ORS (hoặc fallback Haversine) và áp biểu cước theo bậc khoảng cách (tiered km), bậc kích thước xe (`truck_1`..`truck_6`), cước bay theo đầu ngựa, cước phà (`ferry`) và cước tàu biển chuyên dụng (`vessel`). Khóa giá trong 30 phút.

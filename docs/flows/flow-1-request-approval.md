@@ -1,28 +1,40 @@
 # Flow 1: Create and Approve Transport Request (Required)
 
-> **Cập nhật sau review 11/2026:** Transport Specialist và Fleet & Route Coordinator đã gộp vào **Logistics Manager** (xem `docs/actors-and-roles.md`). Trong tài liệu này, mọi chỗ ghi Specialist/Coordinator được hiểu là Logistics Manager; role `TRANSPORT_SPECIALIST`/`FLEET_ROUTE_COORDINATOR` chỉ còn để tương thích dữ liệu cũ.
+> **Cập nhật sau review 11/2026 (Step 7 - Prepaid Flow):** Hệ thống chuyển sang luồng **Trả trước (Prepaid Flow)** làm luồng vận hành chuẩn:
+> 1. Customer tạo báo giá (quote) tự động có hiệu lực 24h.
+> 2. Customer đặt đơn từ báo giá → đơn khởi tạo ở trạng thái `awaiting_payment` (`payment_flow = 'prepaid'`), kèm hóa đơn sơ bộ (`shipment_invoice`, `route_id = NULL`) và mã SePay VietQR.
+> 3. Customer thanh toán ngay trong 24h → SePay webhook chuyển đơn sang `paid_pending_review`. (Nếu quá 24h không thanh toán → SLA sweep tự hủy đơn `cancelled`, void hóa đơn, giải phóng ngựa).
+> 4. Logistics Manager thẩm định khả năng vận hành (`PATCH /orders/:id/feasibility`):
+>    - **Duyệt khả thi (`approve`):** Đơn chuyển sang `planning` (hoặc `approved`) để Coordinator lập lộ trình và phân xe. Không cần thu tiền lần 2 ở Gate 2.
+>    - **Không thể đáp ứng (`cannot_fulfil`):** Manager chọn mã lý do và ghi chú giải trình ≥ 10 ký tự → Đơn chuyển sang `refund_requested`. Customer truy cập trang `/customer/requests/:id/refund` điền form STK nhận hoàn tiền 100% trong 3-5 ngày làm việc.
+> *Ghi chú:* Luồng trả sau (Legacy Postpaid Flow `requested` → `approved` → `planning` → `confirmed` → SePay Gate 2) vẫn được giữ cho các đơn cũ.
 
 ## Actors
 
-Customer, Logistics Manager
+Customer, Logistics Manager, Admin/Finance
 
-## Main path
+## Main path (Prepaid Flow - Step 7)
 
-1. Customer enters origin, destination, domestic/international scope, requested dates, horse count, horse details, and special requirements.
-2. Customer submits the request and uploads available identity/medical documents.
-3. The system creates the request as `DRAFT` or `SUBMITTED` and records the customer and timestamp.
-4. Logistics Manager reviews feasibility, service scope, dates, and requested requirements.
-5. Manager either requests changes, rejects the request with a reason, or approves it for planning. Approval locks and returns a structured estimated VND quotation payload in the order API response (`PATCH /orders/:id/approve`, `GET /orders/:id`), which the frontend renders as a client-side printable HTML/PDF document (`window.print()`) with no server-side PDF endpoint; it is not an invoice or payment request.
-6. For an approved request, the manager assigns work to the Transport Specialist, Fleet & Route Coordinator, and Driver / Escort as planning becomes available.
+1. **Tạo Báo Giá & Khóa Giá (Quote Snapshot):** Khách hàng chọn tuyến đường, phương thức vận chuyển (đường bộ/hàng không/thủy), gói bảo hiểm theo từng ngựa và nhận báo giá tự động có mã `quoteId` (hiệu lực 24 giờ).
+2. **Khởi Tạo Đơn & Phát Hành Hóa Đơn Sơ Bộ:** Khách hàng bấm "Đặt đơn từ báo giá" → hệ thống tạo đơn với `payment_flow = 'prepaid'`, trạng thái `awaiting_payment`, `payment_due_at = now + 24h`. Đồng thời, hệ thống tạo hóa đơn sơ bộ `primary` (`shipment_invoice.route_id = NULL`) và mã VietQR SePay. Báo giá chuyển sang `status = 'used'`.
+3. **Thanh Toán Ngay & Hóa Đơn Điện Tử A4:** Khách hàng thanh toán qua SePay VietQR hoặc xem/in hóa đơn điện tử A4 chuẩn (`GET /orders/:id/invoice`, `numberToVietnameseWords`, mã tra cứu SePay).
+4. **Đối Soát & Chuyển Trạng Thái:** SePay webhook xác thực thanh toán thành công → chuyển trạng thái đơn sang `paid_pending_review` qua state machine atomic guard (`transitionShipment`), ghi lịch sử vào `shipment_status_history` và gửi email/thông báo cho Customer và Manager.
+5. **Thẩm Định Khả Thi (Feasibility Review):** Logistics Manager kiểm tra năng lực xe/chuồng/trạm kiểm dịch trên trang `/manager/requests/:id`:
+   - **Trường hợp A (Duyệt khả thi):** Gọi `PATCH /orders/:id/feasibility` với `{ decision: 'approve' }` → Đơn chuyển sang `planning`. Đội điều phối lập tuyến chi tiết. Khi chuyến xe được xác nhận (`confirmed`), hệ thống tự liên kết `route_id` vào hóa đơn hiện có mà không sinh thêm hóa đơn mới hay yêu cầu thanh toán lần 2.
+   - **Trường hợp B (Không thể đáp ứng):** Gọi `PATCH /orders/:id/feasibility` với `{ decision: 'cannot_fulfil', reasonCode, note }` → Đơn chuyển sang `refund_requested`.
+6. **Hoàn Tiền 100% Khi Công Ty Không Đáp Ứng:**
+   - Khách hàng nhận thông báo và truy cập form `/customer/requests/:id/refund` để xác nhận số tiền hoàn và điền thông tin ngân hàng thụ hưởng (Ngân hàng, STK, Tên chủ TK).
+   - Hệ thống tạo `shipment_refund_record` loại `company_cannot_fulfil`, hạn SLA giải quyết `sla_due_at = addBusinessDays(now, 5)` (3-5 ngày làm việc). Khoản hoàn ≥ 20.000.000 VND kích hoạt dual-approval.
+   - Admin/Finance thực hiện chuyển khoản ngoài hệ thống và xác nhận `PATCH /orders/:id/refund/transfer`. Kiểm tra SoD nghiêm ngặt (`transferred_by != approved_by_1`). Chuyển khoản thành công chuyển đơn sang `refunded` và giải phóng ngựa về `active`.
 
-## Key rules
+## Key rules (Prepaid Flow)
 
-- An order must contain at least one horse, origin, destination, and requested transport date before submission.
-- Rejection and change requests require a reason.
-- Only the Logistics Manager can approve or reject a submitted order.
-- Customer edits after a change request create a new revision and preserve the previous version.
-- Payment instructions remain locked until the Flow 3 route is confirmed and its invoice is issued, even when Flow 2 is already complete.
-- Approval does not mean the trip can depart; document readiness and operational planning are separate gates.
+- Khách hàng bắt buộc phải có `quoteId` hợp lệ để tạo đơn vận chuyển mới.
+- Hạn thanh toán của đơn trả trước là 24 giờ kể từ thời điểm tạo đơn (`payment_due_at`).
+- Cổng thanh toán SePay mở ngay cho đơn `awaiting_payment` khi còn hạn; đóng tự động khi hết hạn.
+- Đơn trả trước không cho phép dùng các nút legacy `approve`, `reject`, `request-changes` (trả về 409 Conflict).
+- Đơn không đáp ứng được cam kết hoàn tiền 100% không thu bất kỳ chi phí nào; SLA xử lý từ 3 đến 5 ngày làm việc (không tính Thứ Bảy, Chủ Nhật).
+- Phân tách nhiệm vụ (SoD): Người duyệt hoàn tiền không được là người bấm xác nhận chuyển tiền.
 
 ## Outputs
 

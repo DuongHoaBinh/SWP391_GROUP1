@@ -24,7 +24,10 @@
   - *Đường bộ ghép chuồng:* Tuyến Multi-stop (nhiều điểm đón, nhiều điểm trả dọc trục Bắc – Nam). Coordinator sắp xếp thứ tự ô chuồng trên xe logic (ngựa xuống trước ở khoang ngoài gần cửa dỡ, ngựa đi xa nhất ở trong cùng).
   - *Hàng không ghép chuồng:* Mô hình Hub-to-Hub cố định giữa các sân bay cargo lớn (Tân Sơn Nhất SGN, Nội Bài HAN, Changi, v.v.) kết hợp xe tải trung chuyển chặng đầu và chặng cuối. Thùng Airstall/ULD ghép tối đa 3 ngựa. Khi xuất phát hoặc đích đến không phải sân bay, UI lập lộ trình tự động tạo và bắt buộc đủ chuỗi **Xe thùng đường bộ $\rightarrow$ Chuyến bay $\rightarrow$ Xe thùng đường bộ** trước khi gửi duyệt.
   - *Khung thời hạn (SLA — Hòa giải Spec v3.1, `DEC-05` Approved):* Đặt chỗ `>= MAX(3 ngày [shared] / 2 ngày [charter], MaxLeadTime + 2 ngày)`; nộp hồ sơ Tầng A `>= MAX(2 ngày [shared] / 1 ngày [charter], MAX(lead_time_days))`; Coordinator chốt lộ trình và phân công trước `T - 70h` (Cut-off `T - 72h`). Driver/Escort chính xác nhận theo **SLA 4 giờ làm việc (`08:00–18:00`) hoặc tối đa 12 giờ đồng hồ** (mục tiêu hóa đơn `≤ T - 58h`), quá hạn chuyển Backup Pool với **Backup SLA 4 giờ đồng hồ** (**Trần cứng hóa đơn `T - 52h`**). Hạn thanh toán = `MIN(invoice_issued_at + 24h, departure_at - 30h)`.
-- Khi phát hành invoice sau xác nhận, lưu `bookingType`, `stallUnitPrice` (nếu có), số ngựa, cước và bảo hiểm trong snapshot. Thanh toán vẫn đợi Flow 3 xác nhận, điều kiện xuất phát vẫn yêu cầu đủ tiền và đủ hồ sơ.
+- Khi phát hành invoice sau xác nhận, lưu `bookingType`, `stallUnitPrice` (nếu có), số ngựa, cước và bảo hiểm trong snapshot.
+  - *Đối với đơn trả sau (Legacy Postpaid Flow):* Thanh toán đợi Flow 3 xác nhận, phát hành hóa đơn mới và mở Gate 2.
+  - *Đối với đơn trả trước (Prepaid Flow - Step 7):* Khách hàng đã thanh toán và sở hữu hóa đơn sơ bộ `route_id = NULL` từ khi tạo đơn. Khi route được xác nhận (`confirmed`), hệ thống tự động liên kết `route_id` vào hóa đơn hiện có; **tuyệt đối không sinh thêm hóa đơn thứ hai** và không yêu cầu khách hàng thanh toán lại.
+- Điều kiện xuất phát vẫn yêu cầu đủ tiền (`isPaymentSucceeded === true`), đủ hồ sơ (100% compliant) và lộ trình đã xác nhận.
 
 ---
 

@@ -1,14 +1,29 @@
-# Payment gating sau Flow 3
+# Payment Gating & Billing Architecture
 
-Nhánh: `codex/payment-after-route-confirmed`, từ `origin/dev` (`c3b2e23`).
+> **Cập nhật sau review 11/2026 (Step 7):** Hệ thống hỗ trợ **hai luồng thanh toán song song**:
+> 1. **Luồng Trả trước (Prepaid Flow - Mặc định mới):** Khách hàng tạo đơn từ báo giá (`payment_flow = 'prepaid'`). Hóa đơn sơ bộ (`shipment_invoice`, `route_id = NULL`) được phát hành ngay tại thời điểm tạo đơn. Cổng thanh toán SePay mở ngay ở trạng thái `awaiting_payment` trong 24h. Sau khi thanh toán, đơn sang `paid_pending_review` để Manager duyệt khả thi. Khi lộ trình được xác nhận ở Flow 3, hệ thống liên kết `route_id` vào hóa đơn hiện có mà không sinh thêm hóa đơn hay đòi thanh toán lần 2.
+> 2. **Luồng Trả sau (Postpaid Legacy Flow - Tương thích đơn cũ):** Cổng thanh toán chỉ mở ở Gate 2 sau khi kế hoạch chi tiết được xác nhận (`confirmed`) và đầy đủ tài xế/escort chấp thuận phân công.
 
-## Hành vi
+## Hai Luồng Thanh Toán (Dual Payment Flows)
 
-1. Duyệt yêu cầu chỉ tạo báo giá dự kiến; chưa có hóa đơn hay QR thanh toán.
-2. Manager duyệt kế hoạch chi tiết. Khi toàn bộ Driver/Escort xác nhận, hệ thống lưu hóa đơn cước vận chuyển và gửi thông báo yêu cầu thanh toán trong cùng transaction.
-3. Customer thấy hóa đơn (in/lưu PDF) và cổng SePay. Chưa xong hồ sơ vẫn thanh toán được khi Flow 3 đã xác nhận.
-4. Chỉ SePay đã nhận đủ tiền thật, lộ trình đã xác nhận và hồ sơ đạt 100% mới mở xuất phát. Thay đổi hồ sơ hoặc webhook đều cập nhật lại readiness. Mốc khởi hành Flow 4 kiểm tra lại điều kiện, kể cả khi trước đó đã hiển thị Ready.
-5. Phiếu thanh toán lịch sử được giữ. Không coi MoMo sandbox hoặc giá 0 là đã thanh toán thực.
+| Tiêu chí | Luồng Trả trước (Prepaid Flow - Step 7) | Luồng Trả sau (Legacy Postpaid Flow) |
+|---|---|---|
+| **Thời điểm mở cổng** | Ngay khi tạo đơn thành công (`awaiting_payment`) | Sau khi lộ trình Flow 3 được xác nhận (`confirmed`) |
+| **Hóa đơn sơ bộ** | `shipment_invoice` có `route_id = NULL` | Không có (chỉ có báo giá dự kiến) |
+| **Thời hạn thanh toán** | 24 giờ (`payment_due_at = now + 24h`) | SLA động `payment_due_at = departure_at - 30h` |
+| **Xử lý khi quá hạn** | Tự động hủy đơn `cancelled`, void hóa đơn, trả ngựa về `active` | Gắn cờ `payment_overdue`, cho gia hạn 10h hoặc hủy `cancelled_operational` |
+| **Khi xác nhận lộ trình (Gate 2)** | Không xuất hóa đơn mới, cập nhật `route_id` vào hóa đơn cũ | Phát hành hóa đơn `primary` và mở cổng thanh toán |
+| **Trạng thái khi đã thanh toán** | `paid_pending_review` (chờ Manager duyệt khả thi) | Giữ `confirmed`, mở điều kiện sẵn sàng xuất phát (`ready_to_depart`) |
+
+## Cơ Chế Hoàn Tiền 100% Khi Không Đáp Ứng Được (Company Cannot Fulfil)
+
+1. **Kích hoạt:** Khi Manager bấm "Không đáp ứng được" (`PATCH /orders/:id/feasibility`, `{ decision: 'cannot_fulfil', reasonCode, note }`), đơn chuyển sang `refund_requested`.
+2. **Khai báo thông tin thụ hưởng:** Customer điền form tại `/customer/requests/:id/refund` cung cấp Tên ngân hàng, Số tài khoản, Tên chủ tài khoản và xác nhận đúng số tiền 100% đã trả.
+3. **SLA xử lý:** `sla_due_at = addBusinessDays(now, 5)` (từ 3 đến 5 ngày làm việc, bỏ qua Thứ Bảy và Chủ Nhật).
+4. **Phân tách nhiệm vụ (Segregation of Duties - SoD):**
+   - Khoản hoàn ≥ 20.000.000 VND yêu cầu Dual-Approval (Người duyệt 1 và Người duyệt 2 phải khác nhau).
+   - Người phê duyệt hoàn tiền (`approved_by_1` / `approved_by_2`) **không được phép** thực hiện lệnh chuyển khoản (`transferred_by != approved_by_1`).
+5. **Hoàn tất chuyển khoản:** Khi Admin/Finance xác nhận chuyển khoản thành công (`PATCH /orders/:id/refund/transfer`), hệ thống chuyển đơn sang `refunded` và giải phóng trạng thái ngựa về `active`.
 
 ## Các nhóm file thay đổi
 
