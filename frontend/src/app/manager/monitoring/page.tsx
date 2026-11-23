@@ -34,6 +34,7 @@ import {
   LiveOverviewItem,
 } from '@/features/tracking/api/tracking.api';
 import { LiveTrackingMap } from '@/components/maps/LiveTrackingMap';
+import { VerticalTimeline, buildTimeline, TimelineItem } from '@/features/tracking/timeline';
 import toast from 'react-hot-toast';
 
 type OverrideReasonCode =
@@ -54,6 +55,7 @@ function TripMonitoringContent() {
 
   const [trackingDetails, setTrackingDetails] = useState<TripTrackingDetails | null>(null);
   const [liveTracking, setLiveTracking] = useState<LiveTrackingDetails | null>(null);
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   const [viewMode, setViewMode] = useState<'timeline' | 'live_map' | 'fleet_overview'>('timeline');
   const [fleetOverview, setFleetOverview] = useState<LiveOverviewItem[]>([]);
   const [loadingFleet, setLoadingFleet] = useState<boolean>(false);
@@ -131,12 +133,16 @@ function TripMonitoringContent() {
   const fetchTrackingDetails = useCallback(async (shipmentId: number, isSilent = false) => {
     try {
       if (!isSilent) setRefreshing(true);
-      const [details, live] = await Promise.all([
+      const [details, live, timelineRes] = await Promise.all([
         trackingApi.getTrackingDetails(shipmentId),
         trackingApi.getLiveTracking(shipmentId).catch(() => null),
+        trackingApi.getShipmentTimeline(shipmentId).catch(() => null),
       ]);
       setTrackingDetails(details);
       if (live) setLiveTracking(live);
+      if (timelineRes) {
+        setTimelineItems(buildTimeline({ timelineData: timelineRes, viewer: 'manager' }));
+      }
     } catch {
       if (!isSilent) {
         toast.error(tRef.current('monitoring.errLoadDetails', 'Không thể tải dữ liệu chi tiết chuyến đi'));
@@ -651,7 +657,7 @@ function TripMonitoringContent() {
               </div>
             </div>
 
-            {/* Detailed Milestones Timeline */}
+            {/* Detailed Milestones Timeline (Step 11 Vertical Timeline) */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-sm flex flex-col gap-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                 <div>
@@ -665,144 +671,38 @@ function TripMonitoringContent() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3">
-                {trackingDetails?.milestones.map((m, idx) => {
-                  const isCurrent = m.status === 'CURRENT';
-                  const isCompleted = m.status === 'COMPLETED';
-
-                  return (
-                    <div
-                      key={m.id}
-                      className={`p-4 rounded-xl border transition-all ${
-                        isCurrent
-                          ? 'bg-[#FAF5EB] border-[#D4C5A3] shadow-sm'
-                          : isCompleted
-                          ? 'bg-slate-50/80 border-slate-200'
-                          : 'bg-white border-slate-200 opacity-85'
-                      }`}
+              <VerticalTimeline
+                items={timelineItems}
+                viewer="manager"
+                emptyText={t('monitoring.noMilestones', 'Chưa có mốc kiểm soát nào.')}
+                renderCurrentActions={(item) => (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const m =
+                          trackingDetails?.milestones.find(
+                            (x) => String(x.id) === item.id || x.title === item.title,
+                          ) || trackingDetails?.milestones[0];
+                        if (m) {
+                          setOverrideMilestone(m);
+                          if (m.itemType === 'leg_start') setOverrideAction('start_leg');
+                          else if (m.itemType === 'leg_end') setOverrideAction('complete_leg');
+                          else setOverrideAction('arrived');
+                          setOverrideReasonCode('lost_signal');
+                          setOverrideNotes('');
+                        }
+                      }}
+                      className="text-[#181A17] border-[#D4C5A3] bg-[#FAF8F4] hover:bg-[#F3EFE4] text-xs font-bold"
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="flex items-start gap-3">
-                          <div
-                            className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-bold text-xs mt-0.5 ${
-                              isCompleted
-                                ? 'bg-emerald-500 text-white'
-                                : isCurrent
-                                ? 'bg-[#181A17] text-white animate-pulse'
-                                : 'bg-slate-200 text-slate-600'
-                            }`}
-                          >
-                            {isCompleted ? <Check size={15} /> : idx + 1}
-                          </div>
-
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-bold text-sm text-slate-900">{m.title}</span>
-                              {m.legType === 'flight' ? (
-                                <span className="bg-sky-100 text-sky-800 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                                  <Plane size={11} /> {t('monitoring.flightLeg', 'Chặng bay')}
-                                </span>
-                              ) : (
-                                <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                                  <Truck size={11} /> {t('monitoring.roadLeg', 'Đường bộ')}
-                                </span>
-                              )}
-                              {m.isCustomsBorder && (
-                                <span className="bg-amber-100 text-amber-900 border border-amber-200 text-[10px] font-bold px-2 py-0.5 rounded">
-                                  {t('monitoring.customsQuarantine', 'Kiểm dịch & Hải quan')}
-                                </span>
-                              )}
-                              <span
-                                className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                                  isCompleted
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : isCurrent
-                                    ? 'bg-[#F3EFE4] text-[#181A17] font-extrabold'
-                                    : 'bg-slate-100 text-slate-600'
-                                }`}
-                              >
-                                {isCompleted ? translateStatus('completed') : isCurrent ? translateStatus('in_transit') : translateStatus('ready_to_depart')}
-                              </span>
-                            </div>
-
-                            <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-1 m-0">
-                              <MapPin size={12} className="text-slate-400 shrink-0" /> {m.location}
-                            </p>
-
-                            <div className="flex flex-wrap items-center gap-2.5 text-[11px] text-slate-500 mt-2">
-                              {m.plannedTime && (() => {
-                                const { time, date } = formatDateTime(m.plannedTime);
-                                return (
-                                  <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px] font-medium border border-slate-200">
-                                    <Clock size={11} className="text-slate-400 shrink-0" />
-                                    <span>{t('monitoring.plannedLabel', 'Kế hoạch:')}</span>
-                                    <strong className="text-slate-900">{time}</strong>
-                                    <span className="text-slate-300">•</span>
-                                    <span>{t('monitoring.datePrefix', 'Ngày {date}', { date })}</span>
-                                  </span>
-                                );
-                              })()}
-                              {m.actualTime && (() => {
-                                const { time, date } = formatDateTime(m.actualTime);
-                                return (
-                                  <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded text-[11px] font-medium border border-emerald-200">
-                                    <CheckCircle2 size={11} className="text-emerald-600 shrink-0" />
-                                    <span>{t('monitoring.actualLabel', 'Thực tế:')}</span>
-                                    <strong className="text-emerald-950 font-bold">{time}</strong>
-                                    <span className="text-emerald-300">•</span>
-                                    <span>{t('monitoring.datePrefix', 'Ngày {date}', { date })}</span>
-                                  </span>
-                                );
-                              })()}
-                              {m.updatedBy && (
-                                <span className="text-[#181A17] bg-[#FAF8F4] px-2 py-0.5 rounded font-medium text-[11px]">
-                                  {m.updatedBy}
-                                </span>
-                              )}
-                            </div>
-
-                            {m.notes && (
-                              <div className="mt-2.5 bg-amber-50/90 border border-amber-200/90 rounded-lg p-2.5 text-xs text-amber-950 flex items-start gap-2 shadow-sm">
-                                <FileText size={14} className="text-amber-600 shrink-0 mt-0.5" />
-                                <div className="flex-1">
-                                  <span className="font-bold text-amber-800 text-[11px] uppercase tracking-wide block">
-                                    {t('monitoring.fieldObservationNotes', 'Ghi chú thực địa:')}
-                                  </span>
-                                  <p className="mt-0.5 m-0 text-slate-800 font-medium italic">
-                                    &ldquo;{m.notes}&rdquo;
-                                  </p>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {!isCompleted && (
-                          <div className="shrink-0 flex items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setOverrideMilestone(m);
-                                if (m.itemType === 'leg_start') setOverrideAction('start_leg');
-                                else if (m.itemType === 'leg_end') setOverrideAction('complete_leg');
-                                else setOverrideAction('arrived');
-                                setOverrideReasonCode('lost_signal');
-                                setOverrideNotes('');
-                              }}
-                              className="text-[#181A17] border-[#D4C5A3] bg-[#FAF8F4] hover:bg-[#F3EFE4] text-xs font-bold"
-                            >
-                              <Edit3 size={13} className="mr-1.5 text-[#A67C2E]" />
-                              <span>{t('monitoring.overrideDriverBtn', 'Cập nhật thay Driver')}</span>
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                      <Edit3 size={13} className="mr-1.5 text-[#A67C2E]" />
+                      <span>{t('monitoring.overrideDriverBtn', 'Cập nhật thay Driver')}</span>
+                    </Button>
+                  </div>
+                )}
+              />
             </div>
 
             {/* Equine Health Monitor Stream */}

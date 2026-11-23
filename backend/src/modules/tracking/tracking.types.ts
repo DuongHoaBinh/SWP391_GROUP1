@@ -339,3 +339,64 @@ export interface TrackingSystemSettings {
   simulationEnabled: boolean;
   customerVitalsDetail: boolean;
 }
+
+export type TimelineStatus = 'done' | 'current' | 'upcoming' | 'skipped' | 'failed';
+export type TimelineKind =
+  | 'payment'
+  | 'approval'
+  | 'documents'
+  | 'pickup'
+  | 'depot'
+  | 'rest'
+  | 'border'
+  | 'quarantine'
+  | 'airport'
+  | 'seaport'
+  | 'transfer'
+  | 'delivery'
+  | 'handover'
+  | 'return_start'
+  | 'no_show'
+  | 'refund'
+  | 'other';
+
+export interface TimelineVitalBadge {
+  horseName: string;
+  tier: 'green' | 'amber_observational' | 'amber_escalatable' | 'red';
+  text: string;
+}
+
+export interface TimelinePhoto {
+  url: string;
+  alt: string;
+}
+
+export interface TimelineItemDto {
+  id: string;
+  group: 'pre_trip' | 'outbound' | 'return' | 'post_trip';
+  kind: TimelineKind;
+  title: string;
+  subtitle?: string;
+  status: TimelineStatus;
+  plannedAt?: string | null;
+  actualAt?: string | null;
+  delayMinutes?: number | null;
+  progressPercent?: number;
+  locationSource?: 'gps' | 'simulated' | 'manual' | 'override' | null;
+  flagged?: boolean;
+  vitals?: TimelineVitalBadge[];
+  photos?: TimelinePhoto[];
+  actorLabel?: string;
+  note?: string;
+}
+
+export interface ShipmentTimelineResponse {
+  shipmentId: number;
+  requestCode: string;
+  status: string;
+  tripType: 'one_way' | 'round_trip';
+  returnStatus?: string;
+  progressPercent: number;
+  etaFinalAt?: string | null;
+  items: TimelineItemDto[];
+}

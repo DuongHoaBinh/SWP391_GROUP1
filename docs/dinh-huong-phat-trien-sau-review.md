@@ -621,17 +621,18 @@ Bước 5  : Không có phương án → báo khách "Chưa đủ xe ngày này"
 
 ---
 
-### STEP 11. Timeline tiến độ dạng line dọc (1,5 ngày)
+### STEP 11. Timeline tiến độ dạng line dọc (1,5 ngày) - **ĐÃ HOÀN THÀNH (Review 11/2026)**
 
-- [ ] 11.1 Component dùng chung `frontend/src/features/tracking/VerticalTimeline.tsx`:
-  - Mỗi mốc: icon theo loại (đón, nghỉ, cửa khẩu, sân bay, cảng, giao), tên, **giờ dự kiến và giờ thực tế**, badge trễ hoặc sớm, chip sinh hiệu, ảnh nhỏ, nguồn vị trí (GPS hoặc giả lập).
-  - Trạng thái: `done` (đường nối tô màu đầy), `current` (chấm **nhấp nháy** + đường nối tô dần theo % quãng đường), `upcoming` (nét đứt, mờ).
-  - Có nhóm **"Chặng đi"** và **"Chặng về"** cho khứ hồi; mốc thanh toán, duyệt, giấy tờ ở đầu timeline.
-  - Responsive: trên điện thoại timeline chiếm toàn chiều rộng; dark mode; animation tắt khi `prefers-reduced-motion`.
-- [ ] 11.2 Dùng ở: `customer/tracking`, chi tiết đơn của Customer, `manager/monitoring`, `driver/trips/[id]`.
-- [ ] 11.3 Thay các timeline ngang hoặc bảng hiện có bằng component này (chỉ ở các trang trên).
+- [x] 11.1 Component dùng chung `frontend/src/features/tracking/timeline/`:
+  - Mỗi mốc: icon theo loại (đón, nghỉ, cửa khẩu, sân bay, cảng, giao, thanh toán, giấy tờ...), tên, **giờ dự kiến và giờ thực tế**, badge trễ hoặc sớm, chip sinh hiệu, ảnh nhỏ, nguồn vị trí (GPS, giả lập, can thiệp điều phối).
+  - Trạng thái: `done` (đoạn nối tô màu đầy `#A67C2E`), `current` (chấm nhấp nháy `motion-safe:animate-ping` + đường nối tô dần theo % quãng đường `progressPercent`), `upcoming` (nét đứt, mờ), `failed` (chấm đỏ), `skipped` (gạch ngang).
+  - Phân nhóm chuẩn hóa: **"Trước chuyến đi"**, **"Chặng đi"**, **"Chặng về"** (cho đơn khứ hồi), **"Sau chuyến đi"**.
+  - Responsive: trên mobile xếp dọc toàn chiều rộng, không cuộn ngang; animation tắt khi `prefers-reduced-motion`; text cho screen reader (`sr-only`).
+- [x] 11.2 Dùng ở 4 nơi: `customer/tracking` (+ `customer/tracking/[id]`), chi tiết đơn Customer `customer/requests/[id]`, `manager/monitoring`, chi tiết chuyến Driver `driver/trips/[id]` & `driver/status`.
+- [x] 11.3 Thay các timeline ngang và bảng cũ ở các trang trên bằng `VerticalTimeline`.
+- [x] 11.4 Backend endpoint gộp: `GET /tracking/shipments/:shipmentId/timeline` với phân quyền cách ly server-side (ẩn điểm trung chuyển gom hàng nội bộ và tên nhân viên đối với Customer).
 
-**Hoàn thành khi:** cả 3 actor xem cùng một chuyến bằng cùng component, tiến độ khớp với check-in thực tế.
+**Hoàn thành khi:** cả 3 actor xem cùng một chuyến bằng cùng component, tiến độ khớp với check-in thực tế. Đã kiểm thử unit test backend `timeline.test.cjs` và Next.js build thành công.
 
 ---
 

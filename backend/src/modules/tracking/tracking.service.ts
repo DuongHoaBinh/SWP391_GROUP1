@@ -54,6 +54,8 @@ import {
   TrackingMilestoneItem,
   TrackingSystemSettings,
   TripTrackingDetails,
+  ShipmentTimelineResponse,
+  TimelineItemDto,
 } from './tracking.types';
 
 @Injectable()
@@ -2884,5 +2886,313 @@ export class TrackingService {
     }
 
     return this.getTrackingSettings();
+  }
+
+  async getShipmentTimeline(
+    user: AuthenticatedUser,
+    shipmentId: number,
+  ): Promise<ShipmentTimelineResponse> {
+    const shipment = await this.trackingStore.findShipmentById(shipmentId);
+    if (!shipment) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+
+    const isCustomer = String(user.role).toUpperCase() === 'CUSTOMER';
+    if (isCustomer && shipment.customer_id !== Number(user.id)) {
+      throw new ForbiddenException('Bạn không có quyền xem thông tin chuyến đi của khách hàng khác');
+    }
+
+    await this.assertAssignedForDriverEscort(user, shipmentId);
+
+    const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
+    const routeId = route?.route_id || shipment.route_id;
+
+    let legs: any[] = [];
+    let stops: any[] = [];
+    if (routeId) {
+      legs = await this.trackingStore.findLegsByRouteId(routeId);
+      stops = await this.trackingStore.findStopsByRouteId(routeId);
+    }
+
+    const rawStatusLogs = await this.trackingStore.findTripStatusLogs(shipmentId);
+    const healthLogs = await this.trackingStore.findHorseHealthLogs(shipmentId);
+    const assignedStaff = await this.trackingStore.findAssignedStaff(shipmentId);
+    let customerVitalsDetail = false;
+    if (typeof this.trackingStore?.getSetting === 'function') {
+      customerVitalsDetail = Boolean(await this.trackingStore.getSetting('tracking.customer_vitals_detail'));
+    }
+
+    // Build timeline items
+    const items: TimelineItemDto[] = [];
+    const status = String(shipment.status || 'requested').toLowerCase();
+    const tripType = shipment.trip_type === 'round_trip' ? 'round_trip' : 'one_way';
+
+    // ── 1. PRE-TRIP GROUP ──
+    const isPaid = !['awaiting_payment', 'requested', 'draft'].includes(status);
+    const paymentActualAt = shipment.paid_at || shipment.payment_received_at || (isPaid ? shipment.created_at : null);
+    items.push({
+      id: 'pre_payment',
+      group: 'pre_trip',
+      kind: 'payment',
+      title: 'Thanh toán cước vận chuyển',
+      subtitle: isPaid ? 'Đã hoàn tất thanh toán VietQR' : 'Chờ khách hàng thanh toán',
+      status: isPaid ? 'done' : status === 'awaiting_payment' ? 'current' : 'upcoming',
+      plannedAt: shipment.created_at ? new Date(shipment.created_at).toISOString() : null,
+      actualAt: paymentActualAt ? new Date(paymentActualAt).toISOString() : null,
+    });
+
+    const isApproved = !['awaiting_payment', 'paid_pending_review', 'rejected', 'refund_requested', 'refunded'].includes(status);
+    items.push({
+      id: 'pre_approval',
+      group: 'pre_trip',
+      kind: 'approval',
+      title: 'Phê duyệt khả thi & kế hoạch',
+      subtitle: isApproved ? 'Logistics Manager đã phê duyệt' : 'Đang thẩm định khả thi tuyến & xe',
+      status: isApproved ? 'done' : status === 'paid_pending_review' ? 'current' : 'upcoming',
+      actualAt: shipment.feasibility_reviewed_at || (isApproved ? shipment.approved_at : null),
+    });
+
+    const isDocsCompliant = ['ready_to_depart', 'in_transit', 'return_pending', 'completed'].includes(status);
+    items.push({
+      id: 'pre_documents',
+      group: 'pre_trip',
+      kind: 'documents',
+      title: 'Hồ sơ kiểm dịch & giấy tờ thú y',
+      subtitle: isDocsCompliant ? 'Đủ điều kiện xuất phát (Tier A/B)' : 'Đang rà soát và kiểm duyệt giấy tờ',
+      status: isDocsCompliant ? 'done' : ['approved', 'planning', 'confirmed'].includes(status) ? 'current' : 'upcoming',
+    });
+
+    const isDispatched = ['ready_to_depart', 'in_transit', 'return_pending', 'completed'].includes(status);
+    const driverStaff = assignedStaff.find((s) => s.role_in_shipment === 'driver');
+    items.push({
+      id: 'pre_dispatch',
+      group: 'pre_trip',
+      kind: 'depot',
+      title: 'Điều phối xe & tài xế sẵn sàng',
+      subtitle: isDispatched
+        ? (isCustomer ? 'Phương tiện chuyên dụng đã sẵn sàng' : `Xe đã bàn giao cho tài xế ${driverStaff?.full_name || ''}`)
+        : 'Đang xếp lịch phương tiện & nhân sự',
+      status: isDispatched ? 'done' : status === 'confirmed' ? 'current' : 'upcoming',
+    });
+
+    // ── 2. OUTBOUND & RETURN GROUPS ──
+    const outboundLegs = legs.filter((l) => (l.direction || 'outbound') === 'outbound');
+    const returnLegs = legs.filter((l) => l.direction === 'return');
+    const outboundStops = stops.filter((s) => (s.direction || 'outbound') === 'outbound');
+    const returnStops = stops.filter((s) => s.direction === 'return');
+
+    const mapStopKind = (stopType?: string, legType?: string): any => {
+      if (legType === 'flight') return 'airport';
+      if (legType === 'sea' || stopType === 'seaport') return 'seaport';
+      if (stopType === 'border_check') return 'border';
+      if (stopType === 'quarantine') return 'quarantine';
+      if (stopType === 'rest') return 'rest';
+      if (stopType === 'transfer_hub') return 'transfer';
+      if (stopType === 'delivery') return 'delivery';
+      return 'other';
+    };
+
+    const processLegsAndStops = (legsSubset: any[], stopsSubset: any[], group: 'outbound' | 'return') => {
+      const firstLeg = legsSubset[0];
+      if (firstLeg) {
+        const isLegDeparted = ['departed', 'in_transit', 'completed', 'arrived'].includes(firstLeg.status) ||
+          ['in_transit', 'return_pending', 'completed'].includes(status);
+        const legStartLog = rawStatusLogs.find(
+          (l) => l.milestoneType === 'leg_departure' && Number(l.legId) === Number(firstLeg.leg_id),
+        );
+        const plannedTime = firstLeg.planned_departure ? new Date(firstLeg.planned_departure).toISOString() : null;
+        const actualTime = firstLeg.actual_departure
+          ? new Date(firstLeg.actual_departure).toISOString()
+          : (legStartLog ? new Date(legStartLog.createdAt).toISOString() : null);
+
+        let delayMins: number | null = null;
+        if (plannedTime && actualTime) {
+          delayMins = Math.round((new Date(actualTime).getTime() - new Date(plannedTime).getTime()) / 60000);
+        }
+
+        const isCurrent = group === 'outbound'
+          ? (status === 'ready_to_depart' || (status === 'in_transit' && firstLeg.status === 'pending'))
+          : (status === 'return_pending' || (status === 'in_transit' && firstLeg.status === 'pending'));
+
+        items.push({
+          id: `${group}_pickup`,
+          group,
+          kind: group === 'return' ? 'return_start' : 'pickup',
+          title: group === 'return' ? `Khởi hành chặng về: ${firstLeg.origin_location}` : `Đón ngựa tại: ${firstLeg.origin_location}`,
+          subtitle: firstLeg.origin_location,
+          status: isLegDeparted && !isCurrent ? 'done' : isCurrent ? 'current' : 'upcoming',
+          plannedAt: plannedTime,
+          actualAt: actualTime,
+          delayMinutes: delayMins,
+          locationSource: (legStartLog?.locationSource as any) || (firstLeg.checkin_source as any) || 'gps',
+          flagged: Boolean(legStartLog?.flagged),
+          actorLabel: isCustomer ? undefined : legStartLog?.updatedByName || driverStaff?.full_name,
+        });
+      }
+
+      for (const stop of stopsSubset) {
+        if (isCustomer && stop.stop_type === 'transfer_hub') continue;
+
+        const stopLog = rawStatusLogs.find(
+          (l) => Number(l.routeStopId) === Number(stop.route_stop_id),
+        );
+        const isStopDeparted = stop.status === 'departed' || stop.status === 'completed' || status === 'completed';
+        const isStopArrived = stop.status === 'arrived' || stop.status === 'customs_cleared';
+        const isStopCurrent = isStopArrived && !isStopDeparted;
+
+        const stopPlanned = stop.planned_arrival ? new Date(stop.planned_arrival).toISOString() : null;
+        const stopActual = stop.actual_arrival
+          ? new Date(stop.actual_arrival).toISOString()
+          : (stopLog ? new Date(stopLog.createdAt).toISOString() : null);
+
+        let delayMins: number | null = null;
+        if (stopPlanned && stopActual) {
+          delayMins = Math.round((new Date(stopActual).getTime() - new Date(stopPlanned).getTime()) / 60000);
+        }
+
+        const stopHealthLogs = healthLogs.filter((h) => Number(h.routeStopId ?? (h as any).route_stop_id) === Number(stop.route_stop_id));
+        const vitalsList = stopHealthLogs.map((h) => {
+          const temp = h.temperatureC ?? (h as any).temperature_c;
+          const hr = h.heartRateBpm ?? (h as any).heart_rate_bpm;
+          const cond = h.conditionStatus ?? (h as any).condition_status;
+          const hName = h.horseName ?? (h as any).horse_name;
+          const tier = h.alertTier ?? (h as any).alert_tier;
+          const showRaw = !isCustomer || customerVitalsDetail === true;
+          const vitalsText = showRaw && temp && hr
+            ? `${temp}°C, ${hr} bpm`
+            : (cond === 'stable' ? 'Ổn định' : 'Cần chú ý');
+          return {
+            horseName: hName,
+            tier: (tier || (cond === 'stable' ? 'green' : 'amber_observational')) as any,
+            text: vitalsText,
+          };
+        });
+
+        items.push({
+          id: `${group}_stop_${stop.route_stop_id || stop.sequence_no}`,
+          group,
+          kind: mapStopKind(stop.stop_type, stop.leg_type),
+          title: stop.location_name || `Trạm dừng #${stop.sequence_no}`,
+          subtitle: stop.address || stop.city || stop.country,
+          status: isStopDeparted ? 'done' : isStopCurrent ? 'current' : 'upcoming',
+          plannedAt: stopPlanned,
+          actualAt: stopActual,
+          delayMinutes: delayMins,
+          locationSource: (stop.checkin_source as any) || (stopLog?.locationSource as any) || 'gps',
+          flagged: Boolean(stopLog?.flagged),
+          vitals: vitalsList.length > 0 ? vitalsList : undefined,
+          actorLabel: isCustomer ? undefined : stopLog?.updatedByName || driverStaff?.full_name,
+          note: stop.notes || stopLog?.notes,
+        });
+      }
+
+      const lastLeg = legsSubset[legsSubset.length - 1];
+      if (lastLeg) {
+        const isDelivered = lastLeg.status === 'completed' || status === 'completed';
+        const legEndLog = rawStatusLogs.find(
+          (l) => l.milestoneType === 'leg_arrival' && Number(l.legId) === Number(lastLeg.leg_id),
+        );
+        const plannedTime = lastLeg.planned_arrival ? new Date(lastLeg.planned_arrival).toISOString() : null;
+        const actualTime = lastLeg.actual_arrival
+          ? new Date(lastLeg.actual_arrival).toISOString()
+          : (legEndLog ? new Date(legEndLog.createdAt).toISOString() : null);
+
+        let delayMins: number | null = null;
+        if (plannedTime && actualTime) {
+          delayMins = Math.round((new Date(actualTime).getTime() - new Date(plannedTime).getTime()) / 60000);
+        }
+
+        const isCurrent = lastLeg.status === 'arrived' || (lastLeg.status === 'departed' && status === 'in_transit');
+
+        items.push({
+          id: `${group}_delivery`,
+          group,
+          kind: 'delivery',
+          title: group === 'return' ? `Cập bến về đích: ${lastLeg.destination_location}` : `Bàn giao tại đích: ${lastLeg.destination_location}`,
+          subtitle: lastLeg.destination_location,
+          status: isDelivered ? 'done' : isCurrent ? 'current' : 'upcoming',
+          plannedAt: plannedTime,
+          actualAt: actualTime,
+          delayMinutes: delayMins,
+          locationSource: (legEndLog?.locationSource as any) || (lastLeg.checkin_source as any) || 'gps',
+          flagged: Boolean(legEndLog?.flagged),
+          actorLabel: isCustomer ? undefined : legEndLog?.updatedByName || driverStaff?.full_name,
+        });
+      }
+    };
+
+    if (outboundLegs.length > 0) {
+      processLegsAndStops(outboundLegs, outboundStops, 'outbound');
+    }
+    if (tripType === 'round_trip' && returnLegs.length > 0) {
+      processLegsAndStops(returnLegs, returnStops, 'return');
+    }
+
+    // ── 3. POST-TRIP GROUP ──
+    const isCompleted = status === 'completed';
+    const isNoShow = shipment.return_no_show === true || status === 'no_show';
+    const isRefunded = status === 'refunded';
+
+    if (isNoShow) {
+      items.push({
+        id: 'post_noshow',
+        group: 'post_trip',
+        kind: 'no_show',
+        title: 'Khách không giao ngựa chặng về (No-Show)',
+        subtitle: 'Tài xế đã chờ đủ 120 phút theo chính sách',
+        status: 'failed',
+        actualAt: shipment.return_cancelled_at || new Date().toISOString(),
+      });
+    } else if (isRefunded) {
+      items.push({
+        id: 'post_refund',
+        group: 'post_trip',
+        kind: 'refund',
+        title: 'Đã hoàn tiền đơn hàng',
+        subtitle: 'Hoàn tiền 100% qua chuyển khoản ngân hàng',
+        status: 'failed',
+        actualAt: shipment.refunded_at || new Date().toISOString(),
+      });
+    } else {
+      items.push({
+        id: 'post_handover',
+        group: 'post_trip',
+        kind: 'handover',
+        title: 'Biên bản bàn giao & kiểm tra thể trạng',
+        subtitle: isCompleted ? 'Đã ký nhận bàn giao ngựa an toàn' : 'Biên bản giao nhận Flow 6',
+        status: isCompleted ? 'done' : 'upcoming',
+      });
+      items.push({
+        id: 'post_completed',
+        group: 'post_trip',
+        kind: 'delivery',
+        title: 'Hoàn tất toàn bộ hành trình',
+        subtitle: isCompleted ? 'Chuyến đi kết thúc thành công' : 'Chờ hoàn tất',
+        status: isCompleted ? 'done' : 'upcoming',
+      });
+    }
+
+    const doneItems = items.filter((it) => it.status === 'done').length;
+    const progressPercent = items.length > 0 ? Math.round((doneItems / items.length) * 100) : 0;
+
+    const currentItem = items.find((it) => it.status === 'current');
+    if (currentItem) {
+      currentItem.progressPercent = 50;
+    }
+
+    const finalRequestCode = isCustomer && shipment.customer_request_code
+      ? shipment.customer_request_code
+      : (shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`);
+
+    return {
+      shipmentId,
+      requestCode: finalRequestCode,
+      status: shipment.status,
+      tripType,
+      returnStatus: shipment.return_status,
+      progressPercent,
+      etaFinalAt: legs[legs.length - 1]?.planned_arrival ? new Date(legs[legs.length - 1].planned_arrival).toISOString() : null,
+      items,
+    };
   }
 }

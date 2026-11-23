@@ -30,6 +30,7 @@ import {
 import { DeliveryHandoverPanel } from '@/features/tracking/components/DeliveryHandoverPanel';
 import { routesApi } from '@/features/routes/api/routes.api';
 import { markReturnNoShow } from '@/features/orders/return-api';
+import { VerticalTimeline, buildTimeline, TimelineItem } from '@/features/tracking/timeline';
 import toast from 'react-hot-toast';
 
 function DriverStatusContent() {
@@ -40,6 +41,7 @@ function DriverStatusContent() {
   const [trips, setTrips] = useState<AssignedTripSummary[]>([]);
   const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
   const [trackingDetails, setTrackingDetails] = useState<TripTrackingDetails | null>(null);
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -137,8 +139,14 @@ function DriverStatusContent() {
   const loadDetails = useCallback(
     async (shipmentId: number, isSilent = false) => {
       try {
-        const details = await trackingApi.getTrackingDetails(shipmentId);
+        const [details, timelineRes] = await Promise.all([
+          trackingApi.getTrackingDetails(shipmentId),
+          trackingApi.getShipmentTimeline(shipmentId).catch(() => null),
+        ]);
         setTrackingDetails(details);
+        if (timelineRes) {
+          setTimelineItems(buildTimeline({ timelineData: timelineRes, viewer: 'driver' }));
+        }
         try {
           const route = await routesApi.getRouteByShipmentId(shipmentId);
           setActiveIncident(route?.activeIncident || null);
@@ -823,179 +831,91 @@ function DriverStatusContent() {
               </span>
             </div>
 
-            <div className="relative border-l-2 border-[#D8CEBE] ml-4 pl-6 flex flex-col gap-8">
-              {milestones.length === 0 ? (
-                <p className="text-sm text-[#57564E] py-4 m-0">
-                  {t('driver.status.noMilestonesYet', language === 'en' ? 'No milestones created yet.' : 'Chưa có chặng và trạm dừng nào được tạo cho đơn này.')}
-                </p>
-              ) : (
-                milestones.map((m) => {
-                  const isCurrent = m.status === 'CURRENT';
-                  const isCompleted = m.status === 'COMPLETED';
+            {/* Step 11 Vertical Timeline */}
+            <div className="pt-2">
+              <VerticalTimeline
+                items={timelineItems}
+                viewer="driver"
+                emptyText={t("driver.status.noMilestonesYet", language === "en" ? "No milestones created yet." : "Chưa có chặng và trạm dừng nào được tạo cho đơn này.")}
+                renderCurrentActions={(item) => {
+                  const m =
+                    milestones.find((x) => String(x.id) === item.id || x.title === item.title) ||
+                    milestones.find((x) => x.status === "CURRENT") ||
+                    milestones[0];
+                  if (!m) return null;
+
+                  const canCheckin = canUserCheckinMilestone(m) && (m.allowedActions || []).length > 0;
+                  const healthReady = hasHealthLogForMilestone(m);
 
                   return (
-                    <div key={m.id} className="relative">
-                      <div
-                        className={`absolute -left-[33px] top-0 w-5 h-5 rounded-full border-2 bg-white flex items-center justify-center ${
-                          isCompleted
-                            ? 'border-[#2D5A3F] text-[#2D5A3F]'
-                            : isCurrent
-                            ? 'border-[#181A17] text-[#A67C2E] animate-pulse'
-                            : 'border-[#D8CEBE] text-[#D8CEBE]'
-                        }`}
-                      >
-                        {isCompleted && <div className="w-2.5 h-2.5 rounded-full bg-[#2D5A3F]" />}
-                        {isCurrent && <div className="w-2.5 h-2.5 rounded-full bg-[#181A17]" />}
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-xs px-2 py-0.5 rounded bg-[#F4F1E9] text-[#57564E]">
-                              #{m.seq}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {canCheckin && (
+                        <>
+                          {healthReady ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#E8F2EB] text-[#2D5A3F] border border-[#2D5A3F]/25 text-[11px] font-bold">
+                              <Stethoscope size={13} aria-hidden="true" />
+                              {language === "en" ? "Health logged" : "Đã báo cáo sức khỏe"}
                             </span>
-                            <h3 className="text-sm font-bold text-[#181A17] m-0 flex items-center gap-1.5">
-                              {m.legType === 'flight' ? (
-                                <Plane size={14} className="text-[#A67C2E]" aria-hidden="true" />
-                              ) : (
-                                <Truck size={14} className="text-[#A67C2E]" aria-hidden="true" />
-                              )}
-                              {m.title}
-                            </h3>
-                            {m.isCustomsBorder && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3EFE4] text-[#181A17] border border-[#D4C5A3]">
-                                {t('driver.status.customsQuarantineBadge', language === 'en' ? 'Customs / Quarantine' : 'Hải quan / Kiểm dịch')}
-                              </span>
-                            )}
-                            <span
-                              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                                isCompleted
-                                  ? 'bg-[#E8F2EB] text-[#2D5A3F]'
-                                  : isCurrent
-                                  ? 'bg-[#FAF5EB] text-[#A67C2E] border border-[#D4C5A3]'
-                                  : 'bg-[#F4F1E9] text-[#747D88]'
-                              }`}
-                            >
-                              {isCompleted
-                                ? t('common.completed', language === 'en' ? 'Completed' : 'Đã hoàn tất')
-                                : isCurrent
-                                ? t('driver.status.inProgressCurrent', language === 'en' ? 'Current milestone' : 'Đang diễn ra — Mốc hiện tại')
-                                : t('driver.status.waitingTurn', language === 'en' ? 'Upcoming' : 'Chờ tới lượt')}
-                            </span>
-                          </div>
-
-                          <p className="text-xs text-[#57564E] flex flex-wrap items-center gap-1.5 mt-1.5 m-0">
-                            <MapPin size={12} className="text-[#8A8478] shrink-0" aria-hidden="true" /> <span>{m.location}</span>
-                            {m.actualTime
-                              ? (() => {
-                                  const { time, date } = formatDateTimeLocale(m.actualTime);
-                                  return (
-                                    <span className="text-[#2D5A3F] font-semibold inline-flex items-center gap-1">
-                                      • {t('driver.status.actualTime', language === 'en' ? 'Actual:' : 'Thực tế:')} <strong>{time}</strong> (
-                                      {t('driver.status.onDate', 'Ngày {date}', { date })})
-                                    </span>
-                                  );
-                                })()
-                              : m.plannedTime
-                              ? (() => {
-                                  const { time, date } = formatDateTimeLocale(m.plannedTime);
-                                  return (
-                                    <span className="text-[#747D88] inline-flex items-center gap-1">
-                                      • {t('driver.status.plannedTime', language === 'en' ? 'Estimated:' : 'Dự kiến:')} <strong>{time}</strong> (
-                                      {t('driver.status.onDate', 'Ngày {date}', { date })})
-                                    </span>
-                                  );
-                                })()
-                              : null}
-                          </p>
-
-                          {m.notes && (
-                            <div className="mt-2 p-2.5 rounded-xl bg-[#FAF8F4] border border-[#EAE5DA] text-xs text-[#3C403A] break-words">
-                              <strong>{t('common.notes', language === 'en' ? 'Notes' : 'Ghi chú')}:</strong> {m.notes}
-                              {m.updatedBy && (
-                                <span className="text-[#747D88] ml-2">
-                                  • {t('driver.status.updatedBy', language === 'en' ? 'Updated by:' : 'Cập nhật bởi:')} {m.updatedBy}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {isCurrent && (
-                          <div className="flex items-center gap-2 flex-wrap shrink-0">
-                            {canUserCheckinMilestone(m) && (m.allowedActions || []).length > 0 && (() => {
-                              const healthReady = hasHealthLogForMilestone(m);
-                              return (
-                                <>
-                                  {healthReady ? (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#E8F2EB] text-[#2D5A3F] border border-[#2D5A3F]/25 text-[11px] font-bold">
-                                      <Stethoscope size={13} aria-hidden="true" />
-                                      {language === 'en' ? 'Health logged' : 'Đã báo cáo sức khỏe'}
-                                    </span>
-                                  ) : (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      onClick={() => openQuickHealthModal(m)}
-                                      className="min-h-[44px] px-3.5 border-[#A67C2E] bg-[#FAF5EB] hover:bg-[#F3E9D2] text-[#8A5A11] font-bold text-xs shrink-0 flex items-center gap-1.5 cursor-pointer"
-                                    >
-                                      <Stethoscope size={14} aria-hidden="true" />
-                                      <span>
-                                        {language === 'en' ? 'Log Health (Required)' : 'Báo cáo sức khỏe (Bắt buộc)'}
-                                      </span>
-                                    </Button>
-                                  )}
-                                  <Button
-                                    type="button"
-                                    variant="primary"
-                                    onClick={() => handleOpenCheckin(m)}
-                                    title={
-                                      !healthReady
-                                        ? language === 'en'
-                                          ? 'Submit horse health report for this milestone first'
-                                          : 'Cần báo cáo sức khỏe ngựa trước khi báo cáo mốc này'
-                                        : undefined
-                                    }
-                                    className={`min-h-[44px] font-bold text-xs shrink-0 shadow-sm transition-all cursor-pointer ${
-                                      !healthReady
-                                        ? 'bg-[#EAE5DA] hover:bg-[#DFD8C8] text-[#57564E] border border-[#C8BFA8] px-4'
-                                        : m.itemType === 'leg_start' && m.seq === 1
-                                        ? 'bg-[#2D5A3F] hover:bg-[#234731] text-white px-4'
-                                        : 'bg-[#181A17] hover:bg-[#2C2F2A] text-[#F7F7F4] px-4'
-                                    }`}
-                                  >
-                                    {m.itemType === 'leg_start' && m.seq === 1 ? (
-                                      <>
-                                        <Play size={14} fill="currentColor" className="mr-1.5" aria-hidden="true" />
-                                        {t('driver.status.startTripBtn', language === 'en' ? 'Start Trip' : 'Bắt đầu chuyến đi')}
-                                      </>
-                                    ) : (
-                                      <>
-                                        <CheckCircle2 size={15} className="mr-1.5" aria-hidden="true" />
-                                        {t('driver.status.reportMilestoneBtn', language === 'en' ? 'Check-in Milestone' : 'Báo cáo mốc này')}
-                                      </>
-                                    )}
-                                  </Button>
-                                </>
-                              );
-                            })()}
+                          ) : (
                             <Button
                               type="button"
                               variant="outline"
-                              onClick={openIncidentModal}
-                              className="min-h-[44px] px-3.5 border-[#9E3B3B]/40 text-[#9E3B3B] hover:bg-rose-50 font-bold text-xs shrink-0 flex items-center gap-1 cursor-pointer"
-                              title={t('driver.status.reportEmergencyBtn', language === 'en' ? 'Report incident' : 'Báo cáo sự cố khẩn cấp')}
+                              onClick={() => openQuickHealthModal(m)}
+                              className="min-h-[40px] px-3.5 border-[#A67C2E] bg-[#FAF5EB] hover:bg-[#F3E9D2] text-[#8A5A11] font-bold text-xs shrink-0 flex items-center gap-1.5 cursor-pointer"
                             >
-                              <AlertTriangle size={14} className="text-[#9E3B3B]" aria-hidden="true" />
-                              <span>{t('incidents.reportIncident', language === 'en' ? 'Report Incident' : 'Báo sự cố')}</span>
+                              <Stethoscope size={14} aria-hidden="true" />
+                              <span>
+                                {language === "en" ? "Log Health (Required)" : "Báo cáo sức khỏe (Bắt buộc)"}
+                              </span>
                             </Button>
-                          </div>
-                        )}
-                      </div>
+                          )}
+                          <Button
+                            type="button"
+                            variant="primary"
+                            onClick={() => handleOpenCheckin(m)}
+                            title={
+                              !healthReady
+                                ? language === "en"
+                                  ? "Submit horse health report for this milestone first"
+                                  : "Cần báo cáo sức khỏe ngựa trước khi báo cáo mốc này"
+                                : undefined
+                            }
+                            className={`min-h-[40px] font-bold text-xs shrink-0 shadow-sm transition-all cursor-pointer ${
+                              !healthReady
+                                ? "bg-[#EAE5DA] hover:bg-[#DFD8C8] text-[#57564E] border border-[#C8BFA8] px-4"
+                                : m.itemType === "leg_start" && m.seq === 1
+                                ? "bg-[#2D5A3F] hover:bg-[#234731] text-white px-4"
+                                : "bg-[#181A17] hover:bg-[#2C2F2A] text-[#F7F7F4] px-4"
+                            }`}
+                          >
+                            {m.itemType === "leg_start" && m.seq === 1 ? (
+                              <>
+                                <Play size={14} fill="currentColor" className="mr-1.5" aria-hidden="true" />
+                                {t("driver.status.startTripBtn", language === "en" ? "Start Trip" : "Bắt đầu chuyến đi")}
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 size={15} className="mr-1.5" aria-hidden="true" />
+                                {t("driver.status.reportMilestoneBtn", language === "en" ? "Check-in Milestone" : "Báo cáo mốc này")}
+                              </>
+                            )}
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={openIncidentModal}
+                        className="min-h-[40px] px-3.5 border-[#9E3B3B]/40 text-[#9E3B3B] hover:bg-rose-50 font-bold text-xs shrink-0 flex items-center gap-1 cursor-pointer"
+                        title={t("driver.status.reportEmergencyBtn", language === "en" ? "Report incident" : "Báo cáo sự cố khẩn cấp")}
+                      >
+                        <AlertTriangle size={14} className="text-[#9E3B3B]" aria-hidden="true" />
+                        <span>{t("incidents.reportIncident", language === "en" ? "Report Incident" : "Báo sự cố")}</span>
+                      </Button>
                     </div>
                   );
-                })
-              )}
+                }}
+              />
             </div>
           </div>
         </>

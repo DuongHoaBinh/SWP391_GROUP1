@@ -97,3 +97,32 @@ Current trip status, chronological route log, horse health log, delay alerts, an
   - Trước mốc `return_departure_at + return_wait_minutes`: Hệ thống chặn không cho đánh dấu no-show (`409 Conflict` kèm thông tin `allowedAt`).
   - Sau mốc chờ: Tài xế chụp ảnh làm bằng chứng và gửi yêu cầu no-show.
   - Server cập nhật `shipment.status = 'completed'`, `shipment.return_status = 'no_show'`, `shipment.return_no_show = true`, giải phóng ngựa về `active`, giải phóng xe về `active`, ghi `trip_status_log` (milestone `no_show`) và gửi thông báo cho khách hàng cùng Logistics Manager. Khách hàng không được hoàn lại bất kỳ khoản cước chặng về nào.
+
+## 10. Timeline Tiến độ Dạng Line Dọc Dùng Chung (Step 11 — BA Spec & Hội đồng G12)
+
+### 1. Mục tiêu và Nguyên tắc Dùng chung
+- Hợp nhất hiển thị tiến trình của một chuyến đi thành component duy nhất `VerticalTimeline` phục vụ đồng bộ cả 3 actor: **Customer**, **Logistics Manager**, và **Driver/Escort**.
+- Tiến độ được chia thành 4 nhóm mốc thời gian rõ ràng:
+  1. `pre_trip` (Trước chuyến đi): Đặt cọc/Thanh toán cước, Quản lý phê duyệt, Hồ sơ kiểm dịch & hải quan, Xe & tài xế xác nhận xuất phát.
+  2. `outbound` (Chặng đi): Điểm đón xuất phát, các trạm dừng chân/nghỉ ngơi, cửa khẩu/trạm kiểm dịch, sân bay/cảng, và điểm giao đích.
+  3. `return` (Chặng về - chỉ hiển thị với đơn khứ hồi): Lộ trình đón trả ngựa quay trở về điểm xuất phát ban đầu.
+  4. `post_trip` (Sau chuyến đi): Bàn giao ngựa & ký biên bản nghiệm thu (Flow 6), hoặc xử lý sự cố hủy/no-show/hoàn tiền.
+
+### 2. Trạng thái Mốc và Trực quan hóa
+- `done`: Chấm tròn đặc màu xanh lục `#287653`, đoạn nối phía dưới tô đầy màu đồng `#A67C2E`.
+- `current`: Chấm tròn có vòng hào quang nhấp nháy (`motion-safe:animate-ping`), đoạn nối phía dưới tô dần theo tỉ lệ hoàn thành quãng đường (`progressPercent`), viền nổi bật và đánh dấu `aria-current="step"`.
+- `upcoming`: Chấm rỗng, đoạn nối nét đứt (`border-dashed`), chữ xám dịu.
+- `skipped`: Chấm xám, tiêu đề gạch ngang.
+- `failed`: Chấm đỏ cảnh báo `#B33E3E` (áp dụng khi đơn no-show, hủy chuyến hoặc hoàn tiền).
+
+### 3. Quy tắc Tính toán Trễ/Sớm và Định dạng Giờ
+- `delayMinutes = actualAt - plannedAt` (tính theo phút) khi mốc đã diễn ra; hoặc `etaAt - plannedAt` đối với mốc đang xử lý (`current`).
+- Hiển thị badge:
+  - `Trễ X phút` (badge vàng nếu trễ $\le 60$ phút, badge đỏ nếu trễ $> 60$ phút).
+  - `Sớm X phút` (badge xanh lục).
+  - Định dạng hiển thị giờ: `HH:mm dd/MM` theo múi giờ `Asia/Ho_Chi_Minh`.
+
+### 4. Phân Quyền và Ẩn Thông Tin (Privacy & SoD)
+- **Customer viewer:** Ẩn danh tính nhân viên nội bộ (`actorLabel` bị redact), ẩn các trạm trung chuyển gom hàng nội bộ (`transfer_hub`) của đơn hàng khác. Sinh hiệu hiển thị dạng trung tính nếu chưa có kết quả lâm sàng chi tiết.
+- **Manager viewer:** Hiển thị đầy đủ nhãn người cập nhật, nguồn tọa độ (GPS, Giả lập, Thủ công) kèm cờ cảnh báo `flagged` nếu điều phối can thiệp, cung cấp nút "Cập nhật thay Driver".
+- **Driver viewer:** Trên mốc `current`, hiển thị slot hành động nhanh `renderCurrentActions` gồm các nút: Báo cáo mốc / Bắt đầu chuyến đi và Cập nhật Sinh hiệu Ngựa.

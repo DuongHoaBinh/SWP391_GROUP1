@@ -1,4 +1,5 @@
 import { apiClient } from '@/lib/api-client';
+import type { ShipmentTimelineResponse } from '../timeline/timeline-types';
 
 export interface TrackingMilestoneItem {
   id: string;
@@ -509,6 +510,10 @@ export const trackingApi = {
 
   getTrackingSettings: async (): Promise<TrackingSystemSettings> => {
     return apiClient<TrackingSystemSettings>('/system-settings/tracking');
+  },
+
+  getShipmentTimeline: async (shipmentId: number): Promise<ShipmentTimelineResponse> => {
+    return apiClient<ShipmentTimelineResponse>(`/tracking/shipments/${shipmentId}/timeline`);
   },
 
   updateTrackingSettings: async (

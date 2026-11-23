@@ -39,6 +39,7 @@ import {
   PositionPingResult,
   TrackingSystemSettings,
   TripTrackingDetails,
+  ShipmentTimelineResponse,
 } from './tracking.types';
 
 @ApiTags('Tracking')
@@ -95,6 +96,15 @@ export class TrackingController {
     @Param('shipmentId', ParseIntPipe) shipmentId: number,
   ): Promise<LiveTrackingDetails> {
     return this.trackingService.getLiveTracking(user, shipmentId);
+  }
+
+  @Get('shipments/:shipmentId/timeline')
+  @ApiOperation({ summary: 'Dữ liệu timeline tiến độ dọc chi tiết đã chuẩn hóa cho cả 3 actor' })
+  async getShipmentTimeline(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('shipmentId', ParseIntPipe) shipmentId: number,
+  ): Promise<ShipmentTimelineResponse> {
+    return this.trackingService.getShipmentTimeline(user, shipmentId);
   }
 
   @Post('shipments/:shipmentId/pings')

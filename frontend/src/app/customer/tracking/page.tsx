@@ -27,6 +27,7 @@ import {
 } from '@/features/tracking/api/tracking.api';
 import { DeliveryHandoverPanel } from '@/features/tracking/components/DeliveryHandoverPanel';
 import { LiveTrackingMap } from '@/components/maps/LiveTrackingMap';
+import { VerticalTimeline, buildTimeline, TimelineItem } from '@/features/tracking/timeline';
 import toast from 'react-hot-toast';
 
 function CustomerTrackingContent() {
@@ -39,6 +40,7 @@ function CustomerTrackingContent() {
   const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
   const [trackingDetails, setTrackingDetails] = useState<TripTrackingDetails | null>(null);
   const [liveTracking, setLiveTracking] = useState<LiveTrackingDetails | null>(null);
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [tripsError, setTripsError] = useState<string>('');
   const [detailsError, setDetailsError] = useState<string>('');
@@ -121,13 +123,17 @@ function CustomerTrackingContent() {
           setRefreshing(true);
           setDetailsError('');
         }
-        const [details, liveData] = await Promise.all([
+        const [details, liveData, timelineRes] = await Promise.all([
           trackingApi.getTrackingDetails(shipmentId),
           trackingApi.getLiveTracking(shipmentId).catch(() => null),
+          trackingApi.getShipmentTimeline(shipmentId).catch(() => null),
         ]);
         if (isMountedRef.current && !controller.signal.aborted && seq === requestSeqRef.current) {
           setTrackingDetails(details);
           if (liveData) setLiveTracking(liveData);
+          if (timelineRes) {
+            setTimelineItems(buildTimeline({ timelineData: timelineRes, viewer: 'customer' }));
+          }
           setDetailsError('');
         }
         return true;
@@ -463,311 +469,202 @@ function CustomerTrackingContent() {
             </div>
           </div>
 
-          {/* Live Telemetry Map */}
-          {liveTracking && (
-            <div className="bg-[#FAF8F4] border border-[#E5DDD0] rounded-2xl p-5 sm:p-6 flex flex-col gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-bold tracking-[0.12em] text-[#A67C2E] uppercase">
-                    {language === 'en' ? 'LIVE VEHICLE TRACKING' : 'VỊ TRÍ PHƯƠNG TIỆN TRỰC TIẾP'}
-                  </span>
-                  {liveTracking.isSimulated && (
-                    <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-300">
-                      {language === 'en' ? 'SIMULATED DATA' : 'DỮ LIỆU GIẢ LẬP'}
-                    </span>
-                  )}
-                </div>
-                {(liveTracking.currentPosition || liveTracking.vehiclePosition) && (
-                  <span className="text-xs text-[#5F6977]">
-                    {language === 'en' ? 'Speed: ' : 'Vận tốc: '}
-                    <strong className="text-[#181A17]">
-                      {Math.round(
-                        (liveTracking.currentPosition || liveTracking.vehiclePosition)?.speedKmh || 0,
-                      )}{' '}
-                      km/h
-                    </strong>
-                  </span>
-                )}
-              </div>
-              <LiveTrackingMap liveData={liveTracking} height="380px" autoCenter />
-            </div>
-          )}
-
-          {/* Light Editorial Route Progress Card */}
-          <div className="bg-[#FAF8F4] border border-[#E5DDD0] rounded-2xl p-5 sm:p-6">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
-              <span className="text-[11px] font-bold tracking-[0.12em] text-[#A67C2E] uppercase">
-                {t('tracking.gpsRadar', language === 'en' ? 'JOURNEY PROGRESS' : 'TIẾN ĐỘ HÀNH TRÌNH')}
-              </span>
-              <span className="text-xs font-semibold text-[#5F6977]">
-                {language === 'en' ? 'Progress:' : 'Tiến độ:'} <strong className="text-[#181A17]">{progressPct}%</strong> (
-                {completedCount}/{totalCount} {language === 'en' ? 'milestones' : 'mốc'})
-              </span>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-6 my-2">
-              <div className="text-center sm:text-left">
-                <div className="w-3 h-3 rounded-full bg-[#287653] mb-1.5 ring-4 ring-[#E8F2EB] mx-auto sm:mx-0" />
-                <div className="font-bold text-sm text-[#181A17]">{shortLocation(trackingDetails?.origin)}</div>
-                <div className="text-xs text-[#5F6977]">{language === 'en' ? 'Origin' : 'Điểm xuất phát'}</div>
-              </div>
-
-              <div className="flex-1 w-full relative px-2 sm:px-4">
-                <div className="h-2 w-full bg-[#E5DDD0] rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-[#181A17] rounded-full transition-all duration-500"
-                    style={{ width: `${Math.max(8, progressPct)}%` }}
-                  />
-                </div>
-                <div className="flex justify-center mt-3">
-                  <span className="bg-white border border-[#D8CEBE] text-[#181A17] px-3.5 py-1.5 rounded-full text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm">
-                    <MapPin size={13} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
-                    <span>
-                      {language === 'en' ? 'Current milestone:' : 'Vị trí hiện tại:'}{' '}
-                      <strong>{trackingDetails?.currentMilestone || '—'}</strong>
-                    </span>
-                  </span>
-                </div>
-              </div>
-
-              <div className="text-center sm:text-right">
-                <div className="w-3 h-3 rounded-full bg-[#A67C2E] mb-1.5 ring-4 ring-[#F5EFE2] mx-auto sm:ml-auto" />
-                <div className="font-bold text-sm text-[#181A17]">{shortLocation(trackingDetails?.destination)}</div>
-                <div className="text-xs text-[#5F6977]">
-                  {language === 'en' ? 'Estimated arrival:' : 'Dự kiến đến:'}{' '}
-                  {trackingDetails?.eta
-                    ? (Number.isNaN(Date.parse(trackingDetails.eta))
-                        ? trackingDetails.eta
-                        : new Date(trackingDetails.eta).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN'))
-                    : (language === 'en' ? 'On schedule' : 'Đúng tiến độ')}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Milestones Timeline */}
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap justify-between items-center gap-2">
-              <h3 className="text-lg font-bold text-[#181A17] m-0 flex items-center gap-2">
-                <FileCheck2 size={18} className="text-[#A67C2E]" aria-hidden="true" />
-                {t('tracking.milestones', 'Tiến độ các Mốc Lộ trình & Thủ tục Kiểm dịch')}
-              </h3>
-              <span className="text-xs font-bold text-[#5F6977]">
-                {language === 'en'
-                  ? `${completedCount} of ${totalCount} checkpoints passed`
-                  : `${completedCount} trên ${totalCount} chặng/trạm đã qua`}
-              </span>
-            </div>
-
-            <div className="relative border-l-2 border-[#D8CEBE] ml-4 pl-6 flex flex-col gap-5 py-2">
-              {!trackingDetails || !trackingDetails.milestones || trackingDetails.milestones.length === 0 ? (
-                <p className="text-sm text-[#5F6977]">
-                  {language === 'en'
-                    ? 'No control milestones have been scheduled for this journey yet.'
-                    : 'Chưa có thông tin mốc kiểm soát nào cho chuyến đi này.'}
-                </p>
-              ) : (
-                trackingDetails.milestones.map((m, idx) => {
-                  const isCompleted = m.status === 'COMPLETED';
-                  const isCurrent = m.status === 'CURRENT';
-
-                  return (
-                    <div key={m.id} className="relative">
-                      {/* Status Icon */}
-                      <div
-                        className={`absolute -left-[35px] top-0.5 w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${
-                          isCompleted
-                            ? 'bg-[#287653] text-white ring-4 ring-[#E8F2EB]'
-                            : isCurrent
-                            ? 'bg-[#181A17] text-[#C4B38E] ring-4 ring-[#F5EFE2] animate-pulse motion-reduce:animate-none'
-                            : 'bg-[#F0EEE8] text-[#5F6977]'
-                        }`}
-                      >
-                        {isCompleted ? <CheckCircle2 size={16} aria-hidden="true" /> : idx + 1}
-                      </div>
-
-                      <div
-                        className={`rounded-xl p-4 border transition-colors ${
-                          isCurrent
-                            ? 'bg-[#FAF8F4] border-[#A67C2E]'
-                            : isCompleted
-                            ? 'bg-[#F0EEE8]/60 border-[#D8CEBE]'
-                            : 'bg-white border-[#D8CEBE]'
-                        }`}
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-bold text-[#181A17] text-sm">{m.title}</span>
-                            {m.legType === 'flight' && (
-                              <span className="bg-[#F5EFE2] text-[#8C6621] border border-[#DFCA9A] text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                                <Plane size={11} aria-hidden="true" /> {language === 'en' ? 'Air Leg' : 'Chặng bay'}
-                              </span>
-                            )}
-                            {m.isCustomsBorder && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A]">
-                                {language === 'en' ? 'Quarantine & Customs' : 'Kiểm dịch & Hải quan'}
-                              </span>
-                            )}
-                          </div>
-
-                          <span
-                            className={`text-xs font-bold px-2.5 py-0.5 rounded-full w-fit ${
-                              isCompleted
-                                ? 'bg-[#E8F2EB] text-[#287653]'
-                                : isCurrent
-                                ? 'bg-[#181A17] text-[#C4B38E]'
-                                : 'bg-[#F0EEE8] text-[#5F6977]'
-                            }`}
-                          >
-                            {isCompleted
-                              ? language === 'en'
-                                ? 'Completed'
-                                : 'Đã hoàn tất'
-                              : isCurrent
-                              ? language === 'en'
-                                ? 'In Progress'
-                                : 'Đang thực hiện'
-                              : language === 'en'
-                              ? 'Upcoming'
-                              : 'Sắp tới'}
-                          </span>
-                        </div>
-
-                        <p className="text-xs text-[#5F6977] flex items-center gap-1.5 mt-1.5 m-0">
-                          <MapPin size={13} className="text-[#8892A0] shrink-0" aria-hidden="true" /> {m.location}
-                        </p>
-
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-[#5F6977] mt-2.5">
-                          {m.plannedTime && (() => {
-                            const { time, date } = formatDateTimeLocale(m.plannedTime);
-                            return (
-                              <span className="inline-flex items-center gap-1.5 bg-[#F0EEE8] text-[#181A17] px-2.5 py-1 rounded-md text-[11px] font-medium border border-[#D8CEBE]">
-                                <Clock size={12} className="text-[#5F6977] shrink-0" aria-hidden="true" />
-                                <span>{language === 'en' ? 'Planned:' : 'Kế hoạch:'}</span>
-                                <strong className="text-[#181A17]">{time}</strong>
-                                <span className="text-[#8892A0] mx-0.5">•</span>
-                                <span>{date}</span>
-                              </span>
-                            );
-                          })()}
-                          {m.actualTime && (() => {
-                            const { time, date } = formatDateTimeLocale(m.actualTime);
-                            return (
-                              <span className="inline-flex items-center gap-1.5 bg-[#E8F2EB] text-[#287653] px-2.5 py-1 rounded-md text-[11px] font-medium border border-[#B7DBC4]">
-                                <CheckCircle2 size={12} className="text-[#287653] shrink-0" aria-hidden="true" />
-                                <span>{language === 'en' ? 'Actual:' : 'Thực tế:'}</span>
-                                <strong className="font-bold">{time}</strong>
-                                <span className="opacity-60 mx-0.5">•</span>
-                                <span>{date}</span>
-                              </span>
-                            );
-                          })()}
-                          {m.updatedBy && (
-                            <span className="text-[#5F6977] italic text-[11px]">
-                              {language === 'en' ? 'Confirmed by:' : 'Xác nhận bởi:'} {m.updatedBy}
-                            </span>
-                          )}
-                        </div>
-
-                        {m.notes && (
-                          <div className="mt-2.5 bg-[#F8F0DF]/70 border border-[#DFCA9A] rounded-lg p-2.5 text-xs text-[#181A17] flex items-start gap-2 shadow-sm">
-                            <FileText size={14} className="text-[#A67C2E] shrink-0 mt-0.5" aria-hidden="true" />
-                            <div className="flex-1">
-                              <span className="font-bold text-[#8C6621] text-[11px] uppercase tracking-wide block">
-                                {language === 'en' ? 'Field Notes:' : 'Ghi chú thực địa:'}
-                              </span>
-                              <p className="mt-0.5 m-0 text-[#181A17] font-medium italic">&ldquo;{m.notes}&rdquo;</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
+          {/* Desktop 2-Column / Mobile Stacked: Live Map (Left/Top) & Vertical Timeline (Right/Bottom) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Column 1: Live Map & Telemetry Details */}
+            <div className="lg:col-span-7 flex flex-col gap-6 order-1">
+              {/* Live Telemetry Map */}
+              {liveTracking && (
+                <div className="bg-[#FAF8F4] border border-[#E5DDD0] rounded-2xl p-5 sm:p-6 flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold tracking-[0.12em] text-[#A67C2E] uppercase">
+                        {language === 'en' ? 'LIVE VEHICLE TRACKING' : 'VỊ TRÍ PHƯƠNG TIỆN TRỰC TIẾP'}
+                      </span>
+                      {liveTracking.isSimulated && (
+                        <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-300">
+                          {language === 'en' ? 'SIMULATED DATA' : 'DỮ LIỆU GIẢ LẬP'}
+                        </span>
+                      )}
                     </div>
-                  );
-                })
+                    {(liveTracking.currentPosition || liveTracking.vehiclePosition) && (
+                      <span className="text-xs text-[#5F6977]">
+                        {language === 'en' ? 'Speed: ' : 'Vận tốc: '}
+                        <strong className="text-[#181A17]">
+                          {Math.round(
+                            (liveTracking.currentPosition || liveTracking.vehiclePosition)?.speedKmh || 0,
+                          )}{' '}
+                          km/h
+                        </strong>
+                      </span>
+                    )}
+                  </div>
+                  <LiveTrackingMap liveData={liveTracking} height="420px" autoCenter />
+                </div>
+              )}
+
+              {/* Equine Health Summary */}
+              {trackingDetails?.healthLogs && trackingDetails.healthLogs.length > 0 && (
+                <div className="bg-[#FAF8F4] rounded-xl p-5 border border-[#D8CEBE] flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-bold text-[#181A17] m-0 flex items-center gap-2">
+                      <Heart size={16} className="text-[#B33E3E]" aria-hidden="true" />
+                      {language === 'en'
+                        ? 'In-Transit Equine Health & Vital Logs'
+                        : 'Nhật ký Sức khỏe & Thể trạng Ngựa trong Chuyến đi'}
+                    </h4>
+                    <span className="text-xs text-[#5F6977]">
+                      {language === 'en'
+                        ? 'Updated by Attending Equine Escort'
+                        : 'Cập nhật bởi Chuyên viên y tế áp tải'}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    {trackingDetails.healthLogs.map((log) => (
+                      <div
+                        key={log.id}
+                        className="p-3 bg-white rounded-lg border border-[#D8CEBE] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                      >
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-extrabold text-[#181A17]">{log.horseName}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                log.conditionStatus === 'stable'
+                                  ? 'bg-[#E8F2EB] text-[#287653]'
+                                  : 'bg-[#F8F0DF] text-[#966516]'
+                              }`}
+                            >
+                              {language === 'en'
+                                ? log.conditionStatus
+                                : log.conditionStatusVi || log.conditionStatus}
+                            </span>
+                            {log.legName && (
+                              <span className="bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE] px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                                <MapPin size={10} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+                                <span>{log.legName}</span>
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[#5F6977] mt-1 m-0">
+                            {log.notes || (language === 'en' ? 'Stable vital condition' : 'Sức khỏe ổn định')}
+                          </p>
+                        </div>
+
+                        <div className="text-[#5F6977] sm:text-right shrink-0">
+                          <span className="font-bold text-[#181A17] block">
+                            {log.temperatureC ? `${log.temperatureC}°C` : '--'} •{' '}
+                            {log.heartRateBpm ? `${log.heartRateBpm} bpm` : '--'}
+                          </span>
+                          {(() => {
+                            const { time, date } = formatDateTimeLocale(log.recordedAt);
+                            return (
+                              <span className="text-[11px] text-[#5F6977] flex sm:justify-end items-center gap-1 mt-0.5">
+                                <Clock size={11} className="text-[#8892A0]" aria-hidden="true" />
+                                <strong className="text-[#181A17]">{time}</strong>
+                                <span className="text-[#D8CEBE] mx-0.5">•</span>
+                                <span>{date}</span>
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selectedShipmentId && trackingDetails && (
+                <DeliveryHandoverPanel
+                  role="customer"
+                  shipmentId={selectedShipmentId}
+                  shipmentStatus={trackingDetails.shipmentStatus}
+                  assignedHorses={trackingDetails.assignedHorses}
+                />
               )}
             </div>
-          </div>
 
-          {/* Equine Health Summary */}
-          {trackingDetails?.healthLogs && trackingDetails.healthLogs.length > 0 && (
-            <div className="bg-[#FAF8F4] rounded-xl p-5 border border-[#D8CEBE] flex flex-col gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h4 className="text-sm font-bold text-[#181A17] m-0 flex items-center gap-2">
-                  <Heart size={16} className="text-[#B33E3E]" aria-hidden="true" />
-                  {language === 'en'
-                    ? 'In-Transit Equine Health & Vital Logs'
-                    : 'Nhật ký Sức khỏe & Thể trạng Ngựa trong Chuyến đi'}
-                </h4>
-                <span className="text-xs text-[#5F6977]">
-                  {language === 'en'
-                    ? 'Updated by Attending Equine Escort'
-                    : 'Cập nhật bởi Chuyên viên y tế áp tải'}
-                </span>
-              </div>
+            {/* Column 2: Progress & Step 11 Vertical Timeline */}
+            <div className="lg:col-span-5 flex flex-col gap-6 order-2">
+              {/* Light Editorial Route Progress Card */}
+              <div className="bg-[#FAF8F4] border border-[#E5DDD0] rounded-2xl p-5 sm:p-6">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
+                  <span className="text-[11px] font-bold tracking-[0.12em] text-[#A67C2E] uppercase">
+                    {t('tracking.gpsRadar', language === 'en' ? 'JOURNEY PROGRESS' : 'TIẾN ĐỘ HÀNH TRÌNH')}
+                  </span>
+                  <span className="text-xs font-semibold text-[#5F6977]">
+                    {language === 'en' ? 'Progress:' : 'Tiến độ:'} <strong className="text-[#181A17]">{progressPct}%</strong> (
+                    {completedCount}/{totalCount} {language === 'en' ? 'milestones' : 'mốc'})
+                  </span>
+                </div>
 
-              <div className="flex flex-col gap-2">
-                {trackingDetails.healthLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="p-3 bg-white rounded-lg border border-[#D8CEBE] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                  >
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-extrabold text-[#181A17]">{log.horseName}</span>
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            log.conditionStatus === 'stable'
-                              ? 'bg-[#E8F2EB] text-[#287653]'
-                              : 'bg-[#F8F0DF] text-[#966516]'
-                          }`}
-                        >
-                          {language === 'en'
-                            ? log.conditionStatus
-                            : log.conditionStatusVi || log.conditionStatus}
-                        </span>
-                        {log.legName && (
-                          <span className="bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE] px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-                            <MapPin size={10} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
-                            <span>{log.legName}</span>
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[#5F6977] mt-1 m-0">
-                        {log.notes || (language === 'en' ? 'Stable vital condition' : 'Sức khỏe ổn định')}
-                      </p>
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-6 my-2">
+                  <div className="text-center sm:text-left">
+                    <div className="w-3 h-3 rounded-full bg-[#287653] mb-1.5 ring-4 ring-[#E8F2EB] mx-auto sm:mx-0" />
+                    <div className="font-bold text-sm text-[#181A17]">{shortLocation(trackingDetails?.origin)}</div>
+                    <div className="text-xs text-[#5F6977]">{language === 'en' ? 'Origin' : 'Điểm xuất phát'}</div>
+                  </div>
+
+                  <div className="flex-1 w-full relative px-2 sm:px-4">
+                    <div className="h-2 w-full bg-[#E5DDD0] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#181A17] rounded-full transition-all duration-500"
+                        style={{ width: `${Math.max(8, progressPct)}%` }}
+                      />
                     </div>
-
-                    <div className="text-[#5F6977] sm:text-right shrink-0">
-                      <span className="font-bold text-[#181A17] block">
-                        {log.temperatureC ? `${log.temperatureC}°C` : '--'} •{' '}
-                        {log.heartRateBpm ? `${log.heartRateBpm} bpm` : '--'}
+                    <div className="flex justify-center mt-3">
+                      <span className="bg-white border border-[#D8CEBE] text-[#181A17] px-3.5 py-1.5 rounded-full text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm">
+                        <MapPin size={13} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+                        <span>
+                          {language === 'en' ? 'Current milestone:' : 'Vị trí hiện tại:'}{' '}
+                          <strong>{trackingDetails?.currentMilestone || '—'}</strong>
+                        </span>
                       </span>
-                      {(() => {
-                        const { time, date } = formatDateTimeLocale(log.recordedAt);
-                        return (
-                          <span className="text-[11px] text-[#5F6977] flex sm:justify-end items-center gap-1 mt-0.5">
-                            <Clock size={11} className="text-[#8892A0]" aria-hidden="true" />
-                            <strong className="text-[#181A17]">{time}</strong>
-                            <span className="text-[#D8CEBE] mx-0.5">•</span>
-                            <span>{date}</span>
-                          </span>
-                        );
-                      })()}
                     </div>
                   </div>
-                ))}
+
+                  <div className="text-center sm:text-right">
+                    <div className="w-3 h-3 rounded-full bg-[#A67C2E] mb-1.5 ring-4 ring-[#F5EFE2] mx-auto sm:ml-auto" />
+                    <div className="font-bold text-sm text-[#181A17]">{shortLocation(trackingDetails?.destination)}</div>
+                    <div className="text-xs text-[#5F6977]">
+                      {language === 'en' ? 'Estimated arrival:' : 'Dự kiến đến:'}{' '}
+                      {trackingDetails?.eta
+                        ? (Number.isNaN(Date.parse(trackingDetails.eta))
+                            ? trackingDetails.eta
+                            : new Date(trackingDetails.eta).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN'))
+                        : (language === 'en' ? 'On schedule' : 'Đúng tiến độ')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 11 Vertical Timeline */}
+              <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 sm:p-6 shadow-sm flex flex-col gap-4">
+                <div className="flex flex-wrap justify-between items-center gap-2 border-b border-[#E5DDD0] pb-3">
+                  <h3 className="text-base font-bold text-[#181A17] m-0 flex items-center gap-2">
+                    <FileCheck2 size={18} className="text-[#A67C2E]" aria-hidden="true" />
+                    {t('tracking.milestones', 'Tiến độ các Mốc Lộ trình & Thủ tục Kiểm dịch')}
+                  </h3>
+                  <span className="text-xs font-bold text-[#5F6977]">
+                    {language === 'en'
+                      ? `${completedCount} of ${totalCount} checkpoints passed`
+                      : `${completedCount} trên ${totalCount} chặng/trạm đã qua`}
+                  </span>
+                </div>
+
+                <VerticalTimeline
+                  items={timelineItems}
+                  viewer="customer"
+                  emptyText={
+                    language === 'en'
+                      ? 'No control milestones have been scheduled for this journey yet.'
+                      : 'Chưa có thông tin mốc kiểm soát nào cho chuyến đi này.'
+                  }
+                />
               </div>
             </div>
-          )}
-
-          {selectedShipmentId && trackingDetails && (
-            <DeliveryHandoverPanel
-              role="customer"
-              shipmentId={selectedShipmentId}
-              shipmentStatus={trackingDetails.shipmentStatus}
-              assignedHorses={trackingDetails.assignedHorses}
-            />
-          )}
+          </div>
         </div>
       )}
     </div>

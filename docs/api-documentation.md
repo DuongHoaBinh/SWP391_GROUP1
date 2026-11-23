@@ -1181,3 +1181,45 @@ Base URL: `http://localhost:5000/api` (Tất cả endpoint yêu cầu `Authoriza
   "geofenceRadiusLargeSiteM": 1000
 }
 ```
+
+### 5. `GET /tracking/shipments/:shipmentId/timeline` (Step 11 — Timeline Dọc Dùng Chung)
+- **Quyền:** Đã đăng nhập. `CUSTOMER` chỉ xem đơn hàng của mình (`403 Forbidden` nếu truy cập đơn của khách khác).
+- **Mô tả:** Trả về danh sách toàn bộ các mốc tiến độ chuẩn hóa theo thứ tự hành trình (`pre_trip`, `outbound`, `return`, `post_trip`), phục vụ component `VerticalTimeline`.
+- **Phân quyền và che giấu dữ liệu (Privacy & SoD):**
+  - Đối với `CUSTOMER`: Server tự động ẩn các trạm trung chuyển gom hàng nội bộ (`transfer_hub`) và ẩn tên nhân viên nội bộ (`actorLabel = undefined`).
+  - Đối với `LOGISTICS_MANAGER`, `ADMIN`, `DRIVER_ESCORT`: Hiển thị đầy đủ nhãn người cập nhật, cờ can thiệp `flagged`, nguồn tọa độ (`gps`, `simulated`, `manual`, `override`).
+- **Response Format:**
+```json
+{
+  "shipmentId": 12,
+  "requestCode": "TR-2026-F4",
+  "isRoundTrip": false,
+  "currentMilestoneId": "leg_start_1",
+  "items": [
+    {
+      "id": "pre_paid",
+      "group": "pre_trip",
+      "kind": "payment",
+      "title": "Thanh toán cước phí vận chuyển",
+      "status": "done",
+      "actualAt": "2026-11-23T08:00:00Z"
+    },
+    {
+      "id": "stop_10",
+      "group": "outbound",
+      "kind": "quarantine",
+      "title": "Trạm kiểm dịch Cửa khẩu Mộc Bài",
+      "subtitle": "Bến Cầu, Tây Ninh",
+      "status": "current",
+      "plannedAt": "2026-11-23T10:00:00Z",
+      "actualAt": null,
+      "delayMinutes": 25,
+      "progressPercent": 65,
+      "locationSource": "gps",
+      "vitals": [
+        { "horseName": "Xích Thố", "tier": "green", "text": "38.2°C • 40 bpm (Ổn định)" }
+      ]
+    }
+  ]
+}
+```

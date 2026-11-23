@@ -26,6 +26,7 @@ import {
   Download,
   CreditCard,
   Route,
+  FileCheck2,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
@@ -47,6 +48,8 @@ import { DeliveryHandoverPanel } from '@/features/tracking/components/DeliveryHa
 import { RoundTripPanel } from '@/features/orders/components/RoundTripPanel';
 import { CustomerClaimsList } from '@/features/orders/components/CustomerClaimsList';
 import { escapeQuotationText } from '@/features/orders/quotation-html';
+import { VerticalTimeline, buildTimeline, TimelineItem } from '@/features/tracking/timeline';
+import { trackingApi } from '@/features/tracking/api/tracking.api';
 
 const fetcher = async (url: string) => {
   let targetUrl = url;
@@ -302,6 +305,24 @@ export default function RequestDetailPage() {
     { revalidateOnFocus: true }
   );
 
+  // Step 11: Fetch live shipment timeline if order has an associated active shipment
+  const isTransitOrBeyondPre = ['ready_to_depart', 'ready', 'in_transit', 'arrived', 'completed'].includes(
+    String(request?.status || '').toLowerCase()
+  );
+  const targetShipmentId =
+    request?.shipment?.id || request?.shipmentId || (isTransitOrBeyondPre ? request?.id : null);
+  const { data: timelineData } = useSWR(
+    targetShipmentId ? `/tracking/shipments/${targetShipmentId}/timeline` : null,
+    async () => {
+      try {
+        return await trackingApi.getShipmentTimeline(Number(targetShipmentId));
+      } catch {
+        return null;
+      }
+    },
+    { revalidateOnFocus: false },
+  );
+
   // Tab State: 4 core tabs
   const [activeTab, setActiveTab] = useState<'overview' | 'horses' | 'documents' | 'quotation'>('overview');
 
@@ -425,6 +446,92 @@ export default function RequestDetailPage() {
 
   // Check if order has quotation available
   const hasQuotation = Number(request.totalCost) > 0 || statusLower === 'quotation_sent' || statusLower === 'approved';
+
+  // Step 11: Setup timeline items for request detail
+  const isTransitOrBeyond = ['ready_to_depart', 'ready', 'in_transit', 'arrived', 'completed'].includes(statusLower);
+
+  const fallbackTimelineItems: TimelineItem[] = [
+    {
+      id: 'req_created',
+      group: 'pre_trip',
+      kind: 'approval',
+      title: language === 'en' ? 'Transport Request Created' : 'Tạo yêu cầu vận chuyển',
+      subtitle: request.origin && request.destination ? `${request.origin} → ${request.destination}` : undefined,
+      status: 'done',
+      actualAt: request.createdAt,
+    },
+    {
+      id: 'req_paid',
+      group: 'pre_trip',
+      kind: 'payment',
+      title: language === 'en' ? 'Deposit / Fee Payment' : 'Thanh toán cước phí / đặt cọc',
+      subtitle: request.totalCost ? `${Number(request.totalCost).toLocaleString()} VND` : undefined,
+      status: ['paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(statusLower)
+        ? 'done'
+        : ['awaiting_payment', 'quotation_sent'].includes(statusLower)
+        ? 'current'
+        : 'upcoming',
+    },
+    {
+      id: 'req_approved',
+      group: 'pre_trip',
+      kind: 'approval',
+      title: language === 'en' ? 'Logistics Feasibility Approval' : 'Quản lý phê duyệt tính khả thi',
+      status: ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(statusLower)
+        ? 'done'
+        : ['requested', 'under_review', 'in_review'].includes(statusLower)
+        ? 'current'
+        : ['rejected', 'cancelled', 'cancelled_operational'].includes(statusLower)
+        ? 'failed'
+        : 'upcoming',
+    },
+    {
+      id: 'req_docs',
+      group: 'pre_trip',
+      kind: 'documents',
+      title: language === 'en' ? 'Veterinary & Customs Compliance' : 'Hồ sơ kiểm dịch & hải quan',
+      subtitle: checklist?.isFullyCompliant ? (language === 'en' ? 'All mandatory documents verified' : 'Đã duyệt đủ hồ sơ') : undefined,
+      status: checklist?.isFullyCompliant || ['confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(statusLower)
+        ? 'done'
+        : statusLower === 'planning'
+        ? 'current'
+        : 'upcoming',
+    },
+    {
+      id: 'req_planned',
+      group: 'outbound',
+      kind: 'pickup',
+      title: language === 'en' ? 'Route & Fleet Planning' : 'Phân bổ xe & Lập lộ trình di chuyển',
+      status: ['ready_to_depart', 'in_transit', 'completed'].includes(statusLower)
+        ? 'done'
+        : statusLower === 'confirmed'
+        ? 'current'
+        : 'upcoming',
+    },
+    {
+      id: 'req_transit',
+      group: 'outbound',
+      kind: 'delivery',
+      title: language === 'en' ? 'In-Transit Execution' : 'Tiến trình vận chuyển thực địa',
+      status: statusLower === 'completed'
+        ? 'done'
+        : statusLower === 'in_transit'
+        ? 'current'
+        : 'upcoming',
+    },
+    {
+      id: 'req_handover',
+      group: 'post_trip',
+      kind: 'handover',
+      title: language === 'en' ? 'Delivery Handover & Acceptance' : 'Bàn giao ngựa & Nghiệm thu kết thúc',
+      status: statusLower === 'completed' ? 'done' : 'upcoming',
+    },
+  ];
+
+  const activeTimelineItems =
+    timelineData?.items && timelineData.items.length > 0
+      ? buildTimeline({ timelineData, viewer: 'customer' })
+      : fallbackTimelineItems;
 
   // Compute dynamic timeline stepper
   let computedStep = 2;
@@ -953,93 +1060,24 @@ export default function RequestDetailPage() {
         </div>
       )}
 
-      {/* 1. STATUS TIMELINE STEPPER */}
-      <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 shadow-sm">
-        <div className="overflow-x-auto pb-1">
-        <div style={{ position: 'relative', minWidth: '540px', maxWidth: '800px', margin: '0 auto' }}>
-          {/* Background connector bar */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '18px',
-              left: '30px',
-              right: '30px',
-              height: '4px',
-              backgroundColor: '#F0EEE8',
-              zIndex: 0,
-            }}
-          />
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
-            {displayTimeline.map((stage) => {
-              const isCompleted = stage.status === 'completed';
-              const isActive = stage.status === 'active';
-
-              return (
-                <div
-                  key={stage.stage}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '8px',
-                    width: '76px',
-                    textAlign: 'center',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '50%',
-                      backgroundColor: isCompleted
-                        ? '#287653'
-                        : isActive
-                        ? '#181A17'
-                        : '#ffffff',
-                      color: isCompleted ? '#ffffff' : isActive ? '#C4B38E' : '#8892A0',
-                      border: isCompleted || isActive ? '2px solid transparent' : '2px solid #E5DDD0',
-                      boxShadow: isCompleted
-                        ? '0 0 0 2px #287653'
-                        : isActive
-                        ? '0 0 0 3px rgba(196, 179, 142, 0.35)'
-                        : 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '12px',
-                      position: 'relative',
-                    }}
-                  >
-                    {isCompleted && <Check size={14} strokeWidth={3} />}
-                    {isActive && <Search size={14} />}
-                    {!isCompleted && !isActive && (
-                      <>
-                        {stage.stage === 2 && <ThumbsUp size={14} />}
-                        {stage.stage === 3 && <FileText size={14} />}
-                        {stage.stage === 4 && <CalendarCheck size={14} />}
-                        {stage.stage === 5 && <Plane size={14} />}
-                        {stage.stage === 6 && <Flag size={14} />}
-                      </>
-                    )}
-                  </div>
-
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: isActive ? 700 : 600,
-                      color: isActive ? '#181A17' : isCompleted ? '#181A17' : '#747D88',
-                      lineHeight: 1.25,
-                    }}
-                  >
-                    {stage.name}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+      {/* 1. STATUS TIMELINE (Step 11 Vertical Timeline) */}
+      <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 sm:p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-4 border-b border-[#E5DDD0]">
+          <h3 className="text-sm font-bold text-[#181A17] m-0 flex items-center gap-2">
+            <FileCheck2 size={16} className="text-[#A67C2E]" aria-hidden="true" />
+            {language === 'en' ? 'Journey Progress & Timeline' : 'Tiến trình Xử lý & Lộ trình Vận chuyển'}
+          </h3>
+          <span className="text-xs text-[#747D88]">
+            {isTransitOrBeyond
+              ? (language === 'en' ? 'Live Telemetry Milestones' : 'Mốc hành trình thực tế')
+              : (language === 'en' ? 'Lifecycle Stages' : 'Tiến trình đơn hàng')}
+          </span>
         </div>
-        </div>
+        <VerticalTimeline
+          items={activeTimelineItems}
+          viewer="customer"
+          compact={!isTransitOrBeyond}
+        />
       </div>
 
       {/* ─── UNDERLINE TAB NAVIGATION BAR ─────────────────────────── */}
