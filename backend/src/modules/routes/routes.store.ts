@@ -1258,10 +1258,17 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       const fullyConfirmed = assignments.every(a => Boolean(a.is_confirmed) || Number(a.user_id) === userId);
       if (fullyConfirmed) {
         const [invoices] = await db.execute<RowDataPacket[]>(
-          "SELECT invoice_id, amount FROM shipment_invoice WHERE route_id = ? AND COALESCE(invoice_type, 'primary') = 'primary' AND COALESCE(status, 'active') <> 'void'",
-          [route.route_id],
+          "SELECT invoice_id, amount, route_id, status FROM shipment_invoice WHERE shipment_id = ? AND COALESCE(invoice_type, 'primary') = 'primary' AND COALESCE(status, 'active') <> 'void' ORDER BY invoice_id DESC LIMIT 1",
+          [shipmentId],
         );
-        if (invoices.length && Number(invoices[0].amount) !== amount) throw new BadRequestException('Báo giá khác hóa đơn đã phát hành. Cần đối soát trước khi xác nhận lại');
+        if (invoices.length) {
+          if (invoices[0].route_id == null) {
+            await db.execute("UPDATE shipment_invoice SET route_id = ? WHERE invoice_id = ?", [route.route_id, invoices[0].invoice_id]);
+          }
+          if (order.payment_flow !== 'prepaid' && Number(invoices[0].amount) !== amount) {
+            throw new BadRequestException('Báo giá khác hóa đơn đã phát hành. Cần đối soát trước khi xác nhận lại');
+          }
+        }
         if (!invoices.length) {
           const [insuredHorses] = await db.execute<RowDataPacket[]>('SELECT sh.*, h.name FROM shipment_horse sh JOIN horse h ON h.horse_id = sh.horse_id WHERE sh.shipment_id = ?', [shipmentId]);
           const snapshot = { requestCode: `REQ-${String(shipmentId).padStart(3, '0')}`, contactName: order.contact_name,
@@ -1309,8 +1316,13 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       const paidAmount = payments
         .filter((p) => p.status === 'succeeded')
         .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-      const isPaymentSucceeded = paidAmount >= Number(order.total_cost) && Number(order.total_cost) > 0;
-      const isPlanConfirmed = gate.paymentUnlocked;
+      const isPrepaid = order.payment_flow === 'prepaid';
+      const isPaymentSucceeded = isPrepaid
+        ? (payments.some((p) => p.status === 'succeeded') || gate.invoice?.status === 'paid')
+        : (paidAmount >= Number(order.total_cost) && Number(order.total_cost) > 0);
+      const isPlanConfirmed = isPrepaid
+        ? (route?.plan_status === 'confirmed' || gate.paymentUnlocked)
+        : gate.paymentUnlocked;
       const isReadyToDepart = isPlanConfirmed && isPaymentSucceeded && isLegalCompliant && ['confirmed', 'ready_to_depart'].includes(order.status);
       if (order.status === 'in_transit') {
         // BR-F2-06 / AC-F2-03: Never rollback an in_transit shipment; flag compliance alert only.

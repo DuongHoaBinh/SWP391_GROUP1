@@ -107,4 +107,9 @@ export class MailService {
       return { delivered: false };
     }
   }
+
+  async sendNotificationEmail(to: string, subject: string, html: string): Promise<boolean> {
+    const res = await this.sendOperationalEmail(to, subject, html);
+    return res.delivered;
+  }
 }

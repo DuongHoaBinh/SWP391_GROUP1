@@ -19,6 +19,8 @@ import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DocumentsService } from '../documents/documents.service';
+import { MailService } from '../auth/mail.service';
+import { FeasibilityReviewDto, SubmitRefundFormDto } from './dto/prepaid-flow.dto';
 import {
   currentReturnPolicy,
   calculateReturnCancellationRefund,
@@ -31,6 +33,7 @@ export class OrdersService {
     private readonly ordersStore: OrdersStore,
     private readonly notificationsService: NotificationsService,
     @Optional() private readonly documentsService?: DocumentsService,
+    @Optional() private readonly mailService?: MailService,
   ) {}
 
   async getOrderCutoffPolicy(input: {
@@ -109,12 +112,18 @@ export class OrdersService {
   async createOrder(user: AuthenticatedUser, dto: CreateOrderDto): Promise<TransportOrder> {
     // Bỏ gom chuyến (Step 3): đơn mới luôn bao chuyến, gửi shared_stall trả 400
     dto.bookingType = assertNewBookingType(dto.bookingType);
+    if (dto.tripType === 'round_trip' && !dto.acceptReturnPolicy) {
+      throw new BadRequestException('Bạn phải đồng ý chính sách hủy chặng về và no-show để đặt chuyến khứ hồi');
+    }
     await this.assertValidRequestedDate(dto.requestedDate, {
       destinationLocation: dto.destinationLocation,
       originLocation: dto.originLocation,
       bookingType: dto.bookingType,
       transportationType: dto.transportationType,
     });
+    if (!dto.quoteId && !(dto as any).isLegacySeed) {
+      throw new BadRequestException('Vui lòng tạo báo giá trước khi đặt đơn');
+    }
     const customerId = Number(user.id);
     const shipmentId = await this.ordersStore.createShipment(customerId, dto);
     const created = await this.ordersStore.findShipmentById(shipmentId);
@@ -126,10 +135,14 @@ export class OrdersService {
     const code = created.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
     const horseCount = dto.horses?.length || dto.requestedHorseCount || 1;
     const customerDisplayName = created.customerName || created.contactName || (user as any).fullName || user.email;
+    const notifMsg = created.paymentFlow === 'prepaid'
+      ? `Khách hàng ${customerDisplayName} (${user.email}) vừa tạo đơn trả trước ${code} từ báo giá #${dto.quoteId} (${horseCount} ngựa) và đang chờ thanh toán qua SePay.`
+      : `Khách hàng ${customerDisplayName} (${user.email}) vừa gửi yêu cầu vận chuyển mới ${code} từ "${dto.originLocation}" đến "${dto.destinationLocation}" (${horseCount} ngựa). Vui lòng xem xét và duyệt đơn.`;
+
     await this.notificationsService.notifyRole(
       'Logistics Manager',
       `Yêu cầu vận chuyển mới: ${code}`,
-      `Khách hàng ${customerDisplayName} (${user.email}) vừa gửi yêu cầu vận chuyển mới ${code} từ "${dto.originLocation}" đến "${dto.destinationLocation}" (${horseCount} ngựa). Vui lòng xem xét và duyệt đơn.`,
+      notifMsg,
       'status_update',
       shipmentId,
     );
@@ -194,6 +207,10 @@ export class OrdersService {
       throw new NotFoundException(`Transport order #${orderId} not found`);
     }
 
+    if (order.paymentFlow === 'prepaid') {
+      throw new ConflictException('Đơn trả trước dùng nút Duyệt khả thi');
+    }
+
     if (order.status !== ShipmentStatus.REQUESTED) {
       throw new ConflictException(
         `Chỉ đơn hàng đang ở trạng thái "${ShipmentStatus.REQUESTED}" mới có thể phê duyệt. Trạng thái hiện tại: "${order.status}"`,
@@ -249,6 +266,10 @@ export class OrdersService {
       throw new NotFoundException(`Transport order #${orderId} not found`);
     }
 
+    if (order.paymentFlow === 'prepaid') {
+      throw new ConflictException('Đơn trả trước dùng nút Duyệt khả thi');
+    }
+
     if (order.status !== ShipmentStatus.REQUESTED) {
       throw new ConflictException(
         `Chỉ đơn hàng đang ở trạng thái "${ShipmentStatus.REQUESTED}" mới có thể từ chối. Trạng thái hiện tại: "${order.status}"`,
@@ -285,6 +306,10 @@ export class OrdersService {
     const order = await this.ordersStore.findShipmentById(orderId);
     if (!order) {
       throw new NotFoundException(`Transport order #${orderId} not found`);
+    }
+
+    if (order.paymentFlow === 'prepaid') {
+      throw new ConflictException('Đơn trả trước dùng nút Duyệt khả thi');
     }
 
     if (order.status !== ShipmentStatus.REQUESTED) {
@@ -598,5 +623,56 @@ export class OrdersService {
       fee: reschedule.fee,
       free: reschedule.free,
     };
+  }
+
+  async feasibilityReview(
+    manager: AuthenticatedUser,
+    orderId: number,
+    dto: FeasibilityReviewDto,
+  ): Promise<TransportOrder> {
+    const managerId = Number(manager.id);
+    const updated = await this.ordersStore.feasibilityReview(orderId, managerId, dto);
+
+    const customerCode = updated.customerRequestCode || updated.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
+    if (dto.decision === 'approve') {
+      await this.notificationsService.createNotification(
+        updated.customerId,
+        `Đơn vận chuyển ${customerCode} đã được duyệt khả thi`,
+        `Đơn hàng ${customerCode} đã được Quản lý vận hành xác nhận khả thi vận chuyển. Đội ngũ điều phối đang tiến hành xây dựng lộ trình chi tiết.`,
+        'status_update',
+        orderId,
+      );
+    } else {
+      const reasonLabel = dto.reasonCode || 'Không đáp ứng được điều kiện vận chuyển';
+      await this.notificationsService.createNotification(
+        updated.customerId,
+        `Thông báo không thể đáp ứng đơn ${customerCode}`,
+        `Rất tiếc công ty không thể đáp ứng yêu cầu vận chuyển của quý khách (${reasonLabel}: ${dto.note}). Quý khách được hoàn tiền 100%. Vui lòng điền form thông tin tài khoản ngân hàng để nhận hoàn tiền.`,
+        'status_update',
+        orderId,
+      );
+
+      if (this.mailService && updated.contactEmail) {
+        await this.mailService.sendNotificationEmail(
+          updated.contactEmail,
+          `Thông báo hoàn tiền đơn hàng ${customerCode}`,
+          `Xin chào ${updated.contactName || 'Quý khách'},<br/><br/>Công ty rất tiếc phải thông báo hiện chưa thể đáp ứng đơn vận chuyển ${customerCode} vì lý do: <b>${reasonLabel}</b> (${dto.note}).<br/><br/>Quý khách sẽ được hoàn tiền 100% chi phí đã thanh toán (${Number(updated.totalCost).toLocaleString('vi-VN')} VND). Vui lòng truy cập trang chi tiết đơn hàng để điền thông tin tài khoản ngân hàng nhận tiền hoàn.<br/><br/>Trân trọng,<br/>EquiTransit Logistics`,
+        );
+      }
+    }
+
+    return updated;
+  }
+
+  async getOrderInvoice(user: AuthenticatedUser, orderId: number): Promise<any> {
+    return this.ordersStore.getOrderInvoice(orderId, Number(user.id), user.role);
+  }
+
+  async getRefundFormInfo(user: AuthenticatedUser, orderId: number): Promise<any> {
+    return this.ordersStore.getRefundFormInfo(orderId, Number(user.id), user.role);
+  }
+
+  async submitRefundForm(user: AuthenticatedUser, orderId: number, dto: SubmitRefundFormDto): Promise<any> {
+    return this.ordersStore.submitRefundForm(orderId, Number(user.id), dto);
   }
 }

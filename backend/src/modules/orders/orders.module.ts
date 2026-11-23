@@ -24,9 +24,10 @@ import { QuotesStore } from './quotes.store';
 import { InsuranceClaimController } from './insurance-claim.controller';
 import { InsuranceClaimService } from './insurance-claim.service';
 import { InsuranceClaimStore } from './insurance-claim.store';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [NotificationsModule, DocumentsModule, DistanceModule],
+  imports: [NotificationsModule, DocumentsModule, DistanceModule, AuthModule],
   controllers: [
     OrdersOpsController,
     OrdersController,

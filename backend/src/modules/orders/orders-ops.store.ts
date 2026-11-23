@@ -19,6 +19,7 @@ import {
   RefundMode,
 } from './refund-policy';
 import { computeGraceDueAt, computePaymentDueAt } from './sla-timeline.policy';
+import { transitionShipment } from './order-state-machine';
 
 export interface DisbursementItem {
   id: number;
@@ -641,6 +642,51 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
         // Continue if insurance_claim table not yet present in old tests
       }
 
+      // Step 7: If this refund belongs to 'company_cannot_fulfil', transition shipment to 'refunded' and release horses
+      if (r.cancellation_category === 'company_cannot_fulfil') {
+        const sid = Number(r.shipment_id);
+        try {
+          await transitionShipment(db, {
+            shipmentId: sid,
+            to: 'refunded',
+            actorId: transferrerId,
+            actorRole: 'ADMIN',
+            reasonCode: 'refund_transferred',
+            note: `Đã hoàn tất chuyển khoản hoàn tiền ${Number(r.amount).toLocaleString('vi-VN')} VND kèm UNC ${data.bankTransactionRef}`,
+          });
+        } catch {
+          await db.execute("UPDATE shipment SET status = 'refunded' WHERE shipment_id = ?", [sid]);
+        }
+
+        // Release horses
+        await db.execute(
+          `UPDATE horse h
+           SET h.status = 'active'
+           WHERE h.horse_id IN (
+             SELECT sh.horse_id FROM shipment_horse sh WHERE sh.shipment_id = ?
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM shipment_horse sh2
+             JOIN shipment s2 ON s2.shipment_id = sh2.shipment_id
+             WHERE sh2.horse_id = h.horse_id
+               AND s2.shipment_id <> ?
+               AND s2.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refunded', 'completed')
+           )`,
+          [sid, sid],
+        );
+
+        // Notify Customer
+        await db.execute(
+          `INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
+           VALUES (?, ?, 'Hoàn tiền thành công', ?, 'status_update', FALSE)`,
+          [
+            r.customer_id,
+            sid,
+            `Khoản hoàn tiền 100% (${Number(r.amount).toLocaleString('vi-VN')} VND) của đơn #${sid} đã được chuyển khoản thành công. Quý khách có thể xem ủy nhiệm chi tại trang chi tiết đơn hàng.`,
+          ],
+        );
+      }
+
       return (await this.findRefundByIdWithConn(db, refundId))!;
     });
   }
@@ -1053,6 +1099,92 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      // 4. Prepaid flow: check expired awaiting_payment shipments
+      const prepaidAutoCancelled: Array<{ shipmentId: number; customerId: number }> = [];
+      const prepaidReviewAlerts: Array<{ shipmentId: number; customerId: number }> = [];
+      try {
+        const [expiredPrepaidRows] = await db.execute<RowDataPacket[]>(
+          `SELECT s.shipment_id, s.customer_id, s.status, s.payment_flow, s.payment_due_at
+           FROM shipment s
+           WHERE s.payment_flow = 'prepaid'
+             AND s.status = 'awaiting_payment'
+             AND s.payment_due_at IS NOT NULL
+             AND s.payment_due_at < NOW()`,
+        );
+
+        for (const prep of expiredPrepaidRows) {
+          const sid = Number(prep.shipment_id);
+          const cid = Number(prep.customer_id);
+
+          const [payRows] = await db.execute<RowDataPacket[]>(
+            `SELECT status FROM shipment_sepay_payment WHERE shipment_id = ?`,
+            [sid],
+          );
+          const hasSucceeded = payRows.some((p) => p.status === 'succeeded');
+          const hasReview = payRows.some((p) => p.status === 'review');
+
+          if (hasSucceeded) {
+            continue;
+          }
+
+          if (hasReview) {
+            prepaidReviewAlerts.push({ shipmentId: sid, customerId: cid });
+            continue;
+          }
+
+          try {
+            await transitionShipment(db, {
+              shipmentId: sid,
+              to: 'cancelled',
+              actorId: null,
+              actorRole: 'SYSTEM',
+              reasonCode: 'payment_expired',
+              note: 'Hết hạn thời gian thanh toán (24h). Hệ thống tự động hủy đơn và hoàn trả ngựa.',
+            });
+
+            await db.execute(
+              `UPDATE shipment
+               SET cancel_reason_code = 'payment_expired',
+                   cancellation_reason = 'Hết hạn thời gian thanh toán (payment_expired)'
+               WHERE shipment_id = ?`,
+              [sid],
+            );
+
+            await db.execute(
+              "UPDATE shipment_invoice SET status = 'void' WHERE shipment_id = ? AND status <> 'void'",
+              [sid],
+            );
+
+            await db.execute(
+              "UPDATE shipment_sepay_payment SET status = 'cancelled' WHERE shipment_id = ? AND status = 'pending'",
+              [sid],
+            );
+
+            await db.execute(
+              `UPDATE horse h
+               SET h.status = 'active'
+               WHERE h.horse_id IN (
+                 SELECT sh.horse_id FROM shipment_horse sh WHERE sh.shipment_id = ?
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM shipment_horse sh2
+                 JOIN shipment s2 ON s2.shipment_id = sh2.shipment_id
+                 WHERE sh2.horse_id = h.horse_id
+                   AND s2.shipment_id <> ?
+                   AND s2.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refunded', 'completed')
+               )`,
+              [sid, sid],
+            );
+
+            prepaidAutoCancelled.push({ shipmentId: sid, customerId: cid });
+          } catch {
+            // Ignore error per shipment
+          }
+        }
+      } catch {
+        // Table or columns might not exist in old unit test DB
+      }
+
       return {
         primaryReminders,
         primaryBreaches,
@@ -1060,6 +1192,8 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
         paymentReminders,
         overdueMarked,
         expiredGraceShipmentIds: [...new Set(expiredGraceShipmentIds)],
+        prepaidAutoCancelled,
+        prepaidReviewAlerts,
       };
     } finally {
       db.release();

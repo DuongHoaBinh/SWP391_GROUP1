@@ -147,6 +147,32 @@ export class SlaMonitorService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+      if ((sweep as any).prepaidAutoCancelled) {
+        for (const pac of (sweep as any).prepaidAutoCancelled) {
+          const code = `REQ-${String(pac.shipmentId).padStart(3, '0')}`;
+          await this.notificationsService.createNotification(
+            pac.customerId,
+            `Đơn hàng đã tự động hủy do hết hạn thanh toán (${code})`,
+            `Đơn hàng ${code} đã quá thời hạn thanh toán 24 giờ mà chưa ghi nhận giao dịch thành công. Đơn hàng đã tự động hủy và hoàn trả ngựa. Quý khách vui lòng tạo báo giá mới nếu muốn tiếp tục đặt chuyến.`,
+            'status_update',
+            pac.shipmentId,
+          );
+        }
+      }
+
+      if ((sweep as any).prepaidReviewAlerts) {
+        for (const pra of (sweep as any).prepaidReviewAlerts) {
+          const code = `REQ-${String(pra.shipmentId).padStart(3, '0')}`;
+          await this.notificationsService.notifyRole(
+            'Logistics Manager',
+            `Đơn trả trước quá hạn có giao dịch cần đối soát (${code})`,
+            `Đơn hàng ${code} đã quá payment_due_at nhưng có giao dịch SePay đang ở trạng thái review. Hệ thống không tự động hủy. Vui lòng đối soát.`,
+            'incident',
+            pra.shipmentId,
+          );
+        }
+      }
+
       return {
         escalatedPrimaryAssignments: sweep.primaryBreaches.length,
         hardCapAlertsTriggered: sweep.hardCapShipmentIds.length,

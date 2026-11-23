@@ -294,6 +294,7 @@ test('Wave 5 Order Cutoff: createOrder & updateOrder reject violations with 422 
           transportationType: 'Domestic',
           bookingType: 'dedicated_charter',
           requestedDate: dayIso(1),
+          isLegacySeed: true,
         },
       ),
     (err) => err instanceof UnprocessableEntityException && err.getStatus() === 422 && err.getResponse().code === 'ORDER_CUTOFF_VIOLATION',
@@ -306,6 +307,7 @@ test('Wave 5 Order Cutoff: createOrder & updateOrder reject violations with 422 
       transportationType: 'Domestic',
       bookingType: 'dedicated_charter',
       requestedDate: dayIso(2),
+      isLegacySeed: true,
     },
   );
   assert.equal(createdPayloads.length, 1);

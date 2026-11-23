@@ -13,6 +13,10 @@ export enum ShipmentStatus {
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
   CANCELLED_OPERATIONAL = 'cancelled_operational',
+  AWAITING_PAYMENT = 'awaiting_payment',
+  PAID_PENDING_REVIEW = 'paid_pending_review',
+  REFUND_REQUESTED = 'refund_requested',
+  REFUNDED = 'refunded',
 }
 
 export interface ShipmentAttachment {
@@ -109,5 +113,12 @@ export interface TransportOrder {
   returnPolicyAcceptedAt?: string | null;
   returnCancelledAt?: string | null;
   returnCancelReason?: string | null;
+  paymentFlow?: 'postpaid_legacy' | 'prepaid';
+  paymentDueAt?: string | null;
+  cancelReasonCode?: string | null;
+  feasibilityDecidedBy?: number | null;
+  feasibilityDecidedAt?: string | null;
+  feasibilityReasonCode?: string | null;
+  feasibilityNote?: string | null;
   returnRescheduleFee?: number | null;
 }

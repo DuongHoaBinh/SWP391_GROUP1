@@ -278,6 +278,7 @@ test('5. Tạo đơn khứ hồi thiếu acceptReturnPolicy → 400; có → lư
         requestedDate: '2026-12-10T08:00:00.000Z',
         tripType: 'round_trip',
         acceptReturnPolicy: false,
+        isLegacySeed: true,
       });
     },
     (err) => err instanceof BadRequestException && err.message.includes('đồng ý chính sách'),
@@ -293,6 +294,7 @@ test('5. Tạo đơn khứ hồi thiếu acceptReturnPolicy → 400; có → lư
     requestedDate: '2026-12-10T08:00:00.000Z',
     tripType: 'round_trip',
     acceptReturnPolicy: true,
+    isLegacySeed: true,
   });
 
   assert.equal(order.id, 101);

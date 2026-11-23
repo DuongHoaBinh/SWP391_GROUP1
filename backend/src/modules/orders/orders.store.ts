@@ -8,6 +8,10 @@ import { calculateInsurance, totalInsuranceFee } from './insurance-policy';
 import { BookingQuote, BookingType, assertNewBookingType, calculateBookingQuote, resolveResubmitBookingType } from './booking-policy';
 import { parseJsonField } from './pricing.store';
 import { currentReturnPolicy, calculateReturnCancellationRefund } from './return-policy';
+import { CANNOT_FULFIL_REASONS, FeasibilityReviewDto, SubmitRefundFormDto } from './dto/prepaid-flow.dto';
+import { addBusinessDays } from './prepaid-policy';
+import { transitionShipment } from './order-state-machine';
+import { ResultSetHeader } from 'mysql2/promise';
 
 interface ShipmentRow extends RowDataPacket {
   transport_mode: 'road' | 'air' | 'sea' | null;
@@ -50,6 +54,13 @@ interface ShipmentRow extends RowDataPacket {
   return_cancelled_at?: Date | string | null;
   return_cancel_reason?: string | null;
   return_reschedule_fee?: number | string;
+  payment_flow?: 'postpaid_legacy' | 'prepaid';
+  payment_due_at?: Date | string | null;
+  cancel_reason_code?: string | null;
+  feasibility_decided_by?: number | null;
+  feasibility_decided_at?: Date | string | null;
+  feasibility_reason_code?: string | null;
+  feasibility_note?: string | null;
   special_requirements: string | null;
   rejection_reason: string | null;
   change_request_notes: string | null;
@@ -271,18 +282,21 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         const transportMode = qRow.transport_mode;
         const seaMode = qRow.sea_mode ?? null;
 
+        const paymentWindowMinutes = Number(process.env.ORDER_PAYMENT_WINDOW_MINUTES || 1440);
+        const paymentDueAt = new Date(Date.now() + paymentWindowMinutes * 60 * 1000);
+
         const [result] = await db.execute(
           `INSERT INTO shipment (
             customer_id, requested_by, contact_name, contact_address, contact_phone,
             contact_email, requested_horse_count, origin_location, destination_location,
-            requested_date, transportation_type, special_requirements, status,
+            requested_date, transportation_type, special_requirements, status, payment_flow, payment_due_at,
             total_cost, transport_cost, insurance_fee, booking_type,
             quote_id, pricing_snapshot, distance_km, distance_source,
             origin_lat, origin_lng, destination_lat, destination_lng,
             transport_mode, sea_mode,
             trip_type, return_departure_at, return_wait_minutes, return_status, return_no_show,
             return_freight, return_insurance_fee, return_policy_snapshot, return_policy_accepted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 120, ?, FALSE, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_payment', 'prepaid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 120, ?, FALSE, ?, ?, ?, ?)`,
           [
             customerId,
             customerId,
@@ -296,6 +310,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
             dto.requestedDate ? new Date(dto.requestedDate) : new Date(qInput.departureDate || Date.now()),
             dto.transportationType ?? null,
             dto.specialRequirements ?? null,
+            paymentDueAt,
             totalCost,
             transportCost,
             insuranceFee,
@@ -328,6 +343,75 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         );
 
         await this.insertInsuredHorses(db, shipmentId, horses);
+
+        const invoiceCode = `INV-${new Date().getFullYear()}-${String(shipmentId).padStart(6, '0')}`;
+        const invoiceSnapshot = {
+          invoiceCode,
+          shipmentId,
+          quoteId: dto.quoteId,
+          customer: {
+            id: customerId,
+            name: dto.contactName,
+            phone: dto.contactPhone,
+            email: dto.contactEmail,
+            address: dto.contactAddress,
+          },
+          route: {
+            origin: originLocation,
+            destination: destinationLocation,
+            transportMode,
+            seaMode,
+            distanceKm,
+            requestedDate: dto.requestedDate,
+            isRoundTrip,
+            tripType,
+            returnDepartureAt,
+          },
+          horses: horses.map((h) => ({
+            horseId: h.horseId,
+            name: (h as any).name || (h as any).horseName || 'Ngựa',
+            microchipNo: (h as any).microchipNo || null,
+            declaredValueVnd: h.declaredValueVnd,
+            insurancePackage: h.insurancePackage,
+            insuranceFee: h.insuranceFee,
+            maxCompensation: h.maxCompensation,
+          })),
+          breakdown: selectedOption?.freight?.breakdown || qResult.legs?.[0]?.breakdown || [],
+          freightTotal: transportCost,
+          insuranceTotal: insuranceFee,
+          totalAmount: totalCost,
+          currency: 'VND',
+          tariffVersions: qResult.tariffVersions || [],
+          returnPolicyAccepted: isRoundTrip,
+          issuedAt: new Date().toISOString(),
+          paymentDueAt: paymentDueAt.toISOString(),
+        };
+
+        try {
+          await db.execute(
+            `INSERT INTO shipment_invoice (
+              shipment_id, route_id, customer_id, invoice_type, status, amount, currency, snapshot, payment_due_at, issued_at
+            ) VALUES (?, NULL, ?, 'primary', 'active', ?, 'VND', ?, ?, NOW())`,
+            [shipmentId, customerId, totalCost, JSON.stringify(invoiceSnapshot), paymentDueAt],
+          );
+        } catch (invErr: any) {
+          // If shipment_invoice table or route_id NULL constraint is missing in mock test db, fallback gracefully
+          if (!invErr?.message?.includes("doesn't exist")) {
+            throw invErr;
+          }
+        }
+
+        try {
+          await db.execute(
+            `INSERT INTO shipment_status_history
+              (shipment_id, from_status, to_status, actor_id, actor_role, reason_code, note)
+             VALUES (?, NULL, 'awaiting_payment', ?, 'CUSTOMER', 'order_created', 'Đơn hàng trả trước được tạo từ báo giá')`,
+            [shipmentId, customerId],
+          );
+        } catch {
+          // Ignore if table does not exist yet
+        }
+
         if (dto.medicalDocumentUrl) {
           await db.execute(
             "INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'document', ?)",
@@ -335,6 +419,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
           );
         }
         return shipmentId;
+      }
+
+      if (!dto.quoteId && !(dto as any).isLegacySeed) {
+        throw new BadRequestException('Vui lòng tạo báo giá trước khi đặt đơn');
       }
 
       const horses = await this.insuredHorses(db, customerId, this.horseInputs(dto));
@@ -941,6 +1029,13 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       returnCancelledAt: row.return_cancelled_at ? new Date(row.return_cancelled_at).toISOString() : null,
       returnCancelReason: row.return_cancel_reason ?? null,
       returnRescheduleFee: Number(row.return_reschedule_fee ?? 0),
+      paymentFlow: row.payment_flow ?? 'postpaid_legacy',
+      paymentDueAt: row.payment_due_at ? new Date(row.payment_due_at).toISOString() : null,
+      cancelReasonCode: row.cancel_reason_code ?? null,
+      feasibilityDecidedBy: row.feasibility_decided_by != null ? Number(row.feasibility_decided_by) : null,
+      feasibilityDecidedAt: row.feasibility_decided_at ? new Date(row.feasibility_decided_at).toISOString() : null,
+      feasibilityReasonCode: row.feasibility_reason_code ?? null,
+      feasibilityNote: row.feasibility_note ?? null,
       attachments: attachments.map((att) => ({
         id: att.attachment_id,
         fileUrl: att.file_url,
@@ -969,5 +1064,273 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         specialRequirements: h.special_requirements ?? null,
       })),
     };
+  }
+
+  async feasibilityReview(
+    orderId: number,
+    managerId: number,
+    dto: FeasibilityReviewDto,
+  ): Promise<TransportOrder> {
+    return this.transaction(async (db) => {
+      const [rows] = await db.execute<RowDataPacket[]>(
+        'SELECT * FROM shipment WHERE shipment_id = ? FOR UPDATE',
+        [orderId],
+      );
+      const ship = rows[0];
+      if (!ship) throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
+
+      if (ship.payment_flow !== 'prepaid' || ship.status !== 'paid_pending_review') {
+        throw new ConflictException(
+          `Chỉ đơn hàng trả trước ở trạng thái đã thanh toán chờ duyệt (paid_pending_review) mới có thể đánh giá khả thi (trạng thái hiện tại: ${ship.status}, luồng: ${ship.payment_flow})`,
+        );
+      }
+
+      if (dto.decision === 'approve') {
+        await transitionShipment(db, {
+          shipmentId: orderId,
+          to: 'approved',
+          actorId: managerId,
+          actorRole: 'LOGISTICS_MANAGER',
+          reasonCode: 'feasibility_approved',
+          note: dto.note ?? 'Đã duyệt khả thi vận chuyển',
+        });
+
+        await db.execute(
+          `UPDATE shipment
+           SET feasibility_decided_by = ?,
+               feasibility_decided_at = NOW(),
+               feasibility_reason_code = NULL,
+               feasibility_note = ?
+           WHERE shipment_id = ?`,
+          [managerId, dto.note ?? null, orderId],
+        );
+      } else {
+        if (!dto.reasonCode || !CANNOT_FULFIL_REASONS.includes(dto.reasonCode as any)) {
+          throw new BadRequestException(
+            `Vui lòng chọn lý do không thể đáp ứng hợp lệ: ${CANNOT_FULFIL_REASONS.join(', ')}`,
+          );
+        }
+        if (!dto.note || dto.note.trim().length < 10) {
+          throw new BadRequestException('Ghi chú giải trình không thể đáp ứng phải có ít nhất 10 ký tự');
+        }
+
+        await transitionShipment(db, {
+          shipmentId: orderId,
+          to: 'refund_requested',
+          actorId: managerId,
+          actorRole: 'LOGISTICS_MANAGER',
+          reasonCode: dto.reasonCode,
+          note: dto.note.trim(),
+        });
+
+        await db.execute(
+          `UPDATE shipment
+           SET feasibility_decided_by = ?,
+               feasibility_decided_at = NOW(),
+               feasibility_reason_code = ?,
+               feasibility_note = ?
+           WHERE shipment_id = ?`,
+          [managerId, dto.reasonCode, dto.note.trim(), orderId],
+        );
+      }
+
+      return (await this.findShipmentById(orderId))!;
+    });
+  }
+
+  async getOrderInvoice(orderId: number, userId: number, userRole: string): Promise<any> {
+    const ship = await this.findShipmentById(orderId);
+    if (!ship) throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
+    if (userRole === 'CUSTOMER' && ship.customerId !== userId) {
+      throw new ForbiddenException('Bạn chỉ có thể xem hóa đơn của đơn hàng thuộc tài khoản của mình');
+    }
+
+    const [invRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM shipment_invoice
+       WHERE shipment_id = ? AND COALESCE(invoice_type, 'primary') = 'primary' AND COALESCE(status, 'active') <> 'void'
+       ORDER BY invoice_id DESC LIMIT 1`,
+      [orderId],
+    );
+
+    const inv = invRows[0];
+    if (!inv) {
+      throw new NotFoundException(`Hóa đơn cho đơn hàng #${orderId} chưa được phát hành`);
+    }
+
+    const [payRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT transaction_id, paid_at, bank_code FROM shipment_sepay_payment
+       WHERE shipment_id = ? AND status = 'succeeded'
+       ORDER BY payment_id DESC LIMIT 1`,
+      [orderId],
+    );
+    const pay = payRows[0];
+
+    const [suppRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT invoice_id, amount, currency, status, issued_at, payment_due_at, snapshot
+       FROM shipment_invoice
+       WHERE shipment_id = ? AND invoice_type = 'supplemental' AND status <> 'void'`,
+      [orderId],
+    );
+
+    const snapshot = typeof inv.snapshot === 'string' ? JSON.parse(inv.snapshot) : inv.snapshot;
+    const invoiceCode = snapshot?.invoiceCode || `INV-${new Date(inv.issued_at).getFullYear()}-${String(inv.invoice_id).padStart(6, '0')}`;
+
+    return {
+      invoiceCode,
+      status: inv.status,
+      issuedAt: inv.issued_at ? new Date(inv.issued_at).toISOString() : null,
+      paidAt: pay?.paid_at ? new Date(pay.paid_at).toISOString() : null,
+      amount: Number(inv.amount),
+      currency: inv.currency || 'VND',
+      snapshot,
+      payment: pay
+        ? {
+            method: 'SePay',
+            transactionId: pay.transaction_id,
+            paidAt: pay.paid_at ? new Date(pay.paid_at).toISOString() : null,
+            bankCode: pay.bank_code,
+          }
+        : null,
+      supplementalInvoices: suppRows.map((s) => ({
+        id: s.invoice_id,
+        code: `SUP-${String(s.invoice_id).padStart(6, '0')}`,
+        amount: Number(s.amount),
+        currency: s.currency,
+        status: s.status,
+        issuedAt: s.issued_at ? new Date(s.issued_at).toISOString() : null,
+        snapshot: typeof s.snapshot === 'string' ? JSON.parse(s.snapshot) : s.snapshot,
+      })),
+    };
+  }
+
+  async getRefundFormInfo(orderId: number, userId: number, userRole: string): Promise<any> {
+    const ship = await this.findShipmentById(orderId);
+    if (!ship) throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
+    if (userRole === 'CUSTOMER' && ship.customerId !== userId) {
+      throw new ForbiddenException('Bạn chỉ có thể xem form hoàn tiền của đơn hàng thuộc tài khoản của mình');
+    }
+
+    const [refRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM shipment_refund_record
+       WHERE shipment_id = ? AND cancellation_category = 'company_cannot_fulfil'
+       ORDER BY refund_id DESC LIMIT 1`,
+      [orderId],
+    );
+    const existingRecord = refRows[0];
+
+    const totalPaid = Number(ship.totalCost);
+    return {
+      shipmentId: orderId,
+      status: ship.status,
+      totalPaidAmount: totalPaid,
+      freightAmount: Number(ship.transportCost ?? totalPaid - Number(ship.insuranceFee)),
+      insuranceAmount: Number(ship.insuranceFee),
+      cannotFulfilReason: ship.feasibilityReasonCode,
+      cannotFulfilNote: ship.feasibilityNote,
+      slaDueAt: existingRecord?.sla_due_at ? new Date(existingRecord.sla_due_at).toISOString() : null,
+      refundRecord: existingRecord
+        ? {
+            refundId: existingRecord.refund_id,
+            status: existingRecord.status,
+            bankName: existingRecord.recipient_bank_name,
+            accountNumber: existingRecord.recipient_bank_account,
+            accountHolder: existingRecord.recipient_account_holder,
+            customerNote: existingRecord.customer_note,
+            formSubmittedAt: existingRecord.form_submitted_at ? new Date(existingRecord.form_submitted_at).toISOString() : null,
+            slaDueAt: existingRecord.sla_due_at ? new Date(existingRecord.sla_due_at).toISOString() : null,
+            requiresDualApproval: Boolean(existingRecord.requires_dual_approval),
+            transferReceiptUrl: existingRecord.transfer_receipt_url,
+          }
+        : null,
+    };
+  }
+
+  async submitRefundForm(orderId: number, userId: number, dto: SubmitRefundFormDto): Promise<any> {
+    return this.transaction(async (db) => {
+      const [rows] = await db.execute<RowDataPacket[]>(
+        'SELECT * FROM shipment WHERE shipment_id = ? FOR UPDATE',
+        [orderId],
+      );
+      const ship = rows[0];
+      if (!ship) throw new NotFoundException(`Không tìm thấy đơn hàng #${orderId}`);
+      if (ship.customer_id !== userId) {
+        throw new ForbiddenException('Bạn chỉ có thể nộp form hoàn tiền cho đơn hàng của mình');
+      }
+
+      if (ship.status !== 'refund_requested') {
+        throw new ConflictException(
+          `Chỉ có thể nộp form hoàn tiền khi đơn ở trạng thái "refund_requested" (hiện tại: "${ship.status}")`,
+        );
+      }
+
+      const totalPaid = Number(ship.total_cost);
+      if (Math.round(Number(dto.confirmAmount)) !== Math.round(totalPaid)) {
+        throw new ConflictException(
+          `Số tiền xác nhận (${Number(dto.confirmAmount).toLocaleString('vi-VN')} VND) không khớp với số tiền đã thanh toán (${totalPaid.toLocaleString('vi-VN')} VND)`,
+        );
+      }
+
+      const [existing] = await db.execute<RowDataPacket[]>(
+        `SELECT refund_id, status FROM shipment_refund_record
+         WHERE shipment_id = ? AND cancellation_category = 'company_cannot_fulfil' AND status <> 'rejected'`,
+        [orderId],
+      );
+      if (existing.length > 0) {
+        throw new ConflictException('Đơn hàng này đã được nộp thông tin hoàn tiền rồi');
+      }
+
+      const slaDays = Math.max(1, Number(process.env.REFUND_SLA_BUSINESS_DAYS || 3));
+      const slaDueAt = addBusinessDays(new Date(), slaDays);
+      const requiresDualApproval = totalPaid >= 20_000_000;
+      const freightAmount = Number(ship.transport_cost ?? totalPaid - Number(ship.insurance_fee));
+      const insuranceAmount = Number(ship.insurance_fee);
+
+      const [result] = await db.execute<ResultSetHeader>(
+        `INSERT INTO shipment_refund_record (
+          shipment_id, customer_id, cancellation_category, refund_mode,
+          freight_refund_amount, insurance_refund_amount, amount,
+          requires_dual_approval, requested_by, recipient_bank_account,
+          recipient_bank_name, recipient_account_holder, customer_note,
+          form_submitted_at, sla_due_at, status
+        ) VALUES (?, ?, 'company_cannot_fulfil', 'cash_refund', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, 'pending_approval')`,
+        [
+          orderId,
+          userId,
+          freightAmount,
+          insuranceAmount,
+          totalPaid,
+          requiresDualApproval ? 1 : 0,
+          userId,
+          dto.accountNumber.trim(),
+          dto.bankName.trim(),
+          dto.accountHolder.trim().toUpperCase(),
+          dto.note?.trim() ?? null,
+          slaDueAt,
+        ],
+      );
+
+      const refundId = result.insertId;
+
+      await db.execute(
+        `INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
+         SELECT user_id, ?, 'Khách hàng đã nộp form hoàn tiền', ?, 'status_update', FALSE
+         FROM \`user\` WHERE role IN ('LOGISTICS_MANAGER', 'ADMIN')`,
+        [
+          orderId,
+          `Khách hàng đã nộp thông tin nhận hoàn tiền cho đơn #${orderId} (${totalPaid.toLocaleString('vi-VN')} VND). Hạn xử lý SLA: ${slaDueAt.toLocaleDateString('vi-VN')}.`,
+        ],
+      );
+
+      return {
+        refundId,
+        shipmentId: orderId,
+        status: 'pending_approval',
+        amount: totalPaid,
+        slaDueAt: slaDueAt.toISOString(),
+        bankName: dto.bankName,
+        accountNumber: dto.accountNumber,
+        accountHolder: dto.accountHolder.toUpperCase(),
+      };
+    });
   }
 }

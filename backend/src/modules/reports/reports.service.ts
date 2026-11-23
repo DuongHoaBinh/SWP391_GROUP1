@@ -81,7 +81,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
               COALESCE(SUM(insurance_fee), 0) AS quoted_insurance_revenue,
               COALESCE(SUM(total_cost), 0) AS quoted_active_revenue
        FROM shipment
-       WHERE status IN ('ready_to_depart', 'in_transit', 'return_pending', 'completed')`,
+       WHERE status IN ('paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed')`,
     );
     const completedTrips = Number(quotedRows[0]?.completed_trips || 0);
     const quotedTransportRevenue = Number(quotedRows[0]?.quoted_transport_revenue || 0);
@@ -90,7 +90,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     // 2. SePay realized cash receipts (all & cancelled_operational)
     const [sepayRows] = await this.pool.execute<any[]>(
       `SELECT COALESCE(SUM(p.amount), 0) AS sepay_total,
-              COALESCE(SUM(CASE WHEN s.status = 'cancelled_operational' THEN p.amount ELSE 0 END), 0) AS cancelled_sepay
+              COALESCE(SUM(CASE WHEN s.status IN ('cancelled_operational', 'refund_requested', 'refunded') THEN p.amount ELSE 0 END), 0) AS cancelled_sepay
        FROM shipment_sepay_payment p
        JOIN shipment s ON s.shipment_id = p.shipment_id
        WHERE p.status = 'succeeded'`,

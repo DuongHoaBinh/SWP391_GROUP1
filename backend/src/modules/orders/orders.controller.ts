@@ -25,6 +25,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { insurancePolicy } from './insurance-policy';
+import { FeasibilityReviewDto, SubmitRefundFormDto } from './dto/prepaid-flow.dto';
 
 @ApiTags('Orders')
 @ApiBearerAuth()
@@ -203,5 +204,45 @@ export class OrdersController {
     @Body() body: { newReturnDepartureAt: string },
   ) {
     return this.ordersService.rescheduleReturnLeg(user, id, body?.newReturnDepartureAt);
+  }
+
+  @Patch(':id/feasibility')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Quản lý vận hành duyệt khả thi đơn trả trước (approve hoặc cannot_fulfil)' })
+  feasibilityReview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: FeasibilityReviewDto,
+  ) {
+    return this.ordersService.feasibilityReview(user, id, dto);
+  }
+
+  @Get(':id/invoice')
+  @ApiOperation({ summary: 'Xem hóa đơn vận chuyển điện tử (chỉ đọc từ snapshot phát hành)' })
+  getOrderInvoice(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.getOrderInvoice(user, id);
+  }
+
+  @Get(':id/refund-form')
+  @ApiOperation({ summary: 'Lấy thông tin form hoàn tiền khi công ty không thể đáp ứng vận chuyển' })
+  getRefundFormInfo(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.getRefundFormInfo(user, id);
+  }
+
+  @Post(':id/refund-form')
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({ summary: 'Khách hàng điền thông tin tài khoản ngân hàng để nhận hoàn tiền 100%' })
+  submitRefundForm(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SubmitRefundFormDto,
+  ) {
+    return this.ordersService.submitRefundForm(user, id, dto);
   }
 }

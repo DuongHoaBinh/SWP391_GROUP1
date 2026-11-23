@@ -176,7 +176,14 @@ CREATE TABLE shipment (
   special_requirements TEXT,
   rejection_reason VARCHAR(500),
   change_request_notes VARCHAR(500),
-  status ENUM('requested','under_review','change_requested','approved','rejected','planning','confirmed','ready_to_depart','in_transit','return_pending','completed','delivered','cancelled','cancelled_operational') NOT NULL DEFAULT 'requested',
+  status ENUM('requested','under_review','change_requested','approved','rejected','planning','confirmed','ready_to_depart','in_transit','return_pending','completed','delivered','cancelled','cancelled_operational','awaiting_payment','paid_pending_review','refund_requested','refunded') NOT NULL DEFAULT 'requested',
+  payment_flow ENUM('postpaid_legacy','prepaid') NOT NULL DEFAULT 'postpaid_legacy',
+  payment_due_at DATETIME NULL,
+  cancel_reason_code VARCHAR(50) NULL,
+  feasibility_decided_by INT NULL,
+  feasibility_decided_at DATETIME NULL,
+  feasibility_reason_code VARCHAR(50) NULL,
+  feasibility_note TEXT NULL,
   total_cost DECIMAL(15,2) NOT NULL DEFAULT 0,
   transport_cost DECIMAL(15,2) NULL DEFAULT NULL,
   insurance_fee DECIMAL(15,2) NOT NULL DEFAULT 0,
@@ -535,7 +542,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 CREATE TABLE IF NOT EXISTS shipment_invoice (
   invoice_id INT AUTO_INCREMENT PRIMARY KEY,
   shipment_id INT NOT NULL,
-  route_id INT NOT NULL,
+  route_id INT NULL,
   customer_id INT NOT NULL,
   invoice_type ENUM('primary','supplemental') NOT NULL DEFAULT 'primary',
   status ENUM('active','paid','void','overdue') NOT NULL DEFAULT 'active',
@@ -553,8 +560,12 @@ CREATE TABLE IF NOT EXISTS shipment_invoice (
   active_primary_route_id INT GENERATED ALWAYS AS (
     CASE WHEN invoice_type = 'primary' AND status <> 'void' THEN route_id ELSE NULL END
   ) STORED,
+  active_primary_shipment_key INT GENERATED ALWAYS AS (
+    CASE WHEN invoice_type = 'primary' AND status <> 'void' AND route_id IS NULL THEN shipment_id ELSE NULL END
+  ) STORED,
   INDEX idx_invoice_route (route_id),
   UNIQUE KEY uq_active_primary_invoice_route (active_primary_route_id),
+  UNIQUE KEY uq_active_primary_invoice_shipment (active_primary_shipment_key),
   INDEX idx_invoice_shipment (shipment_id, issued_at),
   CONSTRAINT fk_invoice_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
   CONSTRAINT fk_invoice_route FOREIGN KEY (route_id) REFERENCES route(route_id),
@@ -861,6 +872,11 @@ CREATE TABLE IF NOT EXISTS shipment_refund_record (
   transferred_by INT NULL,
   transferred_at DATETIME NULL,
   recipient_bank_account VARCHAR(100) NULL,
+  recipient_bank_name VARCHAR(150) NULL,
+  recipient_account_holder VARCHAR(150) NULL,
+  customer_note TEXT NULL,
+  form_submitted_at DATETIME NULL,
+  sla_due_at DATETIME NULL,
   bank_transaction_ref VARCHAR(150) NULL,
   transfer_receipt_url VARCHAR(500) NULL,
   credit_expires_at DATETIME NULL,
@@ -1135,4 +1151,18 @@ CREATE TABLE IF NOT EXISTS insurance_claim_event (
   note TEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_claim_event_claim FOREIGN KEY (claim_id) REFERENCES insurance_claim(claim_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shipment_status_history (
+  history_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  from_status VARCHAR(40) NULL,
+  to_status VARCHAR(40) NOT NULL,
+  actor_id INT NULL,
+  actor_role VARCHAR(40) NOT NULL,
+  reason_code VARCHAR(50) NULL,
+  note TEXT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_ssh_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  INDEX idx_ssh_shipment (shipment_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
