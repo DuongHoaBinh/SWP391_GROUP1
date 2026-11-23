@@ -34,6 +34,7 @@ import {
   ManagerFreightSuggestionCard,
 } from '@/features/orders/components/BookingSummary';
 import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
+import { SnapshotBreakdown } from '@/features/orders/components/SnapshotBreakdown';
 import type { InsuredHorse } from '@/features/orders/insurance-policy';
 import {
   bookingName,
@@ -123,7 +124,12 @@ interface TransportOrder {
   specialRequirements?: string | null;
   internalNotes?: string | null;
   rejectionReason?: string | null;
-  transportMode?: 'road' | 'air' | null;
+  transportMode?: 'road' | 'air' | 'sea' | null;
+  seaMode?: 'ferry' | 'vessel' | null;
+  quoteId?: string | number | null;
+  pricingSnapshot?: any | null;
+  distanceKm?: number | null;
+  distanceSource?: string | null;
   bookingType?: BookingType;
   stallUnitPrice?: number | null;
   requestedHorseCount?: number;
@@ -433,8 +439,9 @@ export default function ManagerRequestsPage() {
     const isRoadRequested = reqNotes.includes('đường bộ') || reqNotes.includes('road') || isDomestic;
 
     const initialMode: 'road' | 'air' =
-      order.transportMode ??
-      (reqNotes.includes('hàng không') || reqNotes.includes('air')
+      order.transportMode === 'air' || order.transportMode === 'road'
+        ? order.transportMode
+        : (reqNotes.includes('hàng không') || reqNotes.includes('air')
         ? 'air'
         : isRoadRequested
         ? 'road'
@@ -620,21 +627,30 @@ export default function ManagerRequestsPage() {
   // Actions
   const handleApprove = async () => {
     if (!approveOrder || actionLoading) return;
-    const quoted = Number(totalCostInput);
-    if (!quoted || isNaN(quoted) || quoted <= 0) {
-      toast.error(t('manager.requests.toastValidPrice', 'Vui lòng nhập báo giá hợp lệ (lớn hơn 0)'));
-      return;
+    const hasQuote = Boolean(approveOrder.quoteId);
+    if (!hasQuote) {
+      const quoted = Number(totalCostInput);
+      if (!quoted || isNaN(quoted) || quoted <= 0) {
+        toast.error(t('manager.requests.toastValidPrice', 'Vui lòng nhập báo giá hợp lệ (lớn hơn 0)'));
+        return;
+      }
     }
     const operating = Number(operatingCostInput) || 0;
     setActionLoading(true);
     try {
+      const payload = hasQuote
+        ? {
+            transportMode: selectedTransportMode,
+            estimatedOperatingCost: operating,
+          }
+        : {
+            ...bookingQuotePayload(totalCostInput, approveOrder.bookingType ?? 'dedicated_charter', approveOrder.requestedHorseCount ?? 1, costCurrency, usdToVndRate),
+            transportMode: selectedTransportMode,
+            estimatedOperatingCost: operating,
+          };
       await apiClient(`/orders/${approveOrder.id}/approve`, {
         method: 'PATCH',
-        body: JSON.stringify({
-          ...bookingQuotePayload(totalCostInput, approveOrder.bookingType ?? 'dedicated_charter', approveOrder.requestedHorseCount ?? 1, costCurrency, usdToVndRate),
-          transportMode: selectedTransportMode,
-          estimatedOperatingCost: operating,
-        }),
+        body: JSON.stringify(payload),
       });
       toast.success(
         t('manager.requests.toastApproveSuccess', `Đã phê duyệt và báo giá thành công cho đơn #${approveOrder.id}`, {
@@ -1327,126 +1343,148 @@ export default function ManagerRequestsPage() {
               }}
               className="flex flex-col gap-4 text-sm"
             >
-              {/* Route & Mode Selection Card */}
-              <div className="p-3.5 bg-[#FAF8F4] border border-[#D8CEBE] rounded-xl flex flex-col gap-2.5">
-                <div className="flex flex-wrap justify-between items-center gap-2">
-                  <span className="text-xs font-bold text-[#242722]">
-                    {t('manager.requests.transportMethod', 'Phương thức vận chuyển:')}
-                  </span>
-                  <div className="flex gap-1 bg-white p-1 rounded-lg border border-[#D8CEBE]">
-                    <button
-                      type="button"
-                      onClick={() => handleModeToggle('road')}
-                      className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
-                        selectedTransportMode === 'road' ? 'bg-[#181A17] text-[#FAF8F4] shadow-sm' : 'text-slate-600 hover:text-[#181A17]'
-                      }`}
-                    >
-                      <Truck size={12} /> {t('manager.requests.modeRoad', 'Đường bộ')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleModeToggle('air')}
-                      className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
-                        selectedTransportMode === 'air' ? 'bg-[#181A17] text-[#FAF8F4] shadow-sm' : 'text-slate-600 hover:text-[#181A17]'
-                      }`}
-                    >
-                      <Plane size={12} /> {t('manager.requests.modeAir', 'Hàng không')}
-                    </button>
+              {Boolean(approveOrder.quoteId) ? (
+                <div className="space-y-3">
+                  <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs">
+                    <strong>{isEn ? `Quotation Locked (Quote #${approveOrder.quoteId})` : `Báo giá đã khóa theo Quote #${approveOrder.quoteId}`}</strong>
+                    <p className="mt-1 mb-0">
+                      {isEn
+                        ? 'This order has locked pricing from the official quotation snapshot. Manual override is disabled.'
+                        : 'Đơn này có báo giá đã khóa từ máy chủ. Giá cước và phương án đã được cố định theo bảng giá.'}
+                    </p>
                   </div>
-                </div>
-
-                <div className="text-xs font-bold text-[#181A17]">
-                  {approveOrder.originLocation} → {approveOrder.destinationLocation}
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div>
-                    <span className="text-slate-500 block text-[11px]">{t('manager.requests.distance', 'Khoảng cách:')}</span>
-                    <strong className="text-[#7A591C]">{routeInfo.distanceKm.toLocaleString('vi-VN')} km</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[11px]">{t('manager.requests.estDuration', 'Thời gian ước tính:')}</span>
-                    <strong className="text-[#181A17]">~{routeInfo.durationHours} {isEn ? 'hrs' : 'giờ'}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[11px]">{t('manager.requests.borderGates', 'Cửa khẩu:')}</span>
-                    <strong className="text-[#181A17]">{routeInfo.customsCount} {isEn ? 'posts' : 'trạm'}</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Booking Quote & Insurance Summary */}
-              <BookingQuoteSummary
-                input={totalCostInput}
-                bookingType={approveOrder.bookingType}
-                horseCount={approveOrder.requestedHorseCount || approveOrder.horses?.length || 1}
-                currency={costCurrency}
-                insuranceFee={Number(approveOrder.insuranceFee ?? 0)}
-              />
-
-              {/* Price Input with USD/VND toggle */}
-              <div className="p-3.5 bg-[#FAF9F5] border border-[#D8CEBE] rounded-xl flex flex-col gap-2">
-                <div className="flex flex-wrap justify-between items-center gap-2">
-                  <label htmlFor="requests-approve-price" className="text-xs font-bold text-[#242722]">
-                    {approveOrder.bookingType === 'dedicated_charter'
-                      ? t('manager.requests.charterPriceLabel', 'Cước trọn gói *')
-                      : t('manager.requests.stallPriceLabel', 'Đơn giá mỗi ô chuồng *')}
-                  </label>
-                  <div className="flex gap-1 bg-white p-0.5 rounded-lg border border-[#D8CEBE]">
-                    <button
-                      type="button"
-                      onClick={() => handleCurrencyToggle('USD')}
-                      className={`px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer ${
-                        costCurrency === 'USD' ? 'bg-[#181A17] text-white' : 'text-slate-600'
-                      }`}
-                    >
-                      USD ($)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCurrencyToggle('VND')}
-                      className={`px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer ${
-                        costCurrency === 'VND' ? 'bg-[#287653] text-white' : 'text-slate-600'
-                      }`}
-                    >
-                      VND (₫)
-                    </button>
-                  </div>
-                </div>
-
-                <div className="relative">
-                  <input
-                    id="requests-approve-price"
-                    type="number"
-                    min={costCurrency === 'USD' ? '0.01' : 1}
-                    step={costCurrency === 'USD' ? 'any' : 1}
-                    required
-                    value={totalCostInput}
-                    onChange={(e) => setTotalCostInput(e.target.value)}
-                    placeholder={costCurrency === 'USD' ? 'VD: 2500' : 'VD: 60000000'}
-                    className="w-full h-11 px-3.5 pr-16 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-slate-900 text-sm font-bold outline-none focus:ring-2 focus:ring-[#C4B38E]/20 focus:border-[#181A17]"
+                  <SnapshotBreakdown
+                    quoteId={approveOrder.quoteId as any}
+                    pricingSnapshot={approveOrder.pricingSnapshot}
+                    transportCost={approveOrder.transportCost}
+                    insuranceFee={approveOrder.insuranceFee}
+                    totalCost={approveOrder.totalCost}
                   />
-                  <span className="absolute right-3.5 top-3 text-xs font-bold text-slate-500">
-                    {costCurrency === 'USD' ? 'USD ($)' : 'VND (₫)'}
-                  </span>
                 </div>
+              ) : (
+                <>
+                  {/* Route & Mode Selection Card */}
+                  <div className="p-3.5 bg-[#FAF8F4] border border-[#D8CEBE] rounded-xl flex flex-col gap-2.5">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
+                      <span className="text-xs font-bold text-[#242722]">
+                        {t('manager.requests.transportMethod', 'Phương thức vận chuyển:')}
+                      </span>
+                      <div className="flex gap-1 bg-white p-1 rounded-lg border border-[#D8CEBE]">
+                        <button
+                          type="button"
+                          onClick={() => handleModeToggle('road')}
+                          className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                            selectedTransportMode === 'road' ? 'bg-[#181A17] text-[#FAF8F4] shadow-sm' : 'text-slate-600 hover:text-[#181A17]'
+                          }`}
+                        >
+                          <Truck size={12} /> {t('manager.requests.modeRoad', 'Đường bộ')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleModeToggle('air')}
+                          className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                            selectedTransportMode === 'air' ? 'bg-[#181A17] text-[#FAF8F4] shadow-sm' : 'text-slate-600 hover:text-[#181A17]'
+                          }`}
+                        >
+                          <Plane size={12} /> {t('manager.requests.modeAir', 'Hàng không')}
+                        </button>
+                      </div>
+                    </div>
 
-                <div className="flex justify-between text-[11px] text-slate-600 mt-1">
-                  <span>{t('manager.requests.fxRateNote', 'Tỷ lệ quy đổi (1 USD ≈ 25.400 VND):')}</span>
-                  <strong className="text-slate-800">
-                    {costCurrency === 'USD'
-                      ? `≈ ${(Math.round((parseFloat(totalCostInput) || 0) * 25400)).toLocaleString('vi-VN')} VND`
-                      : `≈ $${(Math.round(((parseFloat(totalCostInput) || 0) / 25400) * 100) / 100).toLocaleString('vi-VN')} USD`}
-                  </strong>
-                </div>
+                    <div className="text-xs font-bold text-[#181A17]">
+                      {approveOrder.originLocation} → {approveOrder.destinationLocation}
+                    </div>
 
-                <p className="text-[11px] text-slate-500 m-0">
-                  {t(
-                    'manager.requests.sepayUnlockHint',
-                    'Báo giá dự kiến được lưu bằng VND, gồm cước cơ bản và bảo hiểm. Hóa đơn và thanh toán SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.'
-                  )}
-                </p>
-              </div>
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <span className="text-slate-500 block text-[11px]">{t('manager.requests.distance', 'Khoảng cách:')}</span>
+                        <strong className="text-[#7A591C]">{routeInfo.distanceKm.toLocaleString('vi-VN')} km</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block text-[11px]">{t('manager.requests.estDuration', 'Thời gian ước tính:')}</span>
+                        <strong className="text-[#181A17]">~{routeInfo.durationHours} {isEn ? 'hrs' : 'giờ'}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block text-[11px]">{t('manager.requests.borderGates', 'Cửa khẩu:')}</span>
+                        <strong className="text-[#181A17]">{routeInfo.customsCount} {isEn ? 'posts' : 'trạm'}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Booking Quote & Insurance Summary */}
+                  <BookingQuoteSummary
+                    input={totalCostInput}
+                    bookingType={approveOrder.bookingType}
+                    horseCount={approveOrder.requestedHorseCount || approveOrder.horses?.length || 1}
+                    currency={costCurrency}
+                    insuranceFee={Number(approveOrder.insuranceFee ?? 0)}
+                  />
+
+                  {/* Price Input with USD/VND toggle */}
+                  <div className="p-3.5 bg-[#FAF9F5] border border-[#D8CEBE] rounded-xl flex flex-col gap-2">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
+                      <label htmlFor="requests-approve-price" className="text-xs font-bold text-[#242722]">
+                        {approveOrder.bookingType === 'dedicated_charter'
+                          ? t('manager.requests.charterPriceLabel', 'Cước trọn gói *')
+                          : t('manager.requests.stallPriceLabel', 'Đơn giá mỗi ô chuồng *')}
+                      </label>
+                      <div className="flex gap-1 bg-white p-0.5 rounded-lg border border-[#D8CEBE]">
+                        <button
+                          type="button"
+                          onClick={() => handleCurrencyToggle('USD')}
+                          className={`px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer ${
+                            costCurrency === 'USD' ? 'bg-[#181A17] text-white' : 'text-slate-600'
+                          }`}
+                        >
+                          USD ($)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCurrencyToggle('VND')}
+                          className={`px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer ${
+                            costCurrency === 'VND' ? 'bg-[#287653] text-white' : 'text-slate-600'
+                          }`}
+                        >
+                          VND (₫)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        id="requests-approve-price"
+                        type="number"
+                        min={costCurrency === 'USD' ? '0.01' : 1}
+                        step={costCurrency === 'USD' ? 'any' : 1}
+                        required
+                        value={totalCostInput}
+                        onChange={(e) => setTotalCostInput(e.target.value)}
+                        placeholder={costCurrency === 'USD' ? 'VD: 2500' : 'VD: 60000000'}
+                        className="w-full h-11 px-3.5 pr-16 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-slate-900 text-sm font-bold outline-none focus:ring-2 focus:ring-[#C4B38E]/20 focus:border-[#181A17]"
+                      />
+                      <span className="absolute right-3.5 top-3 text-xs font-bold text-slate-500">
+                        {costCurrency === 'USD' ? 'USD ($)' : 'VND (₫)'}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-[11px] text-slate-600 mt-1">
+                      <span>{t('manager.requests.fxRateNote', 'Tỷ lệ quy đổi (1 USD ≈ 25.400 VND):')}</span>
+                      <strong className="text-slate-800">
+                        {costCurrency === 'USD'
+                          ? `≈ ${(Math.round((parseFloat(totalCostInput) || 0) * 25400)).toLocaleString('vi-VN')} VND`
+                          : `≈ $${(Math.round(((parseFloat(totalCostInput) || 0) / 25400) * 100) / 100).toLocaleString('vi-VN')} USD`}
+                      </strong>
+                    </div>
+
+                    <p className="text-[11px] text-slate-500 m-0">
+                      {t(
+                        'manager.requests.sepayUnlockHint',
+                        'Báo giá dự kiến được lưu bằng VND, gồm cước cơ bản và bảo hiểm. Hóa đơn và thanh toán SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.'
+                      )}
+                    </p>
+                  </div>
+                </>
+              )}
 
               <div className="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-[#F0EEE8] mt-2">
                 <button

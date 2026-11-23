@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -16,10 +16,13 @@ import {
   Clock,
   Search,
   X,
+  Ship,
 } from 'lucide-react';
 import { AddressAutocompleteInput } from '@/components/ui/AddressAutocompleteInput';
-import { normalizeVietnamese, type GeocodedLocation, type RouteLegPreview } from '@/lib/geo-corridors';
+import { normalizeVietnamese, resolveLocation, type GeocodedLocation, type RouteLegPreview } from '@/lib/geo-corridors';
 import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
+import { requestQuote, type QuoteResult } from '@/features/orders/quote-api';
+import { QuoteBreakdown } from '@/features/orders/components/QuoteBreakdown';
 const HORSE_PLACEHOLDER_SVG =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='40' fill='%23F0EEE8'/%3E%3Ctext x='40' y='47' text-anchor='middle' font-family='serif' font-weight='700' font-size='22' fill='%23A67C2E'%3EEQ%3C/text%3E%3C/svg%3E";
 import { Horse } from '@/lib/types';
@@ -283,6 +286,99 @@ function CreateTransportRequestForm() {
       quantity: horseQuantities[h.id] || 1,
     }));
 
+  const [transportMode, setTransportMode] = useState<'road' | 'air' | 'sea'>('road');
+  const [seaMode, setSeaMode] = useState<'ferry' | 'vessel'>('ferry');
+  const [tripType, setTripType] = useState<'one_way' | 'round_trip'>('one_way');
+  const [returnDepartureAt, setReturnDepartureAt] = useState<string>('');
+  const [acceptReturnPolicy, setAcceptReturnPolicy] = useState<boolean>(false);
+  const [quote, setQuote] = useState<QuoteResult | null>(null);
+  const [selectedOptionCode, setSelectedOptionCode] = useState<string>('standard');
+  const [isQuoteLoading, setIsQuoteLoading] = useState<boolean>(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+
+  const fetchQuoteNow = useCallback(async () => {
+    if (!formValues.origin || !formValues.destination || !formValues.departureDate || selectedHorses.length === 0) {
+      return;
+    }
+
+    const originLoc = selectedOriginGeo
+      ? { address: formValues.origin, lat: selectedOriginGeo.coords[0], lng: selectedOriginGeo.coords[1], country: selectedOriginGeo.country }
+      : (() => {
+          const loc = resolveLocation(formValues.origin, 'vn-hcm-cuchi', formValues.transportType === 'Domestic');
+          return { address: formValues.origin, lat: loc.coords[0], lng: loc.coords[1], country: loc.country };
+        })();
+
+    const destLoc = selectedDestGeo
+      ? { address: formValues.destination, lat: selectedDestGeo.coords[0], lng: selectedDestGeo.coords[1], country: selectedDestGeo.country }
+      : (() => {
+          const loc = resolveLocation(formValues.destination, formValues.transportType === 'Domestic' ? 'vn-hanoi-socson' : 'intl-singapore', formValues.transportType === 'Domestic');
+          return { address: formValues.destination, lat: loc.coords[0], lng: loc.coords[1], country: loc.country };
+        })();
+
+    setIsQuoteLoading(true);
+    setQuoteError(null);
+    try {
+      const horsePayload = selectedHorses.map((h) => {
+        const val = insuranceValues[h.id] ?? defaultInsurance;
+        return {
+          horseId: Number(h.backendId || h.id || 1),
+          quantity: h.quantity || 1,
+          declaredValue: Number(val.declaredValue || 0),
+          declaredCurrency: val.declaredCurrency || 'VND',
+          insurancePackage: val.insurancePackage || 'basic',
+        };
+      });
+
+      const effectiveReturnDeparture =
+        tripType === 'round_trip'
+          ? returnDepartureAt
+            ? new Date(returnDepartureAt).toISOString()
+            : new Date(new Date(formValues.departureDate).getTime() + 72 * 3600 * 1000).toISOString()
+          : undefined;
+
+      const res = await requestQuote({
+        origin: originLoc,
+        destination: destLoc,
+        departureDate: formValues.departureDate,
+        transportMode,
+        seaMode: transportMode === 'sea' ? seaMode : undefined,
+        tripType,
+        returnDepartureAt: effectiveReturnDeparture,
+        horses: horsePayload,
+      });
+
+      setQuote(res);
+      setSelectedOptionCode(res.recommendedOptionCode || res.options[0]?.optionCode || 'standard');
+      setQuoteError(null);
+    } catch (err: any) {
+      console.error('Failed to request quote:', err);
+      setQuoteError(err?.message || (language === 'en' ? 'Unable to calculate server quote' : 'Không thể tính toán báo giá tự động'));
+    } finally {
+      setIsQuoteLoading(false);
+    }
+  }, [
+    formValues.origin,
+    formValues.destination,
+    formValues.departureDate,
+    formValues.transportType,
+    selectedOriginGeo,
+    selectedDestGeo,
+    transportMode,
+    seaMode,
+    tripType,
+    returnDepartureAt,
+    selectedHorses,
+    insuranceValues,
+    language,
+  ]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchQuoteNow();
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [fetchQuoteNow]);
+
   const estimatedInsuranceFee = selectedHorses.reduce((sum, h) => sum + previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null).fee * h.quantity, 0);
   const validateInsurance = () => {
     const invalid = selectedHorses.map(h => ({ name: h.name, ...previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null) })).find(p => p.error);
@@ -414,6 +510,16 @@ function CreateTransportRequestForm() {
       toast.error(cutoffViolationMessage());
       return;
     }
+    if (tripType === 'round_trip') {
+      if (!returnDepartureAt) {
+        toast.error(language === 'en' ? 'Please select return departure date & time' : 'Vui lòng chọn ngày giờ đón chặng về');
+        return;
+      }
+      if (!acceptReturnPolicy) {
+        toast.error(language === 'en' ? 'Please accept the return policy & no-show terms' : 'Vui lòng đọc và tích đồng ý chính sách hủy chặng về và no-show');
+        return;
+      }
+    }
     setIsSubmitting(true);
     try {
       const selectedHorsesData: Array<{
@@ -453,6 +559,13 @@ function CreateTransportRequestForm() {
         requestedDate: new Date(data.departureDate).toISOString(),
         transportationType: data.transportType,
         transportType: data.transportType,
+        transportMode,
+        seaMode: transportMode === 'sea' ? seaMode : undefined,
+        tripType,
+        returnDepartureAt: tripType === 'round_trip' && returnDepartureAt ? new Date(returnDepartureAt).toISOString() : undefined,
+        acceptReturnPolicy: tripType === 'round_trip' ? acceptReturnPolicy : undefined,
+        quoteId: quote?.quoteId ? String(quote.quoteId) : undefined,
+        pricingOptionCode: selectedOptionCode,
         specialRequirements: combinedReqs || undefined,
         horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
         // Fallback for single horse if array is not preferred by backend yet
@@ -475,6 +588,21 @@ function CreateTransportRequestForm() {
       router.push(`/customer/requests/${newReq.id}`);
     } catch (error: any) {
       console.error('Failed to create request:', error);
+      if (
+        error?.status === 410 ||
+        error?.statusCode === 410 ||
+        String(error?.message).toLowerCase().includes('expired') ||
+        String(error?.message).toLowerCase().includes('hết hạn')
+      ) {
+        toast.error(
+          language === 'en'
+            ? 'Quotation expired (30m limit). A new quote has been generated.'
+            : 'Báo giá đã hết hạn (quá 30 phút). Hệ thống đã tự tạo báo giá mới, vui lòng kiểm tra lại.'
+        );
+        void fetchQuoteNow();
+        setIsSubmitting(false);
+        return;
+      }
       toast.error(error?.message || t('requests.createFailed', 'Gửi yêu cầu vận chuyển thất bại. Vui lòng thử lại.'));
       setIsSubmitting(false);
     }
@@ -598,6 +726,111 @@ function CreateTransportRequestForm() {
                     <option value="Domestic" className="text-[#181A17] bg-white">{language === 'en' ? 'Domestic Transit' : 'Vận chuyển nội địa'}</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Transport Mode & Sea Mode Selection */}
+              <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex flex-col gap-3">
+                <div>
+                  <span className="text-xs font-bold text-[#181A17] block mb-1.5 uppercase tracking-wide">
+                    {language === 'en' ? 'Transport Mode' : 'Phương thức vận tải'}
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTransportMode('road')}
+                      className={`px-3 py-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                        transportMode === 'road'
+                          ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                          : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
+                      }`}
+                    >
+                      <Truck size={15} />
+                      <span>{language === 'en' ? 'Road' : 'Đường bộ'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTransportMode('air')}
+                      className={`px-3 py-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                        transportMode === 'air'
+                          ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                          : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
+                      }`}
+                    >
+                      <Plane size={15} />
+                      <span>{language === 'en' ? 'Air Cargo' : 'Hàng không'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTransportMode('sea')}
+                      className={`px-3 py-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                        transportMode === 'sea'
+                          ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                          : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
+                      }`}
+                    >
+                      <Ship size={15} />
+                      <span>{language === 'en' ? 'Sea' : 'Đường thủy'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {transportMode === 'sea' && (
+                  <div className="pt-3 border-t border-[#E5DDD0] flex flex-col gap-2.5">
+                    <span className="text-xs font-bold text-[#181A17] block">
+                      {language === 'en' ? 'Sea Transport Type' : 'Hình thức đường thủy'}
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <label className={`p-3 rounded-lg border cursor-pointer flex items-start gap-2.5 ${seaMode === 'ferry' ? 'bg-white border-[#A67C2E] ring-1 ring-[#A67C2E]' : 'bg-[#F5EFE2]/50 border-[#D8CEBE]'}`}>
+                        <input
+                          type="radio"
+                          name="seaMode"
+                          value="ferry"
+                          checked={seaMode === 'ferry'}
+                          onChange={() => setSeaMode('ferry')}
+                          className="mt-0.5"
+                        />
+                        <div>
+                          <div className="text-xs font-bold text-[#181A17]">
+                            {language === 'en' ? 'Ferry (Truck on Ferry)' : 'Phà (Xe tải lên phà)'}
+                          </div>
+                          <div className="text-[11px] text-[#5F6977]">
+                            {language === 'en' ? 'Horses remain inside climate-controlled vehicle (legs <= 12h)' : 'Ngựa ở trong xe chuyên dụng, áp dụng chặng biển dưới 12h'}
+                          </div>
+                        </div>
+                      </label>
+                      <label className={`p-3 rounded-lg border cursor-pointer flex items-start gap-2.5 ${seaMode === 'vessel' ? 'bg-white border-[#A67C2E] ring-1 ring-[#A67C2E]' : 'bg-[#F5EFE2]/50 border-[#D8CEBE]'}`}>
+                        <input
+                          type="radio"
+                          name="seaMode"
+                          value="vessel"
+                          checked={seaMode === 'vessel'}
+                          onChange={() => setSeaMode('vessel')}
+                          className="mt-0.5"
+                        />
+                        <div>
+                          <div className="text-xs font-bold text-[#181A17]">
+                            {language === 'en' ? 'Dedicated Vessel' : 'Tàu biển chuyên dụng (Vessel)'}
+                          </div>
+                          <div className="text-[11px] text-[#5F6977]">
+                            {language === 'en' ? 'Specialized stalls on deck or hold for long-distance routes' : 'Ô chuồng cố định trên tàu cho chặng đường dài'}
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+
+                    {seaMode === 'vessel' && (
+                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
+                        <AlertCircle size={15} className="text-amber-700 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>{language === 'en' ? 'Health Advisory:' : 'Khuyến cáo sức khỏe:'}</strong>{' '}
+                          {language === 'en'
+                            ? 'Sea transport is more economical but slower and carries higher health risks. Air transport is recommended for competition racehorses.'
+                            : 'Đường thủy rẻ hơn nhưng lâu hơn và rủi ro sức khỏe cao hơn. Khuyến nghị đường hàng không cho ngựa đua thi đấu.'}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Row 2: Route */}
@@ -732,6 +965,81 @@ function CreateTransportRequestForm() {
                       : 'Thời gian đến chính thức sẽ do Điều phối viên chốt theo lịch xe/bay.'}
                   </p>
                 </div>
+              </div>
+
+              {/* Trip Type & Round-Trip Configuration */}
+              <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-[#181A17] uppercase tracking-wide">
+                    {language === 'en' ? 'Trip Type & Schedule' : 'Hình thức chuyến & Lịch trình'}
+                  </span>
+                  <span className="text-[11px] font-semibold text-[#8B6724] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                    {language === 'en' ? 'Round-trip: -10% return freight & insurance' : 'Khứ hồi: Giảm 10% cước chặng về & 10% bảo hiểm'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTripType('one_way');
+                      setReturnDepartureAt('');
+                    }}
+                    className={`px-3 py-2.5 rounded-lg border text-xs font-bold cursor-pointer transition-all ${
+                      tripType === 'one_way'
+                        ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                        : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
+                    }`}
+                  >
+                    {language === 'en' ? 'One-Way' : 'Một Chiều'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTripType('round_trip');
+                      if (!returnDepartureAt && formValues.departureDate) {
+                        const dep = new Date(formValues.departureDate);
+                        dep.setDate(dep.getDate() + 3);
+                        dep.setHours(9, 0, 0, 0);
+                        setReturnDepartureAt(dep.toISOString().slice(0, 16));
+                      }
+                    }}
+                    className={`px-3 py-2.5 rounded-lg border text-xs font-bold cursor-pointer transition-all ${
+                      tripType === 'round_trip'
+                        ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                        : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
+                    }`}
+                  >
+                    {language === 'en' ? 'Round-Trip (-10%)' : 'Khứ Hồi (Giảm 10%)'}
+                  </button>
+                </div>
+
+                {tripType === 'round_trip' && (
+                  <div className="pt-3 border-t border-[#E5DDD0] flex flex-col gap-2">
+                    <label htmlFor="req-return-departure-at" className="text-xs font-bold text-[#181A17]">
+                      {language === 'en' ? 'Return Pickup Date & Time' : 'Ngày giờ hẹn đón chặng về'} <span className="text-[#B33E3E]">*</span>
+                    </label>
+                    <input
+                      id="req-return-departure-at"
+                      type="datetime-local"
+                      value={returnDepartureAt}
+                      min={
+                        formValues.departureDate
+                          ? new Date(new Date(formValues.departureDate).getTime() + (Number(routeData?.durationHours || 6) + 12) * 3600 * 1000)
+                              .toISOString()
+                              .slice(0, 16)
+                          : undefined
+                      }
+                      onChange={(e) => setReturnDepartureAt(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E]"
+                    />
+                    <p className="text-[11px] text-[#747D88] m-0">
+                      {language === 'en'
+                        ? 'Return pickup must be at least the transit duration plus 12 hours rest time after departure.'
+                        : 'Thời điểm đón chặng về phải sau giờ xuất phát tối thiểu thời gian hành trình + 12 giờ nghỉ ngơi.'}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Row 4: Special Requirements */}
@@ -1323,6 +1631,30 @@ function CreateTransportRequestForm() {
       </div>
 
       {currentStep === 3 && (
+        <div className="mx-auto w-full max-w-[850px] mb-4">
+          <QuoteBreakdown
+            quote={quote}
+            isLoading={isQuoteLoading}
+            onRefresh={() => void fetchQuoteNow()}
+            selectedOptionCode={selectedOptionCode}
+            onSelectOptionCode={(code) => setSelectedOptionCode(code)}
+          />
+          {quoteError && (
+            <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
+              <span>{quoteError}</span>
+              <button
+                type="button"
+                onClick={() => void fetchQuoteNow()}
+                className="font-bold underline cursor-pointer"
+              >
+                {language === 'en' ? 'Retry quote' : 'Thử lại'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {currentStep === 3 && (
         <section
           aria-label={language === 'en' ? 'Insurance confirmation' : 'Xác nhận bảo hiểm'}
           className="mx-auto w-full max-w-[850px] space-y-4 rounded-2xl border border-[#E5DDD0] bg-white p-5 sm:p-6 shadow-sm"
@@ -1345,6 +1677,61 @@ function CreateTransportRequestForm() {
           <BookingSummary bookingType={bookingType} horseCount={totalSelectedHorses} />
           <CostSummary transportCost={null} insuranceFee={estimatedInsuranceFee} />
           {insuranceError && <p role="alert" className="text-sm text-[#B33E3E]">{insuranceError}</p>}
+        </section>
+      )}
+
+      {currentStep === 3 && tripType === 'round_trip' && (
+        <section
+          aria-label={language === 'en' ? 'Return Policy Agreement' : 'Cam kết chính sách khứ hồi'}
+          className="mx-auto w-full max-w-[850px] space-y-4 rounded-2xl border-2 border-[#A67C2E]/40 bg-[#FAF8F4] p-5 sm:p-6 shadow-sm mt-4"
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#A67C2E]" />
+            <h3 className="font-bold text-[#181A17] m-0">
+              {language === 'en' ? 'Round-Trip Service & No-Show Policy' : 'Chính sách vận chuyển khứ hồi & cam kết no-show'}
+            </h3>
+          </div>
+
+          <div className="p-4 rounded-xl bg-white border border-[#E5DDD0] text-xs space-y-2 text-[#5F6977] leading-relaxed">
+            <p className="m-0">
+              <strong>{language === 'en' ? '1. Freight & Insurance Discount:' : '1. Ưu đãi cước & bảo hiểm:'}</strong>{' '}
+              {language === 'en'
+                ? 'Return freight is discounted by 10%. Insurance for round-trip is calculated as 2 legs × 0.9.'
+                : 'Cước vận chuyển chặng về được giảm 10%. Bảo hiểm cho chuyến khứ hồi được áp dụng ưu đãi tổng 2 chặng × 0,9.'}
+            </p>
+            <p className="m-0">
+              <strong>{language === 'en' ? '2. Cancellation & Refund Tiers:' : '2. Quy định hủy chặng về & tỷ lệ hoàn:'}</strong>{' '}
+              {language === 'en'
+                ? '≥ 168h before return departure: 80% freight refund; 72h-168h: 50% refund; < 72h: 0% refund. 100% of return insurance is refunded. Company cancellations receive 100% refund.'
+                : 'Trước ≥ 168 giờ: hoàn 80% cước chặng về; từ 72h đến 168h: hoàn 50%; dưới 72h: không hoàn cước (0%). Tiền bảo hiểm chặng về được hoàn 100%. Nếu công ty hủy: hoàn 100%.'}
+            </p>
+            <p className="m-0">
+              <strong>{language === 'en' ? '3. Rescheduling:' : '3. Đổi ngày đón chặng về:'}</strong>{' '}
+              {language === 'en'
+                ? 'Free if rescheduled ≥ 168h before return departure. Within 168h, a 10% late change fee is incurred.'
+                : 'Miễn phí nếu đổi trước ≥ 168 giờ. Đổi trong vòng 168 giờ trước khi đón: thu phí 10% cước chặng về.'}
+            </p>
+            <p className="m-0">
+              <strong>{language === 'en' ? '4. No-Show Policy:' : '4. Quy định no-show:'}</strong>{' '}
+              {language === 'en'
+                ? 'Driver will wait up to 120 minutes past the scheduled pickup time. If horses are not delivered, the trip is completed with 0% refund.'
+                : 'Tài xế chờ tối đa 120 phút tại điểm đón chặng về. Nếu khách không giao ngựa, chuyến đi sẽ được kết thúc với 0% hoàn tiền (mất 100% cước chặng về).'}
+            </p>
+          </div>
+
+          <label className="flex items-start gap-2.5 cursor-pointer pt-1">
+            <input
+              type="checkbox"
+              checked={acceptReturnPolicy}
+              onChange={(e) => setAcceptReturnPolicy(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded border-[#D8CEBE] text-[#A67C2E] focus:ring-[#A67C2E] cursor-pointer"
+            />
+            <span className="text-xs font-semibold text-[#181A17] leading-relaxed">
+              {language === 'en'
+                ? 'I have read and agree to the return leg cancellation and no-show policy (driver waits up to 2 hours, failing to hand over horses forfeits 100% return freight).'
+                : 'Tôi đã đọc và đồng ý chính sách hủy chặng về và no-show (chờ tối đa 2 giờ, không giao ngựa thì mất 100% cước chặng về).'}
+            </span>
+          </label>
         </section>
       )}
 
@@ -1382,7 +1769,7 @@ function CreateTransportRequestForm() {
                 if (isSubmitting) return;
                 handleSubmit(onSubmitForm)();
               }}
-              disabled={isSubmitting}
+              disabled={isSubmitting || (tripType === 'round_trip' && (!returnDepartureAt || !acceptReturnPolicy))}
               className="px-6 py-2.5 rounded-xl bg-[#287653] hover:bg-[#205F43] disabled:bg-[#8892A0] text-white text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-colors cursor-pointer disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287653]"
             >
               {isSubmitting ? (

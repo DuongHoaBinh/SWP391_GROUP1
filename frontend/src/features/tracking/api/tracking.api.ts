@@ -102,6 +102,11 @@ export interface TripTrackingDetails {
   milestones: TrackingMilestoneItem[];
   healthLogs: HorseHealthLogItem[];
   statusLogs: TripStatusLogItem[];
+  tripType?: string;
+  returnStatus?: string | null;
+  returnDepartureAt?: string | null;
+  returnWaitMinutes?: number;
+  returnNoShow?: boolean;
   lastUpdated: string;
 }
 

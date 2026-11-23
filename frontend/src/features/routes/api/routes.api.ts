@@ -51,6 +51,7 @@ export interface RouteLegItem {
   roadTripId?: number | null;
   id?: number;
   sequenceNo: number;
+  direction?: 'outbound' | 'return';
   legType: 'road' | 'flight';
   originLocation: string;
   destinationLocation: string;
@@ -75,6 +76,7 @@ export interface RouteLegItem {
 export interface RouteStopItem {
   id?: number;
   sequenceNo: number;
+  direction?: 'outbound' | 'return';
   legSequenceNo?: number;
   stopType: 'rest' | 'quarantine' | 'refuel' | 'border_check' | 'transfer_hub' | 'other';
   locationName: string;

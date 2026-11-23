@@ -31,6 +31,7 @@ import {
   Bus,
   Building2,
   Radio,
+  Coins,
 } from 'lucide-react';
 import { getAuthToken, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { getDashboardRouteForRole } from '@/lib/auth-redirect';
@@ -320,6 +321,11 @@ export default function ManagerLayout({
       icon: <Bell size={18} />,
       badge: unreadNotifs > 0 ? unreadNotifs : undefined,
       badgeColor: 'brand',
+    },
+    {
+      label: t('manager.nav.pricing', 'Bảng Giá & Định Mức'),
+      href: '/manager/settings/pricing',
+      icon: <Coins size={18} />,
     },
     {
       label: t('common.settings', 'Cài Đặt Hệ Thống'),

@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   BarChart3,
   Stethoscope,
+  Coins,
 } from 'lucide-react';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 
@@ -105,6 +106,16 @@ export function CommandPalette() {
             : 'Phê duyệt đổi tuyến và chi phí phát sinh khẩn cấp',
           icon: <AlertTriangle className="w-4 h-4 text-[#B33E3E]" />,
           url: '/manager/incidents',
+        },
+        {
+          id: 'mgr-pricing',
+          category: 'actions',
+          title: isEn ? 'Pricing & Tariffs' : 'Bảng giá & Định mức',
+          subtitle: isEn
+            ? 'Configure road, air, and sea freight tariffs & distance tiers'
+            : 'Cấu hình bảng giá cước đường bộ, hàng không, đường thủy và bậc khoảng cách',
+          icon: <Coins className="w-4 h-4 text-[#A67C2E]" />,
+          url: '/manager/settings/pricing',
         },
       ];
 

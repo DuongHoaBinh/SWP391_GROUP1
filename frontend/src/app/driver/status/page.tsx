@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Plane,
   Play,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -27,6 +28,7 @@ import {
 } from '@/features/tracking/api/tracking.api';
 import { DeliveryHandoverPanel } from '@/features/tracking/components/DeliveryHandoverPanel';
 import { routesApi } from '@/features/routes/api/routes.api';
+import { markReturnNoShow } from '@/features/orders/return-api';
 import toast from 'react-hot-toast';
 
 function DriverStatusContent() {
@@ -62,6 +64,12 @@ function DriverStatusContent() {
   const [healthHr, setHealthHr] = useState('40');
   const [healthNotes, setHealthNotes] = useState('');
   const [isSavingHealth, setIsSavingHealth] = useState(false);
+
+  // No-Show Modal State
+  const [isNoShowOpen, setIsNoShowOpen] = useState(false);
+  const [noShowNotes, setNoShowNotes] = useState('');
+  const [noShowEvidenceUrls, setNoShowEvidenceUrls] = useState('');
+  const [isSubmittingNoShow, setIsSubmittingNoShow] = useState(false);
 
   const isEscort =
     currentUser?.persona === 'escort' ||
@@ -901,6 +909,58 @@ function DriverStatusContent() {
         </>
       )}
 
+      {/* Return Leg No-Show Card */}
+      {selectedShipmentId && trackingDetails && trackingDetails.tripType === 'round_trip' && trackingDetails.returnStatus !== 'completed' && trackingDetails.returnStatus !== 'no_show' && (
+        <div className="rounded-2xl border-2 border-rose-300 bg-rose-50/50 p-5 shadow-sm mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-rose-600" />
+              <h3 className="text-sm font-bold text-rose-950 m-0">
+                {language === 'en' ? 'Return Leg - Non-delivery (No-Show)' : 'Chặng Về - Khách Không Giao Ngựa (No-Show)'}
+              </h3>
+            </div>
+            {trackingDetails.returnDepartureAt && (
+              <span className="text-xs font-semibold text-rose-800">
+                {language === 'en' ? 'Scheduled pickup:' : 'Giờ đón chặng về:'} {new Date(trackingDetails.returnDepartureAt).toLocaleString('vi-VN')}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-rose-900 leading-relaxed mb-3">
+            {language === 'en'
+              ? `Driver must wait a minimum of ${trackingDetails.returnWaitMinutes ?? 120} minutes at the scheduled return pickup point. If horses are not brought for transport, mark no-show with photo evidence. No freight refund will be issued.`
+              : `Tài xế phải chờ tối thiểu ${trackingDetails.returnWaitMinutes ?? 120} phút tại điểm đón chặng về. Nếu khách không giao ngựa, tiến hành chụp ảnh bằng chứng và đánh dấu no-show. Khách sẽ mất 100% cước chặng về.`}
+          </p>
+
+          {(() => {
+            const depTime = trackingDetails.returnDepartureAt ? new Date(trackingDetails.returnDepartureAt).getTime() : 0;
+            const waitMs = (trackingDetails.returnWaitMinutes ?? 120) * 60 * 1000;
+            const allowedAtTime = depTime + waitMs;
+            const isAllowed = Boolean(depTime && Date.now() >= allowedAtTime);
+            const allowedStr = depTime ? new Date(allowedAtTime).toLocaleString('vi-VN') : '';
+
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-rose-200">
+                <span className="text-xs font-semibold text-rose-700">
+                  {isAllowed
+                    ? (language === 'en' ? 'Required wait period passed. You can submit no-show.' : 'Đã quá thời gian chờ tối thiểu. Bạn có thể đánh dấu no-show.')
+                    : (language === 'en' ? `Can mark no-show after ${allowedStr}` : `Có thể đánh no-show sau: ${allowedStr}`)}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!isAllowed}
+                  onClick={() => setIsNoShowOpen(true)}
+                  className="border-rose-600 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-200 text-white font-bold text-xs px-4 py-2 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  <AlertTriangle size={14} className="mr-1.5" />
+                  {language === 'en' ? 'Mark Return No-Show' : 'Khách không giao ngựa (no-show)'}
+                </Button>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {selectedShipmentId && trackingDetails && (
         <DeliveryHandoverPanel
           role="driver"
@@ -1346,6 +1406,81 @@ function DriverStatusContent() {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* No-Show Modal */}
+      {isNoShowOpen && selectedShipmentId && (
+        <Modal
+          isOpen={isNoShowOpen}
+          onClose={() => setIsNoShowOpen(false)}
+          title={language === 'en' ? 'Report Return No-Show' : 'Đánh dấu Khách không giao ngựa (No-Show)'}
+          maxWidth="500px"
+        >
+          <div className="flex flex-col gap-4 text-xs">
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 leading-relaxed">
+              <strong>{language === 'en' ? 'Warning: ' : 'Lưu ý quan trọng: '}</strong>
+              {language === 'en'
+                ? 'Confirming no-show will close this shipment as completed with return status set to no-show. No refund will be generated for the return freight. Please ensure you have waited the full 120 minutes.'
+                : 'Đánh dấu no-show sẽ đóng chuyến đi với trạng thái completed (no_show chặng về) và không hoàn cước chặng về. Vui lòng đảm bảo đã chờ đủ 120 phút và có ảnh chụp tại địa điểm.'}
+            </div>
+
+            <div>
+              <label className="font-bold text-[#181A17] block mb-1">
+                {language === 'en' ? 'Detailed Notes' : 'Ghi chú tình huống'} <span className="text-red-600">*</span>
+              </label>
+              <textarea
+                rows={3}
+                value={noShowNotes}
+                onChange={(e) => setNoShowNotes(e.target.value)}
+                placeholder={language === 'en' ? 'e.g. Arrived at pickup at 08:00, called customer 3 times, waited until 10:15 with no answer...' : 'VD: Đến điểm đón lúc 08:00, gọi khách 3 cuộc không nghe máy, chờ đến 10:15 không có người giao ngựa...'}
+                className="w-full p-2.5 rounded-xl border border-[#D8CEBE] text-xs focus:outline-none focus:border-rose-500"
+              />
+            </div>
+
+            <div>
+              <label className="font-bold text-[#181A17] block mb-1">
+                {language === 'en' ? 'Evidence Photo URLs (comma separated)' : 'Đường dẫn ảnh bằng chứng (phân cách bằng dấu phẩy)'}
+              </label>
+              <input
+                type="text"
+                value={noShowEvidenceUrls}
+                onChange={(e) => setNoShowEvidenceUrls(e.target.value)}
+                placeholder="/uploads/tracking/... hoặc https://..."
+                className="w-full p-2.5 rounded-xl border border-[#D8CEBE] text-xs focus:outline-none focus:border-rose-500"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-[#E5DDD0]">
+              <Button variant="outline" onClick={() => setIsNoShowOpen(false)}>
+                {language === 'en' ? 'Cancel' : 'Hủy bỏ'}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={isSubmittingNoShow || !noShowNotes.trim()}
+                onClick={async () => {
+                  setIsSubmittingNoShow(true);
+                  try {
+                    const urls = noShowEvidenceUrls ? noShowEvidenceUrls.split(',').map((s) => s.trim()).filter(Boolean) : [];
+                    await markReturnNoShow(selectedShipmentId, { notes: noShowNotes, evidenceUrls: urls });
+                    toast.success(language === 'en' ? 'Return no-show recorded successfully' : 'Đã ghi nhận no-show chặng về thành công');
+                    setIsNoShowOpen(false);
+                    setNoShowNotes('');
+                    setNoShowEvidenceUrls('');
+                    await loadTrips();
+                  } catch (err: any) {
+                    toast.error(err?.message || (language === 'en' ? 'Failed to record no-show' : 'Không thể đánh dấu no-show'));
+                  } finally {
+                    setIsSubmittingNoShow(false);
+                  }
+                }}
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+              >
+                {isSubmittingNoShow ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
+                {language === 'en' ? 'Confirm No-Show' : 'Xác Nhận No-Show'}
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

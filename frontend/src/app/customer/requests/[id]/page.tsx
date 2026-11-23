@@ -44,6 +44,7 @@ import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { InsuranceAmendmentForm } from '@/features/orders/components/InsuranceAmendmentForm';
 import { CustomerRefundSummaryCard } from '@/features/orders/components/CustomerRefundSummaryCard';
 import { DeliveryHandoverPanel } from '@/features/tracking/components/DeliveryHandoverPanel';
+import { RoundTripPanel } from '@/features/orders/components/RoundTripPanel';
 import { escapeQuotationText } from '@/features/orders/quotation-html';
 
 const fetcher = async (url: string) => {
@@ -823,6 +824,13 @@ export default function RequestDetailPage() {
           shipmentStatus={statusLower}
         />
       )}
+
+      {/* Step 5 Round-Trip Information & Management */}
+      <RoundTripPanel
+        order={request}
+        userRole="customer"
+        onRefresh={() => mutate()}
+      />
 
       {/* Official Quotation Strip */}
       {hasQuotation && (

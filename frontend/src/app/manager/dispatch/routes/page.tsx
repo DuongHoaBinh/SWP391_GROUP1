@@ -953,8 +953,9 @@ function RoutePlanningContent() {
   };
 
   // Add Leg
-  const handleAddLeg = (type: 'road' | 'flight') => {
+  const handleAddLeg = (type: 'road' | 'flight', defaultDirection?: 'outbound' | 'return') => {
     const nextSeq = legs.length + 1;
+    const legDirection = defaultDirection || (legs.length > 0 && legs[legs.length - 1].direction === 'return' ? 'return' : 'outbound');
     if (type === 'road') {
       const isAfterFlight = legs.some((l) => l.legType === 'flight');
       const destClean = (selectedPlanningOrder?.destination || 'Địa điểm đích').split(',')[0].trim();
@@ -967,6 +968,7 @@ function RoutePlanningContent() {
           ...legs,
           {
             sequenceNo: nextSeq,
+            direction: legDirection,
             legType: 'road',
             originLocation: legs.length > 0 ? legs[legs.length - 1].destinationLocation : (language === 'en' ? 'Assembly Point' : 'Điểm tập kết'),
             destinationLocation: isAfterFlight ? (selectedPlanningOrder?.destination || (language === 'en' ? 'Destination' : 'Địa điểm đích')) : (language === 'en' ? 'Road Leg Destination' : 'Điểm đến chặng đường bộ'),
@@ -2480,7 +2482,7 @@ function RoutePlanningContent() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => handleAddLeg('road')}
+                      onClick={() => handleAddLeg('road', 'outbound')}
                       className="text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50"
                     >
                       <Truck size={13} className="mr-1" /> {t('coordinator.routes.addRoadLegBtn', 'Thêm Chặng Đường Bộ').replace(/^\+\s*/, '')}
@@ -2489,10 +2491,19 @@ function RoutePlanningContent() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => handleAddLeg('flight')}
+                      onClick={() => handleAddLeg('flight', 'outbound')}
                       className="text-xs text-[#181A17] border-[#D4C5A3] hover:bg-[#FAF8F4]"
                     >
                       <Plane size={13} className="mr-1" /> {t('coordinator.routes.addFlightLegBtn', 'Thêm Chặng Bay').replace(/^\+\s*/, '')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleAddLeg('road', 'return')}
+                      className="text-xs text-amber-800 border-amber-300 bg-amber-50/50 hover:bg-amber-100"
+                    >
+                      <RotateCcw size={13} className="mr-1" /> {language === 'en' ? 'Add Return Leg' : 'Thêm Chặng Về'}
                     </Button>
                   </div>
                 )}
@@ -2523,6 +2534,28 @@ function RoutePlanningContent() {
                         >
                           {leg.legType === 'flight' ? t('coordinator.routes.flightLegTitle', '✈️ Chặng Đường Hàng Không') : t('coordinator.routes.roadLegTitle', '🚚 Chặng Đường Bộ')}
                         </span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
+                            leg.direction === 'return'
+                              ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                              : 'bg-blue-100 text-blue-900 border border-blue-300'
+                          }`}
+                        >
+                          {leg.direction === 'return' ? (language === 'en' ? 'Return Leg' : 'Chặng Về') : (language === 'en' ? 'Outbound Leg' : 'Chặng Đi')}
+                        </span>
+                        {!isReadOnlyModal && (
+                          <select
+                            value={leg.direction || 'outbound'}
+                            onChange={(e) => {
+                              const dir = e.target.value as 'outbound' | 'return';
+                              setLegs((prev) => prev.map((l, i) => (i === idx ? { ...l, direction: dir } : l)));
+                            }}
+                            className="text-[11px] font-semibold px-2 py-0.5 rounded border border-slate-300 bg-white cursor-pointer"
+                          >
+                            <option value="outbound">{language === 'en' ? 'Outbound' : 'Chặng Đi'}</option>
+                            <option value="return">{language === 'en' ? 'Return' : 'Chặng Về'}</option>
+                          </select>
+                        )}
                       </div>
                       {!isReadOnlyModal && (
                         <button
