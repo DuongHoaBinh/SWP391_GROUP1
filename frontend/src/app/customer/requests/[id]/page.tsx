@@ -45,6 +45,7 @@ import { InsuranceAmendmentForm } from '@/features/orders/components/InsuranceAm
 import { CustomerRefundSummaryCard } from '@/features/orders/components/CustomerRefundSummaryCard';
 import { DeliveryHandoverPanel } from '@/features/tracking/components/DeliveryHandoverPanel';
 import { RoundTripPanel } from '@/features/orders/components/RoundTripPanel';
+import { CustomerClaimsList } from '@/features/orders/components/CustomerClaimsList';
 import { escapeQuotationText } from '@/features/orders/quotation-html';
 
 const fetcher = async (url: string) => {
@@ -830,6 +831,14 @@ export default function RequestDetailPage() {
         order={request}
         userRole="customer"
         onRefresh={() => mutate()}
+      />
+
+      {/* Step 6 Insurance Claims Management */}
+      <CustomerClaimsList
+        shipmentId={Number(request.id || request.shipmentId || requestId)}
+        shipmentStatus={statusLower}
+        deliveredAt={request.completedAt || request.updatedAt}
+        horses={request.horses || []}
       />
 
       {/* Official Quotation Strip */}

@@ -1469,7 +1469,8 @@ function CreateTransportRequestForm() {
               )}
               {selectedHorses.length > 0 && <InsuranceSelection horses={selectedHorses} values={insuranceValues}
                 onChange={(id, value) => { setInsuranceValues(previous => ({ ...previous, [id]: value })); setInsuranceError(''); }}
-                policy={policy ?? null} error={policyError ? (language === 'en' ? 'Unable to load insurance policy.' : 'Chưa tải được chính sách bảo hiểm.') : insuranceError} onRetry={() => void reloadPolicy()} />}
+                policy={policy ?? null} error={policyError ? (language === 'en' ? 'Unable to load insurance policy.' : 'Chưa tải được chính sách bảo hiểm.') : insuranceError} onRetry={() => void reloadPolicy()}
+                isRoundTrip={tripType === 'round_trip'} />}
             </div>
           </div>
         )}

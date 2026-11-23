@@ -32,6 +32,7 @@ import {
   Building2,
   Radio,
   Coins,
+  ShieldAlert,
 } from 'lucide-react';
 import { getAuthToken, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { getDashboardRouteForRole } from '@/lib/auth-redirect';
@@ -234,6 +235,11 @@ export default function ManagerLayout({
           label: t('manager.nav.incidents', 'Xử Lý Sự Cố'),
           href: '/manager/incidents',
           icon: <AlertTriangle size={18} />,
+        },
+        {
+          label: t('manager.nav.claims', 'Bồi Thường Bảo Hiểm'),
+          href: '/manager/insurance/claims',
+          icon: <ShieldAlert size={18} />,
         },
       ],
     },

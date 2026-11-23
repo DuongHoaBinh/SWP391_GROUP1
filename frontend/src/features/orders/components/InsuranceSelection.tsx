@@ -2,13 +2,15 @@
 
 import { defaultInsurance, insuranceNames, previewInsurance, unchangedInsurance, vnd, type InsuranceInput, type InsurancePolicy, type InsuredHorse } from '../insurance-policy';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
+import { InsuranceComparison } from './InsuranceComparison';
 
-export function InsuranceSelection({ horses, values, onChange, policy, error, onRetry, savedPolicies }: {
+export function InsuranceSelection({ horses, values, onChange, policy, error, onRetry, savedPolicies, isRoundTrip }: {
   horses: Array<{ id: string; name: string; quantity?: number }>;
   values: Record<string, InsuranceInput>;
   onChange: (id: string, value: InsuranceInput) => void;
   policy: InsurancePolicy | null; error?: string; onRetry: () => void;
   savedPolicies?: Record<string, InsuredHorse>;
+  isRoundTrip?: boolean;
 }) {
   const { t, language } = useLanguage();
 
@@ -93,13 +95,28 @@ export function InsuranceSelection({ horses, values, onChange, policy, error, on
                       {code === 'basic'
                         ? t('insurance.pkgBasicDesc', 'Phí 0 VNĐ, đã gồm trong cước. Bồi thường tối đa 50.000.000 VNĐ/ngựa theo quy định vận tải chung.')
                         : code === 'standard'
-                        ? t('insurance.pkgStandardDesc', 'Phí 1,5% giá trị khai báo. Bồi thường tối đa 80% khi có tổn thất/thương tích vĩnh viễn.')
-                        : t('insurance.pkgPremiumDesc', 'Phí 3% giá trị khai báo. Bồi thường 100% giá trị khai báo và toàn bộ chi phí cấp cứu thú y trên đường.')}
+                        ? t('insurance.pkgStandardDesc', 'Phí 1,5% giá trị khai báo (tối thiểu 1.000.000 VNĐ). Bồi thường tối đa 80% khi có tổn thất/thương tích vĩnh viễn.')
+                        : t('insurance.pkgPremiumDesc', 'Phí 3% giá trị khai báo (tối thiểu 2.000.000 VNĐ). Bồi thường 100% giá trị khai báo và toàn bộ chi phí cấp cứu thú y trên đường.')}
                     </span>
                   </span>
                 </label>
               ))}
             </div>
+
+            {/* Step 6: Bảng so sánh quyền lợi bảo hiểm bằng tiền thật cho ngựa */}
+            {Number(value.declaredValue || 0) > 0 && (
+              <div className="pt-2">
+                <InsuranceComparison
+                  horseName={horse.name}
+                  declaredValueVnd={Number(value.declaredValue || 0)}
+                  selectedPackage={value.insurancePackage}
+                  onSelectPackage={(pkg) => onChange(horse.id, { ...value, insurancePackage: pkg })}
+                  isRoundTrip={isRoundTrip}
+                  policy={policy}
+                />
+              </div>
+            )}
+
             <p id={`insurance-help-${horse.id}`} role={preview.error ? 'alert' : undefined} className={`text-sm font-medium ${preview.error ? 'text-[#9E3B3B]' : 'text-[#181A17]'}`}>
               {preview.error || `${t('insurance.estimatedFeePrefix', 'Phí dự kiến')}: ${vnd(preview.fee)} / ${t('common.horseUnit', 'ngựa')} × ${horse.quantity ?? 1} = ${vnd(preview.fee * (horse.quantity ?? 1))}`}
             </p>

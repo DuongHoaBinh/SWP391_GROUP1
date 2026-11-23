@@ -117,6 +117,16 @@ export function CommandPalette() {
           icon: <Coins className="w-4 h-4 text-[#A67C2E]" />,
           url: '/manager/settings/pricing',
         },
+        {
+          id: 'mgr-claims',
+          category: 'actions',
+          title: isEn ? 'Insurance Claims Review' : 'Bồi thường bảo hiểm',
+          subtitle: isEn
+            ? 'Review horse incident claims and approve payouts M1–M4'
+            : 'Thẩm định hồ sơ bồi thường sự cố M1–M4 và phê duyệt chi trả',
+          icon: <ShieldCheck className="w-4 h-4 text-[#B33E3E]" />,
+          url: '/manager/insurance/claims',
+        },
       ];
 
       const complianceItems: PaletteItem[] = [
