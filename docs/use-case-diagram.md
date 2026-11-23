@@ -1,14 +1,15 @@
 # Use Case Diagram
 
-The system connects five operational actors across core Flows 1–4 and optional Flows 5–6 as defined in `docs/requirements.md`.
+The system connects three operational actors (plus Admin) across core Flows 1–4 and optional Flows 5–6 as defined in `docs/requirements.md`.
+
+> Sau review hội đồng 11/2026, Transport Specialist và Fleet & Route Coordinator đã gộp vào **Logistics Manager** (xem `docs/actors-and-roles.md`).
 
 ```mermaid
 flowchart TB
   Customer["Customer / Horse Owner"]
-  Manager["Logistics Manager"]
-  Specialist["Transport Specialist"]
-  Coordinator["Fleet & Route Coordinator"]
+  Manager["Logistics Manager (Quản lý vận hành)"]
   Driver["Vehicle Driver / Vet Escort"]
+  Admin["Admin"]
 
   subgraph F1["Flow 1: Transport Request & Quote"]
     UC1["Manage Horses & Submit Order"]
@@ -32,6 +33,7 @@ flowchart TB
     UC10["Update Stop Check-ins & Vital Logs"]
     UC11["Report / Resolve Corridor Incidents"]
     UC12["Monitor SLA & Performance Reports"]
+    UC13["Execute Refund Transfer (SoD)"]
   end
 
   Customer --> UC1
@@ -40,18 +42,18 @@ flowchart TB
   Customer --> UC10
 
   Manager --> UC2
+  Manager --> UC4
+  Manager --> UC6
   Manager --> UC7
+  Manager --> UC8
   Manager --> UC9
+  Manager --> UC10
+  Manager --> UC11
   Manager --> UC12
-
-  Specialist --> UC4
-  Specialist --> UC6
-
-  Coordinator --> UC8
-  Coordinator --> UC11
-  Coordinator --> UC10
 
   Driver --> UC9
   Driver --> UC10
   Driver --> UC11
+
+  Admin --> UC13
 ```
