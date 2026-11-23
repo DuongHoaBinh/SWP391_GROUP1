@@ -3,6 +3,17 @@ import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { VehicleStatus, VehicleType } from '../fleet.types';
 
 export class UpdateVehicleDto {
+  @ApiPropertyOptional({ example: 'truck_4', description: 'Đổi loại phương tiện; capacity cập nhật theo loại' })
+  @IsOptional()
+  @IsString()
+  vehicleClassCode?: string;
+
+  @ApiPropertyOptional({ example: 1, description: 'Chuyển xe sang trạm khác' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  depotId?: number;
+
   @ApiPropertyOptional({ enum: VehicleType })
   @IsOptional()
   @IsEnum(VehicleType)

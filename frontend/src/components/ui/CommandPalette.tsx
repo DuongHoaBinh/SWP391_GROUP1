@@ -193,6 +193,14 @@ export function CommandPalette() {
           url: '/manager/fleet/vehicles',
         },
         {
+          id: 'coord-depots',
+          category: 'actions',
+          title: isEn ? 'Vehicle Depots' : 'Trạm xe',
+          subtitle: isEn ? 'Depots, partner depots abroad and vehicles per depot' : 'Trạm xe, trạm đối tác nước ngoài và xe theo trạm',
+          icon: <Truck className="w-4 h-4 text-[#B49A68]" />,
+          url: '/manager/fleet/depots',
+        },
+        {
           id: 'coord-mon',
           category: 'actions',
           title: isEn ? 'Live Route Monitoring' : 'Giám sát hành trình trực tuyến',

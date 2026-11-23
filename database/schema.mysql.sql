@@ -181,7 +181,8 @@ CREATE TABLE shipment (
   transport_cost DECIMAL(15,2) NULL DEFAULT NULL,
   insurance_fee DECIMAL(15,2) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  booking_type ENUM('shared_stall','dedicated_charter') NOT NULL DEFAULT 'shared_stall',
+  -- shared_stall: chỉ còn ở đơn cũ (bỏ gom chuyến sau review 11/2026)
+  booking_type ENUM('shared_stall','dedicated_charter') NOT NULL DEFAULT 'dedicated_charter',
   stall_unit_price DECIMAL(15,2) NULL DEFAULT NULL,
   transport_mode ENUM('road','air') NULL DEFAULT NULL,
   excused_delay BOOLEAN NOT NULL DEFAULT FALSE,
@@ -239,13 +240,65 @@ CREATE TABLE shipment_horse (
   CONSTRAINT fk_sh_horse FOREIGN KEY (horse_id) REFERENCES horse(horse_id)
 ) ENGINE=InnoDB;
 
+-- Trạm xe (Step 3, review 11/2026). Dữ liệu demo.
+CREATE TABLE depot (
+  depot_id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(30) NOT NULL UNIQUE,
+  name VARCHAR(150) NOT NULL,
+  country VARCHAR(100) NOT NULL,
+  city VARCHAR(100) NOT NULL,
+  address VARCHAR(255) NULL,
+  lat DECIMAL(10,7) NOT NULL,
+  lng DECIMAL(10,7) NOT NULL,
+  type ENUM('own','partner') NOT NULL DEFAULT 'own',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- Dữ liệu demo: tọa độ trung tâm khu vực, cần thay bằng địa chỉ thật của doanh nghiệp.
+INSERT INTO depot (code, name, country, city, address, lat, lng, type) VALUES
+  ('VN-HCM-TD', 'Trạm Thủ Đức', 'Vietnam', 'Hồ Chí Minh', 'Xa lộ Hà Nội, TP. Thủ Đức, TP.HCM', 10.8494000, 106.7537000, 'own'),
+  ('VN-HN-LB', 'Trạm Long Biên', 'Vietnam', 'Hà Nội', 'Quận Long Biên, Hà Nội', 21.0486000, 105.8880000, 'own'),
+  ('VN-DN', 'Trạm Đà Nẵng', 'Vietnam', 'Đà Nẵng', 'Quận Liên Chiểu, Đà Nẵng', 16.0718000, 108.1508000, 'own'),
+  ('VN-CT', 'Trạm Cần Thơ', 'Vietnam', 'Cần Thơ', 'Quận Cái Răng, Cần Thơ', 10.0003000, 105.7637000, 'own'),
+  ('KH-PNH', 'Đối tác Phnom Penh', 'Cambodia', 'Phnom Penh', 'Phnom Penh, Cambodia', 11.5564000, 104.9282000, 'partner'),
+  ('TH-BKK', 'Đối tác Bangkok', 'Thailand', 'Bangkok', 'Bangkok, Thailand', 13.7563000, 100.5018000, 'partner'),
+  ('SG-SIN', 'Đối tác Singapore', 'Singapore', 'Singapore', 'Singapore', 1.3521000, 103.8198000, 'partner');
+
+-- Loại phương tiện và sức chứa (số ngựa). horse_capacity NULL = theo xe chở trên phà.
+CREATE TABLE vehicle_class (
+  code VARCHAR(30) PRIMARY KEY,
+  mode ENUM('road','air','sea') NOT NULL,
+  name_vi VARCHAR(150) NOT NULL,
+  name_en VARCHAR(150) NOT NULL,
+  horse_capacity INT NULL,
+  price_coefficient DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+  is_heavy_truck BOOLEAN NOT NULL DEFAULT FALSE,
+  sort_order INT NOT NULL DEFAULT 0
+) ENGINE=InnoDB;
+
+INSERT INTO vehicle_class (code, mode, name_vi, name_en, horse_capacity, price_coefficient, is_heavy_truck, sort_order) VALUES
+  ('truck_1', 'road', 'Xe chở ngựa 1 chỗ', '1-horse transporter', 1, 1.00, FALSE, 10),
+  ('truck_2', 'road', 'Xe chở ngựa 2 chỗ (≈7,5 tấn)', '2-horse lorry (~7.5 t)', 2, 1.00, FALSE, 20),
+  ('truck_4', 'road', 'Xe tải ngựa 4 chỗ (≈18 tấn)', '4-horse lorry (~18 t)', 4, 1.30, TRUE, 30),
+  ('truck_6', 'road', 'Xe tải ngựa 6 chỗ (≈26 tấn)', '6-horse lorry (~26 t)', 6, 1.60, TRUE, 40),
+  ('jet_stall', 'air', 'Chuồng bay (jet stall)', 'Jet stall', 3, 1.00, FALSE, 50),
+  ('ferry_slot', 'sea', 'Chỗ xe trên phà RoRo', 'RoRo ferry slot', NULL, 1.00, FALSE, 60),
+  ('vessel_pen', 'sea', 'Ô chuồng trên tàu', 'Vessel pen', 1, 1.00, FALSE, 70);
+
 CREATE TABLE vehicle (
   vehicle_id INT AUTO_INCREMENT PRIMARY KEY,
   vehicle_type ENUM('truck','aircraft_stall','container') NOT NULL,
+  vehicle_class_code VARCHAR(30) NULL,
   plate_or_code VARCHAR(50) NOT NULL UNIQUE,
+  depot_id INT NULL,
+  -- capacity: lấy theo vehicle_class.horse_capacity khi tạo xe; giữ cột để tương thích
   capacity INT NOT NULL,
   status ENUM('available','in_use','maintenance') NOT NULL DEFAULT 'available',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  current_location VARCHAR(255) NULL DEFAULT 'Fleet Operations Depot',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_vehicle_class FOREIGN KEY (vehicle_class_code) REFERENCES vehicle_class(code),
+  CONSTRAINT fk_vehicle_depot FOREIGN KEY (depot_id) REFERENCES depot(depot_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE shipment_vehicle (

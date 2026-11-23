@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Truck,
   Plus,
@@ -21,6 +21,8 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import toast from 'react-hot-toast';
 import { useFleetRouteStore, Vehicle } from '@/lib/fleet-route-store';
+import { apiClient } from '@/lib/api-client';
+import { DepotOption, VehicleClassOption, MODE_TO_VEHICLE_TYPE } from '@/features/fleet/fleet-catalog';
 
 type CanonicalVehicleType = 'truck' | 'aircraft_stall' | 'container';
 type CanonicalVehicleStatus = 'available' | 'in_use' | 'maintenance';
@@ -58,20 +60,129 @@ export default function VehicleManagementPage() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
 
+  // Step 3: danh mục loại phương tiện + trạm xe
+  const [vehicleClasses, setVehicleClasses] = useState<VehicleClassOption[]>([]);
+  const [depots, setDepots] = useState<DepotOption[]>([]);
+  const [filterDepot, setFilterDepot] = useState<string>('ALL');
+
+  useEffect(() => {
+    apiClient<VehicleClassOption[]>('/fleet/vehicle-classes').then(setVehicleClasses).catch(() => setVehicleClasses([]));
+    apiClient<DepotOption[]>('/fleet/depots').then(setDepots).catch(() => setDepots([]));
+  }, []);
+
   // Form State (store capacityInput as string so users can clear & retype cleanly)
   const [formData, setFormData] = useState<{
     code: string;
     type: CanonicalVehicleType;
+    classCode: string;
+    depotId: string;
     capacityInput: string;
     status: CanonicalVehicleStatus;
     location: string;
   }>({
     code: '',
     type: 'truck',
+    classCode: 'truck_4',
+    depotId: '',
     capacityInput: '4',
     status: 'available',
     location: '',
   });
+
+  const selectedClass = useMemo(
+    () => vehicleClasses.find((c) => c.code === formData.classCode),
+    [vehicleClasses, formData.classCode],
+  );
+  const needsCapacityInput = !selectedClass || selectedClass.horseCapacity === null;
+  const needsDepot = !selectedClass || selectedClass.mode === 'road';
+  const className = (c: VehicleClassOption) => (language === 'en' ? c.nameEn : c.nameVi);
+  const activeDepots = depots.filter((d) => d.isActive);
+
+  const onClassChange = (code: string) => {
+    const cls = vehicleClasses.find((c) => c.code === code);
+    setFormData((prev) => ({
+      ...prev,
+      classCode: code,
+      type: cls ? MODE_TO_VEHICLE_TYPE[cls.mode] : prev.type,
+      capacityInput: cls?.horseCapacity != null ? String(cls.horseCapacity) : prev.capacityInput,
+    }));
+  };
+
+  const classAndDepotFields = (prefix: string) => (
+    <>
+      <div>
+        <label htmlFor={`${prefix}-veh-class`} className="text-xs font-bold text-slate-700 block mb-1.5">
+          {t('fleet.vehicleClassLabel', language === 'en' ? 'Vehicle class *' : 'Loại phương tiện *')}
+        </label>
+        <select
+          id={`${prefix}-veh-class`}
+          value={formData.classCode}
+          onChange={(e) => onClassChange(e.target.value)}
+          className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] text-sm outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#C4B38E]/20 bg-white font-medium text-slate-800 transition-all cursor-pointer"
+        >
+          {(['road', 'air', 'sea'] as const).map((mode) => (
+            <optgroup key={mode} label={mode === 'road' ? (language === 'en' ? 'Road' : 'Đường bộ') : mode === 'air' ? (language === 'en' ? 'Air' : 'Hàng không') : (language === 'en' ? 'Sea' : 'Đường thủy')}>
+              {vehicleClasses.filter((c) => c.mode === mode).map((c) => (
+                <option key={c.code} value={c.code}>
+                  {className(c)}
+                  {c.horseCapacity != null ? ` · ${c.horseCapacity} ${language === 'en' ? 'horses' : 'ngựa'}` : ''}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        {selectedClass && (
+          <p className="text-[11px] text-slate-500 mt-1 m-0">
+            {selectedClass.horseCapacity != null
+              ? language === 'en'
+                ? `Capacity is fixed by class: ${selectedClass.horseCapacity} horses. A horse needing a private stall uses 2 places.`
+                : `Sức chứa theo loại: ${selectedClass.horseCapacity} ngựa. Ngựa cần chuồng riêng chiếm 2 chỗ.`
+              : language === 'en'
+                ? 'Capacity depends on the vehicle carried; enter it below.'
+                : 'Sức chứa tùy xe chở trên phà; nhập ở ô bên dưới.'}
+            {selectedClass.isHeavyTruck ? (language === 'en' ? ' Heavy truck: city time windows apply.' : ' Xe tải nặng: bị giới hạn giờ chạy trong đô thị.') : ''}
+          </p>
+        )}
+      </div>
+      {needsDepot && (
+        <div>
+          <label htmlFor={`${prefix}-veh-depot`} className="text-xs font-bold text-slate-700 block mb-1.5">
+            {t('fleet.depotLabel', language === 'en' ? 'Home depot *' : 'Trạm xe *')}
+          </label>
+          <select
+            id={`${prefix}-veh-depot`}
+            value={formData.depotId}
+            onChange={(e) => setFormData({ ...formData, depotId: e.target.value })}
+            required
+            className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] text-sm outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#C4B38E]/20 bg-white font-medium text-slate-800 transition-all cursor-pointer"
+          >
+            <option value="">{language === 'en' ? '— Choose depot —' : '— Chọn trạm —'}</option>
+            {activeDepots.map((d) => (
+              <option key={d.id} value={String(d.id)}>
+                {d.name} ({d.city}, {d.country}){d.type === 'partner' ? (language === 'en' ? ' · partner' : ' · đối tác') : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {needsCapacityInput && (
+        <div>
+          <label htmlFor={`${prefix}-veh-cap`} className="text-xs font-bold text-slate-700 block mb-1.5">
+            {t('fleet.stallCapacityLabel', 'Sức chứa buồng (ngựa)')}
+          </label>
+          <input
+            id={`${prefix}-veh-cap`}
+            type="number"
+            min={1}
+            max={24}
+            value={formData.capacityInput}
+            onChange={(e) => setFormData({ ...formData, capacityInput: e.target.value })}
+            className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] text-sm outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#181A17]/10 text-slate-800 transition-all"
+          />
+        </div>
+      )}
+    </>
+  );
 
   const handleSyncDatabase = async () => {
     if (isSyncing) return;
@@ -95,10 +206,20 @@ export default function VehicleManagementPage() {
     setFormData({
       code: '',
       type: 'truck',
+      classCode: 'truck_4',
+      depotId: '',
       capacityInput: '4',
       status: 'available',
       location: '',
     });
+  };
+
+  const depotRequiredOrToast = (): boolean => {
+    if (needsDepot && !formData.depotId) {
+      toast.error(language === 'en' ? 'Road vehicles must belong to a depot.' : 'Xe đường bộ phải thuộc một trạm xe.');
+      return false;
+    }
+    return true;
   };
 
   const closeAddModal = () => {
@@ -141,13 +262,15 @@ export default function VehicleManagementPage() {
       return;
     }
     const capacity = parseCapacityOrToast();
-    if (capacity === null) return;
+    if (capacity === null || !depotRequiredOrToast()) return;
 
     setIsSubmitting(true);
     try {
       const created = await addVehicle({
         code: formData.code.trim().toUpperCase(),
         type: toCanonicalVehicleType(formData.type),
+        vehicleClassCode: formData.classCode || null,
+        depotId: needsDepot && formData.depotId ? Number(formData.depotId) : null,
         capacity,
         status: formData.status,
         lastInspection: new Date().toISOString().split('T')[0],
@@ -167,13 +290,15 @@ export default function VehicleManagementPage() {
     e.preventDefault();
     if (!selectedVehicle || isSubmitting) return;
     const capacity = parseCapacityOrToast();
-    if (capacity === null) return;
+    if (capacity === null || !depotRequiredOrToast()) return;
 
     setIsSubmitting(true);
     try {
       await updateVehicle(selectedVehicle.id, {
         code: formData.code.trim().toUpperCase() || selectedVehicle.code,
         type: toCanonicalVehicleType(formData.type),
+        vehicleClassCode: formData.classCode || null,
+        depotId: needsDepot && formData.depotId ? Number(formData.depotId) : null,
         capacity,
         status: formData.status,
         location: formData.location.trim(),
@@ -211,13 +336,14 @@ export default function VehicleManagementPage() {
       v.code.toLowerCase().includes(q) ||
       (v.location || '').toLowerCase().includes(q);
     const matchesType = filterType === 'ALL' || toCanonicalVehicleType(v.type) === filterType;
-    return matchesSearch && matchesType;
+    const matchesDepot = filterDepot === 'ALL' || String(v.depotId ?? '') === filterDepot;
+    return matchesSearch && matchesType && matchesDepot;
   });
 
   const availableCount = vehicles.filter((v) => normalizeFleetStatus(v.status) === 'available').length;
   const inUseCount = vehicles.filter((v) => normalizeFleetStatus(v.status) === 'in_use').length;
   const maintenanceCount = vehicles.filter((v) => normalizeFleetStatus(v.status) === 'maintenance').length;
-  const hasActiveFilter = Boolean(searchTerm.trim()) || filterType !== 'ALL';
+  const hasActiveFilter = Boolean(searchTerm.trim()) || filterType !== 'ALL' || filterDepot !== 'ALL';
 
   return (
     <div className="flex flex-col gap-6 pb-12">
@@ -358,6 +484,17 @@ export default function VehicleManagementPage() {
               <option value="container">{translateVehicleType('container')}</option>
               <option value="aircraft_stall">{translateVehicleType('aircraft_stall')}</option>
             </select>
+            <select
+              aria-label={language === 'en' ? 'Filter by depot' : 'Lọc theo trạm'}
+              value={filterDepot}
+              onChange={(e) => setFilterDepot(e.target.value)}
+              className="flex-1 sm:flex-none px-3.5 h-11 border border-[#D8CEBE] rounded-xl text-sm bg-white font-medium text-slate-700 outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#C4B38E]/20 transition-all cursor-pointer"
+            >
+              <option value="ALL">{language === 'en' ? 'All depots' : 'Tất cả trạm'}</option>
+              {depots.map((d) => (
+                <option key={d.id} value={String(d.id)}>{d.name}</option>
+              ))}
+            </select>
 
             {hasActiveFilter && (
               <button
@@ -365,6 +502,7 @@ export default function VehicleManagementPage() {
                 onClick={() => {
                   setSearchTerm('');
                   setFilterType('ALL');
+                  setFilterDepot('ALL');
                 }}
                 className="text-xs font-semibold text-slate-600 hover:text-[#966516] px-2.5 py-2 rounded-lg hover:bg-white border border-transparent hover:border-[#D8CEBE] transition-colors cursor-pointer"
               >
@@ -382,6 +520,7 @@ export default function VehicleManagementPage() {
                 <th className="p-4">{t('coordinator.vehicles.plate', 'Biển số / Mã xe')}</th>
                 <th className="p-4">{t('coordinator.vehicles.type', 'Loại phương tiện')}</th>
                 <th className="p-4">{t('coordinator.vehicles.capacity', 'Sức chứa buồng')}</th>
+                <th className="p-4">{language === 'en' ? 'Depot' : 'Trạm xe'}</th>
                 <th className="p-4">{t('coordinator.vehicles.location', 'Vị trí hiện tại')}</th>
                 <th className="p-4">{t('common.status', 'Trạng thái')}</th>
                 <th className="p-4 text-right">{t('common.actions', 'Thao tác')}</th>
@@ -390,7 +529,7 @@ export default function VehicleManagementPage() {
             <tbody className="divide-y divide-slate-100">
               {!isLoaded ? (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center text-slate-500">
+                  <td colSpan={7} className="p-12 text-center text-slate-500">
                     <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-[#181A17] border-t-transparent mb-2" />
                     <div className="text-xs font-medium">
                       {t('fleet.loadingVehicles', language === 'en' ? 'Loading fleet vehicles...' : 'Đang tải danh sách đội xe chuyên dụng...')}
@@ -399,7 +538,7 @@ export default function VehicleManagementPage() {
                 </tr>
               ) : filteredVehicles.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center">
+                  <td colSpan={7} className="p-12 text-center">
                     <div className="flex flex-col items-center justify-center max-w-sm mx-auto text-slate-500">
                       <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
                         <Truck size={28} />
@@ -421,10 +560,18 @@ export default function VehicleManagementPage() {
                   return (
                     <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="p-4 font-bold text-slate-900">{v.code}</td>
-                      <td className="p-4 text-slate-700 font-medium">{translateVehicleType(v.type)}</td>
+                      <td className="p-4 text-slate-700 font-medium">
+                        {v.vehicleClassName || translateVehicleType(v.type)}
+                        {v.isHeavyTruck && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 align-middle">
+                            {language === 'en' ? 'Heavy' : 'Tải nặng'}
+                          </span>
+                        )}
+                      </td>
                       <td className="p-4 text-slate-700 font-semibold">
                         {v.capacity} {t('fleet.stallsUnit', 'Buồng Stall')}
                       </td>
+                      <td className="p-4 text-slate-700">{v.depotName || '—'}</td>
                       <td className="p-4 text-slate-600">{v.location || t('coordinator.depot', 'Depot')}</td>
                       <td className="p-4">
                         <StatusBadge
@@ -442,6 +589,8 @@ export default function VehicleManagementPage() {
                               setFormData({
                                 code: v.code,
                                 type: toCanonicalVehicleType(v.type),
+                                classCode: v.vehicleClassCode || 'truck_4',
+                                depotId: v.depotId ? String(v.depotId) : '',
                                 capacityInput: String(v.capacity ?? 4),
                                 status: normalizeFleetStatus(v.status),
                                 location: v.location || '',
@@ -502,60 +651,24 @@ export default function VehicleManagementPage() {
                 required
               />
             </div>
+            {classAndDepotFields('add')}
             <div>
-              <label htmlFor="add-veh-type" className="text-xs font-bold text-slate-700 block mb-1.5">
-                {t('fleet.vehicleTypeLabel', 'Loại phương tiện *')}
+              <label htmlFor="add-veh-status" className="text-xs font-bold text-slate-700 block mb-1.5">
+                {t('fleet.initialStatus', 'Trạng thái ban đầu')}
               </label>
               <select
-                id="add-veh-type"
-                value={formData.type}
-                onChange={(e) => {
-                  const selectedType = e.target.value as CanonicalVehicleType;
-                  let autoCap = '4';
-                  if (selectedType === 'aircraft_stall') autoCap = '2';
-                  else if (selectedType === 'container') autoCap = '4';
-                  setFormData({ ...formData, type: selectedType, capacityInput: autoCap });
-                }}
-                className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] text-sm outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#C4B38E]/20 bg-white font-medium text-slate-800 transition-all cursor-pointer"
+                id="add-veh-status"
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value as CanonicalVehicleStatus })}
+                className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] text-sm outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#181A17]/10 bg-white font-medium text-slate-800 transition-all cursor-pointer"
               >
-                <option value="truck">{translateVehicleType('truck')}</option>
-                <option value="container">{translateVehicleType('container')}</option>
-                <option value="aircraft_stall">{translateVehicleType('aircraft_stall')}</option>
+                <option value="available">{translateStatus('available')}</option>
+                <option value="maintenance">{translateStatus('maintenance')}</option>
               </select>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="add-veh-cap" className="text-xs font-bold text-slate-700 block mb-1.5">
-                  {t('fleet.stallCapacityLabel', 'Sức chứa buồng (ngựa)')}
-                </label>
-                <input
-                  id="add-veh-cap"
-                  type="number"
-                  min={1}
-                  max={24}
-                  value={formData.capacityInput}
-                  onChange={(e) => setFormData({ ...formData, capacityInput: e.target.value })}
-                  className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] text-sm outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#181A17]/10 text-slate-800 transition-all"
-                />
-              </div>
-              <div>
-                <label htmlFor="add-veh-status" className="text-xs font-bold text-slate-700 block mb-1.5">
-                  {t('fleet.initialStatus', 'Trạng thái ban đầu')}
-                </label>
-                <select
-                  id="add-veh-status"
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value as CanonicalVehicleStatus })}
-                  className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] text-sm outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#181A17]/10 bg-white font-medium text-slate-800 transition-all cursor-pointer"
-                >
-                  <option value="available">{translateStatus('available')}</option>
-                  <option value="maintenance">{translateStatus('maintenance')}</option>
-                </select>
-              </div>
             </div>
             <div>
               <label htmlFor="add-veh-loc" className="text-xs font-bold text-slate-700 block mb-1.5">
-                {t('fleet.depotLocation', 'Vị trí đỗ / Depot')}
+                {language === 'en' ? 'Current location (free text)' : 'Vị trí hiện tại (ghi chú)'}
               </label>
               <input
                 id="add-veh-loc"
@@ -589,21 +702,7 @@ export default function VehicleManagementPage() {
           maxWidth="550px"
         >
           <form onSubmit={handleEdit} className="flex flex-col gap-4">
-            <div>
-              <label htmlFor="edit-veh-type" className="text-xs font-bold text-slate-700 block mb-1.5">
-                {t('fleet.vehicleTypeLabel', 'Loại phương tiện *')}
-              </label>
-              <select
-                id="edit-veh-type"
-                value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value as CanonicalVehicleType })}
-                className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] text-sm outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#C4B38E]/20 bg-white font-medium text-slate-800 transition-all cursor-pointer"
-              >
-                <option value="truck">{translateVehicleType('truck')}</option>
-                <option value="container">{translateVehicleType('container')}</option>
-                <option value="aircraft_stall">{translateVehicleType('aircraft_stall')}</option>
-              </select>
-            </div>
+            {classAndDepotFields('edit')}
             <div>
               <label htmlFor="edit-veh-status" className="text-xs font-bold text-slate-700 block mb-1.5">
                 {t('fleet.operationalStatus', 'Trạng thái hoạt động')}
@@ -620,22 +719,8 @@ export default function VehicleManagementPage() {
               </select>
             </div>
             <div>
-              <label htmlFor="edit-veh-cap" className="text-xs font-bold text-slate-700 block mb-1.5">
-                {t('fleet.stallCapacityLabel', 'Sức chứa buồng (ngựa)')}
-              </label>
-              <input
-                id="edit-veh-cap"
-                type="number"
-                min={1}
-                max={24}
-                value={formData.capacityInput}
-                onChange={(e) => setFormData({ ...formData, capacityInput: e.target.value })}
-                className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] text-sm outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#181A17]/10 text-slate-800 transition-all"
-              />
-            </div>
-            <div>
               <label htmlFor="edit-veh-loc" className="text-xs font-bold text-slate-700 block mb-1.5">
-                {t('fleet.depotLocation', 'Vị trí đỗ / Depot')}
+                {language === 'en' ? 'Current location (free text)' : 'Vị trí hiện tại (ghi chú)'}
               </label>
               <input
                 id="edit-veh-loc"

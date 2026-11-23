@@ -17,9 +17,46 @@ export enum ShipmentStaffRole {
   ESCORT = 'escort',
 }
 
+export type TransportMode = 'road' | 'air' | 'sea';
+export type DepotType = 'own' | 'partner';
+
+/** Loại phương tiện và sức chứa (bảng vehicle_class, Step 3). */
+export interface VehicleClass {
+  code: string;
+  mode: TransportMode;
+  nameVi: string;
+  nameEn: string;
+  /** null = theo xe chở trên phà (ferry_slot) */
+  horseCapacity: number | null;
+  priceCoefficient: number;
+  isHeavyTruck: boolean;
+  sortOrder: number;
+}
+
+/** Trạm xe (bảng depot, Step 3). partner = trạm đối tác ở nước ngoài. */
+export interface DepotEntity {
+  id: number;
+  code: string;
+  name: string;
+  country: string;
+  city: string;
+  address: string | null;
+  lat: number;
+  lng: number;
+  type: DepotType;
+  isActive: boolean;
+  vehicleCount?: number;
+  createdAt: string;
+}
+
 export interface VehicleEntity {
   id: number;
   vehicleType: VehicleType;
+  vehicleClassCode?: string | null;
+  vehicleClassName?: string | null;
+  isHeavyTruck?: boolean;
+  depotId?: number | null;
+  depotName?: string | null;
   plateOrCode: string;
   capacity: number;
   status: VehicleStatus;

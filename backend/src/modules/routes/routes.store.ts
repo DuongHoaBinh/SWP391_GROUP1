@@ -22,7 +22,7 @@ import { SetStrategicFrameworkDto } from './dto/set-strategic-framework.dto';
 import { BuildDetailedPlanDto, RouteLegDto } from './dto/build-detailed-plan.dto';
 import { paymentGate } from '../orders/payment-gate';
 import { computePaymentDueAt } from '../orders/sla-timeline.policy';
-import { assertRoadCapacity } from '../fleet/capacity-policy';
+import { assertRoadCapacity, loadRequiredStallSlots } from '../fleet/capacity-policy';
 import { RoadTripsStore } from '../fleet/road-trips.store';
 import {
   areSameLocations,
@@ -1222,7 +1222,8 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       const vehicleIds = [...new Set(legs.filter(l => l.leg_type === 'road' && l.vehicle_id).map(l => Number(l.vehicle_id)))];
       if (vehicleIds.length) {
         const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT vehicle_id, capacity FROM vehicle WHERE vehicle_id IN (${vehicleIds.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, vehicleIds);
-        assertRoadCapacity(Number(order.requested_horse_count), vehicleIds, vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })));
+        const requiredSlots = await loadRequiredStallSlots(db, Number(order.shipment_id), Number(order.requested_horse_count));
+        assertRoadCapacity(requiredSlots, vehicleIds, vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })));
       }
       if (!legs.length || legs.some(l => {
         const isOverseasPostFlightRoadLeg = l.leg_type === 'road' && firstFlightSeq !== null && Number(l.sequence_no) > firstFlightSeq;

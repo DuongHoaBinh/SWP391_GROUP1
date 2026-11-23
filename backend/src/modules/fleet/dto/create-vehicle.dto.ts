@@ -3,14 +3,28 @@ import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-vali
 import { VehicleStatus, VehicleType } from '../fleet.types';
 
 export class CreateVehicleDto {
-  @ApiProperty({
-    description: 'Loại phương tiện vận chuyển ngựa',
+  @ApiPropertyOptional({
+    description: 'Mã loại phương tiện (vehicle_class). Khi có, vehicleType và capacity được lấy theo loại (Step 3)',
+    example: 'truck_4',
+  })
+  @IsString()
+  @IsOptional()
+  vehicleClassCode?: string;
+
+  @ApiPropertyOptional({ description: 'Trạm xe quản lý phương tiện (bắt buộc với xe đường bộ)', example: 1 })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  depotId?: number;
+
+  @ApiPropertyOptional({
+    description: 'Loại phương tiện cũ (chỉ dùng khi không gửi vehicleClassCode)',
     enum: VehicleType,
     example: VehicleType.TRUCK,
   })
   @IsEnum(VehicleType)
-  @IsNotEmpty()
-  vehicleType!: VehicleType;
+  @IsOptional()
+  vehicleType?: VehicleType;
 
   @ApiProperty({
     description: 'Biển số xe hoặc mã chuồng máy bay/container',
@@ -20,14 +34,15 @@ export class CreateVehicleDto {
   @IsNotEmpty()
   plateOrCode!: string;
 
-  @ApiProperty({
-    description: 'Sức chứa tối đa (số lượng ngựa)',
+  @ApiPropertyOptional({
+    description: 'Sức chứa (số ngựa). Bỏ qua nếu loại phương tiện có sức chứa cố định; bắt buộc với ferry_slot hoặc khi không gửi loại',
     example: 4,
     minimum: 1,
   })
   @IsInt()
   @Min(1)
-  capacity!: number;
+  @IsOptional()
+  capacity?: number;
 
   @ApiPropertyOptional({
     description: 'Trạng thái hoạt động',

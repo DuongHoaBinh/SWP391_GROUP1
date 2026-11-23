@@ -10,6 +10,7 @@ function database(conflicts = [], capacity = 4, type = 'shared_stall') {
     if (sql.includes('SELECT * FROM vehicle')) return [[{ vehicle_id: 1, vehicle_type: 'truck', capacity, status: 'available' }]];
     if (sql.includes('SELECT l.road_trip_id')) return [conflicts];
     if (sql.includes('SELECT sv.shipment_id')) return [[]];
+    if (sql.includes('FROM shipment_horse')) return [[]]; // Step 3: số chỗ chuồng → fallback requested_horse_count
     throw new Error(`Unexpected query: ${sql}`);
   } };
 }
@@ -33,7 +34,7 @@ test('selected trip booking must match customer choice and is never accepted for
   await assert.rejects(new RoadTripsStore().prepareLegs(database(), order, [{ ...leg, legType: 'flight' }], 9), /không áp dụng/);
 });
 test('road capacity is enforced for every selected leg and no guessed schedule reserves a vehicle', async () => {
-  await assert.rejects(new RoadTripsStore().prepareLegs(database([], 1), order, [leg], 9), /đủ ô/);
+  await assert.rejects(new RoadTripsStore().prepareLegs(database([], 1), order, [leg], 9), /đủ 2 chỗ chuồng/);
   await assert.rejects(new RoadTripsStore().prepareLegs(database(), order, [{ ...leg, roadTripId: undefined, vehicleId: 1 }], 9), /giờ đi/);
 });
 test('new planning order cannot join a shared road trip whose sibling is already in_transit', async () => {

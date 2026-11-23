@@ -1,9 +1,12 @@
 import { BadRequestException, Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { MYSQL_POOL } from '../../common/database/database.module';
-import { UpdateVehicleDto } from './dto/update-vehicle.dto';
+import { loadRequiredStallSlots } from './capacity-policy';
+import { CreateDepotDto, UpdateDepotDto } from './dto/depot.dto';
 import {
   AvailableStaff,
+  DepotEntity,
+  VehicleClass,
   ShipmentStaffAssignment,
   ShipmentStaffRole,
   ShipmentVehicleAssignment,
@@ -11,12 +14,22 @@ import {
   VehicleStatus,
   VehicleType,
 } from './fleet.types';
-import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { StaffAssignmentItemDto } from './dto/assign-staff.dto';
 import {
   computeBackupPoolSlaDueAt,
   computeDriverPrimarySlaDueAt,
 } from '../orders/sla-timeline.policy';
+
+/** Dữ liệu xe đã chuẩn hóa từ loại phương tiện (service resolve trước khi ghi). */
+export interface VehicleWriteInput {
+  vehicleType: VehicleType;
+  vehicleClassCode: string | null;
+  plateOrCode: string;
+  capacity: number;
+  status?: VehicleStatus;
+  currentLocation?: string;
+  depotId: number | null;
+}
 
 interface VehicleRow extends RowDataPacket {
   vehicle_id: number;
@@ -127,9 +140,9 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async findAllVehicles(status?: VehicleStatus, type?: VehicleType): Promise<VehicleEntity[]> {
+  async findAllVehicles(status?: VehicleStatus, type?: VehicleType, depotId?: number): Promise<VehicleEntity[]> {
     let sql = `
-      SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity, v.current_location,
+      SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity, v.current_location, v.vehicle_class_code, v.depot_id, vc.name_vi AS vehicle_class_name, vc.is_heavy_truck, d.name AS depot_name,
              CASE 
                WHEN active_leg.shipment_id IS NOT NULL THEN 'in_use'
                WHEN active_sv.shipment_id IS NOT NULL THEN 'in_use'
@@ -159,9 +172,16 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
           AND (rl.leg_id IS NULL OR (rl.status != 'completed' AND rl.actual_arrival IS NULL))
         GROUP BY sv.vehicle_id
       ) active_sv ON active_sv.vehicle_id = v.vehicle_id
+      LEFT JOIN vehicle_class vc ON vc.code = v.vehicle_class_code
+       LEFT JOIN depot d ON d.depot_id = v.depot_id
       WHERE 1=1
     `;
     const params: any[] = [];
+
+    if (depotId) {
+      sql += ' AND v.depot_id = ?';
+      params.push(depotId);
+    }
 
     if (type) {
       sql += ' AND v.vehicle_type = ?';
@@ -179,7 +199,11 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
 
   async findVehicleById(id: number): Promise<VehicleEntity | undefined> {
     const [rows] = await this.pool.execute<VehicleRow[]>(
-      'SELECT vehicle_id, vehicle_type, plate_or_code, capacity, status, current_location, created_at FROM vehicle WHERE vehicle_id = ? LIMIT 1',
+      `SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity, v.status, v.current_location, v.created_at, v.vehicle_class_code, v.depot_id, vc.name_vi AS vehicle_class_name, vc.is_heavy_truck, d.name AS depot_name
+       FROM vehicle v
+       LEFT JOIN vehicle_class vc ON vc.code = v.vehicle_class_code
+       LEFT JOIN depot d ON d.depot_id = v.depot_id
+       WHERE v.vehicle_id = ? LIMIT 1`,
       [id],
     );
     const r = rows[0];
@@ -190,29 +214,43 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     if (ids.length === 0) return [];
     const placeholders = ids.map(() => '?').join(',');
     const [rows] = await this.pool.query<VehicleRow[]>(
-      `SELECT vehicle_id, vehicle_type, plate_or_code, capacity, status, current_location, created_at FROM vehicle WHERE vehicle_id IN (${placeholders})`,
+      `SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity, v.status, v.current_location, v.created_at, v.vehicle_class_code, v.depot_id, vc.name_vi AS vehicle_class_name, vc.is_heavy_truck, d.name AS depot_name
+       FROM vehicle v
+       LEFT JOIN vehicle_class vc ON vc.code = v.vehicle_class_code
+       LEFT JOIN depot d ON d.depot_id = v.depot_id
+       WHERE v.vehicle_id IN (${placeholders})`,
       ids,
     );
     return rows.map((r) => this.mapVehicleRow(r));
   }
 
-  async createVehicle(dto: CreateVehicleDto): Promise<number> {
+  async createVehicle(dto: VehicleWriteInput): Promise<number> {
     const [result] = await this.pool.execute(
-      'INSERT INTO vehicle (vehicle_type, plate_or_code, capacity, status, current_location) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO vehicle (vehicle_type, vehicle_class_code, plate_or_code, depot_id, capacity, status, current_location) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [
-        dto.vehicleType, 
-        dto.plateOrCode, 
-        dto.capacity, 
+        dto.vehicleType,
+        dto.vehicleClassCode,
+        dto.plateOrCode.trim(),
+        dto.depotId,
+        dto.capacity,
         dto.status ?? VehicleStatus.AVAILABLE,
-        dto.currentLocation || 'Fleet Operations Depot'
+        dto.currentLocation || 'Fleet Operations Depot',
       ],
     );
     return (result as { insertId: number }).insertId;
   }
 
-  async updateVehicle(vehicleId: number, dto: UpdateVehicleDto): Promise<void> {
+  async updateVehicle(vehicleId: number, dto: Partial<VehicleWriteInput>): Promise<void> {
     const sets: string[] = [];
-    const params: (string | number)[] = [];
+    const params: (string | number | null)[] = [];
+    if (dto.vehicleClassCode !== undefined) {
+      sets.push('vehicle_class_code = ?');
+      params.push(dto.vehicleClassCode);
+    }
+    if (dto.depotId !== undefined) {
+      sets.push('depot_id = ?');
+      params.push(dto.depotId);
+    }
     if (dto.vehicleType !== undefined) {
       sets.push('vehicle_type = ?');
       params.push(dto.vehicleType);
@@ -648,6 +686,122 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  // --- Số chỗ chuồng, loại phương tiện, trạm xe (Step 3, review 11/2026) ---
+  async findRequiredStallSlots(shipmentId: number, fallbackHorseCount: number): Promise<number> {
+    return loadRequiredStallSlots(this.pool, shipmentId, fallbackHorseCount);
+  }
+
+  async findVehicleClasses(): Promise<VehicleClass[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>('SELECT * FROM vehicle_class ORDER BY sort_order, code');
+    return rows.map((r) => this.mapVehicleClassRow(r));
+  }
+
+  async findVehicleClassByCode(code: string): Promise<VehicleClass | undefined> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>('SELECT * FROM vehicle_class WHERE code = ? LIMIT 1', [code]);
+    return rows[0] ? this.mapVehicleClassRow(rows[0]) : undefined;
+  }
+
+  async findDepots(): Promise<DepotEntity[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT d.*, (SELECT COUNT(*) FROM vehicle v WHERE v.depot_id = d.depot_id) AS vehicle_count
+       FROM depot d
+       ORDER BY d.type, d.country, d.name`,
+    );
+    return rows.map((r) => this.mapDepotRow(r));
+  }
+
+  async findDepotById(id: number): Promise<DepotEntity | undefined> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT d.*, (SELECT COUNT(*) FROM vehicle v WHERE v.depot_id = d.depot_id) AS vehicle_count
+       FROM depot d WHERE d.depot_id = ? LIMIT 1`,
+      [id],
+    );
+    return rows[0] ? this.mapDepotRow(rows[0]) : undefined;
+  }
+
+  async findDepotByCode(code: string): Promise<DepotEntity | undefined> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT d.*, 0 AS vehicle_count FROM depot d WHERE d.code = ? LIMIT 1',
+      [code.trim().toUpperCase()],
+    );
+    return rows[0] ? this.mapDepotRow(rows[0]) : undefined;
+  }
+
+  async createDepot(dto: CreateDepotDto): Promise<number> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `INSERT INTO depot (code, name, country, city, address, lat, lng, type, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        dto.code.trim().toUpperCase(),
+        dto.name.trim(),
+        dto.country.trim(),
+        dto.city.trim(),
+        dto.address?.trim() || null,
+        dto.lat,
+        dto.lng,
+        dto.type ?? 'own',
+        dto.isActive ?? true,
+      ],
+    );
+    return result.insertId;
+  }
+
+  async updateDepot(id: number, dto: UpdateDepotDto): Promise<void> {
+    const columns: Record<string, string> = {
+      code: 'code', name: 'name', country: 'country', city: 'city', address: 'address',
+      lat: 'lat', lng: 'lng', type: 'type', isActive: 'is_active',
+    };
+    const sets: string[] = [];
+    const params: (string | number | boolean | null)[] = [];
+    for (const [key, column] of Object.entries(columns)) {
+      const value = (dto as Record<string, unknown>)[key];
+      if (value === undefined) continue;
+      sets.push(`${column} = ?`);
+      if (typeof value === 'string') {
+        params.push(key === 'code' ? value.trim().toUpperCase() : value.trim() || null);
+      } else {
+        params.push(value as number | boolean);
+      }
+    }
+    if (!sets.length) return;
+    params.push(id);
+    await this.pool.execute(`UPDATE depot SET ${sets.join(', ')} WHERE depot_id = ?`, params);
+  }
+
+  async deleteDepot(id: number): Promise<void> {
+    await this.pool.execute('DELETE FROM depot WHERE depot_id = ?', [id]);
+  }
+
+  private mapVehicleClassRow(r: RowDataPacket): VehicleClass {
+    return {
+      code: r.code,
+      mode: r.mode,
+      nameVi: r.name_vi,
+      nameEn: r.name_en,
+      horseCapacity: r.horse_capacity != null ? Number(r.horse_capacity) : null,
+      priceCoefficient: Number(r.price_coefficient),
+      isHeavyTruck: Boolean(r.is_heavy_truck),
+      sortOrder: Number(r.sort_order ?? 0),
+    };
+  }
+
+  private mapDepotRow(r: RowDataPacket): DepotEntity {
+    return {
+      id: Number(r.depot_id),
+      code: r.code,
+      name: r.name,
+      country: r.country,
+      city: r.city,
+      address: r.address ?? null,
+      lat: Number(r.lat),
+      lng: Number(r.lng),
+      type: r.type,
+      isActive: Boolean(r.is_active),
+      vehicleCount: Number(r.vehicle_count ?? 0),
+      createdAt: new Date(r.created_at).toISOString(),
+    };
+  }
+
   private mapVehicleRow(r: any): VehicleEntity {
     const computedStatus = (r.computed_status || r.status) as VehicleStatus;
     const assignedId = r.assigned_shipment_id ? Number(r.assigned_shipment_id) : null;
@@ -659,6 +813,11 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       status: computedStatus,
       createdAt: new Date(r.created_at).toISOString(),
       currentLocation: r.current_location || 'Fleet Operations Depot',
+      vehicleClassCode: r.vehicle_class_code ?? null,
+      vehicleClassName: r.vehicle_class_name ?? null,
+      isHeavyTruck: Boolean(r.is_heavy_truck),
+      depotId: r.depot_id != null ? Number(r.depot_id) : null,
+      depotName: r.depot_name ?? null,
       assignedShipmentId: assignedId,
       assignedTripCode: assignedId ? `REQ-${String(assignedId).padStart(3, '0')}` : null,
     };

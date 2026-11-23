@@ -35,6 +35,12 @@ export interface Vehicle {
   lastInspection: string;
   location: string;
   assignedTripCode?: string;
+  /** Step 3: loại phương tiện (vehicle_class) và trạm xe */
+  vehicleClassCode?: string | null;
+  vehicleClassName?: string | null;
+  isHeavyTruck?: boolean;
+  depotId?: number | null;
+  depotName?: string | null;
 }
 
 export interface RouteStop {
@@ -250,6 +256,11 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
             lastInspection: v.createdAt ? v.createdAt.split('T')[0] : '2026-10-01',
             location: v.status === 'in_use' ? `Active: ${v.assignedTripCode || 'On Road'} (${baseLoc})` : baseLoc,
             assignedTripCode: v.assignedTripCode || undefined,
+            vehicleClassCode: v.vehicleClassCode ?? null,
+            vehicleClassName: v.vehicleClassName ?? null,
+            isHeavyTruck: Boolean(v.isHeavyTruck),
+            depotId: v.depotId ?? null,
+            depotName: v.depotName ?? null,
           };
         });
         setVehicles(mapped);
@@ -574,6 +585,8 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
           capacity: Number(data.capacity) || 4,
           status: data.status || 'available',
           currentLocation: data.location || 'Fleet Operations Depot',
+          ...(data.vehicleClassCode ? { vehicleClassCode: data.vehicleClassCode } : {}),
+          ...(data.depotId ? { depotId: Number(data.depotId) } : {}),
         }),
       });
       await refreshVehicles();
@@ -595,6 +608,8 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
         if (data.capacity !== undefined) payload.capacity = Number(data.capacity);
         if (data.status !== undefined) payload.status = data.status;
         if (data.location !== undefined) payload.currentLocation = data.location;
+        if (data.vehicleClassCode) payload.vehicleClassCode = data.vehicleClassCode;
+        if (data.depotId) payload.depotId = Number(data.depotId);
         await apiClient(`/fleet/vehicles/${numericId}`, {
           method: 'PATCH',
           body: JSON.stringify(payload),

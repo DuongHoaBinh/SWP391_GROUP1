@@ -29,6 +29,7 @@ import {
   Navigation,
   Map as MapIcon,
   Bus,
+  Building2,
   Radio,
 } from 'lucide-react';
 import { getAuthToken, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
@@ -289,6 +290,11 @@ export default function ManagerLayout({
           label: t('nav.vehicles', 'Quản lý đội xe'),
           href: '/manager/fleet/vehicles',
           icon: <Bus size={18} />,
+        },
+        {
+          label: t('manager.nav.depots', 'Trạm xe'),
+          href: '/manager/fleet/depots',
+          icon: <Building2 size={18} />,
         },
         {
           label: t('manager.nav.staff', 'Phân Bổ Ca Trực & Nhân Sự'),

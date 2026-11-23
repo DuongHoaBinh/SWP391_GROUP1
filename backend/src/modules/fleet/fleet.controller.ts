@@ -18,6 +18,7 @@ import { AssignVehiclesDto } from './dto/assign-vehicles.dto';
 import { AssignStaffDto } from './dto/assign-staff.dto';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffShiftDto } from './dto/update-staff-shift.dto';
+import { CreateDepotDto, UpdateDepotDto } from './dto/depot.dto';
 import { VehicleStatus, VehicleType } from './fleet.types';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -37,11 +38,55 @@ export class FleetController {
   @ApiOperation({ summary: 'Lấy danh sách tất cả phương tiện vận chuyển' })
   @ApiQuery({ name: 'status', enum: VehicleStatus, required: false })
   @ApiQuery({ name: 'type', enum: VehicleType, required: false })
+  @ApiQuery({ name: 'depotId', required: false, description: 'Lọc xe theo trạm' })
   getVehicles(
     @Query('status') status?: VehicleStatus,
     @Query('type') type?: VehicleType,
+    @Query('depotId') depotId?: string,
   ) {
-    return this.fleetService.getAllVehicles(status, type);
+    return this.fleetService.getAllVehicles(status, type, depotId ? Number(depotId) : undefined);
+  }
+
+  // --- Loại phương tiện & trạm xe (Step 3, review 11/2026) ---
+  @Get('vehicle-classes')
+  @ApiOperation({ summary: 'Danh mục loại phương tiện và sức chứa (số ngựa) theo mode bộ/không/thủy' })
+  getVehicleClasses() {
+    return this.fleetService.getVehicleClasses();
+  }
+
+  @Get('depots')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Danh sách trạm xe (trạm riêng và trạm đối tác nước ngoài)' })
+  getDepots() {
+    return this.fleetService.getDepots();
+  }
+
+  @Get('depots/:id')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Chi tiết trạm xe kèm danh sách xe thuộc trạm' })
+  getDepotById(@Param('id', ParseIntPipe) id: number) {
+    return this.fleetService.getDepotById(id);
+  }
+
+  @Post('depots')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Tạo trạm xe' })
+  createDepot(@Body() dto: CreateDepotDto) {
+    return this.fleetService.createDepot(dto);
+  }
+
+  @Patch('depots/:id')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Cập nhật trạm xe (tạm ngưng bằng isActive = false)' })
+  updateDepot(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateDepotDto) {
+    return this.fleetService.updateDepot(id, dto);
+  }
+
+  @Delete('depots/:id')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Xóa trạm xe không còn xe nào' })
+  deleteDepot(@Param('id', ParseIntPipe) id: number) {
+    return this.fleetService.deleteDepot(id);
   }
 
   @Get('vehicles/:id')

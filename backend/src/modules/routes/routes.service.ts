@@ -327,7 +327,12 @@ export class RoutesService implements OnModuleInit {
     }
 
     const roadVehicles = [...new Set(dto.legs.filter(l => l.legType === 'road' && l.vehicleId && !l.roadTripId).map(l => l.vehicleId!))];
-    if (roadVehicles.length) assertRoadCapacity(order.requestedHorseCount, roadVehicles, await this.fleetStore.findVehiclesByIds(roadVehicles));
+    if (roadVehicles.length) {
+      const requiredSlots = typeof this.fleetStore.findRequiredStallSlots === 'function'
+        ? await this.fleetStore.findRequiredStallSlots(shipmentId, order.requestedHorseCount)
+        : order.requestedHorseCount;
+      assertRoadCapacity(requiredSlots, roadVehicles, await this.fleetStore.findVehiclesByIds(roadVehicles));
+    }
     let routeId: number;
     if (!route) {
       routeId = await this.routesStore.createRoute(shipmentId, dto.routeName, dto.totalDistanceKm);

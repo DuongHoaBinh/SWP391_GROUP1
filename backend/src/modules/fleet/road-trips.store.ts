@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { CreateRoadTripDto } from './dto/create-road-trip.dto';
 import { RouteLegDto } from '../routes/dto/build-detailed-plan.dto';
-import { assertRoadCapacity } from './capacity-policy';
+import { assertRoadCapacity, loadRequiredStallSlots } from './capacity-policy';
 import { MYSQL_POOL } from '../../common/database/database.module';
 
 @Injectable()
@@ -111,7 +111,9 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
     const ids = [...new Set([...oldVehicleIds, ...roadLegs.filter(l => l.vehicleId).map(l => l.vehicleId!)])].sort((a, b) => a - b);
     if (!ids.length) return prepared;
     const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT * FROM vehicle WHERE vehicle_id IN (${ids.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, ids);
-    assertRoadCapacity(Number(order.requested_horse_count), roadLegs.filter(l => l.vehicleId).map(l => l.vehicleId!), vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })));
+    // Số chỗ chuồng: ngựa cần chuồng riêng tính 2 chỗ (Step 3)
+    const requiredSlots = await loadRequiredStallSlots(db, Number(order.shipment_id), Number(order.requested_horse_count));
+    assertRoadCapacity(requiredSlots, roadLegs.filter(l => l.vehicleId).map(l => l.vehicleId!), vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })));
     const roadTripIds = [...new Set(roadLegs.filter(l => l.roadTripId).map(l => Number(l.roadTripId)))].sort((a, b) => a - b);
     if (roadTripIds.length) {
       const [lockedTripRows] = await db.execute<RowDataPacket[]>(
@@ -159,14 +161,14 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
         throw new ConflictException('Chuyến đường bộ đã bắt đầu di chuyển, không thể ghép thêm đơn mới');
       }
       const booked = conflicts.reduce((n, c) => n + Number(c.stalls_booked || c.requested_horse_count), 0);
-      if (booked + Number(order.requested_horse_count) > Number(vehicle.capacity)) throw new ConflictException('Chuyến đường bộ không còn đủ ô chuồng');
+      if (booked + requiredSlots > Number(vehicle.capacity)) throw new ConflictException('Chuyến đường bộ không còn đủ ô chuồng');
       if (!leg.roadTripId) {
         const [created] = await db.execute<any>(`INSERT INTO road_trip (vehicle_id, booking_type, origin_location, destination_location, planned_departure, planned_arrival, created_by)
           VALUES (?, ?, ?, ?, ?, ?, ?)`, [leg.vehicleId, order.booking_type, leg.originLocation, leg.destinationLocation, start, end, actorId]);
         leg.roadTripId = Number(created.insertId);
       }
       usedTrips.add(leg.roadTripId);
-      leg.stallsBooked = Number(order.requested_horse_count);
+      leg.stallsBooked = requiredSlots;
     }
     return prepared;
   }
