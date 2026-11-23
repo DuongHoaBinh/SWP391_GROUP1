@@ -5,6 +5,7 @@ import {
   Post,
   Param,
   Body,
+  Query,
   Res,
   UploadedFiles,
   UseGuards,
@@ -32,6 +33,11 @@ import {
   CoordinatorOverrideDto,
   CreateHealthLogDto,
   HorseHealthLogEntity,
+  LiveOverviewItem,
+  LiveTrackingDetails,
+  PositionPingBatchDto,
+  PositionPingResult,
+  TrackingSystemSettings,
   TripTrackingDetails,
 } from './tracking.types';
 
@@ -47,12 +53,59 @@ export class TrackingController {
     return this.trackingService.getMyTrips(user);
   }
 
+  @Get('live-overview')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR)
+  @ApiOperation({ summary: 'Bản đồ tổng quan giám sát toàn bộ chuyến đi đang chạy' })
+  async getLiveOverview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('alertFilter') alertFilter?: string,
+  ): Promise<LiveOverviewItem[]> {
+    return this.trackingService.getLiveOverview(user, alertFilter);
+  }
+
+  @Get('settings')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR)
+  @ApiOperation({ summary: 'Lấy cấu hình hệ thống tracking (geofence, simulation, vitals)' })
+  async getTrackingSettings(): Promise<TrackingSystemSettings> {
+    return this.trackingService.getTrackingSettings();
+  }
+
+  @Patch('settings')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Cập nhật cấu hình tracking (ADMIN only: simulation, geofence, customer_vitals_detail)' })
+  async updateTrackingSettings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() patch: Partial<TrackingSystemSettings>,
+  ): Promise<TrackingSystemSettings> {
+    return this.trackingService.updateTrackingSettings(user, patch);
+  }
+
   @Get('shipments/:shipmentId')
   async getTrackingDetails(
     @CurrentUser() user: AuthenticatedUser,
     @Param('shipmentId', ParseIntPipe) shipmentId: number,
   ): Promise<TripTrackingDetails> {
     return this.trackingService.getTrackingDetails(user, shipmentId);
+  }
+
+  @Get('shipments/:shipmentId/live')
+  @ApiOperation({ summary: 'Dữ liệu live tracking thời gian thực (vị trí xe, lộ trình, mốc, sinh hiệu)' })
+  async getLiveTracking(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('shipmentId', ParseIntPipe) shipmentId: number,
+  ): Promise<LiveTrackingDetails> {
+    return this.trackingService.getLiveTracking(user, shipmentId);
+  }
+
+  @Post('shipments/:shipmentId/pings')
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR)
+  @ApiOperation({ summary: 'Nhận batch tọa độ GPS từ thiết bị / app tài xế (tối đa 100 điểm)' })
+  async recordPositionPings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('shipmentId', ParseIntPipe) shipmentId: number,
+    @Body() dto: PositionPingBatchDto,
+  ): Promise<PositionPingResult> {
+    return this.trackingService.recordPositionPings(user, shipmentId, dto);
   }
 
   @Post('shipments/:shipmentId/legs/:legId/start')

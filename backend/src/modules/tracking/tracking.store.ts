@@ -583,6 +583,17 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     notes?: string,
     updatedByRole?: string,
     isBackdated: boolean = false,
+    loc?: {
+      lat?: number | null;
+      lng?: number | null;
+      accuracyM?: number | null;
+      locationSource?: string | null;
+      distanceToStopM?: number | null;
+      geofencePassed?: boolean | null;
+      manualReason?: string | null;
+      evidenceUrl?: string | null;
+      flagged?: boolean;
+    },
   ): Promise<void> {
     const timeCol = isDeparture
       ? 'actual_departure = ?, actual_arrival = COALESCE(actual_arrival, ?)'
@@ -600,8 +611,9 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     if (['departed', 'arrived', 'customs_cleared', 'delivered'].includes(status)) {
       await this.pool.execute(
         `INSERT INTO route_stop_update (
-          route_stop_id, updated_by, updated_by_role, actual_arrival, actual_departure, status, notes, is_backdated
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          route_stop_id, updated_by, updated_by_role, actual_arrival, actual_departure, status, notes, is_backdated,
+          lat, lng, accuracy_m, location_source, distance_to_stop_m, geofence_passed, manual_reason, evidence_url, flagged
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           stopId,
           updatedBy,
@@ -611,6 +623,15 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
           status,
           notes || null,
           isBackdated ? 1 : 0,
+          loc?.lat ?? null,
+          loc?.lng ?? null,
+          loc?.accuracyM ?? null,
+          loc?.locationSource ?? null,
+          loc?.distanceToStopM ?? null,
+          loc?.geofencePassed ?? null,
+          loc?.manualReason ?? null,
+          loc?.evidenceUrl ?? null,
+          loc?.flagged ? 1 : 0,
         ],
       );
     }
@@ -742,10 +763,23 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     updatedBy: number;
     updatedByRole: string;
     isBackdated?: boolean;
+    lat?: number | null;
+    lng?: number | null;
+    accuracyM?: number | null;
+    locationSource?: string | null;
+    distanceToStopM?: number | null;
+    geofencePassed?: boolean | null;
+    manualReason?: string | null;
+    evidenceUrl?: string | null;
+    flagged?: boolean;
   }): Promise<void> {
     await this.pool.execute(
-      `INSERT INTO trip_status_log (shipment_id, route_id, leg_id, route_stop_id, previous_status, new_status, milestone_type, milestone_name, notes, updated_by, updated_by_role, is_backdated, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO trip_status_log (
+        shipment_id, route_id, leg_id, route_stop_id, previous_status, new_status,
+        milestone_type, milestone_name, notes, updated_by, updated_by_role, is_backdated,
+        lat, lng, accuracy_m, location_source, distance_to_stop_m, geofence_passed,
+        manual_reason, evidence_url, flagged, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         log.shipmentId,
         log.routeId,
@@ -759,6 +793,15 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         log.updatedBy,
         log.updatedByRole,
         log.isBackdated ? 1 : 0,
+        log.lat ?? null,
+        log.lng ?? null,
+        log.accuracyM ?? null,
+        log.locationSource ?? null,
+        log.distanceToStopM ?? null,
+        log.geofencePassed ?? null,
+        log.manualReason ?? null,
+        log.evidenceUrl ?? null,
+        log.flagged ? 1 : 0,
       ],
     );
   }
@@ -788,6 +831,15 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       updatedByName: r.updated_by_name,
       updatedByRole: r.updated_by_role,
       isBackdated: Boolean(r.is_backdated),
+      lat: r.lat !== null && r.lat !== undefined ? Number(r.lat) : null,
+      lng: r.lng !== null && r.lng !== undefined ? Number(r.lng) : null,
+      accuracyM: r.accuracy_m !== null && r.accuracy_m !== undefined ? Number(r.accuracy_m) : null,
+      locationSource: r.location_source ?? null,
+      distanceToStopM: r.distance_to_stop_m !== null && r.distance_to_stop_m !== undefined ? Number(r.distance_to_stop_m) : null,
+      geofencePassed: r.geofence_passed !== null && r.geofence_passed !== undefined ? Boolean(r.geofence_passed) : null,
+      manualReason: r.manual_reason ?? null,
+      evidenceUrl: r.evidence_url ?? null,
+      flagged: Boolean(r.flagged),
       createdAt: new Date(r.created_at).toISOString(),
     }));
   }
@@ -802,6 +854,11 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     conditionStatus: HorseConditionStatus;
     temperatureC?: number | null;
     heartRateBpm?: number | null;
+    respiratoryRateBpm?: number | null;
+    routeStopId?: number | null;
+    lat?: number | null;
+    lng?: number | null;
+    locationSource?: string | null;
     alertTier?: HealthAlertTier;
     alertReason?: string | null;
     notes?: string | null;
@@ -812,9 +869,10 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     const [res] = await this.pool.execute<any>(
       `INSERT INTO horse_health_log (
         shipment_id, horse_id, horse_name, leg_name, recorded_by, recorded_by_role,
-        condition_status, temperature_c, heart_rate_bpm, alert_tier, alert_reason,
+        condition_status, temperature_c, heart_rate_bpm, respiratory_rate_bpm,
+        route_stop_id, lat, lng, location_source, alert_tier, alert_reason,
         notes, attachments_json, recorded_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         log.shipmentId,
         log.horseId || null,
@@ -825,6 +883,11 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         log.conditionStatus,
         log.temperatureC ?? null,
         log.heartRateBpm ?? null,
+        log.respiratoryRateBpm ?? null,
+        log.routeStopId ?? null,
+        log.lat ?? null,
+        log.lng ?? null,
+        log.locationSource ?? null,
         log.alertTier || 'green',
         log.alertReason || null,
         log.notes || null,
@@ -839,21 +902,36 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     shipmentId: number,
     horseId?: number | null,
     horseName?: string | null,
-  ): Promise<{ id: number; alertTier: HealthAlertTier; recordedAt: string } | null> {
+  ): Promise<{
+    id: number;
+    alertTier: HealthAlertTier;
+    alertReason?: string | null;
+    conditionStatus?: HorseConditionStatus;
+    temperatureC?: number | null;
+    heartRateBpm?: number | null;
+    respiratoryRateBpm?: number | null;
+    recordedAt: string;
+  } | null> {
     const sql = horseId
-      ? `SELECT log_id, alert_tier, recorded_at FROM horse_health_log
+      ? `SELECT * FROM horse_health_log
          WHERE shipment_id = ? AND horse_id = ?
          ORDER BY recorded_at DESC, log_id DESC LIMIT 1`
-      : `SELECT log_id, alert_tier, recorded_at FROM horse_health_log
+      : `SELECT * FROM horse_health_log
          WHERE shipment_id = ? AND LOWER(horse_name) = LOWER(?)
          ORDER BY recorded_at DESC, log_id DESC LIMIT 1`;
     const param = horseId ? Number(horseId) : String(horseName || '');
     const [rows] = await this.pool.execute<any[]>(sql, [shipmentId, param]);
     if (!rows[0]) return null;
+    const r = rows[0];
     return {
-      id: Number(rows[0].log_id),
-      alertTier: (rows[0].alert_tier as HealthAlertTier) || 'green',
-      recordedAt: new Date(rows[0].recorded_at).toISOString(),
+      id: Number(r.log_id),
+      alertTier: (r.alert_tier as HealthAlertTier) || 'green',
+      alertReason: r.alert_reason ?? null,
+      conditionStatus: r.condition_status,
+      temperatureC: r.temperature_c !== null ? Number(r.temperature_c) : null,
+      heartRateBpm: r.heart_rate_bpm !== null ? Number(r.heart_rate_bpm) : null,
+      respiratoryRateBpm: r.respiratory_rate_bpm !== null && r.respiratory_rate_bpm !== undefined ? Number(r.respiratory_rate_bpm) : null,
+      recordedAt: new Date(r.recorded_at).toISOString(),
     };
   }
 
@@ -1027,6 +1105,11 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         conditionStatusVi: conditionMapVi[r.condition_status] || r.condition_status,
         temperatureC: r.temperature_c !== null ? Number(r.temperature_c) : null,
         heartRateBpm: r.heart_rate_bpm !== null ? Number(r.heart_rate_bpm) : null,
+        respiratoryRateBpm: r.respiratory_rate_bpm !== null && r.respiratory_rate_bpm !== undefined ? Number(r.respiratory_rate_bpm) : null,
+        routeStopId: r.route_stop_id !== null && r.route_stop_id !== undefined ? Number(r.route_stop_id) : null,
+        lat: r.lat !== null && r.lat !== undefined ? Number(r.lat) : null,
+        lng: r.lng !== null && r.lng !== undefined ? Number(r.lng) : null,
+        locationSource: r.location_source ?? null,
         alertTier: (r.alert_tier as HealthAlertTier) || 'green',
         alertReason: r.alert_reason ?? null,
         notes: r.notes,
@@ -1085,6 +1168,11 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         conditionStatusVi: conditionMapVi[r.condition_status] || r.condition_status,
         temperatureC: r.temperature_c !== null ? Number(r.temperature_c) : null,
         heartRateBpm: r.heart_rate_bpm !== null ? Number(r.heart_rate_bpm) : null,
+        respiratoryRateBpm: r.respiratory_rate_bpm !== null && r.respiratory_rate_bpm !== undefined ? Number(r.respiratory_rate_bpm) : null,
+        routeStopId: r.route_stop_id !== null && r.route_stop_id !== undefined ? Number(r.route_stop_id) : null,
+        lat: r.lat !== null && r.lat !== undefined ? Number(r.lat) : null,
+        lng: r.lng !== null && r.lng !== undefined ? Number(r.lng) : null,
+        locationSource: r.location_source ?? null,
         alertTier: (r.alert_tier as HealthAlertTier) || 'green',
         alertReason: r.alert_reason ?? null,
         notes: r.notes,
@@ -1094,5 +1182,304 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         destinationLocation: r.destination_location,
       };
     });
+  }
+
+  // --- Step 10: GPS Geofence, Position Pings, and Simulation Configuration ---
+
+  async getSetting<T = any>(key: string): Promise<T | null> {
+    try {
+      const [rows] = await this.pool.execute<any[]>(
+        'SELECT value_json FROM system_setting WHERE setting_key = ?',
+        [key],
+      );
+      if (!rows[0]) return null;
+      const v = rows[0].value_json;
+      return (typeof v === 'string' ? JSON.parse(v) : v) as T;
+    } catch (err: any) {
+      if (err?.code === 'ER_NO_SUCH_TABLE') return null;
+      throw err;
+    }
+  }
+
+  async setSetting(key: string, value: unknown, userId?: number): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO system_setting (setting_key, value_json, updated_by) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_by = VALUES(updated_by)`,
+      [key, JSON.stringify(value), userId ?? null],
+    );
+  }
+
+  async resolveLocationCoords(locName: string): Promise<{ lat: number; lng: number } | null> {
+    if (!locName || !locName.trim()) return null;
+    const needle = locName.trim();
+    try {
+      const [ms] = await this.pool.execute<any[]>(
+        'SELECT lat, lng FROM master_stop WHERE LOWER(name) = LOWER(?) OR LOWER(address) LIKE LOWER(?) LIMIT 1',
+        [needle, `%${needle}%`],
+      );
+      if (ms[0]?.lat != null) return { lat: Number(ms[0].lat), lng: Number(ms[0].lng) };
+
+      const [ap] = await this.pool.execute<any[]>(
+        'SELECT lat, lng FROM airport WHERE LOWER(name) LIKE LOWER(?) OR LOWER(iata_code) = LOWER(?) LIMIT 1',
+        [`%${needle}%`, needle],
+      );
+      if (ap[0]?.lat != null) return { lat: Number(ap[0].lat), lng: Number(ap[0].lng) };
+
+      const [sp] = await this.pool.execute<any[]>(
+        'SELECT lat, lng FROM seaport WHERE LOWER(name) LIKE LOWER(?) OR LOWER(code) = LOWER(?) LIMIT 1',
+        [`%${needle}%`, needle],
+      );
+      if (sp[0]?.lat != null) return { lat: Number(sp[0].lat), lng: Number(sp[0].lng) };
+
+      const [dp] = await this.pool.execute<any[]>(
+        'SELECT lat, lng FROM depot WHERE LOWER(depot_name) LIKE LOWER(?) LIMIT 1',
+        [`%${needle}%`],
+      );
+      if (dp[0]?.lat != null) return { lat: Number(dp[0].lat), lng: Number(dp[0].lng) };
+    } catch {}
+    return null;
+  }
+
+  async findStopCoordinates(stopId: number): Promise<{
+    routeStopId: number;
+    routeId: number;
+    legId: number | null;
+    sequenceNo: number;
+    stopType: string;
+    locationName: string;
+    country: string | null;
+    lat: number | null;
+    lng: number | null;
+    geofenceRadiusM: number | null;
+    locationRefType: string | null;
+    actualArrival: Date | null;
+    actualDeparture: Date | null;
+    status: string;
+  } | null> {
+    const [rows] = await this.pool.execute<any[]>(
+      'SELECT * FROM route_stop WHERE route_stop_id = ? LIMIT 1',
+      [stopId],
+    );
+    const r = rows[0];
+    if (!r) return null;
+
+    let lat = r.lat !== null && r.lat !== undefined ? Number(r.lat) : null;
+    let lng = r.lng !== null && r.lng !== undefined ? Number(r.lng) : null;
+    let refType = r.location_ref_type ?? null;
+
+    if (lat === null || lng === null) {
+      const resolved = await this.resolveLocationCoords(r.location_name);
+      if (resolved) {
+        lat = resolved.lat;
+        lng = resolved.lng;
+        refType = refType || 'master_stop';
+      }
+    }
+
+    return {
+      routeStopId: Number(r.route_stop_id),
+      routeId: Number(r.route_id),
+      legId: r.leg_id ? Number(r.leg_id) : null,
+      sequenceNo: Number(r.sequence_no),
+      stopType: r.stop_type,
+      locationName: r.location_name,
+      country: r.country ?? null,
+      lat,
+      lng,
+      geofenceRadiusM: r.geofence_radius_m !== null && r.geofence_radius_m !== undefined ? Number(r.geofence_radius_m) : null,
+      locationRefType: refType,
+      actualArrival: r.actual_arrival ? new Date(r.actual_arrival) : null,
+      actualDeparture: r.actual_departure ? new Date(r.actual_departure) : null,
+      status: r.status,
+    };
+  }
+
+  async findLegCoordinates(legId: number): Promise<{
+    legId: number;
+    routeId: number;
+    sequenceNo: number;
+    legType: string;
+    originLocation: string;
+    destinationLocation: string;
+    originLat: number | null;
+    originLng: number | null;
+    destinationLat: number | null;
+    destinationLng: number | null;
+    routePolyline: string | null;
+    status: string;
+    actualDeparture: Date | null;
+    actualArrival: Date | null;
+  } | null> {
+    const [rows] = await this.pool.execute<any[]>(
+      'SELECT * FROM route_leg WHERE leg_id = ? LIMIT 1',
+      [legId],
+    );
+    const r = rows[0];
+    if (!r) return null;
+
+    let originLat = r.origin_lat !== null && r.origin_lat !== undefined ? Number(r.origin_lat) : null;
+    let originLng = r.origin_lng !== null && r.origin_lng !== undefined ? Number(r.origin_lng) : null;
+    let destinationLat = r.destination_lat !== null && r.destination_lat !== undefined ? Number(r.destination_lat) : null;
+    let destinationLng = r.destination_lng !== null && r.destination_lng !== undefined ? Number(r.destination_lng) : null;
+
+    if (originLat === null || originLng === null) {
+      const resolved = await this.resolveLocationCoords(r.origin_location);
+      if (resolved) {
+        originLat = resolved.lat;
+        originLng = resolved.lng;
+      }
+    }
+    if (destinationLat === null || destinationLng === null) {
+      const resolved = await this.resolveLocationCoords(r.destination_location);
+      if (resolved) {
+        destinationLat = resolved.lat;
+        destinationLng = resolved.lng;
+      }
+    }
+
+    return {
+      legId: Number(r.leg_id),
+      routeId: Number(r.route_id),
+      sequenceNo: Number(r.sequence_no),
+      legType: r.leg_type,
+      originLocation: r.origin_location,
+      destinationLocation: r.destination_location,
+      originLat,
+      originLng,
+      destinationLat,
+      destinationLng,
+      routePolyline: r.route_polyline ?? null,
+      status: r.status,
+      actualDeparture: r.actual_departure ? new Date(r.actual_departure) : null,
+      actualArrival: r.actual_arrival ? new Date(r.actual_arrival) : null,
+    };
+  }
+
+  async saveVehiclePositionPings(
+    pings: Array<{
+      shipmentId: number;
+      legId?: number | null;
+      vehicleId?: number | null;
+      reportedBy: number;
+      lat: number;
+      lng: number;
+      accuracyM?: number | null;
+      speedKmh?: number | null;
+      headingDeg?: number | null;
+      source: 'gps' | 'simulated';
+      recordedAt: Date;
+      isBackdated?: boolean;
+    }>,
+  ): Promise<number> {
+    if (!pings || pings.length === 0) return 0;
+    let inserted = 0;
+    for (const p of pings) {
+      await this.pool.execute(
+        `INSERT INTO vehicle_position_ping (
+          shipment_id, leg_id, vehicle_id, reported_by, lat, lng,
+          accuracy_m, speed_kmh, heading_deg, source, recorded_at, is_backdated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          p.shipmentId,
+          p.legId || null,
+          p.vehicleId || null,
+          p.reportedBy,
+          p.lat,
+          p.lng,
+          p.accuracyM ?? null,
+          p.speedKmh ?? null,
+          p.headingDeg ?? null,
+          p.source,
+          p.recordedAt,
+          p.isBackdated ? 1 : 0,
+        ],
+      );
+      inserted++;
+    }
+    return inserted;
+  }
+
+  async findLatestPing(shipmentId: number): Promise<any | null> {
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT * FROM vehicle_position_ping
+       WHERE shipment_id = ?
+       ORDER BY recorded_at DESC, ping_id DESC LIMIT 1`,
+      [shipmentId],
+    );
+    return rows[0] || null;
+  }
+
+  async findRecentPingsForShipment(shipmentId: number, limit = 500): Promise<any[]> {
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT * FROM vehicle_position_ping
+       WHERE shipment_id = ?
+       ORDER BY recorded_at ASC LIMIT ?`,
+      [shipmentId, limit],
+    );
+    return rows;
+  }
+
+  async findHealthLogsForStop(shipmentId: number, arrivedAt: Date, stopId?: number): Promise<any[]> {
+    if (stopId) {
+      const [rows] = await this.pool.execute<any[]>(
+        `SELECT * FROM horse_health_log
+         WHERE shipment_id = ? AND (route_stop_id = ? OR recorded_at >= ?)`,
+        [shipmentId, stopId, arrivedAt],
+      );
+      return rows;
+    }
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT * FROM horse_health_log
+       WHERE shipment_id = ? AND recorded_at >= ?`,
+      [shipmentId, arrivedAt],
+    );
+    return rows;
+  }
+
+  async findActiveShipmentsForLiveOverview(): Promise<any[]> {
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT s.shipment_id,
+              CASE
+                WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
+                ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
+              END as request_code,
+              s.contact_name, s.origin_location, s.destination_location,
+              s.status, r.route_id, r.total_distance_km
+       FROM shipment s
+       LEFT JOIN route r ON r.shipment_id = s.shipment_id
+       WHERE s.status IN ('ready_to_depart', 'in_transit', 'return_pending')
+       ORDER BY s.shipment_id DESC`,
+    );
+    return rows;
+  }
+
+  async findHorsesInOrder(shipmentId: number): Promise<Array<{ horse_id: number; horse_name: string; id?: number; name?: string }>> {
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT h.horse_id, h.name as horse_name
+       FROM shipment_horse sh
+       JOIN horse h ON sh.horse_id = h.horse_id
+       WHERE sh.shipment_id = ?`,
+      [shipmentId],
+    );
+    if (rows && rows.length > 0) {
+      return rows.map((r) => ({
+        horse_id: Number(r.horse_id),
+        horse_name: String(r.horse_name),
+        id: Number(r.horse_id),
+        name: String(r.horse_name),
+      }));
+    }
+    const [logRows] = await this.pool.execute<any[]>(
+      `SELECT DISTINCT horse_id, horse_name
+       FROM horse_health_log
+       WHERE shipment_id = ? AND horse_name IS NOT NULL`,
+      [shipmentId],
+    );
+    return (logRows || []).map((r) => ({
+      horse_id: Number(r.horse_id || 0),
+      horse_name: String(r.horse_name),
+      id: Number(r.horse_id || 0),
+      name: String(r.horse_name),
+    }));
   }
 }

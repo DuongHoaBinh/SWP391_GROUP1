@@ -58,6 +58,27 @@ Current trip status, chronological route log, horse health log, delay alerts, an
 - **AC-F4-02 (Hoàn tất Từng phần Chuyến Ghép):** *Given* `road_trip` chở Đơn A (đích Đà Nẵng `transfer_hub`) và Đơn B (Hà Nội) trên xe `51C-888.99`. *When* Driver check-in rời `transfer_hub` Đà Nẵng. *Then* Đơn A → `completed`, ngựa Đơn A → `active`, Customer A nhận thông báo; Đơn B giữ `in_transit` và xe giữ `in_use`.
 - **AC-F4-03 (Ranh giới Sinh hiệu Kín, Cửa sổ 6h & Chống Alert Fatigue):** *Given* Ngựa X đang `in_transit` (`consecutive_alert_window_hours = 6`). *When* (1) 08:00 & 10:00 ghi `climate_change` sinh hiệu Xanh; (2) 12:00 ghi `stable`, `t = 38.55`, `hr = 25`; (3) 15:00 (cách 3h `<= 6h`) ghi `not_eating`, `t = 38.0`, `hr = 40`. *Then* (1) chỉ sinh Amber quan sát; (2) 12:00 phân loại `escalatable_amber` (không hở tại `38.55°C` và `25 bpm`); (3) 15:00 kích hoạt **Red Alert** cho Manager & Coordinator.
 
+### 8. Check-in GPS, Geofence, Chế độ Giả lập & Live Tracking (Migration 037 — Step 10)
+
+- **Kiểm tra Geofence tại mốc dừng (`evaluateGeofence`):**
+  - Khi Driver gọi check-in (`/legs/:id/start`, `/stops/:id/status`, `/legs/:id/complete`), vị trí gửi lên được kiểm tra với tọa độ kế hoạch của mốc.
+  - Bán kính kiểm soát `radius`: mặc định `300 m` cho trạm nghỉ, trạm dừng thường; `1.000 m` cho sân bay, cảng biển, khu kiểm dịch biên giới.
+  - Điểm được tính là hợp lệ (bên trong geofence) nếu: `distance <= radius + min(accuracy, 100)`.
+  - Nếu độ chính xác GPS kém (`accuracy > 200 m`), từ chối với lỗi `409 LOW_GPS_ACCURACY`.
+  - Nếu ngoài geofence mà không có lý do/bằng chứng: từ chối với lỗi `409 OUTSIDE_GEOFENCE`.
+  - **Check-in thủ công dự phòng (Manual Override):** Khi ngoài vùng hoặc mất tín hiệu GPS, Driver phải nhập `manualReason` (tối thiểu 10 ký tự) và `evidenceUrl` (ảnh chụp thực tế). Hệ thống ghi nhận với `geofence_passed = 0`, đánh cờ `flagged = 1` và kích hoạt thông báo cảnh báo đến Logistics Manager.
+- **Bắt buộc Ghi nhận Sinh hiệu trước khi rời trạm nghỉ/kiểm dịch:**
+  - Tại các điểm dừng loại `rest` hoặc `quarantine`, trước khi Driver gọi check-in rời trạm (`departed`), hệ thống kiểm tra toàn bộ cá thể ngựa trên chuyến (`shipment_horse`).
+  - Mọi con ngựa phải có ít nhất 1 bản ghi sinh hiệu (thân nhiệt `temperature_c` và nhịp tim `heart_rate_bpm`) được ghi sau thời điểm xe đến trạm (`actual_arrival`). Nếu thiếu, chặn xuất phát với lỗi `409 VITALS_REQUIRED` kèm danh sách `missingHorses`.
+  - Khi sinh hiệu ghi nhận rơi vào tầng Đỏ (`red`), hệ thống gửi thông báo khẩn cấp ngay lập tức đến Logistics Manager và Khách hàng (tôn trọng cấu hình `customer_vitals_detail`).
+- **Luồng Tọa độ Xe (`vehicle_position_ping`) & Chế độ Giả lập (Simulation):**
+  - Tài xế/thiết bị xe gửi mảng ping vị trí định kỳ (`POST /tracking/shipments/:id/pings`, tối đa 100 điểm/lần). Bỏ qua ping tương lai (> 2 phút) hoặc quá cũ (> 24 giờ); gắn cờ `is_backdated = 1` nếu chậm > 5 phút.
+  - Cờ `simulation_enabled` trong cấu hình hệ thống: chỉ Admin được phép bật/tắt (`PATCH /system-settings/tracking`). Nếu cờ tắt mà ping hoặc check-in gửi lên có `source = 'simulated'`, hệ thống trả lỗi `403 SIMULATION_DISABLED`.
+  - Khi bật chế độ giả lập, mọi dữ liệu hiển thị trên bản đồ và bảng điều khiển đều được gắn nhãn nổi bật `[GIẢ LẬP / SIMULATED]`.
+- **Live Tracking Map & Fleet Overview:**
+  - `GET /tracking/shipments/:id/live`: Trả về tọa độ xe tức thời, heading, tốc độ, danh sách mốc/trạm, vệt đường thực tế (giảm lấy mẫu tối đa 500 điểm qua Ramer-Douglas-Peucker), tiến độ %, ETA, và sinh hiệu mới nhất.
+  - `GET /tracking/live-overview`: Cung cấp giao diện radar cho Logistics Manager giám sát đồng thời toàn bộ xe đang `in_transit`, phân loại theo 3 tầng cảnh báo (`green`, `amber`, `red`).
+
 
 ## 9. Vòng đời Trạng thái Đơn Khứ hồi & No-Show (Step 5 — Review 11/2026)
 

@@ -25,6 +25,7 @@ import {
   AssignedTripSummary,
   TripTrackingDetails,
   TrackingMilestoneItem,
+  TrackingSystemSettings,
 } from '@/features/tracking/api/tracking.api';
 import { DeliveryHandoverPanel } from '@/features/tracking/components/DeliveryHandoverPanel';
 import { routesApi } from '@/features/routes/api/routes.api';
@@ -48,6 +49,17 @@ function DriverStatusContent() {
   const [activeMilestone, setActiveMilestone] = useState<TrackingMilestoneItem | null>(null);
   const [selectedAction, setSelectedAction] = useState<string>('');
   const [checkInNotes, setCheckInNotes] = useState('');
+
+  // Step 10: GPS Geofence & Simulation states
+  const [useManualCheckIn, setUseManualCheckIn] = useState(false);
+  const [manualReason, setManualReason] = useState('');
+  const [evidenceUrl, setEvidenceUrl] = useState('');
+  const [isGettingGps, setIsGettingGps] = useState(false);
+  const [geofenceError, setGeofenceError] = useState<{ distanceM: number; radiusM: number; message: string } | null>(null);
+  const [vitalsMissingError, setVitalsMissingError] = useState<{ missingHorses: Array<{ id: number; name: string }>; message: string } | null>(null);
+  const [trackingSettings, setTrackingSettings] = useState<TrackingSystemSettings | null>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simSpeed, setSimSpeed] = useState<1 | 10 | 60>(1);
 
   // Emergency Incident Modal
   const [isIncidentOpen, setIsIncidentOpen] = useState(false);
@@ -282,6 +294,11 @@ function DriverStatusContent() {
     setIsCheckInOpen(false);
     setActiveMilestone(null);
     setCheckInNotes('');
+    setUseManualCheckIn(false);
+    setManualReason('');
+    setEvidenceUrl('');
+    setGeofenceError(null);
+    setVitalsMissingError(null);
   };
 
   const openIncidentModal = () => {
@@ -315,10 +332,62 @@ function DriverStatusContent() {
     }
 
     setIsSubmitting(true);
+    setGeofenceError(null);
+    setVitalsMissingError(null);
+
+    let locationPayload: any = undefined;
+
+    if (useManualCheckIn) {
+      if (!manualReason || manualReason.trim().length < 10) {
+        toast.error(language === 'en' ? 'Manual check-in requires a reason of at least 10 characters.' : 'Check-in thủ công bắt buộc có lý do tối thiểu 10 ký tự.');
+        setIsSubmitting(false);
+        return;
+      }
+      if (!evidenceUrl || !evidenceUrl.trim()) {
+        toast.error(language === 'en' ? 'Manual check-in requires an evidence photo URL.' : 'Check-in thủ công bắt buộc đính kèm ảnh bằng chứng.');
+        setIsSubmitting(false);
+        return;
+      }
+      locationPayload = {
+        lat: 0,
+        lng: 0,
+        source: 'manual',
+      };
+    } else {
+      try {
+        setIsGettingGps(true);
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          if (!navigator.geolocation) return reject(new Error('Trình duyệt không hỗ trợ định vị GPS.'));
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 6000,
+            maximumAge: 10000,
+          });
+        });
+        locationPayload = {
+          lat: Number(pos.coords.latitude.toFixed(6)),
+          lng: Number(pos.coords.longitude.toFixed(6)),
+          accuracyM: Math.round(pos.coords.accuracy),
+          source: isSimulating ? 'simulated' : 'gps',
+        };
+      } catch (gpsErr) {
+        setIsGettingGps(false);
+        setUseManualCheckIn(true);
+        toast.error(language === 'en' ? 'Unable to acquire GPS automatically. Please check-in manually with photo and reason.' : 'Không thể lấy GPS tự động. Vui lòng check-in thủ công kèm ảnh và lý do.');
+        setIsSubmitting(false);
+        return;
+      } finally {
+        setIsGettingGps(false);
+      }
+    }
+
     try {
       if (activeMilestone.itemType === 'leg_start') {
         await trackingApi.checkInLegStart(selectedShipmentId, activeMilestone.legId, {
           notes: checkInNotes,
+          location: locationPayload,
+          manualReason: useManualCheckIn ? manualReason : undefined,
+          evidenceUrl: useManualCheckIn ? evidenceUrl : undefined,
         });
         toast.success(t('driver.status.legStartSuccess', language === 'en' ? 'Leg departure confirmed!' : 'Đã xác nhận xuất phát chặng!'));
       } else if (activeMilestone.itemType === 'stop') {
@@ -335,20 +404,43 @@ function DriverStatusContent() {
         await trackingApi.checkInStop(selectedShipmentId, activeMilestone.stopId, {
           action,
           notes: checkInNotes,
+          location: locationPayload,
+          manualReason: useManualCheckIn ? manualReason : undefined,
+          evidenceUrl: useManualCheckIn ? evidenceUrl : undefined,
         });
         toast.success(t('driver.status.stopCheckinSuccess', 'Đã cập nhật mốc: {title}!', { title: activeMilestone.title }));
       } else if (activeMilestone.itemType === 'leg_end') {
         await trackingApi.checkInLegArrival(selectedShipmentId, activeMilestone.legId, {
           notes: checkInNotes,
+          location: locationPayload,
+          manualReason: useManualCheckIn ? manualReason : undefined,
+          evidenceUrl: useManualCheckIn ? evidenceUrl : undefined,
         });
         toast.success(t('driver.status.legArrivalSuccess', language === 'en' ? 'Leg arrival completed safely!' : 'Đã hoàn thành chặng đến nơi an toàn!'));
       }
 
-      setIsCheckInOpen(false);
-      setActiveMilestone(null);
-      setCheckInNotes('');
+      closeCheckInModal();
       await loadDetails(selectedShipmentId);
     } catch (err: any) {
+      const errCode = err?.code || err?.response?.data?.code;
+      if (errCode === 'OUTSIDE_GEOFENCE') {
+        const dist = err?.distanceM ?? err?.response?.data?.distanceM ?? 0;
+        const rad = err?.radiusM ?? err?.response?.data?.radiusM ?? 300;
+        setGeofenceError({
+          distanceM: dist,
+          radiusM: rad,
+          message: err?.message || `Vị trí cách điểm mốc ${dist}m, vượt quá bán kính ${rad}m.`,
+        });
+        return;
+      }
+      if (errCode === 'VITALS_REQUIRED') {
+        const missing = err?.missingHorses || err?.response?.data?.missingHorses || [];
+        setVitalsMissingError({
+          missingHorses: missing,
+          message: err?.message || 'Bắt buộc kiểm tra và ghi nhận sinh hiệu trước khi rời trạm dừng.',
+        });
+        return;
+      }
       toast.error(
         err?.message || t('driver.status.checkinFailed', language === 'en' ? 'Unable to update milestone.' : 'Không thể cập nhật mốc')
       );
@@ -1130,6 +1222,117 @@ function DriverStatusContent() {
                 className="w-full px-3 py-2.5 border border-[#D8CEBE] rounded-xl outline-none focus:border-[#A67C2E] text-xs font-medium"
               />
             </div>
+
+            {/* Geofence Out-of-Bounds Warning */}
+            {geofenceError && (
+              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex flex-col gap-2 text-xs text-amber-900">
+                <div className="flex items-start gap-2 font-semibold">
+                  <AlertTriangle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+                  <span>Cảnh báo khoảng cách Geofence</span>
+                </div>
+                <p>
+                  Vị trí của bạn cách điểm mốc <b>{geofenceError.distanceM}m</b> (vượt quá bán kính cho phép <b>{geofenceError.radiusM}m</b>).
+                </p>
+                <div className="flex gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setGeofenceError(null)}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold"
+                  >
+                    Thử lại GPS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGeofenceError(null);
+                      setUseManualCheckIn(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-white border border-amber-400 hover:bg-amber-100 text-amber-900 font-bold"
+                  >
+                    Check-in thủ công kèm lý do & ảnh
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Vitals Missing Warning */}
+            {vitalsMissingError && (
+              <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl flex flex-col gap-2 text-xs text-rose-900">
+                <div className="flex items-start gap-2 font-semibold">
+                  <AlertTriangle size={16} className="text-rose-600 mt-0.5 shrink-0" />
+                  <span>Bắt buộc ghi sinh hiệu trước khi rời trạm</span>
+                </div>
+                <p>
+                  Các ngựa sau chưa được ghi nhận thân nhiệt & nhịp tim tại trạm này:{' '}
+                  <b>{vitalsMissingError.missingHorses.map((h) => h.name).join(', ')}</b>.
+                </p>
+                <div className="flex gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCheckInOpen(false);
+                      openQuickHealthModal(activeMilestone);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                  >
+                    Nhập nhanh sinh hiệu ngay
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Manual Check-in Form Inputs */}
+            {useManualCheckIn ? (
+              <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-xl flex flex-col gap-3">
+                <div className="flex items-center justify-between text-xs font-bold text-amber-900">
+                  <span>📸 Check-in thủ công (ngoài GPS / mất sóng)</span>
+                  <button
+                    type="button"
+                    onClick={() => setUseManualCheckIn(false)}
+                    className="text-xs text-[#A67C2E] underline hover:text-[#8c6521]"
+                  >
+                    Dùng lại GPS
+                  </button>
+                </div>
+                <div>
+                  <label htmlFor="manual-reason" className="font-bold text-[#181A17] block mb-1">
+                    Lý do giải trình (tối thiểu 10 ký tự) *
+                  </label>
+                  <textarea
+                    id="manual-reason"
+                    rows={2}
+                    value={manualReason}
+                    onChange={(e) => setManualReason(e.target.value)}
+                    placeholder="Ví dụ: GPS mất tín hiệu trong hầm / xe dừng tại cổng phụ của trạm..."
+                    className="w-full px-3 py-2 border border-[#D8CEBE] rounded-xl outline-none focus:border-[#A67C2E] text-xs"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="evidence-url" className="font-bold text-[#181A17] block mb-1">
+                    Ảnh chụp bằng chứng thực địa (URL ảnh) *
+                  </label>
+                  <input
+                    id="evidence-url"
+                    type="text"
+                    value={evidenceUrl}
+                    onChange={(e) => setEvidenceUrl(e.target.value)}
+                    placeholder="https://cdn.example.com/driver-evidence-01.jpg"
+                    className="w-full px-3 py-2 border border-[#D8CEBE] rounded-xl outline-none focus:border-[#A67C2E] text-xs"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-between items-center text-xs text-[#5F6977]">
+                <span>Tọa độ sẽ được lấy tự động qua GPS của thiết bị</span>
+                <button
+                  type="button"
+                  onClick={() => setUseManualCheckIn(true)}
+                  className="text-xs text-[#A67C2E] underline hover:text-[#8c6521]"
+                >
+                  Check-in thủ công?
+                </button>
+              </div>
+            )}
 
             <div className="flex flex-wrap justify-end gap-3 pt-3 border-t border-[#EAE5DA]">
               <Button

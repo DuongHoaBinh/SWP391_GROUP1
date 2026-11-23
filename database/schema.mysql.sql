@@ -407,6 +407,11 @@ CREATE TABLE route_stop (
   planned_departure DATETIME,
   status ENUM('pending','arrived','cleared','customs_cleared','departed') NOT NULL DEFAULT 'pending',
   direction ENUM('outbound','return') NOT NULL DEFAULT 'outbound',
+  lat DECIMAL(10,6) NULL,
+  lng DECIMAL(10,6) NULL,
+  geofence_radius_m INT NULL,
+  location_ref_type ENUM('master_stop','airport','seaport','depot','address','manual') NULL,
+  location_ref_id INT NULL,
   CONSTRAINT fk_stop_route FOREIGN KEY (route_id) REFERENCES route(route_id),
   UNIQUE KEY uq_route_sequence (route_id, sequence_no)
 ) ENGINE=InnoDB;
@@ -438,6 +443,15 @@ CREATE TABLE route_stop_update (
   status ENUM('departed','arrived','customs_cleared','delivered') NOT NULL,
   notes TEXT,
   is_backdated BOOLEAN NOT NULL DEFAULT FALSE,
+  lat DECIMAL(10,6) NULL,
+  lng DECIMAL(10,6) NULL,
+  accuracy_m DECIMAL(8,2) NULL,
+  location_source ENUM('gps','simulated','manual','override') NULL,
+  distance_to_stop_m INT NULL,
+  geofence_passed BOOLEAN NULL,
+  manual_reason VARCHAR(500) NULL,
+  evidence_url VARCHAR(500) NULL,
+  flagged BOOLEAN NOT NULL DEFAULT FALSE,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_rsu_stop FOREIGN KEY (route_stop_id) REFERENCES route_stop(route_stop_id),
   CONSTRAINT fk_rsu_user FOREIGN KEY (updated_by) REFERENCES `user`(user_id)
@@ -704,6 +718,11 @@ CREATE TABLE IF NOT EXISTS route_leg (
   road_trip_id INT NULL,
   jet_stall_count INT NULL,
   allocation_override_reason VARCHAR(255) NULL,
+  origin_lat DECIMAL(10,6) NULL,
+  origin_lng DECIMAL(10,6) NULL,
+  destination_lat DECIMAL(10,6) NULL,
+  destination_lng DECIMAL(10,6) NULL,
+  route_polyline MEDIUMTEXT NULL,
   INDEX idx_route_leg_road_trip (road_trip_id),
   CONSTRAINT fk_leg_route FOREIGN KEY (route_id) REFERENCES route(route_id) ON DELETE CASCADE,
   CONSTRAINT fk_leg_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicle(vehicle_id) ON DELETE SET NULL,
@@ -963,6 +982,15 @@ CREATE TABLE IF NOT EXISTS trip_status_log (
   updated_by INT NOT NULL,
   updated_by_role VARCHAR(50) NOT NULL,
   is_backdated BOOLEAN NOT NULL DEFAULT FALSE,
+  lat DECIMAL(10,6) NULL,
+  lng DECIMAL(10,6) NULL,
+  accuracy_m DECIMAL(8,2) NULL,
+  location_source ENUM('gps','simulated','manual','override') NULL,
+  distance_to_stop_m INT NULL,
+  geofence_passed BOOLEAN NULL,
+  manual_reason VARCHAR(500) NULL,
+  evidence_url VARCHAR(500) NULL,
+  flagged BOOLEAN NOT NULL DEFAULT FALSE,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_tsl_shipment (shipment_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -978,12 +1006,36 @@ CREATE TABLE IF NOT EXISTS horse_health_log (
   condition_status ENUM('stable','not_eating','stressed','climate_change','other') NOT NULL DEFAULT 'stable',
   temperature_c DECIMAL(5,2) NULL,
   heart_rate_bpm INT NULL,
+  respiratory_rate_bpm INT NULL,
+  route_stop_id INT NULL,
+  lat DECIMAL(10,6) NULL,
+  lng DECIMAL(10,6) NULL,
+  location_source ENUM('gps','simulated','manual') NULL,
   alert_tier ENUM('green','amber_observational','amber_escalatable','red') NOT NULL DEFAULT 'green',
   alert_reason VARCHAR(500) NULL,
   notes TEXT NULL,
   attachments_json MEDIUMTEXT NULL,
   recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_hhl_shipment (shipment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS vehicle_position_ping (
+  ping_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  leg_id INT NULL,
+  vehicle_id INT NULL,
+  reported_by INT NOT NULL,
+  lat DECIMAL(10,6) NOT NULL,
+  lng DECIMAL(10,6) NOT NULL,
+  accuracy_m DECIMAL(8,2) NULL,
+  speed_kmh DECIMAL(6,2) NULL,
+  heading_deg DECIMAL(5,2) NULL,
+  source ENUM('gps','simulated') NOT NULL,
+  recorded_at DATETIME(3) NOT NULL,
+  received_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  is_backdated BOOLEAN NOT NULL DEFAULT FALSE,
+  CONSTRAINT fk_ping_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  INDEX idx_ping_shipment_time (shipment_id, recorded_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================
@@ -1279,7 +1331,10 @@ CREATE TABLE IF NOT EXISTS system_setting (
 
 -- B4: EU Regulation 1/2005 làm tham chiếu
 INSERT IGNORE INTO system_setting (setting_key, value_json) VALUES
-  ('journey.rules', '{"maxDriveHoursBeforeRest": 8, "restMinutes": 60, "maxJourneyHours": 24, "mandatoryRestHours": 24, "nightWindow": {"from": "22:00", "to": "06:00"}}');
+  ('journey.rules', '{"maxDriveHoursBeforeRest": 8, "restMinutes": 60, "maxJourneyHours": 24, "mandatoryRestHours": 24, "nightWindow": {"from": "22:00", "to": "06:00"}}'),
+  ('tracking.geofence', '{"defaultRadiusM": 300, "largeSiteRadiusM": 1000, "maxAccuracyM": 200}'),
+  ('tracking.simulation_enabled', 'false'),
+  ('tracking.customer_vitals_detail', 'true');
 
 -- 6. Bảng giá đường bộ của trạm đối tác nước ngoài (region = PARTNER), demo
 INSERT IGNORE INTO pricing_tariff (mode, region, version, params, effective_from, is_active, notes, created_by) VALUES

@@ -29,15 +29,28 @@ export enum MilestoneAction {
   LEG_ARRIVE = 'leg_arrive',
 }
 
+export interface LocationInput {
+  lat: number;
+  lng: number;
+  accuracyM?: number | null;
+  source?: 'gps' | 'simulated' | 'manual' | 'override';
+}
+
 export interface CheckInLegDto {
   actualTime?: string;
   notes?: string;
+  location?: LocationInput;
+  manualReason?: string | null;
+  evidenceUrl?: string | null;
 }
 
 export interface CheckInStopDto {
   action: 'arrived' | 'departed' | 'customs_cleared';
   actualTime?: string;
   notes?: string;
+  location?: LocationInput;
+  manualReason?: string | null;
+  evidenceUrl?: string | null;
 }
 
 export interface CoordinatorOverrideDto {
@@ -54,9 +67,33 @@ export interface CreateHealthLogDto {
   conditionStatus: HorseConditionStatus;
   temperatureC?: number;
   heartRateBpm?: number;
+  respiratoryRate?: number;
+  routeStopId?: number;
   notes?: string;
   attachments?: string[];
   recordedAt?: string;
+  location?: LocationInput;
+}
+
+export interface PositionPingItem {
+  lat: number;
+  lng: number;
+  accuracyM?: number | null;
+  speedKmh?: number | null;
+  headingDeg?: number | null;
+  source: 'gps' | 'simulated';
+  recordedAt: string;
+}
+
+export interface PositionPingBatchDto {
+  pings: PositionPingItem[];
+}
+
+export interface PositionPingResult {
+  accepted: number;
+  skipped: number;
+  dropped?: number;
+  shipmentId?: number;
 }
 
 export interface TrackingMilestoneItem {
@@ -76,6 +113,14 @@ export interface TrackingMilestoneItem {
   notes: string | null;
   updatedBy: string | null;
   allowedActions: string[];
+  lat?: number | null;
+  lng?: number | null;
+  locationSource?: string | null;
+  distanceToStopM?: number | null;
+  geofencePassed?: boolean | null;
+  flagged?: boolean;
+  manualReason?: string | null;
+  evidenceUrl?: string | null;
 }
 
 export interface HorseHealthLogEntity {
@@ -91,6 +136,11 @@ export interface HorseHealthLogEntity {
   conditionStatusVi?: string;
   temperatureC: number | null;
   heartRateBpm: number | null;
+  respiratoryRateBpm?: number | null;
+  routeStopId?: number | null;
+  lat?: number | null;
+  lng?: number | null;
+  locationSource?: string | null;
   alertTier?: 'green' | 'amber_observational' | 'amber_escalatable' | 'red';
   alertReason?: string | null;
   notes: string | null;
@@ -113,6 +163,16 @@ export interface TripStatusLogEntity {
   updatedByName?: string;
   updatedByRole: string;
   isBackdated?: boolean;
+  lat?: number | null;
+  lng?: number | null;
+  accuracyM?: number | null;
+  locationSource?: string | null;
+  distanceToStopM?: number | null;
+  geofencePassed?: boolean | null;
+  manualReason?: string | null;
+  evidenceUrl?: string | null;
+  flagged?: boolean;
+  eventTime?: string;
   createdAt: string;
 }
 
@@ -150,4 +210,132 @@ export interface TripTrackingDetails {
   returnWaitMinutes?: number;
   returnNoShow?: boolean;
   lastUpdated: string;
+}
+
+export interface LiveVehiclePosition {
+  lat: number;
+  lng: number;
+  recordedAt: string;
+  source: 'gps' | 'simulated';
+  speedKmh?: number | null;
+  headingDeg?: number | null;
+  accuracyM?: number | null;
+  isBackdated?: boolean;
+}
+
+export interface LivePathPoint {
+  lat: number;
+  lng: number;
+  t?: string;
+  recordedAt?: string;
+  source?: string;
+}
+
+export interface LiveTrackingLeg {
+  legId: number;
+  sequenceNo?: number;
+  direction?: 'outbound' | 'return';
+  type?: 'road' | 'flight';
+  legType?: string;
+  originLocation?: string;
+  destinationLocation?: string;
+  status: string;
+  polyline?: Array<[number, number]>;
+  polylineJson?: string | null;
+  actualDeparture?: string | null;
+  actualArrival?: string | null;
+}
+
+export interface LiveTrackingStop {
+  stopId?: number;
+  routeStopId?: number;
+  sequenceNo?: number;
+  name?: string;
+  locationName?: string;
+  type?: string;
+  stopType?: string;
+  lat: number | null;
+  lng: number | null;
+  status: string;
+  plannedArrival?: string | null;
+  actualArrival?: string | null;
+  actualDeparture?: string | null;
+  etaAt?: string | null;
+  geofenceRadiusM?: number | null;
+}
+
+export interface LiveTrackingProgress {
+  completedKm?: number;
+  totalKm?: number;
+  percent: number;
+}
+
+export interface LiveTrackingVitalsItem {
+  horseId: number;
+  horseName: string;
+  conditionStatus?: HorseConditionStatus;
+  temperatureC?: number | null;
+  heartRateBpm?: number | null;
+  respiratoryRate?: number | null;
+  respiratoryRateBpm?: number | null;
+  alertTier: 'green' | 'amber_observational' | 'amber_escalatable' | 'red';
+  alertReason?: string | null;
+  recordedAt: string | null;
+  message?: string;
+}
+
+export interface LiveTrackingDetails {
+  shipmentId: number;
+  requestCode?: string;
+  status: string;
+  simulation?: boolean;
+  isSimulated?: boolean;
+  vehicle?: LiveVehiclePosition | null;
+  vehiclePosition?: LiveVehiclePosition | null;
+  path: LivePathPoint[];
+  legs: LiveTrackingLeg[];
+  stops: LiveTrackingStop[];
+  progress?: LiveTrackingProgress;
+  progressPct?: number;
+  currentLegId?: number | null;
+  currentStopId?: number | null;
+  etaFinalAt?: string | null;
+  estimatedArrival?: string | null;
+  vitalsSummary?: LiveTrackingVitalsItem[];
+  latestVitals?: LiveTrackingVitalsItem[];
+}
+
+export interface LiveOverviewItem {
+  shipmentId: number;
+  requestCode: string;
+  status: string;
+  customerName?: string;
+  driverName?: string | null;
+  vehiclePlate?: string | null;
+  origin?: string;
+  originLocation?: string;
+  destination?: string;
+  destinationLocation?: string;
+  assignedDriver?: string | null;
+  assignedVehicle?: string | null;
+  currentMilestone?: string | null;
+  latestPosition?: LiveVehiclePosition | null;
+  latestAlertTier?: 'green' | 'amber' | 'red' | null;
+  alertTier?: 'green' | 'amber' | 'red';
+  alertCount?: number;
+  hasFlaggedCheckIn?: boolean;
+  isSimulated: boolean;
+  lastPingAgoSeconds?: number | null;
+  etaFinalAt?: string | null;
+}
+
+export interface TrackingSystemSettings {
+  geofence?: {
+    defaultRadiusM: number;
+    largeSiteRadiusM: number;
+    bufferAccuracyM: number;
+    maxAccuracyM: number;
+  };
+  simulationEnabled: boolean;
+  customerVitalsDetail: boolean;
 }

@@ -1130,3 +1130,54 @@ Không có phương án: `200` với `{ "quoteId": null, "options": [], "recomme
 ### `POST /routes/plan/:shipmentId/build-detail` (bổ sung)
 
 `legs[].allocationOverrideReason` bắt buộc (≥ 5 ký tự) khi chặng bộ dùng xe khác nhóm xe đã giữ chỗ của đơn, nếu không → `400`. Chặng bay được server ghi `jet_stall_count`. Xe đang được đơn khác giữ chỗ trùng khung giờ → `409`.
+
+## GPS Tracking, Geofence & Simulation API (Step 10 — Migration 037)
+
+Base URL: `http://localhost:5000/api` (Tất cả endpoint yêu cầu `Authorization: Bearer <token>`)
+
+### 1. `POST /tracking/shipments/:shipmentId/pings`
+- **Quyền:** `DRIVER_ESCORT`, `LOGISTICS_MANAGER`, `ADMIN`.
+- **Mô tả:** Tiếp nhận batch tối đa 100 ping tọa độ vị trí của phương tiện đang thực hiện chuyến đi.
+- **Request Body:**
+```json
+{
+  "pings": [
+    {
+      "latitude": 10.776889,
+      "longitude": 106.700806,
+      "speedKmh": 52.4,
+      "headingDeg": 45.0,
+      "accuracyM": 12.5,
+      "source": "gps",
+      "recordedAt": "2026-11-23T14:00:00Z"
+    }
+  ]
+}
+```
+- **Quy tắc:**
+  - Bỏ qua ping tương lai (> 2 phút) hoặc quá cũ (> 24 giờ). Gắn cờ `is_backdated = 1` nếu chậm > 5 phút.
+  - Nếu `source = 'simulated'` và hệ thống đang tắt chế độ giả lập (`simulation_enabled = false`) → `403 Forbidden` (`SIMULATION_DISABLED`).
+
+### 2. `GET /tracking/shipments/:shipmentId/live`
+- **Quyền:** Đã đăng nhập; `CUSTOMER` chỉ xem chuyến của mình (`403 Forbidden`).
+- **Mô tả:** Cung cấp dữ liệu viễn trắc trực tiếp cho bản đồ live tracking: vị trí xe, heading, tốc độ, vệt đường thực tế (giảm lấy mẫu tối đa 500 điểm qua RDP), tiến độ %, ETA, sinh hiệu mới nhất.
+- **Bảo mật sinh hiệu:** Với `CUSTOMER`, nếu cờ hệ thống `tracking.customer_vitals_detail = false`, server tự động ẩn số đo thô `temperature_c` và `heart_rate_bpm`, chỉ trả về tầng trạng thái an toàn `condition_status`.
+
+### 3. `GET /tracking/live-overview`
+- **Quyền:** `LOGISTICS_MANAGER`, `ADMIN`, `DRIVER_ESCORT`.
+- **Query params:** `?alertFilter=all|green|amber|red`
+- **Mô tả:** Màn hình giám sát radar tổng thể toàn bộ các xe đang `in_transit`, kèm vị trí mới nhất, số lượng cảnh báo và phân tầng `alertTier`.
+
+### 4. `GET /system-settings/tracking` & `PATCH /system-settings/tracking`
+- **Quyền GET:** Mọi user đã đăng nhập.
+- **Quyền PATCH:** Chỉ `ADMIN` (`403 Forbidden` đối với các role khác).
+- **Mô tả:** Xem và cập nhật cấu hình định vị, bán kính geofence mặc định / khu lớn, cờ hiển thị sinh hiệu cho khách và cờ giả lập tuyến đường.
+- **Request Body (PATCH):**
+```json
+{
+  "simulationEnabled": true,
+  "customerVitalsDetail": false,
+  "geofenceRadiusDefaultM": 300,
+  "geofenceRadiusLargeSiteM": 1000
+}
+```

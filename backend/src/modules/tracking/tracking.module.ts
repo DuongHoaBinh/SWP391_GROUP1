@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TrackingController } from './tracking.controller';
+import { SystemSettingsController } from './system-settings.controller';
 import { TrackingService } from './tracking.service';
 import { TrackingStore } from './tracking.store';
 import { HandoverController } from './handover.controller';
@@ -11,7 +12,7 @@ import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
   imports: [NotificationsModule, RoutesModule, DocumentsModule],
-  controllers: [HandoverController, TrackingController],
+  controllers: [HandoverController, TrackingController, SystemSettingsController],
   providers: [TrackingService, TrackingStore, HandoverService, HandoverStore],
   exports: [TrackingService, TrackingStore, HandoverService, HandoverStore],
 })

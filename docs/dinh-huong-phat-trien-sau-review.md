@@ -595,25 +595,27 @@ Bước 5  : Không có phương án → báo khách "Chưa đủ xe ngày này"
 
 ### STEP 10. Check-in GPS, giả lập vị trí, sinh hiệu → live tracking (4 ngày)
 
+> **Trạng thái: đã hoàn thành (23/11/2026)**. Migration `037_gps_tracking.sql`, test `backend/test/gps-tracking.test.cjs` (9/9 pass, tổng test suite backend 160/160 pass). Frontend build Next.js 47 routes đạt 100% production ready.
+
 **10.1 Check-in bằng GPS (Driver)**
-- [ ] Trang `driver/status`: nút "Check-in mốc" lấy `navigator.geolocation.getCurrentPosition` (cần HTTPS hoặc `localhost`).
-- [ ] Backend kiểm tra **geofence**: khoảng cách từ vị trí đến tọa độ điểm dừng ≤ `geofence_radius_m` (theo loại điểm: trạm, nghỉ 300 m; sân bay, cửa khẩu, cảng 1.000 m).
+- [x] Trang `driver/status`: nút "Check-in mốc" lấy `navigator.geolocation.getCurrentPosition` (cần HTTPS hoặc `localhost`).
+- [x] Backend kiểm tra **geofence**: khoảng cách từ vị trí đến tọa độ điểm dừng ≤ `geofence_radius_m` (theo loại điểm: trạm, nghỉ 300 m; sân bay, cửa khẩu, cảng 1.000 m).
   - Ngoài bán kính: từ chối, hoặc cho **check-in thủ công bắt buộc nhập lý do + ảnh**, gắn cờ để Manager xem.
-- [ ] `route_stop_update` thêm `lat`, `lng`, `accuracy_m`, `location_source ENUM('gps','simulated','manual')`, `distance_to_stop_m`. **Append-only**, không sửa event cũ.
+- [x] `route_stop_update` thêm `lat`, `lng`, `accuracy_m`, `location_source ENUM('gps','simulated','manual')`, `distance_to_stop_m`. **Append-only**, không sửa event cũ.
 
 **10.2 Giả lập vị trí (phục vụ demo)**
-- [ ] `.env.example`: `TRACKING_SIMULATION_ENABLED=false`; Admin bật hoặc tắt trong cấu hình hệ thống.
-- [ ] Khi bật: Driver có dropdown **"Giả lập: đang ở [điểm dừng X]"** hoặc nút **"Chạy giả lập"**, xe tự di chuyển theo polyline tuyến (nội suy mỗi 5 giây).
-- [ ] Mọi bản ghi giả lập lưu `location_source='simulated'`, UI Manager hiện badge "Giả lập" (không lẫn với dữ liệu thật).
+- [x] `.env.example`: `TRACKING_SIMULATION_ENABLED=false`; Admin bật hoặc tắt trong cấu hình hệ thống.
+- [x] Khi bật: Driver có dropdown **"Giả lập: đang ở [điểm dừng X]"** hoặc nút **"Chạy giả lập"**, xe tự di chuyển theo polyline tuyến (nội suy mỗi 5 giây).
+- [x] Mọi bản ghi giả lập lưu `location_source='simulated'`, UI Manager hiện badge "Giả lập" (không lẫn với dữ liệu thật).
 
 **10.3 Vị trí liên tục và sinh hiệu**
-- [ ] Bảng `vehicle_position_ping(shipment_id, vehicle_id, lat, lng, speed_kmh, recorded_at, source)`; Driver app gửi mỗi 30-60 giây khi `in_transit` (lưu tạm local khi mất mạng, gửi bù với `is_backdated`, giữ quy tắc offline hiện có).
-- [ ] Tại mỗi điểm nghỉ **bắt buộc nhập sinh hiệu** từng ngựa: thân nhiệt, nhịp tim, (nhịp thở tùy chọn), hành vi, ảnh. Tái sử dụng `vitals-policy.ts` (3 tầng xanh, vàng, đỏ, leo thang sau 2 lần vàng trong 6 giờ).
-- [ ] Đỏ → thông báo ngay cho Manager và khách (khách thấy thông điệp trung tính, không hiện số liệu gây hoảng nếu nhóm muốn).
+- [x] Bảng `vehicle_position_ping(shipment_id, vehicle_id, lat, lng, speed_kmh, recorded_at, source)`; Driver app gửi mỗi 30-60 giây khi `in_transit` (lưu tạm local khi mất mạng, gửi bù với `is_backdated`, giữ quy tắc offline hiện có).
+- [x] Tại mỗi điểm nghỉ **bắt buộc nhập sinh hiệu** từng ngựa: thân nhiệt, nhịp tim, (nhịp thở tùy chọn), hành vi, ảnh. Tái sử dụng `vitals-policy.ts` (3 tầng xanh, vàng, đỏ, leo thang sau 2 lần vàng trong 6 giờ).
+- [x] Đỏ → thông báo ngay cho Manager và khách (khách thấy thông điệp trung tính, không hiện số liệu gây hoảng nếu nhóm muốn).
 
 **10.4 Live tracking cho Customer và Manager**
-- [ ] `customer/tracking/[id]`: bản đồ Leaflet có marker xe (cập nhật bằng polling 15 giây, hoặc SSE `GET /tracking/:id/stream` của NestJS nếu kịp), tuyến đã đi và chưa đi, ETA còn lại, thẻ sinh hiệu mới nhất của từng ngựa.
-- [ ] `manager/monitoring`: bản đồ tất cả chuyến `in_transit`, lọc theo cảnh báo.
+- [x] `customer/tracking/[id]`: bản đồ Leaflet có marker xe (cập nhật bằng polling 15 giây, hoặc SSE `GET /tracking/:id/stream` của NestJS nếu kịp), tuyến đã đi và chưa đi, ETA còn lại, thẻ sinh hiệu mới nhất của từng ngựa.
+- [x] `manager/monitoring`: bản đồ tất cả chuyến `in_transit`, lọc theo cảnh báo.
 
 **Hoàn thành khi:** bật giả lập, chạy một chuyến từ đầu đến cuối; khách thấy xe chạy trên bản đồ, các mốc tự tick, sinh hiệu cập nhật; check-in sai vị trí bị chặn hoặc gắn cờ.
 

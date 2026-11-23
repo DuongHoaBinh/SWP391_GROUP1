@@ -185,3 +185,24 @@ erDiagram
   VEHICLE ||--o{ VEHICLE_RESERVATION : reserved_by
   CITY_TRUCK_RESTRICTION ||..o{ CITY_RESTRICTION_EXCEPTION : "same city"
 ```
+
+## GPS Tracking, Geofence & Simulation (Migration 037 — Step 10)
+
+- **`vehicle_position_ping`** (Bảng mới):
+  - Lưu vệt tọa độ GPS/giả lập của phương tiện: `ping_id PK`, `shipment_id FK`, `vehicle_id FK NULL`, `latitude DECIMAL(10,7)`, `longitude DECIMAL(10,7)`, `speed_kmh DECIMAL(5,2) NULL`, `heading_deg DECIMAL(5,2) NULL`, `accuracy_m DECIMAL(6,2) NULL`, `source ENUM('gps','simulated')`, `is_backdated BOOLEAN DEFAULT FALSE`, `recorded_at DATETIME(3)`, `created_at DATETIME(3)`.
+  - Indexes: `idx_vpp_shipment_time(shipment_id, recorded_at)`, `idx_vpp_vehicle_time(vehicle_id, recorded_at)`.
+- **`trip_milestones`** & **`route_stop`**:
+  - Bổ sung kiểm soát geofence: `geofence_radius_m INT NULL`, `actual_lat DECIMAL(10,7) NULL`, `actual_lng DECIMAL(10,7) NULL`, `gps_accuracy_m DECIMAL(6,2) NULL`, `geofence_passed BOOLEAN NULL`, `checkin_source ENUM('gps','simulated','manual') NULL`.
+- **`trip_status_log`**:
+  - Bổ sung dấu vết kiểm tra geofence & ngoại lệ thủ công: `geofence_passed BOOLEAN NULL`, `manual_reason TEXT NULL`, `evidence_url VARCHAR(500) NULL`, `flagged BOOLEAN DEFAULT FALSE`.
+- **`horse_health_log`**:
+  - Bổ sung đo lường sinh hiệu định lượng: `temperature_c DECIMAL(4,2) NULL`, `heart_rate_bpm INT NULL`, `alert_tier ENUM('green','amber_observational','amber_escalatable','red') NULL`, `alert_reason VARCHAR(255) NULL`.
+- **`system_setting`**:
+  - Cấu hình khóa giám sát: `tracking.simulation_enabled` (`BOOLEAN`), `tracking.customer_vitals_detail` (`BOOLEAN`), `tracking.geofence_default_radius_m` (`INT`), `tracking.geofence_large_site_radius_m` (`INT`).
+
+```mermaid
+erDiagram
+  SHIPMENT ||--o{ VEHICLE_POSITION_PING : tracks
+  VEHICLE ||--o{ VEHICLE_POSITION_PING : reports
+  ROUTE_STOP ||--o{ TRIP_STATUS_LOG : audits
+```

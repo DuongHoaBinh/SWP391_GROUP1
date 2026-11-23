@@ -110,6 +110,131 @@ export interface TripTrackingDetails {
   lastUpdated: string;
 }
 
+export interface PositionPingItem {
+  lat: number;
+  lng: number;
+  speedKmh?: number | null;
+  headingDeg?: number | null;
+  accuracyM?: number | null;
+  source: 'gps' | 'simulated';
+  recordedAt?: string;
+}
+
+export interface PositionPingResult {
+  accepted: number;
+  skipped?: number;
+  dropped?: number;
+  shipmentId: number;
+}
+
+export interface LiveVehiclePosition {
+  lat: number;
+  lng: number;
+  speedKmh?: number | null;
+  headingDeg?: number | null;
+  accuracyM?: number | null;
+  source: 'gps' | 'simulated';
+  recordedAt: string;
+  isBackdated?: boolean;
+}
+
+export interface LiveTrackingStop {
+  stopId?: number;
+  routeStopId?: number;
+  sequenceNo?: number;
+  name?: string;
+  locationName?: string;
+  type?: string;
+  stopType?: string;
+  lat: number | null;
+  lng: number | null;
+  geofenceRadiusM?: number | null;
+  status: string;
+  actualArrival?: string | null;
+  actualDeparture?: string | null;
+}
+
+export interface LiveTrackingLeg {
+  legId: number;
+  sequenceNo?: number;
+  direction?: 'outbound' | 'return';
+  type?: 'road' | 'flight';
+  legType?: string;
+  originLocation?: string;
+  destinationLocation?: string;
+  status: string;
+  polylineJson?: string | null;
+}
+
+export interface LiveTrackingVitalsItem {
+  horseId: number;
+  horseName: string;
+  conditionStatus?: string;
+  alertTier: 'green' | 'amber_observational' | 'amber_escalatable' | 'red';
+  temperatureC?: number | null;
+  heartRateBpm?: number | null;
+  respiratoryRate?: number | null;
+  alertReason?: string | null;
+  recordedAt: string | null;
+}
+
+export interface LiveTrackingDetails {
+  shipmentId: number;
+  requestCode: string;
+  status: string;
+  isSimulated?: boolean;
+  simulation?: boolean;
+  currentPosition?: LiveVehiclePosition | null;
+  vehiclePosition?: LiveVehiclePosition | null;
+  vehicle?: LiveVehiclePosition | null;
+  path: Array<{ lat: number; lng: number; recordedAt?: string; t?: string; source?: string }>;
+  legs: LiveTrackingLeg[];
+  stops: LiveTrackingStop[];
+  progressPct?: number;
+  progress?: { percent: number; completedKm?: number; totalKm?: number };
+  currentLegId?: number | null;
+  currentStopId?: number | null;
+  estimatedArrival?: string | null;
+  etaFinalAt?: string | null;
+  vitalsSummary?: LiveTrackingVitalsItem[];
+  latestVitals?: LiveTrackingVitalsItem[];
+}
+
+export interface LiveOverviewItem {
+  shipmentId: number;
+  requestCode: string;
+  customerName?: string;
+  driverName?: string | null;
+  assignedDriver?: string | null;
+  vehiclePlate?: string | null;
+  assignedVehicle?: string | null;
+  originLocation?: string;
+  destinationLocation?: string;
+  status: string;
+  currentMilestone?: string | null;
+  currentPosition?: LiveVehiclePosition | null;
+  latestPosition?: LiveVehiclePosition | null;
+  alertTier?: 'green' | 'amber' | 'red';
+  alertCount?: number;
+  alertReason?: string | null;
+  horsesCount?: number;
+  isSimulated: boolean;
+  lastPingAgoSeconds?: number | null;
+}
+
+export interface TrackingSystemSettings {
+  geofence?: {
+    defaultRadiusM: number;
+    largeSiteRadiusM: number;
+    bufferAccuracyM: number;
+    maxAccuracyM: number;
+  };
+  geofenceRadiusDefaultM?: number;
+  geofenceRadiusLargeSiteM?: number;
+  simulationEnabled: boolean;
+  customerVitalsDetail: boolean;
+}
+
 export interface DeliveryHandoverItem {
   id: number;
   shipmentId: number;
@@ -177,7 +302,13 @@ export const trackingApi = {
   checkInLegStart: async (
     shipmentId: number,
     legId: number,
-    data: { actualTime?: string; notes?: string } = {},
+    data: {
+      actualTime?: string;
+      notes?: string;
+      location?: { lat: number; lng: number; accuracyM?: number; source?: string };
+      manualReason?: string;
+      evidenceUrl?: string;
+    } = {},
   ): Promise<TripTrackingDetails> => {
     return apiClient<TripTrackingDetails>(`/tracking/shipments/${shipmentId}/legs/${legId}/start`, {
       method: 'POST',
@@ -188,7 +319,14 @@ export const trackingApi = {
   checkInStop: async (
     shipmentId: number,
     stopId: number,
-    data: { action: 'arrived' | 'departed' | 'customs_cleared'; actualTime?: string; notes?: string },
+    data: {
+      action: 'arrived' | 'departed' | 'customs_cleared';
+      actualTime?: string;
+      notes?: string;
+      location?: { lat: number; lng: number; accuracyM?: number; source?: string };
+      manualReason?: string;
+      evidenceUrl?: string;
+    },
   ): Promise<TripTrackingDetails> => {
     return apiClient<TripTrackingDetails>(`/tracking/shipments/${shipmentId}/stops/${stopId}/status`, {
       method: 'POST',
@@ -199,7 +337,13 @@ export const trackingApi = {
   checkInLegArrival: async (
     shipmentId: number,
     legId: number,
-    data: { actualTime?: string; notes?: string } = {},
+    data: {
+      actualTime?: string;
+      notes?: string;
+      location?: { lat: number; lng: number; accuracyM?: number; source?: string };
+      manualReason?: string;
+      evidenceUrl?: string;
+    } = {},
   ): Promise<TripTrackingDetails> => {
     return apiClient<TripTrackingDetails>(`/tracking/shipments/${shipmentId}/legs/${legId}/complete`, {
       method: 'POST',
@@ -339,6 +483,40 @@ export const trackingApi = {
     return apiClient<DeliveryHandoverItem>(`/tracking/handovers/${handoverId}/resolve-dispute`, {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  },
+
+  // --- Step 10: Live Tracking, Pings & Overview ---
+
+  sendPositionPings: async (
+    shipmentId: number,
+    pings: PositionPingItem[],
+  ): Promise<PositionPingResult> => {
+    return apiClient<PositionPingResult>(`/tracking/shipments/${shipmentId}/pings`, {
+      method: 'POST',
+      body: JSON.stringify({ pings }),
+    });
+  },
+
+  getLiveTracking: async (shipmentId: number): Promise<LiveTrackingDetails> => {
+    return apiClient<LiveTrackingDetails>(`/tracking/shipments/${shipmentId}/live`);
+  },
+
+  getLiveOverview: async (alertFilter?: string): Promise<LiveOverviewItem[]> => {
+    const query = alertFilter && alertFilter !== 'all' ? `?alertFilter=${encodeURIComponent(alertFilter)}` : '';
+    return apiClient<LiveOverviewItem[]>(`/tracking/live-overview${query}`);
+  },
+
+  getTrackingSettings: async (): Promise<TrackingSystemSettings> => {
+    return apiClient<TrackingSystemSettings>('/system-settings/tracking');
+  },
+
+  updateTrackingSettings: async (
+    patch: Partial<TrackingSystemSettings>,
+  ): Promise<TrackingSystemSettings> => {
+    return apiClient<TrackingSystemSettings>('/system-settings/tracking', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
     });
   },
 };

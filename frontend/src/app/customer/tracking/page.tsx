@@ -23,8 +23,10 @@ import {
   trackingApi,
   TripTrackingDetails,
   AssignedTripSummary,
+  LiveTrackingDetails,
 } from '@/features/tracking/api/tracking.api';
 import { DeliveryHandoverPanel } from '@/features/tracking/components/DeliveryHandoverPanel';
+import { LiveTrackingMap } from '@/components/maps/LiveTrackingMap';
 import toast from 'react-hot-toast';
 
 function CustomerTrackingContent() {
@@ -36,6 +38,7 @@ function CustomerTrackingContent() {
   const [trips, setTrips] = useState<AssignedTripSummary[]>([]);
   const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
   const [trackingDetails, setTrackingDetails] = useState<TripTrackingDetails | null>(null);
+  const [liveTracking, setLiveTracking] = useState<LiveTrackingDetails | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [tripsError, setTripsError] = useState<string>('');
   const [detailsError, setDetailsError] = useState<string>('');
@@ -118,9 +121,13 @@ function CustomerTrackingContent() {
           setRefreshing(true);
           setDetailsError('');
         }
-        const details = await trackingApi.getTrackingDetails(shipmentId);
+        const [details, liveData] = await Promise.all([
+          trackingApi.getTrackingDetails(shipmentId),
+          trackingApi.getLiveTracking(shipmentId).catch(() => null),
+        ]);
         if (isMountedRef.current && !controller.signal.aborted && seq === requestSeqRef.current) {
           setTrackingDetails(details);
+          if (liveData) setLiveTracking(liveData);
           setDetailsError('');
         }
         return true;
@@ -455,6 +462,36 @@ function CustomerTrackingContent() {
               </div>
             </div>
           </div>
+
+          {/* Live Telemetry Map */}
+          {liveTracking && (
+            <div className="bg-[#FAF8F4] border border-[#E5DDD0] rounded-2xl p-5 sm:p-6 flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold tracking-[0.12em] text-[#A67C2E] uppercase">
+                    {language === 'en' ? 'LIVE VEHICLE TRACKING' : 'VỊ TRÍ PHƯƠNG TIỆN TRỰC TIẾP'}
+                  </span>
+                  {liveTracking.isSimulated && (
+                    <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-300">
+                      {language === 'en' ? 'SIMULATED DATA' : 'DỮ LIỆU GIẢ LẬP'}
+                    </span>
+                  )}
+                </div>
+                {(liveTracking.currentPosition || liveTracking.vehiclePosition) && (
+                  <span className="text-xs text-[#5F6977]">
+                    {language === 'en' ? 'Speed: ' : 'Vận tốc: '}
+                    <strong className="text-[#181A17]">
+                      {Math.round(
+                        (liveTracking.currentPosition || liveTracking.vehiclePosition)?.speedKmh || 0,
+                      )}{' '}
+                      km/h
+                    </strong>
+                  </span>
+                )}
+              </div>
+              <LiveTrackingMap liveData={liveTracking} height="380px" autoCenter />
+            </div>
+          )}
 
           {/* Light Editorial Route Progress Card */}
           <div className="bg-[#FAF8F4] border border-[#E5DDD0] rounded-2xl p-5 sm:p-6">

@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { User, KeyRound, Save, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { User, KeyRound, Save, Eye, EyeOff, Loader2, Compass } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { getCurrentUser, updateAuthUser } from '@/lib/auth';
 import { apiClient } from '@/lib/api-client';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
+import { trackingApi, TrackingSystemSettings } from '@/features/tracking/api/tracking.api';
 import toast from 'react-hot-toast';
 
 export default function ManagerSettingsPage() {
@@ -22,16 +23,34 @@ export default function ManagerSettingsPage() {
   const [showCurrentPw, setShowCurrentPw] = useState(false);
   const [showNewPw, setShowNewPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isSavingTracking, setIsSavingTracking] = useState(false);
+  const [trackingSettings, setTrackingSettings] = useState<TrackingSystemSettings>({
+    simulationEnabled: false,
+    customerVitalsDetail: false,
+    geofenceRadiusDefaultM: 300,
+    geofenceRadiusLargeSiteM: 1000,
+  });
 
   useEffect(() => {
     const u = getCurrentUser();
     if (u) {
+      setIsAdmin(u.role?.toUpperCase() === 'ADMIN');
       setProfile({
         fullName: u.fullName || u.name || '',
         email: u.email || '',
         phone: u.phone || '',
       });
     }
+
+    trackingApi
+      .getTrackingSettings()
+      .then((s) => {
+        if (mounted && s) setTrackingSettings(s);
+      })
+      .catch((err) => {
+        console.warn('Could not load tracking settings:', err);
+      });
 
     let mounted = true;
     const loadProfile = async () => {
@@ -150,6 +169,34 @@ export default function ManagerSettingsPage() {
       toast.error(err?.message || t('common.changePasswordError', 'Không thể đổi mật khẩu.'));
     } finally {
       setIsChangingPass(false);
+    }
+  };
+
+  const handleSaveTracking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingTracking(true);
+    try {
+      const updated = await trackingApi.updateTrackingSettings({
+        simulationEnabled: trackingSettings.simulationEnabled,
+        customerVitalsDetail: trackingSettings.customerVitalsDetail,
+        geofenceRadiusDefaultM: Number(trackingSettings.geofenceRadiusDefaultM) || 300,
+        geofenceRadiusLargeSiteM: Number(trackingSettings.geofenceRadiusLargeSiteM) || 1000,
+      });
+      setTrackingSettings(updated);
+      toast.success(
+        language === 'en'
+          ? 'Tracking settings updated!'
+          : 'Đã cập nhật cấu hình định vị GPS & hàng rào địa lý!',
+      );
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          (language === 'en'
+            ? 'Failed to update tracking settings.'
+            : 'Không thể cập nhật cấu hình định vị.'),
+      );
+    } finally {
+      setIsSavingTracking(false);
     }
   };
 
@@ -356,6 +403,152 @@ export default function ManagerSettingsPage() {
                 : language === 'en'
                 ? 'Update Password'
                 : 'Cập Nhật Mật Khẩu'}
+            </Button>
+          </div>
+        </form>
+      </div>
+
+      {/* Tracking & Geofence System Settings */}
+      <div className="bg-white rounded-2xl border border-[#D8CEBE] p-5 sm:p-6 shadow-sm">
+        <h2 className="text-base font-bold text-[#181A17] mb-2 flex items-center gap-2">
+          <Compass size={18} className="text-[#A67C2E]" aria-hidden="true" />
+          {language === 'en' ? 'GPS Tracking & Geofence Settings' : 'Cấu Hình Định Vị GPS & Hàng Rào Địa Lý'}
+        </h2>
+        <p className="text-xs text-[#5F6977] mb-4">
+          {language === 'en'
+            ? 'Configure GPS accuracy tolerances, geofence radius, vitals visibility, and route simulation.'
+            : 'Cấu hình dung sai tọa độ, bán kính trạm dừng, hiển thị sinh hiệu cho khách hàng và cờ giả lập tuyến đường.'}
+        </p>
+
+        <form onSubmit={handleSaveTracking} className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="geofence-default" className="text-xs font-bold text-[#181A17] block mb-1.5">
+                {language === 'en' ? 'Default Geofence Radius (meters)' : 'Bán kính Geofence mặc định (mét)'}
+              </label>
+              <input
+                id="geofence-default"
+                type="number"
+                min="50"
+                max="2000"
+                value={trackingSettings.geofenceRadiusDefaultM}
+                onChange={(e) =>
+                  setTrackingSettings({
+                    ...trackingSettings,
+                    geofenceRadiusDefaultM: Number(e.target.value),
+                  })
+                }
+                className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-sm text-[#181A17] outline-none focus:ring-2 focus:ring-[#A67C2E]/20 focus:border-[#A67C2E]"
+              />
+              <span className="text-[11px] text-[#747D88] mt-1 block">
+                {language === 'en'
+                  ? 'Used for standard rest stops, tolls, and checkpoints (default 300m)'
+                  : 'Áp dụng cho trạm dừng nghỉ, trạm thu phí (mặc định 300m)'}
+              </span>
+            </div>
+
+            <div>
+              <label htmlFor="geofence-large" className="text-xs font-bold text-[#181A17] block mb-1.5">
+                {language === 'en' ? 'Large Site Geofence Radius (meters)' : 'Bán kính Geofence khu liên hợp lớn (mét)'}
+              </label>
+              <input
+                id="geofence-large"
+                type="number"
+                min="100"
+                max="5000"
+                value={trackingSettings.geofenceRadiusLargeSiteM}
+                onChange={(e) =>
+                  setTrackingSettings({
+                    ...trackingSettings,
+                    geofenceRadiusLargeSiteM: Number(e.target.value),
+                  })
+                }
+                className="w-full h-11 px-3.5 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-sm text-[#181A17] outline-none focus:ring-2 focus:ring-[#A67C2E]/20 focus:border-[#A67C2E]"
+              />
+              <span className="text-[11px] text-[#747D88] mt-1 block">
+                {language === 'en'
+                  ? 'Used for airports, seaports, and border quarantine complexes (default 1000m)'
+                  : 'Áp dụng cho sân bay, cảng biển, khu kiểm dịch biên giới (mặc định 1000m)'}
+              </span>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-[#EFEAE0] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold text-[#181A17]">
+                {language === 'en' ? 'Show detailed vitals to customers' : 'Cho phép khách xem chi tiết sinh hiệu'}
+              </div>
+              <div className="text-[11px] text-[#5F6977]">
+                {language === 'en'
+                  ? 'If enabled, customers can view temperature and heart rate; otherwise only condition badges are visible.'
+                  : 'Nếu bật, khách hàng được xem số đo nhiệt độ và nhịp tim cụ thể; nếu tắt, chỉ hiển thị trạng thái ổn định/cảnh báo.'}
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={trackingSettings.customerVitalsDetail}
+                onChange={(e) =>
+                  setTrackingSettings({
+                    ...trackingSettings,
+                    customerVitalsDetail: e.target.checked,
+                  })
+                }
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#287653]"></div>
+            </label>
+          </div>
+
+          <div className="pt-2 border-t border-[#EFEAE0] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold text-[#181A17] flex items-center gap-1.5">
+                <span>{language === 'en' ? 'Simulation Mode' : 'Chế độ Giả lập Tọa độ (Simulation Mode)'}</span>
+                <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-300">
+                  DEV / TEST
+                </span>
+              </div>
+              <div className="text-[11px] text-[#5F6977]">
+                {language === 'en'
+                  ? 'Enable route pings from simulation engine for testing without physical vehicles (Admin permission).'
+                  : 'Cho phép tiếp nhận tọa độ giả lập để kiểm thử luồng di chuyển mà không cần xe thật chạy trên đường (Quyền Admin).'}
+              </div>
+            </div>
+            <label className={`relative inline-flex items-center ${!isAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
+              <input
+                type="checkbox"
+                disabled={!isAdmin}
+                checked={trackingSettings.simulationEnabled}
+                onChange={(e) =>
+                  setTrackingSettings({
+                    ...trackingSettings,
+                    simulationEnabled: e.target.checked,
+                  })
+                }
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#A67C2E]"></div>
+            </label>
+          </div>
+
+          <div className="flex justify-end mt-2">
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={isSavingTracking}
+              className="h-11 px-5 rounded-xl"
+            >
+              {isSavingTracking ? (
+                <Loader2 size={16} className="animate-spin mr-1.5" aria-hidden="true" />
+              ) : (
+                <Save size={16} className="mr-1.5" aria-hidden="true" />
+              )}
+              {isSavingTracking
+                ? t('common.saving', 'Đang lưu...')
+                : language === 'en'
+                ? 'Save Tracking Settings'
+                : 'Lưu Cài Đặt Định Vị'}
             </Button>
           </div>
         </form>

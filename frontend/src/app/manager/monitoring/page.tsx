@@ -30,7 +30,10 @@ import {
   TripTrackingDetails,
   AssignedTripSummary,
   TrackingMilestoneItem,
+  LiveTrackingDetails,
+  LiveOverviewItem,
 } from '@/features/tracking/api/tracking.api';
+import { LiveTrackingMap } from '@/components/maps/LiveTrackingMap';
 import toast from 'react-hot-toast';
 
 type OverrideReasonCode =
@@ -50,6 +53,10 @@ function TripMonitoringContent() {
   selectedIdRef.current = selectedShipmentId;
 
   const [trackingDetails, setTrackingDetails] = useState<TripTrackingDetails | null>(null);
+  const [liveTracking, setLiveTracking] = useState<LiveTrackingDetails | null>(null);
+  const [viewMode, setViewMode] = useState<'timeline' | 'live_map' | 'fleet_overview'>('timeline');
+  const [fleetOverview, setFleetOverview] = useState<LiveOverviewItem[]>([]);
+  const [loadingFleet, setLoadingFleet] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -124,8 +131,12 @@ function TripMonitoringContent() {
   const fetchTrackingDetails = useCallback(async (shipmentId: number, isSilent = false) => {
     try {
       if (!isSilent) setRefreshing(true);
-      const details = await trackingApi.getTrackingDetails(shipmentId);
+      const [details, live] = await Promise.all([
+        trackingApi.getTrackingDetails(shipmentId),
+        trackingApi.getLiveTracking(shipmentId).catch(() => null),
+      ]);
       setTrackingDetails(details);
+      if (live) setLiveTracking(live);
     } catch {
       if (!isSilent) {
         toast.error(tRef.current('monitoring.errLoadDetails', 'Không thể tải dữ liệu chi tiết chuyến đi'));
@@ -134,6 +145,24 @@ function TripMonitoringContent() {
       setRefreshing(false);
     }
   }, []);
+
+  const fetchFleetOverview = useCallback(async () => {
+    try {
+      setLoadingFleet(true);
+      const items = await trackingApi.getLiveOverview();
+      setFleetOverview(items);
+    } catch (err) {
+      console.warn('Could not load fleet overview', err);
+    } finally {
+      setLoadingFleet(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viewMode === 'fleet_overview') {
+      void fetchFleetOverview();
+    }
+  }, [viewMode, fetchFleetOverview]);
 
   useEffect(() => {
     void fetchTrips(false);
@@ -165,6 +194,11 @@ function TripMonitoringContent() {
   };
 
   const handleManualRefresh = async () => {
+    if (viewMode === 'fleet_overview') {
+      await fetchFleetOverview();
+      toast.success(t('monitoring.refreshSuccess', 'Đã làm mới dữ liệu hành trình'));
+      return;
+    }
     if (selectedShipmentId) {
       await fetchTrackingDetails(selectedShipmentId, false);
       await fetchTrips(true);
@@ -287,13 +321,63 @@ function TripMonitoringContent() {
             variant="outline"
             size="sm"
             onClick={() => void handleManualRefresh()}
-            disabled={refreshing}
+            disabled={refreshing || loadingFleet}
             className="flex items-center gap-1.5"
           >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin text-[#A67C2E]' : 'text-slate-600'} />
-            <span>{refreshing ? t('common.syncing', 'Đang đồng bộ...') : t('common.refresh', 'Làm mới')}</span>
+            <RefreshCw size={14} className={refreshing || loadingFleet ? 'animate-spin text-[#A67C2E]' : 'text-slate-600'} />
+            <span>{refreshing || loadingFleet ? t('common.syncing', 'Đang đồng bộ...') : t('common.refresh', 'Làm mới')}</span>
           </Button>
         </div>
+      </div>
+
+      {/* View Mode Tabs */}
+      <div className="flex border-b border-slate-200 gap-2 pb-0">
+        <button
+          type="button"
+          onClick={() => setViewMode('timeline')}
+          className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
+            viewMode === 'timeline'
+              ? 'border-[#A67C2E] text-[#181A17]'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Clock size={14} />
+          <span>{language === 'en' ? 'Route & Milestones' : 'Lộ trình & Mốc'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('live_map')}
+          className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
+            viewMode === 'live_map'
+              ? 'border-[#A67C2E] text-[#181A17]'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <MapPin size={14} className="text-[#A67C2E]" />
+          <span>{language === 'en' ? 'Live GPS Map' : 'Bản đồ xe trực tiếp'}</span>
+          {liveTracking?.isSimulated && (
+            <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded font-semibold border border-amber-300">
+              SIM
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('fleet_overview')}
+          className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
+            viewMode === 'fleet_overview'
+              ? 'border-[#A67C2E] text-[#181A17]'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Truck size={14} className="text-slate-600" />
+          <span>{language === 'en' ? 'Fleet Overview' : 'Toàn đội xe'}</span>
+          {fleetOverview.length > 0 && (
+            <span className="bg-slate-200 text-slate-800 text-[10px] px-1.5 py-0.2 rounded font-semibold">
+              {fleetOverview.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {loadError && (
@@ -322,6 +406,129 @@ function TripMonitoringContent() {
           <RefreshCw size={32} className="animate-spin text-[#A67C2E] mx-auto mb-3" />
           <p className="text-slate-600 font-semibold m-0">{t('monitoring.loadingTrips', 'Đang tải danh sách chuyến đi...')}</p>
         </div>
+      ) : viewMode === 'fleet_overview' ? (
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between">
+              <div>
+                <span className="text-xs text-slate-500 font-semibold uppercase">{language === 'en' ? 'Active Vehicles' : 'Xe Đang Hoạt Động'}</span>
+                <div className="text-2xl font-black text-slate-900 mt-1">{fleetOverview.length}</div>
+              </div>
+              <Truck size={28} className="text-[#A67C2E]" />
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between">
+              <div>
+                <span className="text-xs text-amber-700 font-semibold uppercase">{language === 'en' ? 'Amber Warnings' : 'Cảnh Báo Vàng'}</span>
+                <div className="text-2xl font-black text-amber-600 mt-1">
+                  {fleetOverview.filter((f) => f.alertTier === 'amber').length}
+                </div>
+              </div>
+              <AlertTriangle size={28} className="text-amber-500" />
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between">
+              <div>
+                <span className="text-xs text-red-700 font-semibold uppercase">{language === 'en' ? 'Red Alerts' : 'Báo Động Đỏ'}</span>
+                <div className="text-2xl font-black text-red-600 mt-1">
+                  {fleetOverview.filter((f) => f.alertTier === 'red').length}
+                </div>
+              </div>
+              <Heart size={28} className="text-red-500" />
+            </div>
+          </div>
+
+          {fleetOverview.length === 0 ? (
+            <div className="p-12 text-center bg-white rounded-xl border border-slate-200">
+              <Truck size={40} className="text-slate-300 mx-auto mb-3" />
+              <p className="text-slate-700 font-bold text-base m-0">
+                {language === 'en' ? 'No active vehicle pings reported.' : 'Chưa có tọa độ nào được truyền từ xe đang hoạt động.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {fleetOverview.map((item) => (
+                <div
+                  key={item.shipmentId}
+                  className={`bg-white rounded-xl border p-5 shadow-sm flex flex-col justify-between gap-4 transition-all hover:shadow-md ${
+                    item.alertTier === 'red'
+                      ? 'border-red-400 bg-red-50/20'
+                      : item.alertTier === 'amber'
+                      ? 'border-amber-400 bg-amber-50/20'
+                      : 'border-slate-200'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-black text-[#A67C2E] uppercase">{item.requestCode}</span>
+                      <div className="flex items-center gap-1.5">
+                        {item.isSimulated && (
+                          <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-300">
+                            SIM
+                          </span>
+                        )}
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
+                            item.alertTier === 'red'
+                              ? 'bg-red-100 text-red-800'
+                              : item.alertTier === 'amber'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          {item.alertTier}
+                        </span>
+                      </div>
+                    </div>
+
+                    <h3 className="text-sm font-bold text-slate-900 mt-1 mb-0">{item.customerName}</h3>
+                    <p className="text-xs text-slate-500 mt-1 mb-0 flex items-center gap-2">
+                      <span>{item.assignedVehicle || '—'}</span>
+                      <span>•</span>
+                      <span>{item.assignedDriver || '—'}</span>
+                      <span>•</span>
+                      <span>{item.horsesCount} {language === 'en' ? 'horses' : 'ngựa'}</span>
+                    </p>
+
+                    {item.alertReason && (
+                      <div className="mt-2.5 p-2 rounded bg-red-100/70 border border-red-200 text-xs font-semibold text-red-800 flex items-center gap-1.5">
+                        <AlertTriangle size={13} className="shrink-0" />
+                        <span>{item.alertReason}</span>
+                      </div>
+                    )}
+
+                    {(item.currentPosition || item.latestPosition) && (
+                      <div className="mt-2.5 text-xs text-slate-600 bg-slate-50 p-2 rounded border border-slate-100">
+                        <div>
+                          {language === 'en' ? 'Position: ' : 'Vị trí: '}
+                          <strong>
+                            {(item.currentPosition?.lat ?? item.latestPosition?.lat ?? 0).toFixed(4)}, {(item.currentPosition?.lng ?? item.latestPosition?.lng ?? 0).toFixed(4)}
+                          </strong>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          {language === 'en' ? 'Speed: ' : 'Tốc độ: '}{' '}
+                          {Math.round((item.currentPosition?.speedKmh ?? item.latestPosition?.speedKmh ?? 0))} km/h
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedShipmentId(item.shipmentId);
+                      setViewMode('live_map');
+                    }}
+                    className="w-full text-xs font-bold"
+                  >
+                    <MapPin size={13} className="mr-1 text-[#A67C2E]" />
+                    {language === 'en' ? 'Track on Map' : 'Theo dõi trên bản đồ'}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       ) : trips.length === 0 ? (
         <div className="p-12 text-center bg-white rounded-xl border border-slate-200">
           <Truck size={40} className="text-slate-300 mx-auto mb-3" />
@@ -334,6 +541,35 @@ function TripMonitoringContent() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left: Active Telemetry Data (2 Cols) */}
           <div className="lg:col-span-2 flex flex-col gap-6 min-w-0">
+            {viewMode === 'live_map' && liveTracking && (
+              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900 m-0">
+                      {language === 'en' ? 'Live Telemetry & Geofence Map' : 'Bản Đồ Định Vị GPS & Trạm Dừng'}
+                    </h3>
+                    {liveTracking.isSimulated && (
+                      <span className="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5 rounded border border-amber-300">
+                        {language === 'en' ? 'SIMULATION' : 'GIẢ LẬP'}
+                      </span>
+                    )}
+                  </div>
+                  {(liveTracking.currentPosition || liveTracking.vehiclePosition) && (
+                    <span className="text-xs text-slate-500">
+                      {language === 'en' ? 'Speed: ' : 'Vận tốc: '}
+                      <strong className="text-slate-800">
+                        {Math.round(
+                          (liveTracking.currentPosition || liveTracking.vehiclePosition)?.speedKmh || 0,
+                        )}{' '}
+                        km/h
+                      </strong>
+                    </span>
+                  )}
+                </div>
+                <LiveTrackingMap liveData={liveTracking} height="440px" autoCenter />
+              </div>
+            )}
+
             <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-sm flex flex-col gap-6">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">

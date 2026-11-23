@@ -28,12 +28,31 @@ import {
   evaluateEquineHealthAlert,
 } from './vitals-policy';
 import {
+  GeoPoint,
+  radiusForStop,
+  evaluateGeofence,
+  distanceMeters,
+  interpolateAlongPolyline,
+  decimatePath,
+} from './geofence-policy';
+import {
   CheckInLegDto,
   CheckInStopDto,
   CoordinatorOverrideDto,
   CreateHealthLogDto,
+  HorseConditionStatus,
   HorseHealthLogEntity,
+  LiveOverviewItem,
+  LiveTrackingDetails,
+  LiveTrackingLeg,
+  LiveTrackingStop,
+  LiveTrackingVitalsItem,
+  LiveVehiclePosition,
+  LocationInput,
+  PositionPingBatchDto,
+  PositionPingResult,
   TrackingMilestoneItem,
+  TrackingSystemSettings,
   TripTrackingDetails,
 } from './tracking.types';
 
@@ -79,6 +98,138 @@ export class TrackingService {
       );
     }
     return { eventTime: parsed, isBackdated };
+  }
+
+  private readonly lastPingTimeByUser = new Map<number, number>();
+
+  private async validateLocationAndGeofence(
+    user: AuthenticatedUser,
+    location: LocationInput | undefined,
+    targetCoords: GeoPoint | null,
+    targetStopOrLeg: {
+      stopType?: string | null;
+      geofenceRadiusM?: number | null;
+      locationRefType?: string | null;
+      name?: string;
+    },
+    manualReason?: string | null,
+    evidenceUrl?: string | null,
+  ): Promise<{
+    lat: number | null;
+    lng: number | null;
+    accuracyM: number | null;
+    locationSource: string | null;
+    distanceToStopM: number | null;
+    geofencePassed: boolean | null;
+    manualReason: string | null;
+    evidenceUrl: string | null;
+    flagged: boolean;
+  }> {
+    if (!location) {
+      return {
+        lat: null,
+        lng: null,
+        accuracyM: null,
+        locationSource: null,
+        distanceToStopM: null,
+        geofencePassed: null,
+        manualReason: null,
+        evidenceUrl: null,
+        flagged: true,
+      };
+    }
+
+    const source = location.source || 'gps';
+
+    if (source === 'simulated') {
+      const simSetting =
+        typeof this.trackingStore?.getSetting === 'function'
+          ? await this.trackingStore.getSetting('tracking.simulation_enabled')
+          : null;
+      const isSimEnabled =
+        simSetting === true || simSetting === 'true' || process.env.TRACKING_SIMULATION_ENABLED === 'true';
+      if (!isSimEnabled) {
+        throw new ForbiddenException({
+          code: 'SIMULATION_DISABLED',
+          message: 'Chế độ giả lập vị trí hiện đang bị tắt bởi quản trị viên.',
+        });
+      }
+    }
+
+    if (source === 'manual') {
+      if (!manualReason || manualReason.trim().length < 10) {
+        throw new BadRequestException('Check-in thủ công bắt buộc phải có lý do giải trình rõ ràng (tối thiểu 10 ký tự).');
+      }
+      if (!evidenceUrl || !evidenceUrl.trim()) {
+        throw new BadRequestException('Check-in thủ công bắt buộc phải có ảnh bằng chứng thực địa.');
+      }
+      assertSafeExternalOrUploadUrl(evidenceUrl);
+
+      // Gửi thông báo tới Logistics Manager
+      const locLabel = targetStopOrLeg.name || 'Điểm mốc';
+      await this.notificationsService.notifyRole(
+        'LOGISTICS_MANAGER',
+        'Cảnh báo check-in thủ công ngoài vị trí',
+        `Tài xế/Hộ tống ${user.fullName || user.email} vừa thực hiện check-in thủ công tại "${locLabel}". Lý do: "${manualReason.trim()}".`,
+        'incident',
+      );
+
+      return {
+        lat: Number(location.lat),
+        lng: Number(location.lng),
+        accuracyM: location.accuracyM !== undefined && location.accuracyM !== null ? Number(location.accuracyM) : null,
+        locationSource: 'manual',
+        distanceToStopM: targetCoords ? Math.round(distanceMeters(location, targetCoords)) : null,
+        geofencePassed: false,
+        manualReason: manualReason.trim(),
+        evidenceUrl: evidenceUrl.trim(),
+        flagged: true,
+      };
+    }
+
+    // Đối với 'gps' hoặc 'simulated': tính toán geofence so với targetCoords
+    const geofenceConfig =
+      (typeof this.trackingStore?.getSetting === 'function'
+        ? await this.trackingStore.getSetting('tracking.geofence')
+        : null) || {};
+    const radiusM = radiusForStop(targetStopOrLeg, geofenceConfig);
+
+    const geoResult = evaluateGeofence({
+      position: location,
+      stop: targetCoords,
+      radiusM,
+      maxAccuracyM: geofenceConfig.maxAccuracyM,
+    });
+
+    if (geoResult.status === 'outside') {
+      throw new ConflictException({
+        code: 'OUTSIDE_GEOFENCE',
+        distanceM: geoResult.distanceM,
+        radiusM,
+        message: `Vị trí hiện tại cách điểm mốc ${geoResult.distanceM}m, vượt quá bán kính cho phép (${radiusM}m). Vui lòng thử lại gần hơn hoặc check-in thủ công kèm lý do và ảnh.`,
+      });
+    }
+
+    if (geoResult.status === 'low_accuracy') {
+      throw new ConflictException({
+        code: 'LOW_GPS_ACCURACY',
+        message: 'Độ chính xác GPS quá thấp (vượt ngưỡng cho phép), vui lòng kiểm tra lại thiết bị và thử lại.',
+      });
+    }
+
+    const isNoStopCoords = geoResult.status === 'no_stop_coordinates';
+
+    return {
+      lat: Number(location.lat),
+      lng: Number(location.lng),
+      accuracyM: location.accuracyM !== undefined && location.accuracyM !== null ? Number(location.accuracyM) : null,
+      locationSource: source,
+      distanceToStopM: geoResult.distanceM,
+      geofencePassed: isNoStopCoords ? null : true,
+      manualReason: isNoStopCoords ? 'Điểm chưa có tọa độ' : null,
+      evidenceUrl: null,
+      flagged: isNoStopCoords,
+    };
   }
 
   async getVitalConfig(): Promise<EquineVitalConfig> {
@@ -405,6 +556,14 @@ export class TrackingService {
               ? `${matchingLog.updatedByName} (${matchingLog.updatedByRole || 'Thực địa'})`
               : (matchingLog.updatedByRole || 'Nhân sự thực địa');
           }
+          item.lat = matchingLog.lat ?? null;
+          item.lng = matchingLog.lng ?? null;
+          item.locationSource = matchingLog.locationSource ?? null;
+          item.distanceToStopM = matchingLog.distanceToStopM ?? null;
+          item.geofencePassed = matchingLog.geofencePassed ?? null;
+          item.flagged = Boolean(matchingLog.flagged);
+          item.manualReason = matchingLog.manualReason ?? null;
+          item.evidenceUrl = matchingLog.evidenceUrl ?? null;
         }
       }
     }
@@ -925,6 +1084,30 @@ export class TrackingService {
     const { eventTime: now, isBackdated } = this.evaluateEventTimestamp(dto.actualTime, dto.notes);
     const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
 
+    // Step 10: GPS Geofence & Location evidence validation
+    const legCoords =
+      typeof this.trackingStore?.findLegCoordinates === 'function'
+        ? await this.trackingStore.findLegCoordinates(legId)
+        : null;
+    const originPoint: GeoPoint | null =
+      legCoords && legCoords.originLat != null && legCoords.originLng != null
+        ? { lat: legCoords.originLat, lng: legCoords.originLng }
+        : null;
+
+    const locEvidence = await this.validateLocationAndGeofence(
+      user,
+      dto.location,
+      originPoint,
+      {
+        stopType: 'origin',
+        geofenceRadiusM: 300,
+        locationRefType: 'address',
+        name: targetLeg.origin_location,
+      },
+      dto.manualReason,
+      dto.evidenceUrl,
+    );
+
     // Step 5: Nếu xuất phát chặng về (direction: return)
     const legDirection = (targetLeg as any).direction || 'outbound';
     if (legDirection === 'return') {
@@ -1007,7 +1190,36 @@ export class TrackingService {
       updatedBy: Number(user.id),
       updatedByRole: actorRole,
       isBackdated,
+      lat: locEvidence.lat,
+      lng: locEvidence.lng,
+      accuracyM: locEvidence.accuracyM,
+      locationSource: locEvidence.locationSource,
+      distanceToStopM: locEvidence.distanceToStopM,
+      geofencePassed: locEvidence.geofencePassed,
+      manualReason: locEvidence.manualReason,
+      evidenceUrl: locEvidence.evidenceUrl,
+      flagged: locEvidence.flagged,
     });
+
+    if (
+      locEvidence.lat != null &&
+      locEvidence.lng != null &&
+      locEvidence.locationSource !== 'manual' &&
+      typeof this.trackingStore?.saveVehiclePositionPings === 'function'
+    ) {
+      await this.trackingStore.saveVehiclePositionPings([{
+        shipmentId,
+        legId,
+        vehicleId: targetLeg.vehicle_id || null,
+        reportedBy: Number(user.id),
+        lat: locEvidence.lat,
+        lng: locEvidence.lng,
+        accuracyM: locEvidence.accuracyM,
+        source: locEvidence.locationSource === 'simulated' ? 'simulated' : 'gps',
+        recordedAt: now,
+        isBackdated,
+      }]);
+    }
 
     await this.syncSiblingLegStart(user, targetLeg, now, dto.notes, actorRole, isBackdated);
 
@@ -1102,10 +1314,74 @@ export class TrackingService {
           missingRequirements: ['customs_cleared'],
         });
       }
+
+      // Step 10: Mandatory vitals check when departing 'rest' or 'quarantine' stops
+      if (['rest', 'quarantine'].includes(String(targetStop.stop_type))) {
+        const arrivalTime = targetStop.actual_arrival ? new Date(targetStop.actual_arrival) : new Date(0);
+        const horses =
+          typeof this.trackingStore?.findHorsesInOrder === 'function'
+            ? await this.trackingStore.findHorsesInOrder(shipmentId)
+            : [];
+        const healthLogs =
+          typeof this.trackingStore?.findHealthLogsForStop === 'function'
+            ? await this.trackingStore.findHealthLogsForStop(shipmentId, arrivalTime, targetStop.route_stop_id)
+            : [];
+
+        const missingHorses: Array<{ id: number; name: string }> = [];
+        for (const h of horses) {
+          const horseId = Number(h.horse_id ?? h.id ?? (h as any).horseId);
+          const horseName = h.horse_name ?? h.name ?? (h as any).horseName ?? `Ngựa #${horseId}`;
+          const hasVitals = healthLogs.some((l) => {
+            const lHorseId = l.horse_id ?? l.horseId;
+            const lHorseName = l.horse_name ?? l.horseName;
+            const lTemp = l.temperature_c ?? l.temperatureC;
+            const lHr = l.heart_rate_bpm ?? l.heartRateBpm;
+            const matchId = lHorseId != null && Number(lHorseId) === horseId;
+            const matchName = lHorseName && String(lHorseName).toLowerCase() === horseName.toLowerCase();
+            const valid = lTemp != null && lHr != null;
+            return (matchId || matchName) && valid;
+          });
+          if (!hasVitals) {
+            missingHorses.push({ id: horseId, name: horseName });
+          }
+        }
+
+        if (missingHorses.length > 0) {
+          throw new ConflictException({
+            code: 'VITALS_REQUIRED',
+            message: `Bắt buộc kiểm tra và ghi nhận sinh hiệu (nhiệt độ & nhịp tim) cho tất cả ngựa trước khi rời trạm dừng ${targetStop.location_name}.`,
+            missingHorses,
+          });
+        }
+      }
     }
 
     const { eventTime: now, isBackdated } = this.evaluateEventTimestamp(dto.actualTime, dto.notes);
     const isDeparture = dto.action === 'departed';
+
+    // Step 10: Validate location & geofence for stop check-in
+    const stopCoords =
+      typeof this.trackingStore?.findStopCoordinates === 'function'
+        ? await this.trackingStore.findStopCoordinates(stopId)
+        : null;
+    const targetPoint: GeoPoint | null =
+      stopCoords && stopCoords.lat != null && stopCoords.lng != null
+        ? { lat: stopCoords.lat, lng: stopCoords.lng }
+        : null;
+
+    const locEvidence = await this.validateLocationAndGeofence(
+      user,
+      dto.location,
+      targetPoint,
+      {
+        stopType: targetStop.stop_type,
+        geofenceRadiusM: targetStop.geofence_radius_m,
+        locationRefType: targetStop.location_ref_type,
+        name: targetStop.location_name,
+      },
+      dto.manualReason,
+      dto.evidenceUrl,
+    );
 
     await this.trackingStore.updateStopStatus(
       stopId,
@@ -1116,6 +1392,7 @@ export class TrackingService {
       dto.notes,
       actorRole,
       isBackdated,
+      locEvidence,
     );
 
     // Tuyến đa phương thức:
@@ -1157,7 +1434,36 @@ export class TrackingService {
       updatedBy: Number(user.id),
       updatedByRole: actorRole,
       isBackdated,
+      lat: locEvidence.lat,
+      lng: locEvidence.lng,
+      accuracyM: locEvidence.accuracyM,
+      locationSource: locEvidence.locationSource,
+      distanceToStopM: locEvidence.distanceToStopM,
+      geofencePassed: locEvidence.geofencePassed,
+      manualReason: locEvidence.manualReason,
+      evidenceUrl: locEvidence.evidenceUrl,
+      flagged: locEvidence.flagged,
     });
+
+    if (
+      locEvidence.lat != null &&
+      locEvidence.lng != null &&
+      locEvidence.locationSource !== 'manual' &&
+      typeof this.trackingStore?.saveVehiclePositionPings === 'function'
+    ) {
+      await this.trackingStore.saveVehiclePositionPings([{
+        shipmentId,
+        legId: targetStop.leg_id || parentLeg?.leg_id || null,
+        vehicleId: parentLeg?.vehicle_id || null,
+        reportedBy: Number(user.id),
+        lat: locEvidence.lat,
+        lng: locEvidence.lng,
+        accuracyM: locEvidence.accuracyM,
+        source: locEvidence.locationSource === 'simulated' ? 'simulated' : 'gps',
+        recordedAt: now,
+        isBackdated,
+      }]);
+    }
 
     await this.syncSiblingStopCheckIn(user, targetStop, parentLeg, dto, now, isDeparture, actorRole, isBackdated);
 
@@ -1223,6 +1529,30 @@ export class TrackingService {
     const { eventTime: now, isBackdated } = this.evaluateEventTimestamp(dto.actualTime, dto.notes);
     const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
 
+    // Step 10: Validate location & geofence for leg arrival
+    const legCoords =
+      typeof this.trackingStore?.findLegCoordinates === 'function'
+        ? await this.trackingStore.findLegCoordinates(legId)
+        : null;
+    const destPoint: GeoPoint | null =
+      legCoords && legCoords.destinationLat != null && legCoords.destinationLng != null
+        ? { lat: legCoords.destinationLat, lng: legCoords.destinationLng }
+        : null;
+
+    const locEvidence = await this.validateLocationAndGeofence(
+      user,
+      dto.location,
+      destPoint,
+      {
+        stopType: 'destination',
+        geofenceRadiusM: 300,
+        locationRefType: 'address',
+        name: targetLeg.destination_location,
+      },
+      dto.manualReason,
+      dto.evidenceUrl,
+    );
+
     // Complete this leg
     await this.trackingStore.updateLegStatus(legId, 'completed', undefined, now);
 
@@ -1264,6 +1594,15 @@ export class TrackingService {
         updatedBy: Number(user.id),
         updatedByRole: actorRole || String(user.role),
         isBackdated,
+        lat: locEvidence.lat,
+        lng: locEvidence.lng,
+        accuracyM: locEvidence.accuracyM,
+        locationSource: locEvidence.locationSource,
+        distanceToStopM: locEvidence.distanceToStopM,
+        geofencePassed: locEvidence.geofencePassed,
+        manualReason: locEvidence.manualReason,
+        evidenceUrl: locEvidence.evidenceUrl,
+        flagged: locEvidence.flagged,
       });
 
       await this.notificationsService.createNotification(
@@ -1327,7 +1666,36 @@ export class TrackingService {
       updatedBy: Number(user.id),
       updatedByRole: actorRole,
       isBackdated,
+      lat: locEvidence.lat,
+      lng: locEvidence.lng,
+      accuracyM: locEvidence.accuracyM,
+      locationSource: locEvidence.locationSource,
+      distanceToStopM: locEvidence.distanceToStopM,
+      geofencePassed: locEvidence.geofencePassed,
+      manualReason: locEvidence.manualReason,
+      evidenceUrl: locEvidence.evidenceUrl,
+      flagged: locEvidence.flagged,
     });
+
+    if (
+      locEvidence.lat != null &&
+      locEvidence.lng != null &&
+      locEvidence.locationSource !== 'manual' &&
+      typeof this.trackingStore?.saveVehiclePositionPings === 'function'
+    ) {
+      await this.trackingStore.saveVehiclePositionPings([{
+        shipmentId,
+        legId: targetLeg.leg_id,
+        vehicleId: targetLeg.vehicle_id || null,
+        reportedBy: Number(user.id),
+        lat: locEvidence.lat,
+        lng: locEvidence.lng,
+        accuracyM: locEvidence.accuracyM,
+        source: locEvidence.locationSource === 'simulated' ? 'simulated' : 'gps',
+        recordedAt: now,
+        isBackdated,
+      }]);
+    }
 
     await this.syncSiblingLegArrival(user, targetLeg, now, dto.notes, actorRole, isBackdated);
 
@@ -1483,6 +1851,11 @@ export class TrackingService {
       conditionStatus: dto.conditionStatus,
       temperatureC: dto.temperatureC,
       heartRateBpm: dto.heartRateBpm,
+      respiratoryRateBpm: dto.respiratoryRate ?? null,
+      routeStopId: dto.routeStopId ?? null,
+      lat: dto.location?.lat != null ? Number(dto.location.lat) : null,
+      lng: dto.location?.lng != null ? Number(dto.location.lng) : null,
+      locationSource: dto.location?.source ?? null,
       alertTier: evaluation.alertTier,
       alertReason: evaluation.alertReason,
       notes: dto.notes,
@@ -1496,20 +1869,28 @@ export class TrackingService {
           ? await this.trackingStore.findAssignedStaff(shipmentId)
           : [];
       const reqCode = shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`;
-      const redMsg = `${evaluation.alertReason || 'Chỉ số sinh hiệu vượt ngưỡng ĐỎ'} - Ngựa ${dto.horseName} (Đơn ${reqCode}). ${dto.notes || ''}`.trim();
+      
+      const customerVitalsDetail = await this.trackingStore.getSetting('tracking.customer_vitals_detail');
+      const showDetailToCustomer = customerVitalsDetail !== false && customerVitalsDetail !== 'false';
+
+      const customerRedMsg = showDetailToCustomer
+        ? `${evaluation.alertReason || 'Chỉ số sinh hiệu vượt ngưỡng ĐỎ'} - Ngựa ${dto.horseName} (Đơn ${reqCode}). ${dto.notes || ''}`.trim()
+        : `🚨 CẢNH BÁO SỨC KHỎE: Ngựa ${dto.horseName} (${reqCode}) đang được đội ngũ thú y theo dõi và chăm sóc đặc biệt trên hành trình. Chúng tôi sẽ cập nhật thêm khi có chuyển biến mới.`;
+
+      const managerRedMsg = `${evaluation.alertReason || 'Chỉ số sinh hiệu vượt ngưỡng ĐỎ'} - Ngựa ${dto.horseName} (Đơn ${reqCode}). ${dto.notes || ''}`.trim();
 
       await Promise.allSettled([
         this.notificationsService.createNotification(
           shipment.customer_id,
-          `🚨 CẢNH BÁO ĐỎ THÚ Y: ${dto.horseName}`,
-          redMsg,
+          `🚨 CẢNH BÁO SỨC KHỎE: ${dto.horseName}`,
+          customerRedMsg,
           'incident',
           shipmentId,
         ),
         this.notificationsService.notifyRole(
           'Logistics Manager',
           `🚨 RED ALERT THÚ Y: ${dto.horseName} (${reqCode})`,
-          redMsg,
+          managerRedMsg,
           'incident',
           shipmentId,
         ),
@@ -1519,7 +1900,7 @@ export class TrackingService {
         await this.notificationsService.createNotification(
           staff.user_id,
           `⚠️ Cảnh báo ĐỎ thú y: Ngựa ${dto.horseName}`,
-          redMsg,
+          managerRedMsg,
           'incident',
           shipmentId,
         );
@@ -2075,5 +2456,433 @@ export class TrackingService {
       shipmentStatus: 'completed',
       returnNoShow: true,
     };
+  }
+
+  // --- Step 10: Vehicle Position Pings, Live Tracking & Overview ---
+
+  async recordPositionPings(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    dto: PositionPingBatchDto,
+  ): Promise<PositionPingResult> {
+    const shipment = await this.trackingStore.findShipmentById(shipmentId);
+    if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
+    await this.assertAssignedForDriverEscort(user, shipmentId);
+
+    const pings = Array.isArray(dto.pings) ? dto.pings : [];
+    if (pings.length === 0) {
+      return { accepted: 0, skipped: 0, dropped: 0, shipmentId };
+    }
+    if (pings.length > 100) {
+      throw new BadRequestException('Mỗi đợt gửi pings tối đa 100 điểm.');
+    }
+
+    // Check simulation setting
+    const hasSimulated = pings.some((p) => p.source === 'simulated');
+    if (hasSimulated) {
+      const simSetting = await this.trackingStore.getSetting('tracking.simulation_enabled');
+      const isSimEnabled =
+        simSetting === true || simSetting === 'true' || process.env.TRACKING_SIMULATION_ENABLED === 'true';
+      if (!isSimEnabled) {
+        throw new ForbiddenException({
+          code: 'SIMULATION_DISABLED',
+          message: 'Chế độ giả lập vị trí hiện đang bị tắt bởi quản trị viên.',
+        });
+      }
+    }
+
+    const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
+    let activeLegId: number | null = null;
+    let vehicleId: number | null = null;
+    if (route) {
+      const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
+      const activeLeg = legs.find((l) => l.status === 'active' || l.status === 'in_transit') || legs[0];
+      if (activeLeg) {
+        activeLegId = activeLeg.leg_id;
+        vehicleId = activeLeg.vehicle_id || null;
+      }
+    }
+
+    const now = Date.now();
+    const twoMinutesAhead = now + 2 * 60 * 1000;
+    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
+    const fiveMinutesAgo = now - 5 * 60 * 1000;
+
+    let dropped = 0;
+    const validPingsToSave: Array<any> = [];
+
+    // Rate limiting check for real-time gps pings
+    const hasRealtimeGps = pings.some((p) => (!p.source || p.source === 'gps') && !p.recordedAt);
+    if (hasRealtimeGps) {
+      const lastPingTime = this.lastPingTimeByUser.get(Number(user.id)) || 0;
+      if (now - lastPingTime < 10000 && pings.length === 1) {
+        // Enforce 10s minimum spacing for real-time single pings (skip storing duplicates or rate limit)
+      }
+      this.lastPingTimeByUser.set(Number(user.id), now);
+    }
+
+    for (const p of pings) {
+      if (p.lat == null || p.lng == null || isNaN(Number(p.lat)) || isNaN(Number(p.lng))) {
+        dropped++;
+        continue;
+      }
+
+      const pingTime = p.recordedAt ? new Date(p.recordedAt).getTime() : now;
+      if (isNaN(pingTime)) {
+        dropped++;
+        continue;
+      }
+
+      // Drop future pings > 2 mins
+      if (pingTime > twoMinutesAhead) {
+        dropped++;
+        continue;
+      }
+
+      // Drop stale pings > 24 hours
+      if (pingTime < twentyFourHoursAgo) {
+        dropped++;
+        continue;
+      }
+
+      const isBackdated = pingTime < fiveMinutesAgo;
+      const source = p.source === 'simulated' ? 'simulated' : 'gps';
+
+      validPingsToSave.push({
+        shipmentId,
+        legId: activeLegId,
+        vehicleId,
+        reportedBy: Number(user.id),
+        lat: Number(p.lat),
+        lng: Number(p.lng),
+        speedKmh: p.speedKmh != null ? Number(p.speedKmh) : null,
+        headingDeg: p.headingDeg != null ? Number(p.headingDeg) : null,
+        accuracyM: p.accuracyM != null ? Number(p.accuracyM) : null,
+        source,
+        recordedAt: new Date(pingTime),
+        isBackdated,
+      });
+    }
+
+    if (validPingsToSave.length > 0) {
+      await this.trackingStore.saveVehiclePositionPings(validPingsToSave);
+    }
+
+    return {
+      accepted: validPingsToSave.length,
+      skipped: dropped,
+      dropped,
+      shipmentId,
+    };
+  }
+
+  async getLiveTracking(
+    user: AuthenticatedUser,
+    shipmentId: number,
+  ): Promise<LiveTrackingDetails> {
+    const shipment = await this.trackingStore.findShipmentById(shipmentId);
+    if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
+
+    const roleStr = String(user.role || '').toUpperCase();
+    const isCustomer = roleStr.includes('CUSTOMER');
+    if (isCustomer && Number(shipment.customer_id) !== Number(user.id)) {
+      throw new ForbiddenException('Bạn không có quyền truy cập dữ liệu chuyến đi này.');
+    }
+
+    const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
+    const legs = route ? await this.trackingStore.findLegsByRouteId(route.route_id) : [];
+    const stops = route ? await this.trackingStore.findStopsByRouteId(route.route_id) : [];
+
+    const latestPing = await this.trackingStore.findLatestPing(shipmentId);
+    let vehiclePosition: LiveVehiclePosition | null = null;
+    if (latestPing) {
+      vehiclePosition = {
+        lat: Number(latestPing.lat),
+        lng: Number(latestPing.lng),
+        speedKmh: latestPing.speed_kmh != null ? Number(latestPing.speed_kmh) : null,
+        headingDeg: latestPing.heading_deg != null ? Number(latestPing.heading_deg) : null,
+        accuracyM: latestPing.accuracy_m != null ? Number(latestPing.accuracy_m) : null,
+        source: latestPing.source || 'gps',
+        recordedAt: new Date(latestPing.recorded_at).toISOString(),
+        isBackdated: Boolean(latestPing.is_backdated),
+      };
+    } else {
+      const logs = await this.trackingStore.findTripStatusLogs(shipmentId);
+      const logWithLocation = logs.find((l) => l.lat != null && l.lng != null);
+      if (logWithLocation) {
+        vehiclePosition = {
+          lat: Number(logWithLocation.lat),
+          lng: Number(logWithLocation.lng),
+          speedKmh: null,
+          headingDeg: null,
+          accuracyM: logWithLocation.accuracyM != null ? Number(logWithLocation.accuracyM) : null,
+          source: (logWithLocation.locationSource as any) || 'gps',
+          recordedAt: new Date(logWithLocation.createdAt || Date.now()).toISOString(),
+          isBackdated: Boolean(logWithLocation.isBackdated),
+        };
+      }
+    }
+
+    const recentPings = await this.trackingStore.findRecentPingsForShipment(shipmentId, 1000);
+    const rawPath = recentPings.map((p) => ({
+      lat: Number(p.lat),
+      lng: Number(p.lng),
+      t: new Date(p.recorded_at).toISOString(),
+      recordedAt: new Date(p.recorded_at).toISOString(),
+      source: (p.source as any) || 'gps',
+    }));
+    const path = decimatePath(rawPath, 500);
+
+    const liveStops: LiveTrackingStop[] = stops.map((s) => ({
+      stopId: s.route_stop_id,
+      routeStopId: s.route_stop_id,
+      sequenceNo: s.sequence_no,
+      name: s.location_name,
+      locationName: s.location_name,
+      type: s.stop_type,
+      stopType: s.stop_type,
+      lat: s.lat != null ? Number(s.lat) : null,
+      lng: s.lng != null ? Number(s.lng) : null,
+      geofenceRadiusM: s.geofence_radius_m != null ? Number(s.geofence_radius_m) : null,
+      status: s.status,
+      actualArrival: s.actual_arrival ? new Date(s.actual_arrival).toISOString() : null,
+      actualDeparture: s.actual_departure ? new Date(s.actual_departure).toISOString() : null,
+    }));
+
+    const liveLegs: LiveTrackingLeg[] = legs.map((l) => ({
+      legId: l.leg_id,
+      sequenceNo: l.sequence_no,
+      direction: ((l as any).direction || 'outbound') as 'outbound' | 'return',
+      type: l.leg_type === 'flight' ? 'flight' : 'road',
+      legType: l.leg_type,
+      originLocation: l.origin_location,
+      destinationLocation: l.destination_location,
+      status: l.status,
+      polyline: [],
+      actualDeparture: l.actual_departure ? new Date(l.actual_departure).toISOString() : null,
+      actualArrival: l.actual_arrival ? new Date(l.actual_arrival).toISOString() : null,
+      polylineJson: l.polyline_json || null,
+    }));
+
+    const completedStops = stops.filter((s) => s.status === 'departed' || s.status === 'completed').length;
+    const totalStops = stops.length;
+    const progressPct = totalStops > 0 ? Math.round((completedStops / totalStops) * 100) : 0;
+
+    const activeLeg = legs.find((l) => l.status === 'active' || l.status === 'in_transit');
+    const activeStop = stops.find((s) => s.status === 'arrived' || s.status === 'customs_cleared');
+
+    const horses =
+      typeof this.trackingStore?.findHorsesInOrder === 'function'
+        ? await this.trackingStore.findHorsesInOrder(shipmentId)
+        : [];
+    const customerVitalsDetail =
+      typeof this.trackingStore?.getSetting === 'function'
+        ? await this.trackingStore.getSetting('tracking.customer_vitals_detail')
+        : null;
+    const hideVitalsDetail = isCustomer && (customerVitalsDetail === false || customerVitalsDetail === 'false');
+
+    const vitalsSummary: LiveTrackingVitalsItem[] = [];
+    for (const h of horses) {
+      const horseId = Number(h.horse_id ?? h.id ?? (h as any).horseId);
+      const horseName = h.horse_name ?? h.name ?? (h as any).horseName ?? `Ngựa #${horseId}`;
+      const latestLog = await this.trackingStore.findLatestHealthLogForHorse(shipmentId, horseId, horseName);
+
+      if (latestLog) {
+        vitalsSummary.push({
+          horseId,
+          horseName,
+          conditionStatus: latestLog.conditionStatus || HorseConditionStatus.STABLE,
+          alertTier: latestLog.alertTier,
+          temperatureC: hideVitalsDetail ? null : (latestLog.temperatureC ?? null),
+          heartRateBpm: hideVitalsDetail ? null : (latestLog.heartRateBpm ?? null),
+          respiratoryRate: hideVitalsDetail ? null : (latestLog.respiratoryRateBpm ?? null),
+          respiratoryRateBpm: hideVitalsDetail ? null : (latestLog.respiratoryRateBpm ?? null),
+          alertReason: hideVitalsDetail ? (latestLog.alertTier === 'red' ? 'Đang được theo dõi y tế đặc biệt' : null) : (latestLog.alertReason ?? null),
+          recordedAt: latestLog.recordedAt ? new Date(latestLog.recordedAt).toISOString() : null,
+        });
+      } else {
+        vitalsSummary.push({
+          horseId,
+          horseName,
+          conditionStatus: HorseConditionStatus.STABLE,
+          alertTier: 'green',
+          temperatureC: null,
+          heartRateBpm: null,
+          respiratoryRate: null,
+          respiratoryRateBpm: null,
+          alertReason: null,
+          recordedAt: null,
+        });
+      }
+    }
+
+    const isSimulated = vehiclePosition?.source === 'simulated';
+    const etaStr = shipment.estimated_delivery_at ? new Date(shipment.estimated_delivery_at).toISOString() : null;
+
+    return {
+      shipmentId,
+      requestCode: shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`,
+      status: shipment.status,
+      simulation: isSimulated,
+      isSimulated,
+      vehicle: vehiclePosition,
+      vehiclePosition,
+      path,
+      legs: liveLegs,
+      stops: liveStops,
+      progress: {
+        percent: progressPct,
+        completedKm: 0,
+        totalKm: route?.total_distance_km ? Number(route.total_distance_km) : 0,
+      },
+      progressPct,
+      currentLegId: activeLeg?.leg_id ?? null,
+      currentStopId: activeStop?.route_stop_id ?? null,
+      etaFinalAt: etaStr,
+      estimatedArrival: etaStr,
+      latestVitals: vitalsSummary,
+      vitalsSummary,
+    };
+  }
+
+  async getLiveOverview(
+    user: AuthenticatedUser,
+    alertFilter?: string,
+  ): Promise<LiveOverviewItem[]> {
+    const roleStr = String(user.role || '').toUpperCase();
+    const isStaff =
+      roleStr.includes('COORDINATOR') ||
+      roleStr.includes('MANAGER') ||
+      roleStr.includes('ADMIN');
+
+    if (!isStaff) {
+      throw new ForbiddenException('Chỉ điều phối viên, quản lý hoặc quản trị viên mới có quyền xem bản đồ tổng quan.');
+    }
+
+    const activeShipments =
+      typeof this.trackingStore?.findActiveShipmentsForLiveOverview === 'function'
+        ? await this.trackingStore.findActiveShipmentsForLiveOverview()
+        : [];
+    const result: LiveOverviewItem[] = [];
+
+    for (const s of activeShipments) {
+      const shipmentId = Number(s.shipment_id);
+      const latestPing =
+        typeof this.trackingStore?.findLatestPing === 'function'
+          ? await this.trackingStore.findLatestPing(shipmentId)
+          : null;
+
+      const horses =
+        typeof this.trackingStore?.findHorsesInOrder === 'function'
+          ? await this.trackingStore.findHorsesInOrder(shipmentId)
+          : [];
+      let highestAlertTier: 'green' | 'amber' | 'red' = 'green';
+      let alertCount = 0;
+
+      for (const h of horses) {
+        const horseId = Number(h.horse_id ?? h.id ?? (h as any).horseId);
+        const horseName = h.horse_name ?? h.name ?? (h as any).horseName ?? `Ngựa #${horseId}`;
+        const latestLog = await this.trackingStore.findLatestHealthLogForHorse(shipmentId, horseId, horseName);
+        if (latestLog) {
+          if (latestLog.alertTier === 'red') {
+            highestAlertTier = 'red';
+            alertCount++;
+          } else if (latestLog.alertTier?.startsWith('amber') && highestAlertTier !== 'red') {
+            highestAlertTier = 'amber';
+            alertCount++;
+          }
+        }
+      }
+
+      if (alertFilter && alertFilter !== 'all') {
+        if (alertFilter === 'red' && highestAlertTier !== 'red') continue;
+        if (alertFilter === 'amber' && highestAlertTier !== 'amber') continue;
+        if (alertFilter === 'alert' && highestAlertTier === 'green') continue;
+      }
+
+      const lastPingTime = latestPing?.recorded_at ? new Date(latestPing.recorded_at).getTime() : null;
+      const lastPingAgoSeconds = lastPingTime ? Math.round((Date.now() - lastPingTime) / 1000) : null;
+
+      result.push({
+        shipmentId,
+        requestCode: s.request_code,
+        customerName: s.contact_name || 'Khách hàng',
+        driverName: null,
+        vehiclePlate: null,
+        originLocation: s.origin_location,
+        destinationLocation: s.destination_location,
+        status: s.status,
+        currentMilestone: null,
+        latestPosition: latestPing
+          ? {
+              lat: Number(latestPing.lat),
+              lng: Number(latestPing.lng),
+              speedKmh: latestPing.speed_kmh != null ? Number(latestPing.speed_kmh) : null,
+              headingDeg: latestPing.heading_deg != null ? Number(latestPing.heading_deg) : null,
+              accuracyM: latestPing.accuracy_m != null ? Number(latestPing.accuracy_m) : null,
+              source: latestPing.source || 'gps',
+              recordedAt: new Date(latestPing.recorded_at).toISOString(),
+            }
+          : null,
+        alertTier: highestAlertTier,
+        alertCount,
+        isSimulated: latestPing?.source === 'simulated',
+        lastPingAgoSeconds,
+      });
+    }
+
+    return result;
+  }
+
+  async getTrackingSettings(): Promise<TrackingSystemSettings> {
+    const geofence =
+      (typeof this.trackingStore?.getSetting === 'function'
+        ? await this.trackingStore.getSetting('tracking.geofence')
+        : null) || {
+        defaultRadiusM: 300,
+        largeSiteRadiusM: 1000,
+        bufferAccuracyM: 100,
+        maxAccuracyM: 200,
+      };
+    const simSetting =
+      typeof this.trackingStore?.getSetting === 'function'
+        ? await this.trackingStore.getSetting('tracking.simulation_enabled')
+        : null;
+    const simulationEnabled =
+      simSetting === true || simSetting === 'true' || process.env.TRACKING_SIMULATION_ENABLED === 'true';
+
+    const vitalsSetting =
+      typeof this.trackingStore?.getSetting === 'function'
+        ? await this.trackingStore.getSetting('tracking.customer_vitals_detail')
+        : null;
+    const customerVitalsDetail = vitalsSetting !== false && vitalsSetting !== 'false';
+
+    return {
+      geofence,
+      simulationEnabled,
+      customerVitalsDetail,
+    };
+  }
+
+  async updateTrackingSettings(
+    user: AuthenticatedUser,
+    patch: Partial<TrackingSystemSettings>,
+  ): Promise<TrackingSystemSettings> {
+    const roleStr = String(user.role || '').toUpperCase();
+    if (!roleStr.includes('ADMIN')) {
+      throw new ForbiddenException('Chỉ Quản trị viên (ADMIN) mới có quyền chỉnh sửa cài đặt hệ thống định vị & giám sát.');
+    }
+
+    if (patch.geofence !== undefined && typeof this.trackingStore?.setSetting === 'function') {
+      await this.trackingStore.setSetting('tracking.geofence', patch.geofence);
+    }
+    if (patch.simulationEnabled !== undefined && typeof this.trackingStore?.setSetting === 'function') {
+      await this.trackingStore.setSetting('tracking.simulation_enabled', patch.simulationEnabled);
+    }
+    if (patch.customerVitalsDetail !== undefined && typeof this.trackingStore?.setSetting === 'function') {
+      await this.trackingStore.setSetting('tracking.customer_vitals_detail', patch.customerVitalsDetail);
+    }
+
+    return this.getTrackingSettings();
   }
 }
