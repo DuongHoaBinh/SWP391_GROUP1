@@ -32,7 +32,6 @@ import { useLanguage } from '@/lib/i18n/LanguageContext';
 import useSWR from 'swr';
 import { InsuranceSelection } from '@/features/orders/components/InsuranceSelection';
 import { CostSummary } from '@/features/orders/components/InsuranceSummary';
-import { BookingChoice } from '@/features/orders/components/BookingChoice';
 import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { type BookingType } from '@/features/orders/booking-policy';
 import { defaultInsurance, insuranceNames, previewInsurance, vnd, type InsuranceInput, type InsurancePolicy } from '@/features/orders/insurance-policy';
@@ -192,7 +191,8 @@ function CreateTransportRequestForm() {
   const [horseQuantities, setHorseQuantities] = useState<Record<string, number>>({});
   const [horseFilter, setHorseFilter] = useState<'available' | 'all'>('available');
   const [horseSearch, setHorseSearch] = useState('');
-  const [bookingType, setBookingType] = useState<BookingType>('shared_stall');
+  // Bỏ gom chuyến (Step 3, review 11/2026): mọi đơn mới đi xe riêng.
+  const bookingType: BookingType = 'dedicated_charter';
   const [insuranceValues, setInsuranceValues] = useState<Record<string, InsuranceInput>>({});
   const [insuranceError, setInsuranceError] = useState('');
   const { data: policy, error: policyError, mutate: reloadPolicy } = useSWR<InsurancePolicy>('/orders/insurance-policy', url => apiClient<InsurancePolicy>(url), { shouldRetryOnError: false });
@@ -670,8 +670,11 @@ function CreateTransportRequestForm() {
                 }}
               />
 
-              {/* Booking Type (placed on Step 1 so changing Shared Stall / Charter immediately updates Order Cutoff) */}
-              <BookingChoice value={bookingType} onChange={setBookingType} horseCount={0} compact />
+              <p className="m-0 text-xs text-[#5F6977] rounded-xl border border-[#E5DDD0] bg-[#FAF8F4] px-4 py-3">
+                {language === 'en'
+                  ? 'Each booking travels in its own vehicle (dedicated charter). Trip consolidation is no longer offered.'
+                  : 'Mỗi đơn đi xe riêng (bao nguyên xe). Hệ thống không còn ghép chuyến với khách khác.'}
+              </p>
 
               {/* Row 3: Dates */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
@@ -1156,48 +1159,6 @@ function CreateTransportRequestForm() {
                   )}
                 </div>
               )}
-              <div className="rounded-xl border border-[#E5DDD0] bg-[#FAF8F4] px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-                <div className="text-xs text-[#5F6977]">
-                  <span className="font-semibold text-[#181A17]">
-                    {language === 'en' ? 'Selected Booking Type:' : 'Hình thức đã chọn:'}
-                  </span>{' '}
-                  <span className="font-bold text-[#8C6621]">
-                    {bookingType === 'dedicated_charter'
-                      ? (language === 'en' ? 'Dedicated Charter' : 'Bao nguyên xe (Dedicated Charter)')
-                      : (language === 'en' ? 'Shared Stall' : 'Ghép ô chuồng (Shared Stall)')}
-                  </span>
-                  {totalSelectedHorses >= 3 && bookingType === 'shared_stall' && (
-                    <span className="block sm:inline sm:ml-2 text-[#181A17]">
-                      · {language === 'en'
-                        ? `With ${totalSelectedHorses} horses selected, Dedicated Charter is often more convenient.`
-                        : `Với ${totalSelectedHorses} ngựa đã chọn, Bao nguyên xe sẽ tối ưu hơn.`}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {totalSelectedHorses >= 3 && bookingType === 'shared_stall' ? (
-                    <button
-                      type="button"
-                      onClick={() => setBookingType('dedicated_charter')}
-                      className="px-3 py-1.5 rounded-lg bg-[#181A17] text-[#C4B38E] text-xs font-semibold cursor-pointer hover:bg-[#2A2D27] transition-colors"
-                    >
-                      {language === 'en' ? 'Switch to Dedicated Charter' : 'Chuyển sang Bao nguyên xe'}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setBookingType(bookingType === 'shared_stall' ? 'dedicated_charter' : 'shared_stall')
-                      }
-                      className="px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] cursor-pointer transition-colors"
-                    >
-                      {bookingType === 'shared_stall'
-                        ? (language === 'en' ? 'Switch to Charter' : 'Đổi sang Bao nguyên xe')
-                        : (language === 'en' ? 'Switch to Shared Stall' : 'Đổi sang Ghép ô chuồng')}
-                    </button>
-                  )}
-                </div>
-              </div>
               {selectedHorses.length > 0 && <InsuranceSelection horses={selectedHorses} values={insuranceValues}
                 onChange={(id, value) => { setInsuranceValues(previous => ({ ...previous, [id]: value })); setInsuranceError(''); }}
                 policy={policy ?? null} error={policyError ? (language === 'en' ? 'Unable to load insurance policy.' : 'Chưa tải được chính sách bảo hiểm.') : insuranceError} onRetry={() => void reloadPolicy()} />}

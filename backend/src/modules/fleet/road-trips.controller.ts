@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, GoneException, Post, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -15,6 +15,14 @@ import { CreateRoadTripDto } from './dto/create-road-trip.dto';
 @Controller('fleet/road-trips')
 export class RoadTripsController {
   constructor(private readonly store: RoadTripsStore) {}
-  @Get() list() { return this.store.list(); }
-  @Post() create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateRoadTripDto) { return this.store.create(dto, Number(user.id)); }
+  // Giữ lại để xem chuyến của đơn cũ.
+  @Get() @ApiOperation({ summary: 'Danh sách chuyến đường bộ (chỉ để xem lại đơn cũ)' })
+  list() { return this.store.list(); }
+
+  // Bỏ gom chuyến sau review 11/2026: không tạo chuyến ghép thủ công nữa. Chặng đường bộ của đơn mới
+  // vẫn tự tạo road_trip riêng khi lưu kế hoạch (RoadTripsStore.prepareLegs).
+  @Post() @ApiExcludeEndpoint()
+  create(@CurrentUser() _user: AuthenticatedUser, @Body() _dto: CreateRoadTripDto): never {
+    throw new GoneException('Tính năng ghép chuyến đã ngừng. Mỗi đơn đi xe riêng; chuyến được tạo tự động khi lưu kế hoạch.');
+  }
 }

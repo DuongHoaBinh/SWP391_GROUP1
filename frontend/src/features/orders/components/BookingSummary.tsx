@@ -28,7 +28,7 @@ export function BookingSummary({
   compact?: boolean;
 }) {
   const { t, language } = useLanguage();
-  const isShared = (bookingType ?? 'shared_stall') === 'shared_stall';
+  const isShared = (bookingType ?? 'dedicated_charter') === 'shared_stall';
 
   let activeStep = 1;
   const normalizedStatus = (status || '').toLowerCase();
@@ -209,7 +209,7 @@ export function BookingQuoteSummary({ input, bookingType, horseCount, currency, 
   input: string; bookingType?: BookingType; horseCount: number; currency: 'VND' | 'USD'; insuranceFee: number;
 }) {
   const { t } = useLanguage();
-  const quote = previewBookingQuote(input, bookingType ?? 'shared_stall', horseCount, currency);
+  const quote = previewBookingQuote(input, bookingType ?? 'dedicated_charter', horseCount, currency);
   return (
     <div className="space-y-3">
       <BookingSummary compact bookingType={bookingType} horseCount={horseCount} stallUnitPrice={bookingType === 'dedicated_charter' || quote.error ? null : quote.unit} />

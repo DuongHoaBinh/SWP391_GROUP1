@@ -445,7 +445,7 @@ export default function ManagerRequestsPage() {
     const horseCount = order.requestedHorseCount || (order.horses?.length || 1);
     const suggestion = suggestManagerFreightQuote({
       transportMode: initialMode,
-      bookingType: order.bookingType ?? 'shared_stall',
+      bookingType: order.bookingType ?? 'dedicated_charter',
       horseCount,
       distanceKm: routeInfo.distanceKm,
       customsCount: routeInfo.customsCount,
@@ -468,7 +468,7 @@ export default function ManagerRequestsPage() {
     const horseCount = approveOrder.requestedHorseCount || (approveOrder.horses?.length || 1);
     const suggestion = suggestManagerFreightQuote({
       transportMode: newMode,
-      bookingType: approveOrder.bookingType ?? 'shared_stall',
+      bookingType: approveOrder.bookingType ?? 'dedicated_charter',
       horseCount,
       distanceKm: routeInfo.distanceKm,
       customsCount: routeInfo.customsCount,
@@ -631,7 +631,7 @@ export default function ManagerRequestsPage() {
       await apiClient(`/orders/${approveOrder.id}/approve`, {
         method: 'PATCH',
         body: JSON.stringify({
-          ...bookingQuotePayload(totalCostInput, approveOrder.bookingType ?? 'shared_stall', approveOrder.requestedHorseCount ?? 1, costCurrency, usdToVndRate),
+          ...bookingQuotePayload(totalCostInput, approveOrder.bookingType ?? 'dedicated_charter', approveOrder.requestedHorseCount ?? 1, costCurrency, usdToVndRate),
           transportMode: selectedTransportMode,
           estimatedOperatingCost: operating,
         }),

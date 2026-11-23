@@ -267,7 +267,7 @@ test('Wave 5 Order Cutoff: createOrder & updateOrder reject violations with 422 
     return new Date(utc).toISOString();
   };
 
-  // Domestic shared_stall requires >= 3d; +2d must reject 422
+  // Step 3 (review 11/2026): bỏ gom chuyến — đơn mới gửi shared_stall bị từ chối 400 trước khi xét cutoff
   await assert.rejects(
     () =>
       ordersService.createOrder(
@@ -277,10 +277,10 @@ test('Wave 5 Order Cutoff: createOrder & updateOrder reject violations with 422 
           destinationLocation: 'Đà Nẵng, Vietnam',
           transportationType: 'Domestic',
           bookingType: 'shared_stall',
-          requestedDate: dayIso(2),
+          requestedDate: dayIso(5),
         },
       ),
-    (err) => err instanceof UnprocessableEntityException && err.getStatus() === 422 && err.getResponse().code === 'ORDER_CUTOFF_VIOLATION',
+    (err) => err.getStatus() === 400 && /ghép chuyến/.test(err.message),
   );
 
   // Domestic dedicated_charter requires >= 2d; +1d must reject 422 and +2d succeeds

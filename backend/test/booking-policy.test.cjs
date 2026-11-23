@@ -2,8 +2,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { calculateBookingQuote, normalizeBookingType } = require('../dist/modules/orders/booking-policy');
 
-test('booking defaults and both choices remain available regardless of recommended horse count', () => {
-  assert.equal(normalizeBookingType(), 'shared_stall');
+// Step 3 (review 11/2026): mặc định bao chuyến; báo giá shared_stall vẫn tính được cho đơn cũ.
+test('booking defaults to dedicated charter; legacy shared quotes still compute', () => {
+  assert.equal(normalizeBookingType(), 'dedicated_charter');
   assert.equal(calculateBookingQuote('shared_stall', 3, { stallUnitPrice: 1000000, bookingType: 'shared_stall', quotedHorseCount: 3 }).transportCost, 3000000);
   assert.equal(calculateBookingQuote('dedicated_charter', 1, { transportCost: 10000000 }).transportCost, 10000000);
 });

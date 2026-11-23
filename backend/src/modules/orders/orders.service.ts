@@ -1,3 +1,4 @@
+import { assertNewBookingType } from './booking-policy';
 import {
   BadRequestException,
   ConflictException,
@@ -101,6 +102,8 @@ export class OrdersService {
   }
 
   async createOrder(user: AuthenticatedUser, dto: CreateOrderDto): Promise<TransportOrder> {
+    // Bỏ gom chuyến (Step 3): đơn mới luôn bao chuyến, gửi shared_stall trả 400
+    dto.bookingType = assertNewBookingType(dto.bookingType);
     await this.assertValidRequestedDate(dto.requestedDate, {
       destinationLocation: dto.destinationLocation,
       originLocation: dto.originLocation,

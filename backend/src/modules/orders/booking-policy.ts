@@ -9,10 +9,26 @@ export interface BookingQuote {
   quotedHorseCount?: number;
 }
 
+/** Đơn mới mặc định bao chuyến; shared_stall chỉ còn ở đơn cũ (bỏ gom chuyến sau review 11/2026). */
 export function normalizeBookingType(value?: BookingType): BookingType {
-  const booking = value ?? 'shared_stall';
+  const booking = value ?? 'dedicated_charter';
   if (!['shared_stall', 'dedicated_charter'].includes(booking)) throw new BadRequestException('Hình thức đặt chỗ không hợp lệ');
   return booking;
+}
+
+export const SHARED_STALL_DISCONTINUED_MESSAGE =
+  'Hình thức ghép chuyến (shared_stall) đã ngừng áp dụng. Mỗi đơn đi xe riêng (dedicated_charter).';
+
+/** Hình thức cho đơn mới: luôn bao chuyến; gửi shared_stall trả 400. */
+export function assertNewBookingType(value?: BookingType | string | null): BookingType {
+  if (value === 'shared_stall') throw new BadRequestException(SHARED_STALL_DISCONTINUED_MESSAGE);
+  return normalizeBookingType((value ?? undefined) as BookingType | undefined);
+}
+
+/** Khi khách gửi lại đơn: giữ nguyên hình thức cũ, được đổi sang bao chuyến, không được đổi sang ghép chuyến. */
+export function resolveResubmitBookingType(requested: BookingType | undefined, current: BookingType): BookingType {
+  if (requested === undefined || requested === current) return normalizeBookingType(current);
+  return assertNewBookingType(requested);
 }
 
 export function calculateBookingQuote(booking: BookingType, horseCount: number, quote: BookingQuote) {

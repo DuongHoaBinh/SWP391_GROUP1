@@ -77,7 +77,7 @@ export class HorseInfoDto {
 }
 
 export class CreateOrderDto {
-  @ApiPropertyOptional({ enum: ['shared_stall', 'dedicated_charter'], default: 'shared_stall', description: 'Ghép ô chuồng hoặc bao nguyên chuyến; độc lập với nội địa/quốc tế' })
+  @ApiPropertyOptional({ enum: ['dedicated_charter'], default: 'dedicated_charter', description: 'Luôn bao chuyến. shared_stall đã ngừng sau review 11/2026 và trả 400' })
   @IsOptional()
   @IsIn(['shared_stall', 'dedicated_charter'])
   bookingType?: BookingType;

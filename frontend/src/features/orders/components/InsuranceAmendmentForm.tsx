@@ -9,7 +9,7 @@ import { BookingChoice } from './BookingChoice';
 import { type BookingType } from '../booking-policy';
 import { previewInsurance, unchangedInsurance, type InsuredHorse, type InsuranceInput, type InsurancePolicy } from '../insurance-policy';
 
-export function InsuranceAmendmentForm({ orderId, horses, specialRequirements, bookingType = 'shared_stall', onSaved, onCancel }: {
+export function InsuranceAmendmentForm({ orderId, horses, specialRequirements, bookingType = 'dedicated_charter', onSaved, onCancel }: {
   orderId: number; horses: InsuredHorse[]; specialRequirements?: string | null;
   bookingType?: BookingType;
   onSaved: () => void; onCancel: () => void;
@@ -55,7 +55,10 @@ export function InsuranceAmendmentForm({ orderId, horses, specialRequirements, b
   return <form onSubmit={submit} className="space-y-5">
     <fieldset disabled={submitting} className="space-y-5 disabled:opacity-60">
       <p className="text-sm text-[#5B6779]">Điều chỉnh giá trị hoặc gói bảo hiểm theo yêu cầu của Manager. Cước cơ bản sẽ được báo giá lại sau khi gửi.</p>
-      <BookingChoice value={booking} onChange={setBooking} horseCount={horses.reduce((sum, h) => sum + (h.quantity ?? 1), 0)} />
+      {/* Bỏ gom chuyến (Step 3): chỉ đơn ghép cũ còn hiện lựa chọn, để khách chuyển sang bao chuyến */}
+      {bookingType === 'shared_stall' && (
+        <BookingChoice value={booking} onChange={setBooking} horseCount={horses.reduce((sum, h) => sum + (h.quantity ?? 1), 0)} />
+      )}
       <InsuranceSelection horses={horses.map(h => ({ id: String(h.horseId), name: h.name, quantity: h.quantity }))}
         values={values} savedPolicies={savedPolicies} onChange={(id, value) => { setValues(previous => ({ ...previous, [id]: value })); setError(''); }}
         policy={policy ?? null} error={policyError ? 'Chưa tải được chính sách mới. Khai báo không thay đổi vẫn giữ quyền lợi đã lưu.' : undefined}

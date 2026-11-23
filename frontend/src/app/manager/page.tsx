@@ -279,7 +279,7 @@ export default function ManagerDashboardPage() {
       const horseCount = target.requestedHorseCount || target.horses?.length || 1;
       const suggestion = suggestManagerFreightQuote({
         transportMode: mode,
-        bookingType: target.bookingType ?? 'shared_stall',
+        bookingType: target.bookingType ?? 'dedicated_charter',
         horseCount,
         distanceKm: routeInfo.distanceKm,
         customsCount: routeInfo.customsCount,
@@ -307,7 +307,7 @@ export default function ManagerDashboardPage() {
     const horseCount = selectedOrder.requestedHorseCount || selectedOrder.horses?.length || 1;
     const suggestion = suggestManagerFreightQuote({
       transportMode: mode,
-      bookingType: selectedOrder.bookingType ?? 'shared_stall',
+      bookingType: selectedOrder.bookingType ?? 'dedicated_charter',
       horseCount,
       distanceKm: routeInfo.distanceKm,
       customsCount: routeInfo.customsCount,
@@ -332,7 +332,7 @@ export default function ManagerDashboardPage() {
 
     try {
       if (activeModal === 'APPROVE') {
-        const bookingType: BookingType = selectedOrder?.bookingType ?? 'shared_stall';
+        const bookingType: BookingType = selectedOrder?.bookingType ?? 'dedicated_charter';
         const horseCount =
           selectedOrder?.requestedHorseCount || selectedOrder?.horses?.length || 1;
         const quotePayload = bookingQuotePayload(

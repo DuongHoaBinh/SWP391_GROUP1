@@ -3,7 +3,7 @@ export const bookingNames: Record<BookingType, string> = {
   shared_stall: 'Ghép ô chuồng (Shared Stall)',
   dedicated_charter: 'Bao nguyên xe / Bao chuyến (Dedicated Charter)',
 };
-export function bookingName(value?: BookingType) { return bookingNames[value ?? 'shared_stall']; }
+export function bookingName(value?: BookingType) { return bookingNames[value ?? 'dedicated_charter']; }
 
 export function previewBookingQuote(
   input: string,

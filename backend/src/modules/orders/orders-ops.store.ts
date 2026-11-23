@@ -122,7 +122,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
       id: Number(r.shipment_id),
       customerId: Number(r.customer_id),
       status: String(r.status),
-      bookingType: String(r.booking_type || 'shared_stall'),
+      bookingType: String(r.booking_type || 'dedicated_charter'),
       totalCost: Number(r.total_cost || 0),
       transportCost: r.transport_cost == null ? null : Number(r.transport_cost),
       insuranceFee: Number(r.insurance_fee || 0),

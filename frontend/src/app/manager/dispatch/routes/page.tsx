@@ -293,7 +293,7 @@ function RoutePlanningContent() {
                 hasManagerFramework,
                 status: o.status,
                 transportMode: o.transportMode ?? null,
-                bookingType: o.bookingType ?? 'shared_stall',
+                bookingType: o.bookingType ?? 'dedicated_charter',
                 paymentState:
                   o.paymentStatus === 'succeeded'
                     ? 'PAID'
@@ -2547,8 +2547,10 @@ function RoutePlanningContent() {
                                 leg.vehiclePlate.includes('Consignee') ||
                                 leg.vehiclePlate.includes('pickup'))
                           ));
+                      // Bỏ gom chuyến (Step 3): chỉ đơn ghép cũ còn chọn chuyến đường bộ có sẵn
                       return (
                         leg.legType === 'road' &&
+                        selectedPlanningOrder.bookingType === 'shared_stall' &&
                         !isOverseasConsigneeRoadLeg && (
                           <RoadTripPicker
                             leg={leg}

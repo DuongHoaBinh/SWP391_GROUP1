@@ -5,7 +5,7 @@ import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from '
 import { CreateOrderDto, HorseInfoDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { calculateInsurance, totalInsuranceFee } from './insurance-policy';
-import { BookingQuote, BookingType, calculateBookingQuote, normalizeBookingType } from './booking-policy';
+import { BookingQuote, BookingType, assertNewBookingType, calculateBookingQuote, resolveResubmitBookingType } from './booking-policy';
 
 interface ShipmentRow extends RowDataPacket {
   transport_mode: 'road' | 'air' | null;
@@ -163,7 +163,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0, NULL, ?, ?)`,
         [customerId, customerId, dto.contactName ?? null, dto.contactAddress ?? null, dto.contactPhone, dto.contactEmail,
         count, dto.originLocation, dto.destinationLocation, dto.requestedDate ? new Date(dto.requestedDate) : new Date(),
-        dto.transportationType ?? null, dto.specialRequirements ?? null, totalInsuranceFee(horses), normalizeBookingType(dto.bookingType)]);
+        dto.transportationType ?? null, dto.specialRequirements ?? null, totalInsuranceFee(horses), assertNewBookingType(dto.bookingType)]);
       const shipmentId = (result as { insertId: number }).insertId;
       await this.insertInsuredHorses(db, shipmentId, horses);
       if (dto.medicalDocumentUrl) await db.execute("INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'document', ?)", [shipmentId, dto.medicalDocumentUrl, customerId]);
@@ -478,7 +478,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return this.transaction(async db => {
       const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? AND customer_id = ? FOR UPDATE', [shipmentId, customerId]);
       if (!orders[0] || orders[0].status !== 'change_requested') throw new ConflictException('Chỉ được gửi lại yêu cầu đang cần chỉnh sửa');
-      const bookingType = normalizeBookingType(dto.bookingType ?? orders[0].booking_type);
+      const bookingType = resolveResubmitBookingType(dto.bookingType, orders[0].booking_type);
       if (bookingType !== orders[0].booking_type) {
         await db.execute('INSERT INTO shipment_booking_revision (shipment_id, changed_by, previous_booking_type, booking_type) VALUES (?, ?, ?, ?)',
           [shipmentId, customerId, orders[0].booking_type, bookingType]);
@@ -530,7 +530,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return {
       id: row.shipment_id,
       transportMode: row.transport_mode ?? null,
-      bookingType: row.booking_type ?? 'shared_stall',
+      bookingType: row.booking_type ?? 'dedicated_charter',
       stallUnitPrice: row.stall_unit_price == null ? null : Number(row.stall_unit_price),
       requestCode,
       customerRequestCode: row.customer_request_code,

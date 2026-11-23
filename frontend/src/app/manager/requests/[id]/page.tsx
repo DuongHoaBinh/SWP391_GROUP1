@@ -191,7 +191,7 @@ export default function ManagerRequestDetailPage() {
     const count = Number(order?.requestedHorseCount ?? 1);
     const suggestion = suggestManagerFreightQuote({
       transportMode: mode,
-      bookingType: order?.bookingType ?? 'shared_stall',
+      bookingType: order?.bookingType ?? 'dedicated_charter',
       horseCount: count,
       distanceKm: metrics.distanceKm,
       customsCount: (metrics as any).customsCount ?? (isDomestic ? 1 : 2),
@@ -236,7 +236,7 @@ export default function ManagerRequestDetailPage() {
       const count = Number(order?.requestedHorseCount ?? 1);
       const suggestion = suggestManagerFreightQuote({
         transportMode: mode,
-        bookingType: order?.bookingType ?? 'shared_stall',
+        bookingType: order?.bookingType ?? 'dedicated_charter',
         horseCount: count,
         distanceKm: metrics.distanceKm,
         customsCount: (metrics as any).customsCount ?? (isDomestic ? 1 : 2),
@@ -286,7 +286,7 @@ export default function ManagerRequestDetailPage() {
           body: JSON.stringify({
             ...bookingQuotePayload(
               inputValue,
-              order.bookingType ?? 'shared_stall',
+              order.bookingType ?? 'dedicated_charter',
               Number(order.requestedHorseCount ?? 1),
               costCurrency,
               usdToVndRate
