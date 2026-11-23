@@ -126,6 +126,26 @@ The database schema is the executable source of truth; this document explains ow
 - **`shipment_refund_record`**:
   - Bổ sung thông tin tài khoản thụ hưởng và cam kết SLA: `recipient_bank_name VARCHAR(100) NULL`, `recipient_account_holder VARCHAR(150) NULL`, `customer_note TEXT NULL`, `form_submitted_at DATETIME(3) NULL`, `sla_due_at DATETIME(3) NULL`.
 
+## Country Document Requirements & Compliance Review (Migration 035 — Step 8)
+
+- **`regulation`**:
+  - Bổ sung: `document_type_code VARCHAR(50) NULL`, `max_issue_age_days INT NULL`, `is_active BOOLEAN DEFAULT TRUE`, `legal_reference VARCHAR(255) NULL`, `is_demo_data BOOLEAN DEFAULT FALSE`.
+  - Cập nhật ENUM `transport_mode` bao gồm `'road', 'air', 'sea', 'both'`.
+- **`transport_document`**:
+  - Bổ sung: `reviewed_by INT NULL`, `reviewed_at DATETIME(3) NULL` (truy vết người và thời điểm Logistics Manager thực hiện kiểm duyệt).
+- **`document_review_log`** (Bảng mới):
+  - Lưu toàn bộ lịch sử kiểm duyệt 4 điểm của hồ sơ: `review_id`, `document_id`, `reviewed_by`, `reviewer_role`, `old_status`, `new_status`, `reason`, `checklist_snapshot JSON`, `created_at`.
+- **`document_expiry_notice`** (Bảng mới):
+  - Ngăn gửi lặp thông báo nhắc hạn: `notice_id`, `document_id`, `notice_type ENUM('days_30', 'days_7', 'days_1', 'expired')`, `sent_at`, `recipient_user_id`.
+
+```mermaid
+erDiagram
+  REGULATION ||--o{ TRANSPORT_DOCUMENT : guides
+  HORSE ||--o{ TRANSPORT_DOCUMENT : owns
+  TRANSPORT_DOCUMENT ||--o{ DOCUMENT_REVIEW_LOG : audits
+  TRANSPORT_DOCUMENT ||--o{ DOCUMENT_EXPIRY_NOTICE : alerts
+```
+
 ## Target Schema Extensions (BA Spec v3.1 — `Planned`, Chưa có Migration)
 
 > [!WARNING]
@@ -148,3 +168,20 @@ The database schema is the executable source of truth; this document explains ow
    - Tham số hóa ngưỡng `temp_green_min/max`, `temp_amber_low/high`, `hr_green_min/max`, `hr_amber_low/high`, `escalatable_statuses`, `consecutive_alert_window_hours` (mặc định `6`), `updated_by_vet_name`, `calibrated_at`.
 8. **`route_stop_update` / `trip_status_log` (Mở rộng Audit Thực địa):**
    - Bổ sung `updated_by_role ENUM('driver','escort','coordinator','manager','admin')` (`DEC-07`) và `is_backdated BOOLEAN` (`BR-F4-05`).
+
+## Allocation, city restrictions, system settings (Migration 036 — Step 9)
+
+- `vehicle_reservation` (N–1 `shipment`, N–1 `vehicle`): giữ chỗ xe theo khung giờ `[start_at, end_at)`, `direction`, `status ENUM('active','released','consumed')`, `released_reason`, `released_at`. Không xóa bản ghi (lịch sử).
+- `shipment` thêm `allocation_option_code`, `allocation_snapshot JSON` (phương án đã chọn + lịch sử đổi xe `overrides`), `pickup_at` (giờ đón đã chốt sau khi dời giờ cấm), `night_surcharge_applied`.
+- `route_leg` thêm `jet_stall_count` (chặng bay), `allocation_override_reason` (Manager dùng xe khác phương án đã giữ).
+- `city_truck_restriction`: vùng tròn (`center_lat`, `center_lng`, `radius_km`) + khung cấm `banned_from`/`banned_to` (giờ địa phương, có thể qua nửa đêm) + `days_of_week` + `legal_reference` + hiệu lực + `is_demo_data`.
+- `city_restriction_exception`: lịch cấm riêng theo `(city, exception_date)`, thay thế khung thường ngày đó.
+- `system_setting(setting_key PK, value_json)`: cấu hình dùng chung; `journey.rules` (B4).
+- `pricing_tariff` seed thêm `road / PARTNER / v1` cho trạm đối tác nước ngoài.
+
+```mermaid
+erDiagram
+  SHIPMENT ||--o{ VEHICLE_RESERVATION : holds
+  VEHICLE ||--o{ VEHICLE_RESERVATION : reserved_by
+  CITY_TRUCK_RESTRICTION ||..o{ CITY_RESTRICTION_EXCEPTION : "same city"
+```

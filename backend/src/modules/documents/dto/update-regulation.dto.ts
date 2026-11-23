@@ -59,4 +59,34 @@ export class UpdateRegulationDto {
   @IsOptional()
   @IsString()
   effectiveDate?: string;
+
+  @ApiPropertyOptional({ example: 10 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  maxIssueAgeDays?: number;
+
+  @ApiPropertyOptional({ example: 'horse_passport' })
+  @IsOptional()
+  @IsString()
+  documentTypeCode?: string;
+
+  @ApiPropertyOptional({ example: 'Dữ liệu demo — cần đối chiếu cơ quan thú y' })
+  @IsOptional()
+  @IsString()
+  legalReference?: string;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isDemoData?: boolean;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isActive?: boolean;
 }

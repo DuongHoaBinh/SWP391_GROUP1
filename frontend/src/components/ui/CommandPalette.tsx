@@ -20,6 +20,7 @@ import {
   BarChart3,
   Stethoscope,
   Coins,
+  Timer,
 } from 'lucide-react';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 
@@ -116,6 +117,16 @@ export function CommandPalette() {
             : 'Cấu hình bảng giá cước đường bộ, hàng không, đường thủy và bậc khoảng cách',
           icon: <Coins className="w-4 h-4 text-[#A67C2E]" />,
           url: '/manager/settings/pricing',
+        },
+        {
+          id: 'mgr-city-restrictions',
+          category: 'actions',
+          title: isEn ? 'City truck bans & rest rules' : 'Giờ cấm xe tải & tham số nghỉ',
+          subtitle: isEn
+            ? 'Hanoi / HCMC heavy-truck hours, holiday exceptions, journey rest rules'
+            : 'Khung giờ cấm xe tải nặng HN/HCM, ngoại lệ ngày lễ, tham số nghỉ dọc đường',
+          icon: <Timer className="w-4 h-4 text-[#A67C2E]" />,
+          url: '/manager/settings/city-restrictions',
         },
         {
           id: 'mgr-claims',

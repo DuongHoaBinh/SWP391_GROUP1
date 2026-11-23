@@ -32,6 +32,7 @@ import {
   Building2,
   Radio,
   Coins,
+  Timer,
   ShieldAlert,
 } from 'lucide-react';
 import { getAuthToken, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
@@ -332,6 +333,11 @@ export default function ManagerLayout({
       label: t('manager.nav.pricing', 'Bảng Giá & Định Mức'),
       href: '/manager/settings/pricing',
       icon: <Coins size={18} />,
+    },
+    {
+      label: t('manager.nav.cityRestrictions', 'Giờ Cấm Xe & Nghỉ'),
+      href: '/manager/settings/city-restrictions',
+      icon: <Timer size={18} />,
     },
     {
       label: t('common.settings', 'Cài Đặt Hệ Thống'),

@@ -170,3 +170,14 @@ Role notifications use existing active accounts with the requested role. If no a
   - Trước khi đủ thời gian chờ, tài xế không được đánh dấu no-show (`409 Conflict` kèm thời điểm `allowedAt`).
   - Sau thời gian chờ, tài xế gọi `POST /tracking/shipments/:id/return/no-show` kèm ghi chú và ảnh bằng chứng.
   - Hệ thống đóng đơn với trạng thái `completed`, ghi nhận `return_no_show = true`, `return_status = 'no_show'`, nhả ngựa và phương tiện về trạng thái sẵn sàng, ghi `trip_status_log`. **Khách hàng mất 100% cước chặng về, không phát sinh hoàn tiền.**
+
+## Báo giá nhiều phương án xe, giờ cấm đô thị và ETA có nghỉ (Step 9 — Review 11/2026)
+
+- Khách chọn **ngày + giờ đón** (`pickupAt`, giờ Việt Nam). Thiếu giờ thì mặc định 08:00 của `departureDate`.
+- `POST /quotes` trả tối đa **3 phương án xe** (`options[]`: Rẻ nhất · Ít xe nhất · Đến sớm nhất · Chia nhiều ngày · Ghép xe 2 trạm), mỗi phương án có danh sách xe (loại × số lượng, trạm, km chạy rỗng), breakdown cước riêng, giờ đón đã dời, ETA, số điểm nghỉ. Phương án khuyến nghị = Rẻ nhất. Khách gửi `optionCode` khi tạo đơn; tổng tiền đơn lấy theo phương án đã chọn.
+- **Giờ cấm xe tải nặng nội đô** (bảng `city_truck_restriction`, vùng tròn quanh trung tâm; ngoại lệ ngày lễ `city_restriction_exception` thay thế khung thường ngày đó): nếu phương án có xe tải nặng và điểm đón/giao nằm trong vùng cấm vào giờ dự kiến → **tự dời** sang khung hợp lệ gần nhất (`warnings: PICKUP_SHIFTED_CITY_BAN` / `DELIVERY_SHIFTED_CITY_BAN`). Khi quy định buộc xe đón/giao trong khung đêm (mặc định 22:00–06:00) → cộng **phụ phí đêm** mỗi xe. Phương án chỉ dùng xe không nặng có thể không phải dời giờ.
+- Ô chọn giờ đón hiện các **khung giờ được phép** từ `GET /fleet/city-restrictions/check`.
+- **ETA** = thời gian lái + điểm nghỉ theo tham số B4 (`system_setting 'journey.rules'`: nghỉ `restMinutes` sau mỗi `maxDriveHoursBeforeRest` giờ lái; vượt `maxJourneyHours` thì nghỉ bắt buộc `mandatoryRestHours`) + thời gian bay/biển.
+- **Không đủ xe**: `200` với `options: []`, `quoteId: null`, `shortage: { slots, suggestedDates }`; giao diện hiện "Chưa đủ xe ngày này" và nút chọn nhanh ngày gợi ý. Không lưu báo giá trong trường hợp này.
+- Tạo đơn mà xe vừa bị khách khác giữ → `409`, giao diện tự báo giá lại.
+- Dữ liệu giờ cấm và bảng giá đối tác là **dữ liệu demo**, phải đối chiếu văn bản gốc của UBND/Sở GTVT trước khi dùng thật.

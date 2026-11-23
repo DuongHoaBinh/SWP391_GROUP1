@@ -22,11 +22,16 @@ interface RegulationRow extends RowDataPacket {
   transport_mode?: 'road' | 'air' | 'sea' | 'both' | null;
   doc_tier?: 'A' | 'B' | null;
   lead_time_days?: number | null;
+  max_issue_age_days?: number | null;
   requires_authority_approval?: number | boolean | null;
   min_validity_buffer_hours?: number | null;
   document_type: string;
+  document_type_code?: string | null;
   description: string | null;
   effective_date: Date | null;
+  legal_reference?: string | null;
+  is_demo_data?: number | boolean | null;
+  is_active?: number | boolean | null;
   created_at: Date;
 }
 
@@ -58,6 +63,9 @@ interface DocumentRow extends RowDataPacket {
   request_code?: string;
   customer_request_code?: string;
   shipment_id?: number;
+  reviewed_by?: number | null;
+  reviewed_at?: Date | null;
+  reviewer_name?: string | null;
 }
 
 interface DocumentTypeRow extends RowDataPacket {
@@ -179,18 +187,57 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       id: r.regulation_id,
       country: r.country,
       borderGate: r.border_gate ?? null,
-      transportMode: (r.transport_mode as 'road' | 'air' | 'both') || 'both',
+      transportMode: (r.transport_mode as 'road' | 'air' | 'sea' | 'both') || 'both',
       docTier: (r.doc_tier as 'A' | 'B') || 'A',
       leadTimeDays: r.lead_time_days !== undefined && r.lead_time_days !== null ? Number(r.lead_time_days) : 2,
+      maxIssueAgeDays: r.max_issue_age_days !== undefined && r.max_issue_age_days !== null ? Number(r.max_issue_age_days) : null,
       requiresAuthorityApproval: Boolean(r.requires_authority_approval),
       minValidityBufferHours:
         r.min_validity_buffer_hours !== undefined && r.min_validity_buffer_hours !== null
           ? Number(r.min_validity_buffer_hours)
           : 24,
       documentType: r.document_type,
+      documentTypeCode: r.document_type_code ?? r.document_type,
       description: r.description,
       effectiveDate: this.formatMysqlDateOnly(r.effective_date),
+      legalReference: r.legal_reference ?? null,
+      isDemoData: r.is_demo_data === undefined || r.is_demo_data === null ? true : Boolean(r.is_demo_data),
+      isActive: r.is_active === undefined || r.is_active === null ? true : Boolean(r.is_active),
       createdAt: new Date(r.created_at).toISOString(),
+    };
+  }
+
+  private mapDocumentRow(r: DocumentRow, approvals: any[] = []): TransportDocument {
+    return {
+      id: r.document_id,
+      horseId: r.horse_id,
+      ownerId: r.horse_owner_id !== undefined ? Number(r.horse_owner_id) : undefined,
+      horseName: r.horse_name,
+      requestCode: r.shipment_id ? `REQ-${String(r.shipment_id).padStart(3, '0')}` : undefined,
+      regulationId: r.regulation_id,
+      regulationCountry: r.country,
+      regulationDocType: r.regulation_doc_type || r.doc_type,
+      regulationTitle: r.regulation_title || r.doc_type,
+      uploadedBy: r.uploaded_by,
+      uploaderName: r.uploader_name,
+      uploaderEmail: r.uploader_email,
+      docType: r.doc_type,
+      documentTypeCode: r.document_type_code ?? null,
+      documentTypeNameVi: r.document_type_name_vi ?? null,
+      documentTypeNameEn: r.document_type_name_en ?? null,
+      docNumber: r.doc_number,
+      fileUrl: r.file_url,
+      issueDate: this.formatMysqlDateOnly(r.issue_date),
+      expiryDate: this.formatMysqlDateOnly(r.expiry_date),
+      status: r.status,
+      reviewerNotes: r.reviewer_notes,
+      reviewedBy: r.reviewed_by !== undefined && r.reviewed_by !== null ? Number(r.reviewed_by) : null,
+      reviewedAt: r.reviewed_at ? new Date(r.reviewed_at).toISOString() : null,
+      reviewerName: r.reviewer_name ?? null,
+      createdAt: new Date(r.created_at).toISOString(),
+      isArchived: Boolean(r.is_archived),
+      supersededByDocumentId: r.superseded_by_document_id ?? null,
+      approvals,
     };
   }
 
@@ -263,23 +310,34 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       dto.requiresAuthorityApproval ??
       (!isDomesticVn && ['import_permit', 'export_permit', 'quarantine_certificate', 'health_certificate'].includes(dto.documentType));
     const bufferHours = dto.minValidityBufferHours ?? (isDomesticVn ? 24 : 48);
+    const docTypeCode = (dto as any).documentTypeCode?.trim() || dto.documentType.trim();
+    const maxIssueAgeDays = (dto as any).maxIssueAgeDays !== undefined && (dto as any).maxIssueAgeDays !== null ? Number((dto as any).maxIssueAgeDays) : null;
+    const legalRef = (dto as any).legalReference?.trim() || 'Dữ liệu demo — cần đối chiếu cơ quan thú y';
+    const isDemo = (dto as any).isDemoData !== undefined ? ((dto as any).isDemoData ? 1 : 0) : 1;
+    const isActive = (dto as any).isActive !== undefined ? ((dto as any).isActive ? 1 : 0) : 1;
 
     const [result] = await this.pool.execute(
       `INSERT INTO regulation (
-        country, border_gate, transport_mode, doc_tier, lead_time_days,
-        requires_authority_approval, min_validity_buffer_hours, document_type, description, effective_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        country, border_gate, transport_mode, doc_tier, lead_time_days, max_issue_age_days,
+        requires_authority_approval, min_validity_buffer_hours, document_type, document_type_code,
+        description, effective_date, legal_reference, is_demo_data, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         dto.country.trim(),
         dto.borderGate?.trim() || null,
         dto.transportMode ?? 'both',
         docTier,
         leadTimeDays,
+        maxIssueAgeDays,
         requiresAuth ? 1 : 0,
         bufferHours,
         dto.documentType.trim(),
+        docTypeCode,
         dto.description ?? null,
         effectiveDate,
+        legalRef,
+        isDemo,
+        isActive,
       ],
     );
     return (result as { insertId: number }).insertId;
@@ -295,19 +353,26 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       transportMode?: 'road' | 'air' | 'sea' | 'both';
       docTier?: 'A' | 'B';
       leadTimeDays?: number;
+      maxIssueAgeDays?: number | null;
       requiresAuthorityApproval?: boolean;
       minValidityBufferHours?: number;
       preserveExisting?: boolean;
+      documentTypeCode?: string;
+      legalReference?: string;
+      isDemoData?: boolean;
+      isActive?: boolean;
     },
   ): Promise<number> {
     const cleanBorderGate = meta?.borderGate?.trim() || null;
+    const docTypeCode = meta?.documentTypeCode?.trim() || documentType;
     const [existing] = await this.pool.execute<RegulationRow[]>(
       `SELECT regulation_id FROM regulation
        WHERE LOWER(country) = LOWER(?)
-         AND LOWER(document_type) = LOWER(?)
+         AND (LOWER(document_type) = LOWER(?) OR LOWER(document_type_code) = LOWER(?))
          AND COALESCE(LOWER(border_gate), '') = COALESCE(LOWER(?), '')
+         AND transport_mode = ?
        LIMIT 1`,
-      [country, documentType, cleanBorderGate],
+      [country, documentType, docTypeCode, cleanBorderGate, meta?.transportMode ?? 'both'],
     );
     const effDate = this.toMysqlDateParam(effectiveDate) ?? this.formatMysqlDateOnly(new Date());
     const isDomesticVn = country.trim().toLowerCase() === 'vietnam';
@@ -326,6 +391,10 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     const requiresAuth = meta?.requiresAuthorityApproval ?? (!isDomesticVn && ['import_permit', 'export_permit', 'quarantine_certificate'].includes(documentType));
     const bufferHours = meta?.minValidityBufferHours ?? (isDomesticVn ? 24 : 48);
     const transportMode = meta?.transportMode ?? 'both';
+    const maxIssueAgeDays = meta?.maxIssueAgeDays !== undefined && meta?.maxIssueAgeDays !== null ? Number(meta.maxIssueAgeDays) : null;
+    const legalRef = meta?.legalReference?.trim() || 'Dữ liệu demo — cần đối chiếu cơ quan thú y';
+    const isDemo = meta?.isDemoData !== undefined ? (meta.isDemoData ? 1 : 0) : 1;
+    const isActive = meta?.isActive !== undefined ? (meta.isActive ? 1 : 0) : 1;
 
     if (existing.length > 0) {
       const regId = existing[0].regulation_id;
@@ -333,7 +402,8 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       await this.pool.execute(
         `UPDATE regulation
          SET description = ?, effective_date = ?, border_gate = ?, transport_mode = ?,
-             doc_tier = ?, lead_time_days = ?, requires_authority_approval = ?, min_validity_buffer_hours = ?
+             doc_tier = ?, lead_time_days = ?, max_issue_age_days = ?, requires_authority_approval = ?, min_validity_buffer_hours = ?,
+             document_type_code = ?, legal_reference = ?, is_demo_data = ?, is_active = ?
          WHERE regulation_id = ?`,
         [
           description,
@@ -342,8 +412,13 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
           transportMode,
           docTier,
           leadTimeDays,
+          maxIssueAgeDays,
           requiresAuth ? 1 : 0,
           bufferHours,
+          docTypeCode,
+          legalRef,
+          isDemo,
+          isActive,
           regId,
         ],
       );
@@ -351,20 +426,26 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     } else {
       const [result] = await this.pool.execute(
         `INSERT INTO regulation (
-          country, border_gate, transport_mode, doc_tier, lead_time_days,
-          requires_authority_approval, min_validity_buffer_hours, document_type, description, effective_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          country, border_gate, transport_mode, doc_tier, lead_time_days, max_issue_age_days,
+          requires_authority_approval, min_validity_buffer_hours, document_type, document_type_code,
+          description, effective_date, legal_reference, is_demo_data, is_active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           country,
           cleanBorderGate,
           transportMode,
           docTier,
           leadTimeDays,
+          maxIssueAgeDays,
           requiresAuth ? 1 : 0,
           bufferHours,
           documentType,
+          docTypeCode,
           description,
           effDate,
+          legalRef,
+          isDemo,
+          isActive,
         ],
       );
       return (result as { insertId: number }).insertId;
@@ -430,6 +511,26 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       sets.push('effective_date = ?');
       params.push(this.toMysqlDateParam(dto.effectiveDate));
     }
+    if (dto.documentTypeCode !== undefined) {
+      sets.push('document_type_code = ?');
+      params.push(dto.documentTypeCode.trim() || null);
+    }
+    if (dto.maxIssueAgeDays !== undefined) {
+      sets.push('max_issue_age_days = ?');
+      params.push(dto.maxIssueAgeDays !== null ? Number(dto.maxIssueAgeDays) : null);
+    }
+    if (dto.legalReference !== undefined) {
+      sets.push('legal_reference = ?');
+      params.push(dto.legalReference ? dto.legalReference.trim() || null : null);
+    }
+    if (dto.isDemoData !== undefined) {
+      sets.push('is_demo_data = ?');
+      params.push(dto.isDemoData ? 1 : 0);
+    }
+    if (dto.isActive !== undefined) {
+      sets.push('is_active = ?');
+      params.push(dto.isActive ? 1 : 0);
+    }
     if (sets.length === 0) return true;
     params.push(regulationId);
     const [result] = await this.pool.execute(
@@ -463,8 +564,13 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
                 transportMode: item.transportMode ?? 'both',
                 docTier: item.docTier,
                 leadTimeDays: item.leadTimeDays,
+                maxIssueAgeDays: item.maxIssueAgeDays ?? null,
                 requiresAuthorityApproval: item.requiresAuthorityApproval,
                 minValidityBufferHours: item.minValidityBufferHours,
+                documentTypeCode: item.documentTypeCode ?? item.documentType,
+                legalReference: item.legalReference ?? 'Dữ liệu demo — cần đối chiếu cơ quan thú y',
+                isDemoData: item.isDemoData ?? true,
+                isActive: true,
                 preserveExisting: true,
               },
             );
@@ -685,6 +791,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
     notes?: string,
     expiryDate?: string,
     docNumber?: string,
+    reviewerId?: number | null,
   ): Promise<boolean> {
     const newExpiryDate = this.toMysqlDateParam(expiryDate);
     const cleanDocNumber = docNumber && docNumber.trim().length > 0 ? docNumber.trim() : null;
@@ -693,11 +800,98 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
        SET status = ?,
            reviewer_notes = ?,
            expiry_date = COALESCE(?, expiry_date),
-           doc_number = COALESCE(?, doc_number)
+           doc_number = COALESCE(?, doc_number),
+           reviewed_by = ?,
+           reviewed_at = CURRENT_TIMESTAMP
        WHERE document_id = ?`,
-      [status, notes ?? null, newExpiryDate, cleanDocNumber, documentId],
+      [status, notes ?? null, newExpiryDate, cleanDocNumber, reviewerId ?? null, documentId],
     );
     return (result as { affectedRows: number }).affectedRows > 0;
+  }
+
+  async createReviewLog(entry: {
+    documentId: number;
+    fromStatus: string;
+    toStatus: string;
+    reviewerId: number | null;
+    reason: string | null;
+    checkedFieldsJson: any;
+  }): Promise<number> {
+    const [result] = await this.pool.execute(
+      `INSERT INTO document_review_log (
+        document_id, from_status, to_status, reviewer_id, reason, checked_fields_json
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        entry.documentId,
+        entry.fromStatus,
+        entry.toStatus,
+        entry.reviewerId ?? null,
+        entry.reason ?? null,
+        entry.checkedFieldsJson ? JSON.stringify(entry.checkedFieldsJson) : null,
+      ],
+    );
+    return (result as { insertId: number }).insertId;
+  }
+
+  async findReviewLogsByDocumentId(documentId: number): Promise<any[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT l.*, u.full_name as reviewer_name
+       FROM document_review_log l
+       LEFT JOIN \`user\` u ON u.user_id = l.reviewer_id
+       WHERE l.document_id = ?
+       ORDER BY l.review_id DESC`,
+      [documentId],
+    );
+    return rows.map((r) => ({
+      reviewId: Number(r.review_id),
+      documentId: Number(r.document_id),
+      fromStatus: r.from_status,
+      toStatus: r.to_status,
+      reviewerId: r.reviewer_id !== null ? Number(r.reviewer_id) : null,
+      reviewerName: r.reviewer_name ?? null,
+      reason: r.reason ?? null,
+      checkedFieldsJson: typeof r.checked_fields_json === 'string'
+        ? JSON.parse(r.checked_fields_json)
+        : (r.checked_fields_json ?? null),
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : '',
+    }));
+  }
+
+  async recordExpiryNotice(documentId: number, daysBefore: number): Promise<boolean> {
+    try {
+      const [result] = await this.pool.execute(
+        `INSERT IGNORE INTO document_expiry_notice (document_id, days_before) VALUES (?, ?)`,
+        [documentId, daysBefore],
+      );
+      return (result as { affectedRows: number }).affectedRows > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  async hasExpiryNoticeBeenSent(documentId: number, daysBefore: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT notice_id FROM document_expiry_notice WHERE document_id = ? AND days_before = ? LIMIT 1`,
+      [documentId, daysBefore],
+    );
+    return rows.length > 0;
+  }
+
+  async findApprovedDocuments(): Promise<TransportDocument[]> {
+    const [rows] = await this.pool.execute<DocumentRow[]>(
+      `SELECT d.*, dt.name_vi as document_type_name_vi, dt.name_en as document_type_name_en, h.name as horse_name, h.owner_id as horse_owner_id,
+              r.country, r.description as regulation_title, r.document_type as regulation_doc_type,
+              u.full_name as uploader_name, u.email as uploader_email,
+              rev.full_name as reviewer_name
+       FROM transport_document d
+       JOIN horse h ON h.horse_id = d.horse_id
+       LEFT JOIN regulation r ON r.regulation_id = d.regulation_id
+       LEFT JOIN document_type dt ON dt.code = d.document_type_code
+       JOIN \`user\` u ON u.user_id = d.uploaded_by
+       LEFT JOIN \`user\` rev ON rev.user_id = d.reviewed_by
+       WHERE d.status = 'approved' AND COALESCE(d.is_archived, 0) = 0`,
+    );
+    return rows.map((r) => this.mapDocumentRow(r));
   }
 
   async deleteDocument(documentId: number, userId: number, isAdminOrSpecialist: boolean): Promise<boolean> {

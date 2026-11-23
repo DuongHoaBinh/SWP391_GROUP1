@@ -11,6 +11,7 @@ import { currentReturnPolicy, calculateReturnCancellationRefund } from './return
 import { CANNOT_FULFIL_REASONS, FeasibilityReviewDto, SubmitRefundFormDto } from './dto/prepaid-flow.dto';
 import { addBusinessDays } from './prepaid-policy';
 import { transitionShipment } from './order-state-machine';
+import { releaseShipmentReservations, reserveVehicles } from '../fleet/vehicle-reservation';
 import { ResultSetHeader } from 'mysql2/promise';
 
 interface ShipmentRow extends RowDataPacket {
@@ -240,9 +241,12 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         const count = horses.reduce((sum, h) => sum + h.quantity, 0);
 
         const optionCode = dto.optionCode || qResult.recommendedOptionCode || 'default';
-        const selectedOption =
-          (qResult.options || []).find((o: any) => o.optionCode === optionCode) ||
-          qResult.options?.[0];
+        const matchedOption = (qResult.options || []).find((o: any) => o.optionCode === optionCode);
+        const hasAllocation = (qResult.options || []).some((o: any) => Array.isArray(o.vehicleIds));
+        if (dto.optionCode && !matchedOption && hasAllocation) {
+          throw new BadRequestException(`Phương án xe "${dto.optionCode}" không có trong báo giá`);
+        }
+        const selectedOption = matchedOption || qResult.options?.[0];
 
         const transportCost = Number(selectedOption?.freight?.total ?? qRow.freight_total);
         const insuranceFee = Number(qResult.insurance?.total ?? qRow.insurance_total);
@@ -343,6 +347,45 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         );
 
         await this.insertInsuredHorses(db, shipmentId, horses);
+
+        // Step 9: giữ chỗ xe của phương án khách chọn ngay trong transaction tạo đơn
+        // (khóa xe vehicle_id ASC FOR UPDATE; xe đã bị đơn khác giữ → 409, toàn bộ đơn rollback)
+        if (Array.isArray(selectedOption?.vehicleIds) && selectedOption.vehicleIds.length && selectedOption.reservationWindow) {
+          await reserveVehicles(db, {
+            shipmentId,
+            vehicleIds: selectedOption.vehicleIds.map(Number),
+            start: new Date(selectedOption.reservationWindow.start),
+            end: new Date(selectedOption.reservationWindow.end),
+            direction: 'outbound',
+            actorId: customerId,
+          });
+          await db.execute(
+            `UPDATE shipment
+             SET allocation_option_code = ?, allocation_snapshot = ?, pickup_at = ?, night_surcharge_applied = ?
+             WHERE shipment_id = ?`,
+            [
+              selectedOption.optionCode,
+              JSON.stringify({
+                optionCode: selectedOption.optionCode,
+                label: selectedOption.label,
+                vehicles: selectedOption.vehicles,
+                extraDays: selectedOption.extraDays ?? 0,
+                requestedPickupAt: selectedOption.requestedPickupAt,
+                pickupAt: selectedOption.pickupAt,
+                pickupShifted: Boolean(selectedOption.pickupShifted),
+                deliveryAt: selectedOption.deliveryAt,
+                etaHours: selectedOption.etaHours,
+                restStops: selectedOption.restStops,
+                reservationWindow: selectedOption.reservationWindow,
+                partnerDepot: qResult.partnerDepot ?? null,
+                jetStallsRequired: qResult.jetStallsRequired ?? null,
+              }),
+              selectedOption.pickupAt ? new Date(selectedOption.pickupAt) : null,
+              Boolean(selectedOption.nightSurcharge),
+              shipmentId,
+            ],
+          );
+        }
 
         const invoiceCode = `INV-${new Date().getFullYear()}-${String(shipmentId).padStart(6, '0')}`;
         const invoiceSnapshot = {
@@ -906,6 +949,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       if (!rows[0] || !['requested', 'change_requested'].includes(rows[0].status)) throw new ConflictException('Chỉ được hủy yêu cầu trước khi phê duyệt.');
       await db.execute("UPDATE shipment SET status = 'cancelled' WHERE shipment_id = ?", [shipmentId]);
       await db.execute("UPDATE horse h JOIN shipment_horse sh ON sh.horse_id = h.horse_id SET h.status = 'active' WHERE sh.shipment_id = ?", [shipmentId]);
+      await releaseShipmentReservations(db, shipmentId, 'customer_cancelled');
       await db.commit();
       return true;
     } catch (error) { await db.rollback(); throw error; }

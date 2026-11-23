@@ -19,6 +19,7 @@ import {
   RefundMode,
 } from './refund-policy';
 import { computeGraceDueAt, computePaymentDueAt } from './sla-timeline.policy';
+import { releaseShipmentReservations } from '../fleet/vehicle-reservation';
 import { transitionShipment } from './order-state-machine';
 
 export interface DisbursementItem {
@@ -290,6 +291,9 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
          WHERE shipment_id = ?`,
         [data.category, data.reason.trim(), actorId, shipmentId],
       );
+
+      // Step 9: nhả xe đã giữ chỗ của đơn
+      await releaseShipmentReservations(db, shipmentId, 'cancelled_operational');
 
       // Cancel active route cleanly (route.plan_status ENUM ends at 'cancelled')
       await db.execute(
@@ -656,6 +660,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
           });
         } catch {
           await db.execute("UPDATE shipment SET status = 'refunded' WHERE shipment_id = ?", [sid]);
+          await releaseShipmentReservations(db, sid, 'refunded');
         }
 
         // Release horses

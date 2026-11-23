@@ -65,4 +65,34 @@ export class CreateRegulationDto {
   @IsOptional()
   @IsString()
   effectiveDate?: string;
+
+  @ApiPropertyOptional({ example: 10, description: 'Số ngày tối đa kể từ ngày cấp (không được cấp sớm hơn N ngày trước khởi hành)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  maxIssueAgeDays?: number;
+
+  @ApiPropertyOptional({ example: 'horse_passport', description: 'Mã danh mục loại giấy tờ (bảng document_type)' })
+  @IsOptional()
+  @IsString()
+  documentTypeCode?: string;
+
+  @ApiPropertyOptional({ example: 'Dữ liệu demo — cần đối chiếu cơ quan thú y', description: 'Căn cứ pháp lý / thông tư quy định' })
+  @IsOptional()
+  @IsString()
+  legalReference?: string;
+
+  @ApiPropertyOptional({ example: true, description: 'Cờ đánh dấu dữ liệu demo cần đối chiếu' })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isDemoData?: boolean;
+
+  @ApiPropertyOptional({ example: true, description: 'Trạng thái hiệu lực của quy định' })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isActive?: boolean;
 }

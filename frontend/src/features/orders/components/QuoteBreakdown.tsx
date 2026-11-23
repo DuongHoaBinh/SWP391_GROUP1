@@ -14,6 +14,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { QuoteResult } from '../quote-api';
+import { VehicleOptionCards, VehicleShortageBlock } from './VehicleOptionCards';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface QuoteBreakdownProps {
@@ -22,6 +23,8 @@ interface QuoteBreakdownProps {
   onRefresh?: () => void;
   selectedOptionCode?: string;
   onSelectOptionCode?: (code: string) => void;
+  /** Step 9: khách bấm chọn nhanh một ngày gợi ý khi thiếu xe */
+  onPickShortageDate?: (date: string) => void;
 }
 
 export function QuoteBreakdown({
@@ -30,6 +33,7 @@ export function QuoteBreakdown({
   onRefresh,
   selectedOptionCode,
   onSelectOptionCode,
+  onPickShortageDate,
 }: QuoteBreakdownProps) {
   const { language } = useLanguage();
   const isEn = language === 'en';
@@ -78,11 +82,21 @@ export function QuoteBreakdown({
 
   if (!quote) return null;
 
+  // Step 9: không có phương án xe → khối "Chưa đủ xe ngày này"
+  if (!quote.options.length && quote.shortage) {
+    return <VehicleShortageBlock shortage={quote.shortage} onPickDate={onPickShortageDate} />;
+  }
+
   const activeOption =
     quote.options.find((o) => o.optionCode === (selectedOptionCode || quote.recommendedOptionCode)) ||
     quote.options[0];
 
   const formatVnd = (num: number) => num.toLocaleString('vi-VN') + ' đ';
+  // Step 9: tổng theo phương án đang chọn (mỗi phương án có cước riêng)
+  const isAllocated = Array.isArray(activeOption?.vehicleIds);
+  const selectedFreightTotal = activeOption?.freight?.total ?? 0;
+  const selectedOutboundTotal = activeOption?.outboundFreightTotal ?? quote.outbound?.freight.total ?? 0;
+  const grandTotal = isAllocated ? selectedFreightTotal + (quote.insurance?.total || 0) : quote.total;
 
   return (
     <div className="rounded-2xl border-2 border-[#A67C2E]/40 bg-[#FAF8F4] overflow-hidden shadow-sm">
@@ -93,9 +107,11 @@ export function QuoteBreakdown({
           <span className="text-xs font-bold uppercase tracking-wider text-[#181A17]">
             {isEn ? 'Official Server Quotation' : 'Báo Giá Tự Động Từ Máy Chủ'}
           </span>
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#E5DDD0] font-mono font-bold text-[#6D7785]">
-            #{quote.quoteId}
-          </span>
+          {quote.quoteId != null && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#E5DDD0] font-mono font-bold text-[#6D7785]">
+              #{quote.quoteId}
+            </span>
+          )}
         </div>
 
         {/* Countdown */}
@@ -139,6 +155,34 @@ export function QuoteBreakdown({
               ? 'Sea transport by cargo vessel is more economical but takes significantly longer and carries higher equine health risks. Air transport is strongly recommended for high-value racehorses.'
               : 'Đường thủy rẻ hơn nhưng lâu hơn và rủi ro sức khỏe cao hơn. Khuyến nghị đường hàng không cho ngựa đua thi đấu.'}
           </div>
+        </div>
+      )}
+
+      {quote.warnings?.includes('NO_PARTNER_DEPOT') && (
+        <div className="mx-5 mt-4 p-3 rounded-xl border border-amber-300 bg-amber-50 text-xs text-amber-900">
+          {isEn
+            ? 'No partner depot within 300 km of the destination: the final road leg is priced with the Vietnam tariff.'
+            : 'Không có trạm đối tác trong 300 km quanh điểm giao: chặng bộ cuối tính theo bảng giá Việt Nam.'}
+        </div>
+      )}
+      {(quote.partnerDepot || quote.jetStallsRequired || quote.vesselPens) && (
+        <div className="mx-5 mt-4 flex flex-wrap gap-2 text-[11px]">
+          {quote.jetStallsRequired ? (
+            <span className="px-2.5 py-1 rounded-lg bg-sky-50 border border-sky-200 text-sky-900 font-semibold">
+              {isEn ? `Needs ${quote.jetStallsRequired} jet stall(s)` : `Cần ${quote.jetStallsRequired} jet stall`}
+            </span>
+          ) : null}
+          {quote.vesselPens ? (
+            <span className="px-2.5 py-1 rounded-lg bg-sky-50 border border-sky-200 text-sky-900 font-semibold">
+              {isEn ? `Needs ${quote.vesselPens} vessel pen(s)` : `Cần ${quote.vesselPens} ô chuồng trên tàu`}
+            </span>
+          ) : null}
+          {quote.partnerDepot && (
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 font-semibold">
+              {isEn ? 'Final leg by partner depot: ' : 'Chặng giao cuối do trạm đối tác: '}
+              {quote.partnerDepot.name} ({quote.partnerDepot.deadheadKm} km)
+            </span>
+          )}
         </div>
       )}
 
@@ -220,6 +264,14 @@ export function QuoteBreakdown({
           </button>
         </div>
 
+        <VehicleOptionCards
+          options={quote.options}
+          selectedOptionCode={selectedOptionCode}
+          recommendedOptionCode={quote.recommendedOptionCode}
+          requiredStallSlots={quote.requiredStallSlots}
+          onSelect={onSelectOptionCode}
+        />
+
         {/* Selected Vehicle Summary */}
         {activeOption?.vehicles && (
           <div className="mb-4 p-3 rounded-xl bg-[#F0EEE8] border border-[#D8CEBE] text-xs flex items-center justify-between">
@@ -267,7 +319,7 @@ export function QuoteBreakdown({
               <div className="flex justify-between text-xs text-[#5B6779]">
                 <span>{isEn ? 'Outbound Freight:' : 'Cước chặng đi:'}</span>
                 <span className="font-mono font-semibold text-[#181A17]">
-                  {formatVnd(quote.outbound.freight.total)}
+                  {formatVnd(selectedOutboundTotal)}
                 </span>
               </div>
               <div className="flex justify-between text-xs text-[#5B6779]">
@@ -312,7 +364,7 @@ export function QuoteBreakdown({
               {isEn ? 'Total Quotation (VND):' : 'Tổng Báo Giá (VNĐ):'}
             </span>
             <span className="text-xl font-black font-mono text-[#A67C2E]">
-              {formatVnd(quote.total)}
+              {formatVnd(grandTotal)}
             </span>
           </div>
         </div>

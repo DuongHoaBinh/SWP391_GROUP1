@@ -87,6 +87,19 @@ export class OrdersService {
       throw new BadRequestException('Ngày khởi hành dự kiến không được nằm trong quá khứ');
     }
 
+    // Step 8: Document lead time validation across country regulations & horse profiles
+    if (!(context as any)?.isLegacySeed && this.documentsService && typeof this.documentsService.assertDocumentLeadTime === 'function') {
+      await this.documentsService.assertDocumentLeadTime({
+        departDate: requestedDate,
+        destinationLocation: context?.destinationLocation,
+        originLocation: context?.originLocation,
+        transportMode: (context as any)?.transportMode ?? null,
+        transportationType: context?.transportationType ?? null,
+        bookingType: context?.bookingType,
+        horseIds: (context as any)?.horseIds,
+      });
+    }
+
     const policy = await this.getOrderCutoffPolicy(context || {});
     const now = new Date();
     const earliestUtc =
@@ -120,7 +133,9 @@ export class OrdersService {
       originLocation: dto.originLocation,
       bookingType: dto.bookingType,
       transportationType: dto.transportationType,
-    });
+      isLegacySeed: (dto as any).isLegacySeed,
+      horseIds: dto.horses?.map((h: any) => h.horseId).filter(Boolean),
+    } as any);
     if (!dto.quoteId && !(dto as any).isLegacySeed) {
       throw new BadRequestException('Vui lòng tạo báo giá trước khi đặt đơn');
     }

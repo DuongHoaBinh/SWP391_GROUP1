@@ -91,12 +91,18 @@ CREATE TABLE regulation (
   transport_mode ENUM('road','air','sea','both') NOT NULL DEFAULT 'both',
   doc_tier ENUM('A','B') NOT NULL DEFAULT 'A',
   lead_time_days INT NOT NULL DEFAULT 2,
+  max_issue_age_days INT NULL,
   requires_authority_approval BOOLEAN NOT NULL DEFAULT FALSE,
   min_validity_buffer_hours INT NOT NULL DEFAULT 24,
   document_type VARCHAR(100) NOT NULL,
+  document_type_code VARCHAR(50) NULL,
   description TEXT,
   effective_date DATE,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  legal_reference VARCHAR(255) NULL,
+  is_demo_data BOOLEAN NOT NULL DEFAULT TRUE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_reg_document_type FOREIGN KEY (document_type_code) REFERENCES document_type(code)
 ) ENGINE=InnoDB;
 
 CREATE TABLE document_type (
@@ -137,12 +143,37 @@ CREATE TABLE transport_document (
   reviewer_notes VARCHAR(500),
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
   superseded_by_document_id INT NULL,
+  reviewed_by INT NULL,
+  reviewed_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_doc_horse FOREIGN KEY (horse_id) REFERENCES horse(horse_id),
   CONSTRAINT fk_doc_regulation FOREIGN KEY (regulation_id) REFERENCES regulation(regulation_id),
   CONSTRAINT fk_doc_document_type FOREIGN KEY (document_type_code) REFERENCES document_type(code),
-  CONSTRAINT fk_doc_uploader FOREIGN KEY (uploaded_by) REFERENCES `user`(user_id)
+  CONSTRAINT fk_doc_uploader FOREIGN KEY (uploaded_by) REFERENCES `user`(user_id),
+  CONSTRAINT fk_doc_reviewer FOREIGN KEY (reviewed_by) REFERENCES `user`(user_id)
 ) ENGINE=InnoDB;
+
+CREATE TABLE document_review_log (
+  review_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  document_id INT NOT NULL,
+  from_status VARCHAR(20) NOT NULL,
+  to_status VARCHAR(20) NOT NULL,
+  reviewer_id INT NULL,
+  reason TEXT NULL,
+  checked_fields_json JSON NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_drl_document FOREIGN KEY (document_id) REFERENCES transport_document(document_id) ON DELETE CASCADE,
+  CONSTRAINT fk_drl_reviewer FOREIGN KEY (reviewer_id) REFERENCES `user`(user_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE document_expiry_notice (
+  notice_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  document_id INT NOT NULL,
+  days_before INT NOT NULL,
+  sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_doc_notice (document_id, days_before),
+  CONSTRAINT fk_den_document FOREIGN KEY (document_id) REFERENCES transport_document(document_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE document_approval (
   approval_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -223,6 +254,11 @@ CREATE TABLE shipment (
   cancelled_by INT NULL,
   cancelled_at DATETIME NULL,
   payment_overdue BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Step 9: phương án xe khách chọn, giờ đón đã chốt (sau khi dời giờ cấm), phụ phí đêm
+  allocation_option_code VARCHAR(30) NULL,
+  allocation_snapshot JSON NULL,
+  pickup_at DATETIME NULL,
+  night_surcharge_applied BOOLEAN NOT NULL DEFAULT FALSE,
   sla_escalation_status VARCHAR(40) NULL,
   sla_fallback_option VARCHAR(40) NULL,
   sla_fallback_notes TEXT NULL,
@@ -666,6 +702,8 @@ CREATE TABLE IF NOT EXISTS route_leg (
   direction ENUM('outbound', 'return') NOT NULL DEFAULT 'outbound',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   road_trip_id INT NULL,
+  jet_stall_count INT NULL,
+  allocation_override_reason VARCHAR(255) NULL,
   INDEX idx_route_leg_road_trip (road_trip_id),
   CONSTRAINT fk_leg_route FOREIGN KEY (route_id) REFERENCES route(route_id) ON DELETE CASCADE,
   CONSTRAINT fk_leg_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicle(vehicle_id) ON DELETE SET NULL,
@@ -1166,3 +1204,96 @@ CREATE TABLE IF NOT EXISTS shipment_status_history (
   CONSTRAINT fk_ssh_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
   INDEX idx_ssh_shipment (shipment_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================
+-- STEP 9: GIỮ CHỖ XE, GIỜ CẤM XE TẢI NỘI ĐÔ, CẤU HÌNH HỆ THỐNG, BẢNG GIÁ ĐỐI TÁC (migration 036)
+-- Dữ liệu giờ cấm và bảng giá đối tác là dữ liệu demo, cần đối chiếu văn bản gốc.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS vehicle_reservation (
+  reservation_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  vehicle_id INT NOT NULL,
+  direction ENUM('outbound','return') NOT NULL DEFAULT 'outbound',
+  start_at DATETIME NOT NULL,
+  end_at DATETIME NOT NULL,
+  status ENUM('active','released','consumed') NOT NULL DEFAULT 'active',
+  released_reason VARCHAR(50) NULL,
+  created_by INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  released_at DATETIME NULL,
+  CONSTRAINT fk_vr_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_vr_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicle(vehicle_id),
+  INDEX idx_vr_vehicle_time (vehicle_id, status, start_at, end_at),
+  INDEX idx_vr_shipment (shipment_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 4. Giờ cấm xe tải nội đô (vùng tròn quanh trung tâm). Giờ là giờ địa phương Asia/Ho_Chi_Minh.
+--    banned_from > banned_to nghĩa là khung cấm qua nửa đêm. days_of_week: 1 = Thứ 2 ... 7 = Chủ nhật (ISO).
+CREATE TABLE IF NOT EXISTS city_truck_restriction (
+  restriction_id INT AUTO_INCREMENT PRIMARY KEY,
+  city VARCHAR(100) NOT NULL,
+  center_lat DECIMAL(10,6) NOT NULL,
+  center_lng DECIMAL(10,6) NOT NULL,
+  radius_km DECIMAL(6,2) NOT NULL,
+  applies_to_heavy_truck BOOLEAN NOT NULL DEFAULT TRUE,
+  banned_from TIME NOT NULL,
+  banned_to TIME NOT NULL,
+  days_of_week VARCHAR(20) NOT NULL DEFAULT '1,2,3,4,5,6,7',
+  legal_reference VARCHAR(255) NOT NULL,
+  effective_from DATE NOT NULL,
+  effective_to DATE NULL,
+  is_demo_data BOOLEAN NOT NULL DEFAULT TRUE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_city_restriction (city, banned_from, effective_from)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS city_restriction_exception (
+  exception_id INT AUTO_INCREMENT PRIMARY KEY,
+  city VARCHAR(100) NOT NULL,
+  exception_date DATE NOT NULL,
+  banned_from TIME NOT NULL,
+  banned_to TIME NOT NULL,
+  note VARCHAR(255) NULL,
+  UNIQUE KEY uq_city_exception (city, exception_date, banned_from)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO city_truck_restriction
+  (city, center_lat, center_lng, radius_km, applies_to_heavy_truck, banned_from, banned_to, days_of_week, legal_reference, effective_from, is_demo_data)
+VALUES
+  ('Hà Nội', 21.028500, 105.854200, 10.00, TRUE, '06:00:00', '21:00:00', '1,2,3,4,5,6,7',
+   'QĐ 01/2026/QĐ-UBND Hà Nội (hiệu lực 15/01/2026) — dữ liệu demo, cần đối chiếu văn bản gốc', '2026-01-15', TRUE),
+  ('Hồ Chí Minh', 10.776900, 106.700900, 12.00, TRUE, '06:00:00', '22:00:00', '1,2,3,4,5,6,7',
+   'Quy định cấm xe tải nặng nội đô TP.HCM 6h–22h — dữ liệu demo, cần đối chiếu Sở GTVT', '2025-01-01', TRUE);
+
+INSERT IGNORE INTO city_restriction_exception (city, exception_date, banned_from, banned_to, note) VALUES
+  ('Hồ Chí Minh', '2026-04-30', '04:00:00', '11:30:00', 'Lịch cấm dịp lễ 30/4 (demo)');
+
+-- 5. Cấu hình hệ thống dùng chung (Step 10 dùng tiếp)
+CREATE TABLE IF NOT EXISTS system_setting (
+  setting_key VARCHAR(100) PRIMARY KEY,
+  value_json JSON NOT NULL,
+  updated_by INT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- B4: EU Regulation 1/2005 làm tham chiếu
+INSERT IGNORE INTO system_setting (setting_key, value_json) VALUES
+  ('journey.rules', '{"maxDriveHoursBeforeRest": 8, "restMinutes": 60, "maxJourneyHours": 24, "mandatoryRestHours": 24, "nightWindow": {"from": "22:00", "to": "06:00"}}');
+
+-- 6. Bảng giá đường bộ của trạm đối tác nước ngoài (region = PARTNER), demo
+INSERT IGNORE INTO pricing_tariff (mode, region, version, params, effective_from, is_active, notes, created_by) VALUES
+('road', 'PARTNER', 1, '{
+  "openingFeePerVehicle": 3000000,
+  "distanceTiers": [
+    { "upToKm": 100, "pricePerKm": 54000 },
+    { "upToKm": 500, "pricePerKm": 42000 },
+    { "upToKm": null, "pricePerKm": 33600 }
+  ],
+  "careFeePerHorse": 500000,
+  "deadheadPerKm": 18000,
+  "nightSurchargePerVehicle": 1000000,
+  "borderCrossingFee": 3000000,
+  "roundingUnit": 1000,
+  "averageSpeedKmh": 50
+}', CURRENT_TIMESTAMP, TRUE, 'Bảng giá đối tác nước ngoài (demo)', NULL);

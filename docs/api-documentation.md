@@ -581,6 +581,84 @@ Toàn bộ phiên bản (gồm bản đã lưu trữ) của cùng loại giấy 
 #### `GET /horses/:horseId/documents/:docId/file`
 Stream tệp, có kiểm tra giấy tờ thuộc đúng ngựa và đúng chủ sở hữu.
 
+### Compliance & Document Requirements (Step 8, review 11/2026)
+
+#### `GET /compliance/requirements`
+Lấy danh sách yêu cầu giấy tờ động theo điểm đến, phương thức và ngựa được chọn. Khách hàng chỉ truy cập được yêu cầu đối với ngựa thuộc sở hữu của mình (`403` nếu có ngựa của người khác).
+- **Query params:**
+  - `country` (string, bắt buộc): quốc gia đến (VD: `Singapore`, `Cambodia`, `Vietnam`).
+  - `departDate` (string, `YYYY-MM-DD`, bắt buộc): ngày khởi hành dự kiến.
+  - `returnDate` (string, `YYYY-MM-DD`, tùy chọn): ngày kết thúc chuyến về nếu khứ hồi.
+  - `mode` (`road` | `air` | `sea`, tùy chọn): phương thức vận chuyển.
+  - `horseIds` (string dạng csv hoặc mảng, tùy chọn): danh sách mã ngựa (VD: `101,102`).
+  - `borderGate` (string, tùy chọn): cửa khẩu hoặc sân bay dự kiến.
+- **Response:**
+  ```json
+  {
+    "country": "Singapore",
+    "mode": "air",
+    "usingGlobalBaseline": false,
+    "departureDate": "2026-12-25",
+    "tripEndDate": "2026-12-25",
+    "earliestFeasibleDeparture": "2026-12-08",
+    "isDepartureFeasible": true,
+    "horses": [
+      {
+        "horseId": 101,
+        "horseName": "Storm",
+        "microchipNo": "CHIP-101",
+        "passportNo": "PASS-101",
+        "requirements": [
+          {
+            "regulationId": 1,
+            "documentTypeCode": "health_certificate",
+            "documentTypeName": "Giấy chứng nhận sức khỏe",
+            "tier": "A",
+            "leadTimeDays": 7,
+            "maxIssueAgeDays": 10,
+            "minValidityBufferHours": 48,
+            "status": "reusable",
+            "canSubmitLater": false,
+            "requiresAuthorityApproval": false,
+            "reasonVi": "Đã có giấy tờ hợp lệ, còn hạn đến hết chuyến"
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "reusable": 1,
+      "pendingReview": 0,
+      "missing": 0,
+      "expired": 0,
+      "blocking": []
+    }
+  }
+  ```
+
+#### `GET /compliance/documents/:id/history`
+Lấy lịch sử các lần kiểm duyệt (audit logs) của một tài liệu. Trả về mảng `document_review_log`: `reviewId`, `documentId`, `reviewedBy`, `reviewerRole`, `oldStatus`, `newStatus`, `reason`, `checklistSnapshot`, `createdAt`.
+
+#### `POST /compliance/run-expiry-sweep` (Logistics Manager / Admin)
+Chạy thủ công job quét giấy tờ hết hạn: tự động chuyển giấy tờ quá hạn sang `expired`, gửi cảnh báo nhắc hạn 30/7/1 ngày, hạ trạng thái các đơn `ready_to_depart` có hồ sơ Tầng A quá hạn về `planning`.
+
+#### `PATCH /documents/:id/review` (Logistics Manager / Admin)
+Kiểm duyệt hồ sơ với danh mục đối chiếu 4 điểm (`microchipMatches`, `passportMatches`, `issueDateOk`, `expiryOk`).
+- **Body:**
+```json
+{
+  "status": "approved",
+  "notes": "Hồ sơ hợp lệ và đối chiếu trùng khớp",
+  "checklist": {
+    "microchipMatches": true,
+    "passportMatches": true,
+    "issueDateOk": true,
+    "expiryOk": true
+  }
+}
+```
+- Nếu `status = "rejected"`, `notes` bắt buộc có ít nhất 10 ký tự.
+- Ghi nhật ký kiểm toán vào `document_review_log`.
+
 ### `PUT /horses/:id`
 Updates details of a racehorse profile owned by the customer.
 
@@ -982,3 +1060,73 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
 
 - **Migrations:** Run `024_wave0_schema_hotfixes.sql`, `025_wave1_g1_g2_reports_compliance.sql`, `026_wave2_g3_g4_ops_refunds_sla_vitals.sql`, and `027_wave3_flow5_incidents_and_flow6_handover.sql` (or `npm run migrate:all` in `backend/`).
 
+## Step 9 — Phân bổ xe, giữ chỗ, giờ cấm đô thị, tham số nghỉ (Migration 036)
+
+### `POST /quotes` (bổ sung)
+
+Request thêm `pickupAt?: string` — `"YYYY-MM-DDTHH:mm"` (hiểu là giờ Việt Nam) hoặc ISO có múi giờ. Thiếu thì mặc định 08:00 giờ Việt Nam của `departureDate`. Giờ ở quá khứ → `400`.
+
+Response bổ sung: `requestedPickupAt`, `pickupAt` (của phương án đề xuất), `jetStallsRequired` (air), `vesselPens` (sea vessel), `partnerDepot`, `shortage`, và mỗi phần tử `options[]`:
+
+```json
+{
+  "optionCode": "cheapest",
+  "label": "Rẻ nhất",
+  "recommended": true,
+  "vehicles": [{ "classCode": "truck_4", "className": "Xe tải ngựa 4 chỗ", "count": 1, "capacity": 4, "depotId": 1, "depotName": "Trạm Thủ Đức", "deadheadKm": 20, "isHeavyTruck": true, "trips": 1, "vehicleIds": [12], "plates": ["51C-123"] }],
+  "vehicleIds": [12],
+  "extraDays": 0,
+  "requestedPickupAt": "2026-12-10T02:00:00.000Z",
+  "pickupAt": "2026-12-10T15:00:00.000Z",
+  "pickupShifted": true,
+  "shiftReasonVi": "Xe tải nặng không được vào nội đô Hồ Chí Minh trong giờ cấm; dời sang 22:00 ngày 2026-12-10 (giờ Việt Nam).",
+  "nightSurcharge": true,
+  "deliveryAt": "2026-12-11T00:00:00.000Z",
+  "etaHours": 9,
+  "restStops": 1,
+  "mandatoryRests": 0,
+  "reservationWindow": { "start": "…", "end": "…" },
+  "warnings": ["PICKUP_SHIFTED_CITY_BAN"],
+  "outboundFreightTotal": 19750000,
+  "freight": { "lines": [], "subtotal": 19750000, "rounding": 0, "total": 19750000 }
+}
+```
+
+`optionCode`: `cheapest | fewest_vehicles | earliest | split_days | two_depots`. Khứ hồi: `freight.total` của mỗi phương án đã cộng cước chặng về (giảm 10%). Cảnh báo mới: `PICKUP_SHIFTED_CITY_BAN`, `DELIVERY_SHIFTED_CITY_BAN`, `NO_PARTNER_DEPOT`, `NO_PARTNER_TARIFF`, `VEHICLE_SHORTAGE`, `SPLIT_DAYS_DELAYED_DELIVERY`.
+
+Không có phương án: `200` với `{ "quoteId": null, "options": [], "recommendedOptionCode": null, "shortage": { "slots": 3, "suggestedDates": ["2026-12-12", "2026-12-13", "2026-12-14"] } }`.
+
+### `POST /orders` (bổ sung)
+
+- `optionCode` phải thuộc `options[]` của báo giá (báo giá có phân bổ xe), sai → `400`.
+- Giữ chỗ các xe của phương án trong transaction tạo đơn; xe đã bị đơn khác giữ → `409` "Xe trong phương án đã được đặt, vui lòng báo giá lại".
+- Ghi `shipment.allocation_option_code`, `allocation_snapshot`, `pickup_at`, `night_surcharge_applied`.
+
+### Giờ cấm xe tải nội đô
+
+| Method | Path | Quyền | Mô tả |
+|---|---|---|---|
+| GET | `/fleet/city-restrictions` | Manager, Admin | `{ rules, exceptions, disclaimerVi }` |
+| GET | `/fleet/city-restrictions/check?lat=&lng=&date=YYYY-MM-DD&heavy=true` | Mọi user đã đăng nhập | `{ restricted, cities, allowedWindows: [{from,to}], holidayExceptions, legalReferences, isDemoData, messageVi }` |
+| POST | `/fleet/city-restrictions` | Manager, Admin | Tạo quy tắc. `bannedFrom/bannedTo` dạng `HH:mm` (to < from = qua nửa đêm), `radiusKm` 1–50, `legalReference` bắt buộc, `daysOfWeek` ISO 1–7 |
+| PATCH | `/fleet/city-restrictions/:id` | Manager, Admin | Sửa quy tắc (tắt bằng `isActive: false`). `404` nếu không có |
+| POST | `/fleet/city-restrictions/exceptions` | Manager, Admin | Ngoại lệ ngày lễ `{ city, exceptionDate, bannedFrom, bannedTo, note }`; trùng `(city, date, bannedFrom)` → `409` |
+| DELETE | `/fleet/city-restrictions/exceptions/:id` | Manager, Admin | Xóa ngoại lệ |
+
+### Tham số nghỉ dọc đường (B4)
+
+| Method | Path | Quyền | Mô tả |
+|---|---|---|---|
+| GET | `/system-settings/journey-rules` | Mọi user đã đăng nhập | `{ maxDriveHoursBeforeRest, restMinutes, maxJourneyHours, mandatoryRestHours, nightWindow: { from, to } }` |
+| PATCH | `/system-settings/journey-rules` | Manager, Admin | Cập nhật (validate khoảng giá trị, `HH:mm`) |
+
+### Xe đã giữ chỗ của đơn
+
+| Method | Path | Quyền | Mô tả |
+|---|---|---|---|
+| GET | `/fleet/shipments/:id/reservations` | Đã đăng nhập; Customer chỉ đơn của mình (`403`) | `{ optionCode, pickupAt, nightSurchargeApplied, snapshot, reservations[] }` |
+| POST | `/fleet/shipments/:id/reservations/swap` | Manager, Admin | `{ fromVehicleId, toVehicleId, reason }` — lý do ≥ 5 ký tự; tổng sức chứa phải đủ; xe mới bận → `409`; đơn đã kết thúc/đang chạy → `409` |
+
+### `POST /routes/plan/:shipmentId/build-detail` (bổ sung)
+
+`legs[].allocationOverrideReason` bắt buộc (≥ 5 ký tự) khi chặng bộ dùng xe khác nhóm xe đã giữ chỗ của đơn, nếu không → `400`. Chặng bay được server ghi `jet_stall_count`. Xe đang được đơn khác giữ chỗ trùng khung giờ → `409`.

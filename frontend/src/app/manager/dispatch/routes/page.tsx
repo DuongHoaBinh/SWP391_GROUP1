@@ -35,6 +35,7 @@ import { AddressAutocompleteInput } from '@/components/ui/AddressAutocompleteInp
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { bookingName, type BookingType } from '@/features/orders/booking-policy';
 import { RoadTripPicker, LegScheduleFields } from '@/features/routes/components/RoadTripPicker';
+import { ReservedVehiclesPanel } from '@/features/fleet/components/ReservedVehiclesPanel';
 
 function MapLoadingFallback() {
   const { language } = useLanguage();
@@ -462,7 +463,13 @@ function RoutePlanningContent() {
       return !isInTransport && v.status !== 'maintenance';
     };
 
+    // Step 9: xe đã giữ chỗ cho chính đơn này (phương án khách chọn) được ưu tiên, xe lớn nhất dẫn đoàn
+    const reservedForOrder = roadFleet
+      .filter((v) => Boolean(v.assignedTripCode) && v.assignedTripCode === order?.requestCode)
+      .sort((a, b) => Number(b.capacity || 0) - Number(a.capacity || 0));
+
     const chosen =
+      reservedForOrder[0] ||
       roadFleet.find(
         (v) =>
           isUsableForOrder(v) &&
@@ -2209,6 +2216,8 @@ function RoutePlanningContent() {
                     }`
                   : ''}
               </p>
+              {/* Step 9: phương án xe khách đã chọn + xe đang giữ chỗ, đổi xe bắt buộc lý do */}
+              <ReservedVehiclesPanel shipmentId={selectedPlanningOrder.id} onChanged={() => void loadMasterDataAndOrders()} />
               {/* IN-TRANSIT & INCIDENT & APPROVAL & COMPLETED BANNERS */}
               {isCompleted ? (
                 <div className="p-4 bg-slate-100 border border-slate-300 rounded-xl flex items-start gap-3 text-slate-800 shadow-sm">
@@ -2677,7 +2686,7 @@ function RoutePlanningContent() {
                                           v.code === leg.vehiclePlate ||
                                           (Boolean(v.assignedTripCode) && v.assignedTripCode === selectedPlanningOrder?.requestCode);
                                         return (
-                                          <option key={v.id} value={v.code} disabled={Boolean(isUnderCapacity)}>
+                                          <option key={v.id} value={v.code} disabled={Boolean(isUnderCapacity) && !isCurrentTrip}>
                                             {v.code} — {translateVehicleType(v.type)} ({v.capacity} stall, {v.location}){' '}
                                             {isUnderCapacity
                                               ? `— ⚠️ ${language === 'en' ? `Insufficient stalls (${v.capacity}/${requiredStalls})` : `Không đủ chuồng (${v.capacity}/${requiredStalls} ngựa)`}`
@@ -2690,6 +2699,31 @@ function RoutePlanningContent() {
                                     })()}
                                   </optgroup>
                                 </select>
+                                {(() => {
+                                  // Step 9: đơn có xe đã giữ chỗ mà chặng chọn xe khác → bắt buộc lý do
+                                  const reservedCodes = vehicles
+                                    .filter((v) => Boolean(v.assignedTripCode) && v.assignedTripCode === selectedPlanningOrder?.requestCode)
+                                    .map((v) => v.code);
+                                  const needsReason = Boolean(leg.vehicleId) && reservedCodes.length > 0 && !reservedCodes.includes(leg.vehiclePlate ?? '');
+                                  if (!needsReason) return null;
+                                  return (
+                                    <div className="mt-1.5">
+                                      <label htmlFor={`leg-override-${idx}`} className="block text-[11px] font-semibold text-[#8B6724] mb-0.5">
+                                        {language === 'en' ? 'Reason for using a different vehicle than reserved *' : 'Lý do dùng xe khác xe đã giữ chỗ *'}
+                                      </label>
+                                      <input
+                                        id={`leg-override-${idx}`}
+                                        value={leg.allocationOverrideReason ?? ''}
+                                        maxLength={255}
+                                        onChange={(e) =>
+                                          setLegs((prev) => prev.map((item, i) => (i === idx ? { ...item, allocationOverrideReason: e.target.value } : item)))
+                                        }
+                                        className="w-full px-2.5 py-1.5 rounded-lg border border-[#DFCA9A] bg-white text-xs"
+                                        placeholder={language === 'en' ? 'e.g. reserved vehicle broke down' : 'VD: xe đã giữ bị hỏng đột xuất'}
+                                      />
+                                    </div>
+                                  );
+                                })()}
                                 {leg.vehiclePlate && (leg.vehiclePlate.includes('đến đón') || leg.vehiclePlate.includes('đến rước') || leg.vehiclePlate.includes('pickup') || leg.vehiclePlate.includes('Consignee')) && (
                                   <p className="mt-1 text-[11px] text-[#181A17] bg-[#FAF8F4] px-2 py-1 rounded border border-[#EAE5DA]">
                                     {t('coordinator.routes.overseasNotice', 'ℹ️ Chặng nước ngoài: Bên nhận tự điều xe đến đón tại sân bay (không yêu cầu xe nội bộ).')}

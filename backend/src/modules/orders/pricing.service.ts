@@ -21,6 +21,29 @@ import {
   VehicleOptionInput,
 } from './pricing-policy';
 
+export interface QuoteLeg {
+  key: string;
+  from: string;
+  to: string;
+  distanceKm: number;
+  durationHours: number;
+  source: string;
+}
+
+export interface RouteContext {
+  legs: QuoteLeg[];
+  requiredStallSlots: number;
+  freightBase: Omit<FreightInput, 'vehicles'>;
+  /** Sân bay/cảng đến (air/sea) để tìm trạm đối tác gần điểm giao */
+  arrivalHub: GeoPoint | null;
+  tariffs: {
+    road: RoadTariff & { version?: number };
+    air?: AirTariff & { version?: number };
+    sea?: SeaTariff & { version?: number };
+    partnerRoad?: RoadTariff & { version?: number };
+  };
+}
+
 @Injectable()
 export class PricingService {
   constructor(
@@ -116,17 +139,34 @@ export class PricingService {
   }
 
   /**
-   * Tính thử nghiệm báo giá (preview) cho Manager.
+   * Tính thử nghiệm báo giá (preview) cho Manager (phương án xe mặc định theo loại xe, không xét xe rảnh).
    */
   async previewPricing(
     dto: PreviewPricingDto,
   ): Promise<
     FreightResult & {
-      legs: Array<{ key: string; from: string; to: string; distanceKm: number; durationHours: number; source: string }>;
+      legs: QuoteLeg[];
       requiredStallSlots: number;
       vehicles: VehicleOptionInput[];
     }
   > {
+    const ctx = await this.buildRouteContext(dto);
+    const vehicleRes = await this.resolveDefaultVehicleOption(dto.sample.origin, ctx.requiredStallSlots);
+    const calcResult = calculateFreight({ ...ctx.freightBase, vehicles: vehicleRes.vehicles }, ctx.tariffs);
+    return {
+      ...calcResult,
+      warnings: [...calcResult.warnings, ...vehicleRes.warnings],
+      legs: ctx.legs,
+      requiredStallSlots: ctx.requiredStallSlots,
+      vehicles: vehicleRes.vehicles,
+    };
+  }
+
+  /**
+   * Bảng giá + các chặng (khoảng cách, thời gian) + đầu vào tính cước chưa gắn xe.
+   * Dùng chung cho preview và báo giá có phân bổ xe (Step 9).
+   */
+  async buildRouteContext(dto: PreviewPricingDto): Promise<RouteContext> {
     const { mode, seaMode, sample } = dto;
     const origin = sample.origin;
     const destination = sample.destination;
@@ -160,9 +200,6 @@ export class PricingService {
       })),
     );
 
-    // 3. Phương án xe
-    const vehicleRes = await this.resolveDefaultVehicleOption(origin, requiredStallSlots);
-
     const legs: Array<{
       key: string;
       from: string;
@@ -177,7 +214,8 @@ export class PricingService {
         ? 1
         : 0;
 
-    let freightInput: FreightInput;
+    let freightInput: Omit<FreightInput, 'vehicles'>;
+    let arrivalHub: GeoPoint | null = null;
 
     if (mode === 'road') {
       const roadDist = await this.distanceService.getRoadDistance(origin, destination, roadTariff.averageSpeedKmh);
@@ -197,7 +235,6 @@ export class PricingService {
           quantity: h.quantity || 1,
           requiresPrivateStall: Boolean(h.requiresPrivateStall),
         })),
-        vehicles: vehicleRes.vehicles,
         roadLegs: [
           {
             key: 'main',
@@ -277,6 +314,7 @@ export class PricingService {
         source: legFromHub.source,
       });
 
+      arrivalHub = { lat: arrAirport.lat, lng: arrAirport.lng };
       freightInput = {
         mode: 'air',
         horses: sample.horses.map((h, i) => ({
@@ -284,7 +322,6 @@ export class PricingService {
           quantity: h.quantity || 1,
           requiresPrivateStall: Boolean(h.requiresPrivateStall),
         })),
-        vehicles: vehicleRes.vehicles,
         roadLegs: [
           { key: 'to_hub', distanceKm: legToHub.distanceKm, borderCrossings: 0 },
           { key: 'from_hub', distanceKm: legFromHub.distanceKm, borderCrossings: 0 },
@@ -385,6 +422,7 @@ export class PricingService {
         source: legFromPort.source,
       });
 
+      arrivalHub = { lat: arrivalPort.lat, lng: arrivalPort.lng };
       freightInput = {
         mode: 'sea',
         seaMode,
@@ -393,7 +431,6 @@ export class PricingService {
           quantity: h.quantity || 1,
           requiresPrivateStall: Boolean(h.requiresPrivateStall),
         })),
-        vehicles: vehicleRes.vehicles,
         roadLegs: [
           { key: 'to_hub', distanceKm: legToPort.distanceKm, borderCrossings: 0 },
           { key: 'from_hub', distanceKm: legFromPort.distanceKm, borderCrossings: 0 },
@@ -402,20 +439,16 @@ export class PricingService {
       };
     }
 
-    const calcResult = calculateFreight(freightInput, {
-      road: { ...roadTariff, version: activeTariffs.road?.version || 1 },
-      air: airTariff ? { ...airTariff, version: activeTariffs.air?.version || 1 } : undefined,
-      sea: seaTariff ? { ...seaTariff, version: activeTariffs.sea?.version || 1 } : undefined,
-    });
-
-    const combinedWarnings = [...calcResult.warnings, ...vehicleRes.warnings];
-
     return {
-      ...calcResult,
-      warnings: combinedWarnings,
       legs,
       requiredStallSlots,
-      vehicles: vehicleRes.vehicles,
+      freightBase: freightInput,
+      arrivalHub,
+      tariffs: {
+        road: { ...roadTariff, version: activeTariffs.road?.version || 1 },
+        air: airTariff ? { ...airTariff, version: activeTariffs.air?.version || 1 } : undefined,
+        sea: seaTariff ? { ...seaTariff, version: activeTariffs.sea?.version || 1 } : undefined,
+      },
     };
   }
 }

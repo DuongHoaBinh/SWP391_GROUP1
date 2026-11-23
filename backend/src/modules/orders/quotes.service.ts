@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Optional,
   BadRequestException,
   ForbiddenException,
   NotFoundException,
@@ -9,15 +10,20 @@ import { CreateQuoteDto } from './dto/create-quote.dto';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { PricingService } from './pricing.service';
+import { DocumentsService } from '../documents/documents.service';
 import { haversineKm } from '../routes/geo-policy';
 import { calculateInsurance, totalInsuranceFee } from './insurance-policy';
 import { currentReturnPolicy } from './return-policy';
+import { AllocationQuoteResult, QuoteAllocationService } from './quote-allocation.service';
+import { localToUtc } from '../fleet/city-restriction-policy';
 
 @Injectable()
 export class QuotesService {
   constructor(
     private readonly quotesStore: QuotesStore,
     private readonly pricingService: PricingService,
+    private readonly documentsService: DocumentsService,
+    @Optional() private readonly allocationService?: QuoteAllocationService,
   ) {}
 
   async createQuote(user: AuthenticatedUser, dto: CreateQuoteDto) {
@@ -40,6 +46,18 @@ export class QuotesService {
 
     // 3. Kiểm tra ngày khởi hành không ở quá khứ (theo múi giờ VN UTC+7)
     this.validateDepartureDate(dto.departureDate);
+    const pickupAt = this.resolvePickupAt(dto);
+
+    // 3.5. Kiểm tra thời gian chuẩn bị hồ sơ kiểm dịch (Step 8 lead time)
+    if (this.documentsService && typeof this.documentsService.assertDocumentLeadTime === 'function') {
+      await this.documentsService.assertDocumentLeadTime({
+        departDate: dto.departureDate,
+        destinationLocation: dto.destination.address,
+        originLocation: dto.origin.address,
+        transportMode: dto.seaMode ? 'sea' : 'road',
+        horseIds: dto.horses?.map((h) => h.horseId).filter((id): id is number => typeof id === 'number' && id > 0),
+      });
+    }
 
     // 4. Kiểm tra danh sách ngựa
     if (!dto.horses || !dto.horses.length) {
@@ -120,8 +138,60 @@ export class QuotesService {
       throw new BadRequestException('Vui lòng chọn hình thức đường thủy (ferry hoặc vessel)');
     }
 
-    // 6. Tính toán cước chặng đi qua PricingService
-    const preview = await this.pricingService.previewPricing({
+    // 6. Tính toán cước chặng đi. Step 9: có QuoteAllocationService thì phân bổ xe thật (tối đa 3 phương án)
+    let allocation: AllocationQuoteResult | null = null;
+    if (this.allocationService) {
+      allocation = await this.allocationService.allocate({
+        mode: dto.transportMode,
+        seaMode: dto.seaMode,
+        origin: dto.origin,
+        destination: dto.destination,
+        horses: horseSnapshots.map((h) => ({ quantity: h.quantity, requiresPrivateStall: h.requiresPrivateStall })),
+        pickupAt,
+      });
+      if (!allocation.options.length) {
+        // Không có phương án: trả 200 với options rỗng + ngày gợi ý, không lưu báo giá
+        return {
+          quoteId: null,
+          transportMode: dto.transportMode,
+          seaMode: dto.seaMode ?? null,
+          tripType: dto.tripType ?? 'one_way',
+          legs: allocation.context.legs,
+          requiredStallSlots: allocation.context.requiredStallSlots,
+          requestedPickupAt: pickupAt.toISOString(),
+          options: [],
+          recommendedOptionCode: null,
+          shortage: allocation.shortage,
+          jetStallsRequired: allocation.jetStallsRequired,
+          vesselPens: allocation.vesselPens,
+          warnings: allocation.warnings,
+        } as any;
+      }
+    }
+    const recommendedAlloc = allocation
+      ? allocation.options.find((o) => o.optionCode === allocation!.recommendedOptionCode) ?? allocation.options[0]
+      : null;
+    const preview = allocation && recommendedAlloc
+      ? {
+          ...recommendedAlloc.freight,
+          legs: allocation.context.legs,
+          requiredStallSlots: allocation.context.requiredStallSlots,
+          vehicles: recommendedAlloc.vehicles.map((v) => ({
+            classCode: v.classCode,
+            className: v.className,
+            priceCoefficient: 1,
+            capacity: v.capacity,
+            deadheadKm: v.deadheadKm,
+          })),
+          tariffVersions: {
+            road: allocation.context.tariffs.road.version ?? 1,
+            ...(allocation.context.tariffs.air ? { air: allocation.context.tariffs.air.version ?? 1 } : {}),
+            ...(allocation.context.tariffs.sea ? { sea: allocation.context.tariffs.sea.version ?? 1 } : {}),
+            ...(allocation.context.tariffs.partnerRoad ? { partnerRoad: allocation.context.tariffs.partnerRoad.version ?? 1 } : {}),
+          } as Record<string, number>,
+          warnings: [...allocation.warnings, ...recommendedAlloc.warnings],
+        }
+      : await this.pricingService.previewPricing({
       mode: dto.transportMode,
       seaMode: dto.seaMode,
       sample: {
@@ -231,7 +301,20 @@ export class QuotesService {
         : null,
       returnFreight: isRoundTrip ? discountedReturnFreight : 0,
       returnInsuranceFee: isRoundTrip ? returnInsuranceTotal : 0,
-      options: [
+      requestedPickupAt: pickupAt.toISOString(),
+      pickupAt: recommendedAlloc?.pickupAt ?? pickupAt.toISOString(),
+      jetStallsRequired: allocation?.jetStallsRequired ?? null,
+      vesselPens: allocation?.vesselPens ?? null,
+      partnerDepot: allocation?.partnerDepot ?? null,
+      shortage: null,
+      options: allocation
+        ? allocation.options.map((o) => ({
+            ...o,
+            recommended: o.optionCode === recommendedAlloc?.optionCode,
+            outboundFreightTotal: o.freight.total,
+            freight: { ...o.freight, total: o.freight.total + (isRoundTrip ? discountedReturnFreight : 0) },
+          }))
+        : [
         {
           optionCode: 'default',
           label: vehicleSummary,
@@ -249,7 +332,7 @@ export class QuotesService {
           },
         },
       ],
-      recommendedOptionCode: 'default',
+      recommendedOptionCode: recommendedAlloc?.optionCode ?? 'default',
       insurance: {
         total: insuranceTotal,
         outboundTotal: oneWayInsuranceTotal,
@@ -341,6 +424,28 @@ export class QuotesService {
         `${label} nằm ngoài khu vực phục vụ của EquiTransit (Đông Nam Á & Hồng Kông: vĩ độ [-11, 29], kinh độ [92, 141])`,
       );
     }
+  }
+
+  /**
+   * Giờ đón mong muốn (Step 9). Nhận ISO có múi giờ, hoặc 'YYYY-MM-DDTHH:mm' hiểu là giờ Việt Nam.
+   * Thiếu pickupAt thì mặc định 08:00 giờ Việt Nam của departureDate (tương thích Step 4).
+   */
+  private resolvePickupAt(dto: CreateQuoteDto): Date {
+    const raw = dto.pickupAt?.trim();
+    let at: Date;
+    if (raw && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(raw)) {
+      at = localToUtc(raw.slice(0, 10), raw.slice(11, 16));
+    } else if (raw) {
+      at = new Date(raw);
+    } else {
+      const day = /^\d{4}-\d{2}-\d{2}/.test(dto.departureDate)
+        ? dto.departureDate.slice(0, 10)
+        : new Date(dto.departureDate).toISOString().slice(0, 10);
+      at = localToUtc(day, '08:00');
+    }
+    if (!Number.isFinite(at.getTime())) throw new BadRequestException('Giờ đón (pickupAt) không đúng định dạng');
+    if (raw && at.getTime() < Date.now() - 5 * 60 * 1000) throw new BadRequestException('Giờ đón không được ở quá khứ');
+    return at;
   }
 
   private validateDepartureDate(dateStr: string) {

@@ -207,3 +207,13 @@ Toàn bộ KPI của Logistics Manager phải tính trực tiếp từ dữ li�
   - Quản lý vận tải (Logistics Manager) thẩm định hồ sơ: duyệt trong hạn mức quy định (nếu khác số tiền gợi ý bắt buộc có lý do) hoặc từ chối (bắt buộc chọn mã lý do hợp lệ).
   - Khi phê duyệt, hệ thống tự động khởi tạo hồ sơ hoàn tiền (`shipment_refund_record`) với phân loại `insurance_claim`.
   - Khoản bồi thường ≥ 20.000.000 VNĐ bắt buộc trải qua cơ chế phê duyệt kép (Dual-Approval) và lệnh giải ngân chuyển khoản do System Administrator thực hiện (tuân thủ nguyên tắc Tách biệt Trách nhiệm - SoD).
+
+## 11. Phân bổ nhiều xe, trạm gần nhất, giờ cấm xe tải đô thị, ETA có nghỉ (Step 9 — Review 11/2026)
+
+- **FR-S9-01**: Báo giá trả tối đa 3 phương án xe (Rẻ nhất · Ít xe nhất · Đến sớm nhất), có phương án chia nhiều ngày hoặc ghép xe 2 trạm khi thiếu xe; mỗi phương án có giá riêng. Không có phương án → gợi ý 3 ngày gần nhất có đủ xe (tìm trong 14 ngày).
+- **FR-S9-02**: Xe được giữ chỗ khi tạo đơn, khóa theo `vehicle_id ASC`; hai khách không thể giữ cùng một xe trong khung giờ trùng nhau (`409`). Xe được nhả khi đơn hủy / hết hạn thanh toán / không đáp ứng / hoàn tiền / hủy vận hành.
+- **FR-S9-03**: Chặng đón dùng trạm `own` gần điểm đón nhất; chặng giao ở nước ngoài dùng trạm `partner` gần điểm giao nhất (≤ 300 km) với bảng giá `PARTNER`.
+- **FR-S9-04**: Giờ cấm xe tải nặng nội đô HN, HCM lưu dạng cấu hình (vùng tròn, khung giờ, ngày trong tuần, căn cứ pháp lý, ngoại lệ ngày lễ); điểm đón/giao trong giờ cấm → tự dời giờ, cộng phụ phí đêm khi buộc phải chạy đêm. Giao diện cấu hình luôn hiện cảnh báo "Dữ liệu demo — cần đối chiếu văn bản gốc".
+- **FR-S9-05**: ETA chèn điểm nghỉ theo tham số B4 cấu hình được (`journey.rules`).
+- **FR-S9-06**: Manager đổi xe/trạm đã giữ phải nhập lý do; hệ thống lưu lịch sử.
+- **FR-S9-07**: Chặng bay tính số jet stall = ngựa chuồng riêng + ⌈ngựa thường / 3⌉; tàu gia súc 1 ô/ngựa.

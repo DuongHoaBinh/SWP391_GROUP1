@@ -23,6 +23,7 @@ import { normalizeVietnamese, resolveLocation, type GeocodedLocation, type Route
 import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
 import { requestQuote, type QuoteResult } from '@/features/orders/quote-api';
 import { QuoteBreakdown } from '@/features/orders/components/QuoteBreakdown';
+import { checkCityRestriction, type CityRestrictionCheck } from '@/features/fleet/allocation-api';
 const HORSE_PLACEHOLDER_SVG =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='40' fill='%23F0EEE8'/%3E%3Ctext x='40' y='47' text-anchor='middle' font-family='serif' font-weight='700' font-size='22' fill='%23A67C2E'%3EEQ%3C/text%3E%3C/svg%3E";
 import { Horse } from '@/lib/types';
@@ -38,6 +39,9 @@ import { CostSummary } from '@/features/orders/components/InsuranceSummary';
 import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { type BookingType } from '@/features/orders/booking-policy';
 import { defaultInsurance, insuranceNames, previewInsurance, vnd, type InsuranceInput, type InsurancePolicy } from '@/features/orders/insurance-policy';
+import { RequirementChecklist } from '@/features/documents/components/RequirementChecklist';
+import { fetchComplianceRequirements, type ComplianceRequirementsResponse } from '@/features/documents/requirements-api';
+import { HorseDocumentUploadModal } from '@/features/documents/components/HorseDocumentVault';
 
 const MapLoadingFallback = () => {
   const { language } = useLanguage();
@@ -293,8 +297,54 @@ function CreateTransportRequestForm() {
   const [acceptReturnPolicy, setAcceptReturnPolicy] = useState<boolean>(false);
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [selectedOptionCode, setSelectedOptionCode] = useState<string>('standard');
+  // Step 9: giờ đón mong muốn (giờ Việt Nam) + khung giờ được phép khi điểm đón trong vùng cấm xe tải
+  const [pickupTime, setPickupTime] = useState<string>('08:00');
+  const [cityCheck, setCityCheck] = useState<CityRestrictionCheck | null>(null);
   const [isQuoteLoading, setIsQuoteLoading] = useState<boolean>(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+
+  // Dynamic country compliance requirements (Step 8)
+  const [complianceReqs, setComplianceReqs] = useState<ComplianceRequirementsResponse | null>(null);
+  const [isComplianceLoading, setIsComplianceLoading] = useState(false);
+  const [submittedLaterKeys, setSubmittedLaterKeys] = useState<Set<string>>(new Set());
+  const [uploadModalState, setUploadModalState] = useState<{
+    isOpen: boolean;
+    horseId: number;
+    documentTypeCode?: string;
+  }>({ isOpen: false, horseId: 0 });
+
+  const targetCountry = cutoffPolicy?.destinationCountry || formValues.destination || 'Vietnam';
+  const selectedHorseNumericIds = useMemo(() => {
+    return selectedHorses
+      .map((h) => Number(h.backendId || h.id))
+      .filter((id) => !isNaN(id) && id > 0);
+  }, [selectedHorses]);
+
+  const loadComplianceRequirements = useCallback(async () => {
+    if (!targetCountry || selectedHorseNumericIds.length === 0 || !formValues.departureDate) {
+      setComplianceReqs(null);
+      return;
+    }
+    setIsComplianceLoading(true);
+    try {
+      const res = await fetchComplianceRequirements({
+        country: targetCountry,
+        mode: transportMode,
+        horseIds: selectedHorseNumericIds,
+        departDate: formValues.departureDate,
+        returnDate: tripType === 'round_trip' && returnDepartureAt ? returnDepartureAt.slice(0, 10) : undefined,
+      });
+      setComplianceReqs(res);
+    } catch (err) {
+      console.warn('Failed to load compliance requirements:', err);
+    } finally {
+      setIsComplianceLoading(false);
+    }
+  }, [targetCountry, transportMode, selectedHorseNumericIds, formValues.departureDate, tripType, returnDepartureAt]);
+
+  useEffect(() => {
+    void loadComplianceRequirements();
+  }, [loadComplianceRequirements]);
 
   const fetchQuoteNow = useCallback(async () => {
     if (!formValues.origin || !formValues.destination || !formValues.departureDate || selectedHorses.length === 0) {
@@ -340,6 +390,7 @@ function CreateTransportRequestForm() {
         origin: originLoc,
         destination: destLoc,
         departureDate: formValues.departureDate,
+        pickupAt: `${formValues.departureDate}T${pickupTime || '08:00'}`,
         transportMode,
         seaMode: transportMode === 'sea' ? seaMode : undefined,
         tripType,
@@ -348,7 +399,7 @@ function CreateTransportRequestForm() {
       });
 
       setQuote(res);
-      setSelectedOptionCode(res.recommendedOptionCode || res.options[0]?.optionCode || 'standard');
+      setSelectedOptionCode(res.recommendedOptionCode || res.options[0]?.optionCode || 'default');
       setQuoteError(null);
     } catch (err: any) {
       console.error('Failed to request quote:', err);
@@ -360,6 +411,7 @@ function CreateTransportRequestForm() {
     formValues.origin,
     formValues.destination,
     formValues.departureDate,
+    pickupTime,
     formValues.transportType,
     selectedOriginGeo,
     selectedDestGeo,
@@ -378,6 +430,24 @@ function CreateTransportRequestForm() {
     }, 600);
     return () => clearTimeout(timer);
   }, [fetchQuoteNow]);
+
+  // Step 9: khung giờ xe tải nặng được vào điểm đón trong ngày đã chọn (HN, HCM có giờ cấm)
+  useEffect(() => {
+    if (!selectedOriginGeo || !formValues.departureDate) {
+      setCityCheck(null);
+      return;
+    }
+    let cancelled = false;
+    checkCityRestriction(selectedOriginGeo.coords[0], selectedOriginGeo.coords[1], formValues.departureDate, true)
+      .then((res) => { if (!cancelled) setCityCheck(res); })
+      .catch(() => { if (!cancelled) setCityCheck(null); });
+    return () => { cancelled = true; };
+  }, [selectedOriginGeo, formValues.departureDate]);
+
+  const pickupInBannedWindow = useMemo(() => {
+    if (!cityCheck?.restricted || !pickupTime) return false;
+    return !cityCheck.allowedWindows.some((w) => pickupTime >= w.from && pickupTime < w.to);
+  }, [cityCheck, pickupTime]);
 
   const estimatedInsuranceFee = selectedHorses.reduce((sum, h) => sum + previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null).fee * h.quantity, 0);
   const validateInsurance = () => {
@@ -506,9 +576,35 @@ function CreateTransportRequestForm() {
 
   const onSubmitForm = async (data: FormData) => {
     if (isSubmitting || !validateInsurance()) return;
+    if (quote && !quote.quoteId) {
+      toast.error(language === 'en' ? 'No vehicle option for this date. Please pick a suggested date.' : 'Chưa đủ xe cho ngày này. Vui lòng chọn một ngày gợi ý.');
+      return;
+    }
     if (isDepartureBeforeCutoff(data.departureDate)) {
       toast.error(cutoffViolationMessage());
       return;
+    }
+    // Dynamic compliance lead-time check (Step 8)
+    if (complianceReqs && !complianceReqs.isDepartureFeasible) {
+      const blockingUnresolved: string[] = [];
+      for (const hGroup of complianceReqs.horses) {
+        for (const req of hGroup.requirements) {
+          const key = `${hGroup.horseId}_${req.documentTypeCode}`;
+          const isSatisfied =
+            req.status === 'reusable' || req.status === 'pending_review' || submittedLaterKeys.has(key);
+          if (!isSatisfied) {
+            blockingUnresolved.push(`${hGroup.horseName}: ${req.documentTypeName}`);
+          }
+        }
+      }
+      if (blockingUnresolved.length > 0) {
+        toast.error(
+          language === 'en'
+            ? `Cannot depart on ${data.departureDate}. Earliest feasible departure is ${complianceReqs.earliestFeasibleDeparture}. Outstanding documents: ${blockingUnresolved.slice(0, 2).join(', ')}`
+            : `Theo quy định của ${complianceReqs.country}, bạn không kịp chuẩn bị hồ sơ cho ngày đi đã chọn. Ngày sớm nhất khả thi: ${complianceReqs.earliestFeasibleDeparture}. Giấy tờ chưa hoàn tất: ${blockingUnresolved.slice(0, 2).join(', ')}`
+        );
+        return;
+      }
     }
     if (tripType === 'round_trip') {
       if (!returnDepartureAt) {
@@ -565,7 +661,7 @@ function CreateTransportRequestForm() {
         returnDepartureAt: tripType === 'round_trip' && returnDepartureAt ? new Date(returnDepartureAt).toISOString() : undefined,
         acceptReturnPolicy: tripType === 'round_trip' ? acceptReturnPolicy : undefined,
         quoteId: quote?.quoteId ? String(quote.quoteId) : undefined,
-        pricingOptionCode: selectedOptionCode,
+        optionCode: selectedOptionCode,
         specialRequirements: combinedReqs || undefined,
         horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
         // Fallback for single horse if array is not preferred by backend yet
@@ -598,6 +694,17 @@ function CreateTransportRequestForm() {
           language === 'en'
             ? 'Quotation expired (30m limit). A new quote has been generated.'
             : 'Báo giá đã hết hạn (quá 30 phút). Hệ thống đã tự tạo báo giá mới, vui lòng kiểm tra lại.'
+        );
+        void fetchQuoteNow();
+        setIsSubmitting(false);
+        return;
+      }
+      // Step 9: xe trong phương án đã bị khách khác giữ → báo giá lại
+      if (error?.status === 409 && /báo giá lại|đã được đặt/i.test(String(error?.message))) {
+        toast.error(
+          language === 'en'
+            ? 'A vehicle in this option was just booked by someone else. A new quote has been generated.'
+            : 'Xe trong phương án vừa được khách khác đặt. Hệ thống đã báo giá lại, vui lòng chọn lại phương án.'
         );
         void fetchQuoteNow();
         setIsSubmitting(false);
@@ -945,6 +1052,54 @@ function CreateTransportRequestForm() {
                       </span>
                     </span>
                   )}
+                </div>
+
+                {/* Step 9: giờ đón + khung giờ hợp lệ khi điểm đón trong vùng cấm xe tải */}
+                <div>
+                  <label htmlFor="req-pickup-time" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                    {language === 'en' ? 'Pickup time (Vietnam time)' : 'Giờ đón (giờ Việt Nam)'}
+                  </label>
+                  <input
+                    id="req-pickup-time"
+                    type="time"
+                    value={pickupTime}
+                    onChange={(e) => setPickupTime(e.target.value)}
+                    aria-describedby="req-pickup-time-hint"
+                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${pickupInBannedWindow ? 'border-[#D9A441]' : 'border-[#D8CEBE]'}`}
+                  />
+                  <div id="req-pickup-time-hint">
+                    {cityCheck?.restricted ? (
+                      <div className="mt-1.5 text-xs rounded-lg border border-[#DFCA9A] bg-[#F5EFE2] text-[#6B4E16] px-2.5 py-2 flex flex-col gap-1.5">
+                        <span>
+                          {language === 'en'
+                            ? `Heavy trucks may only enter central ${cityCheck.cities.join(', ')} during: ${cityCheck.allowedWindows.map((w) => `${w.from}–${w.to}`).join(', ')}.`
+                            : cityCheck.messageVi}
+                          {pickupInBannedWindow && (language === 'en'
+                            ? ' Your time falls in the ban: heavy-truck options will be moved to the nearest allowed time (night surcharge may apply).'
+                            : ' Giờ bạn chọn rơi vào giờ cấm: phương án xe tải nặng sẽ tự dời sang khung hợp lệ gần nhất (có thể cộng phụ phí đêm).')}
+                        </span>
+                        <span className="flex flex-wrap gap-1.5">
+                          {cityCheck.allowedWindows.map((w) => (
+                            <button
+                              key={w.from}
+                              type="button"
+                              onClick={() => setPickupTime(w.from)}
+                              className="px-2 py-0.5 rounded-md border border-[#A67C2E] text-[#8B6724] bg-white text-[11px] font-bold cursor-pointer hover:bg-[#A67C2E] hover:text-white"
+                            >
+                              {w.from}
+                            </button>
+                          ))}
+                        </span>
+                        <span className="text-[10px] text-[#8C6621]">
+                          {language === 'en' ? 'Demo regulation data — verify with official sources.' : 'Dữ liệu quy định là demo — cần đối chiếu văn bản gốc.'}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-[#747D88] mt-1.5 mb-0">
+                        {language === 'en' ? 'Default 08:00. Used to check city truck-ban hours and vehicle availability.' : 'Mặc định 08:00. Dùng để kiểm tra giờ cấm xe tải nội đô và xe rảnh.'}
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 <div>
@@ -1632,6 +1787,54 @@ function CreateTransportRequestForm() {
       </div>
 
       {currentStep === 3 && (
+        <section
+          aria-label={language === 'en' ? 'Required Documents & Quarantine Checklist' : 'Hồ sơ pháp lý & kiểm dịch theo quốc gia'}
+          className="mx-auto w-full max-w-[850px] mb-4 bg-white p-5 sm:p-6 rounded-2xl border border-[#E5DDD0] shadow-sm space-y-4"
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-[#EFEAE0] pb-3">
+            <div>
+              <h3 className="font-extrabold text-sm sm:text-base text-[#181A17] m-0">
+                {language === 'en' ? 'Quarantine & Country Regulatory Requirements' : 'Hồ sơ pháp lý & Kiểm dịch theo Nước đến'}
+              </h3>
+              <p className="text-xs text-[#5F6977] mt-0.5 m-0">
+                {language === 'en'
+                  ? `Requirements for ${targetCountry} (${transportMode.toUpperCase()}). Reusable horse documents are recognized automatically.`
+                  : `Yêu cầu giấy tờ cho ${targetCountry} (đường ${transportMode === 'air' ? 'hàng không' : transportMode === 'sea' ? 'biển' : 'bộ'}). Hồ sơ đã có của ngựa được tự động tái sử dụng.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadComplianceRequirements()}
+              className="text-xs font-bold text-[#A67C2E] hover:underline cursor-pointer"
+            >
+              {language === 'en' ? 'Recheck' : 'Kiểm tra lại'}
+            </button>
+          </div>
+
+          <RequirementChecklist
+            requirements={complianceReqs}
+            isLoading={isComplianceLoading}
+            submittedLaterKeys={submittedLaterKeys}
+            onSelectDepartureDate={(dateStr) => {
+              setValue('departureDate', dateStr, { shouldValidate: true });
+            }}
+            onToggleSubmitLater={(hId, docCode) => {
+              const key = `${hId}_${docCode}`;
+              setSubmittedLaterKeys((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              });
+            }}
+            onUploadClick={(hId, docCode) => {
+              setUploadModalState({ isOpen: true, horseId: hId, documentTypeCode: docCode });
+            }}
+          />
+        </section>
+      )}
+
+      {currentStep === 3 && (
         <div className="mx-auto w-full max-w-[850px] mb-4">
           <QuoteBreakdown
             quote={quote}
@@ -1639,6 +1842,7 @@ function CreateTransportRequestForm() {
             onRefresh={() => void fetchQuoteNow()}
             selectedOptionCode={selectedOptionCode}
             onSelectOptionCode={(code) => setSelectedOptionCode(code)}
+            onPickShortageDate={(date) => setValue('departureDate', date, { shouldValidate: true })}
           />
           {quoteError && (
             <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
@@ -1794,6 +1998,18 @@ function CreateTransportRequestForm() {
           setHorseSearch('');
           setHorseFilter('available');
           setHorseQuantities((prev) => ({ ...prev, [newHorse.id]: 1 }));
+        }}
+      />
+
+      <HorseDocumentUploadModal
+        isOpen={uploadModalState.isOpen}
+        horseId={uploadModalState.horseId}
+        defaultTypeCode={uploadModalState.documentTypeCode}
+        onClose={() => setUploadModalState((prev) => ({ ...prev, isOpen: false }))}
+        onUploaded={() => {
+          setUploadModalState((prev) => ({ ...prev, isOpen: false }));
+          toast.success(language === 'en' ? 'Document uploaded successfully!' : 'Đã tải giấy tờ lên thành công!');
+          void loadComplianceRequirements();
         }}
       />
     </div>

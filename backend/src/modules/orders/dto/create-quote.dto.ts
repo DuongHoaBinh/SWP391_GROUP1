@@ -102,6 +102,11 @@ export class CreateQuoteDto {
   @IsString()
   returnDepartureAt?: string;
 
+  @ApiPropertyOptional({ example: '2026-12-10T09:00', description: 'Step 9: ngày + giờ đón mong muốn. "YYYY-MM-DDTHH:mm" hiểu là giờ Việt Nam; hoặc ISO có múi giờ. Thiếu thì mặc định 08:00 của departureDate' })
+  @IsOptional()
+  @IsString()
+  pickupAt?: string;
+
   @ApiProperty({ type: [QuoteHorseItemDto], description: 'Danh sách ngựa cần vận chuyển' })
   @IsArray()
   @ValidateNested({ each: true })

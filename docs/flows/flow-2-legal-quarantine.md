@@ -67,5 +67,33 @@ Document completion is a departure requirement, not the payment trigger. A confi
 ### Acceptance Criteria (BDD — Flow 2)
 
 - **AC-F2-01 (Tuân thủ 2 Tầng & Lead Time Động):** *Given* quy định `import_permit` Singapore có `border_gate = SIN`, `requires_authority_approval = true`, `lead_time_days = 3` (hoặc cấu hình động theo từng quốc gia). *When* đơn khởi hành sau 10 ngày, Specialist duyệt nội bộ nhưng AVS vẫn `pending`. *Then* hạn Tầng A hiển thị `D - 3` (theo `MAX(base_days, lead_time_days)`), `isFullyCompliant = false` và Gate 2 chặn `ready_to_depart`.
-- **AC-F2-02 (Hết hạn Trước giờ Chạy):** *Given* đơn `ready_to_depart` đã trả SePay `succeeded`. *When* dời lịch làm `expected_arrival_datetime + 48h` vượt `expiry_datetime` giấy Tầng B (hoặc chuyển giấy tờ sang `expired`). *Then* hạ đơn về `confirmed`, API xuất phát trả `422 Unprocessable Entity` và thông báo Specialist, Coordinator, Customer.
+- **AC-F2-02 (Hết hạn Trước giờ Chạy):** *Given* đơn `ready_to_depart` đã trả SePay `succeeded`. *When* dời lịch làm `expected_arrival_datetime + 48h` vượt `expiry_datetime` giấy Tầng B (hoặc chuyển giấy tờ sang `expired`). *Then* hạ đơn về `planning`/`confirmed`, API xuất phát trả `422 Unprocessable Entity` và thông báo Specialist, Coordinator, Customer.
 - **AC-F2-03 (Hết hạn khi Đang `in_transit`):** *Given* đơn đang `in_transit` trước trạm `border_check`. *When* giấy Tầng B bị đánh dấu `expired`. *Then* giữ nguyên `in_transit`, bật `in_transit_compliance_alert = true`, bắn Red Alert, và thao tác `customs_cleared` tại trạm biên giới bị chặn với `422 Unprocessable Entity`.
+
+### Yêu cầu Giấy tờ Động theo Quốc gia, Tái sử dụng & Kiểm duyệt 4 Điểm (Step 8, review 11/2026)
+
+- **Yêu cầu động (`GET /compliance/requirements`):**
+  - Tính toán theo bộ ba: quốc gia đến (`destination_country`), phương thức (`road`/`air`/`sea`), danh sách ngựa (`horse_ids`).
+  - Phân loại 6 trạng thái yêu cầu cho từng giấy tờ:
+    1. `reusable`: Đã có giấy tờ hợp lệ trong kho ngựa, còn hạn đến hết chuyến và đúng ngày cấp. Tự động liên kết không cần nộp lại.
+    2. `pending_review`: Đã nộp giấy tờ nhưng đang chờ Logistics Manager duyệt.
+    3. `expiring`: Giấy tờ còn hạn nhưng sẽ hết hạn trong vòng 30 ngày hoặc sát mốc an toàn chuyến đi.
+    4. `expired`: Giấy tờ đã hết hạn trước khi chuyến đi kết thúc hoặc hết hạn tại thời điểm hiện tại.
+    5. `issued_too_early`: Giấy tờ cấp quá sớm so với quy định `max_issue_age_days` (ví dụ giấy kiểm dịch chỉ có giá trị 10 ngày).
+    6. `missing`: Chưa nộp hồ sơ.
+- **Kiểm soát Lead Time khởi hành (`assertDocumentLeadTime`):**
+  - Chặn tạo đơn hoặc báo giá nếu ngày khởi hành sớm hơn `earliestFeasibleDeparture` với lỗi `422 DOCUMENT_LEAD_TIME_VIOLATION`.
+  - Hỗ trợ tùy chọn **"Nộp sau" (canSubmitLater)** trong wizard tạo đơn đối với hồ sơ Tầng B và hồ sơ Tầng A khả thi.
+- **Quy trình Kiểm duyệt 4 Điểm của Logistics Manager:**
+  - Modal kiểm duyệt đối chiếu trực tiếp hồ sơ tải lên với thông tin cá thể ngựa:
+    1. `microchipMatches`: Khớp số vi mạch với ngựa.
+    2. `passportMatches`: Khớp số hộ chiếu với ngựa.
+    3. `issueDateOk`: Ngày cấp không vượt quá `maxIssueAgeDays`.
+    4. `expiryOk`: Ngày hết hạn bao trùm toàn bộ hành trình + biên an toàn (`minValidityBufferHours`).
+  - Từ chối bắt buộc nhập lý do (tối thiểu 10 ký tự). Hồ sơ đã bị từ chối không thể duyệt đè nếu chưa nộp bản thay thế.
+  - Mọi thao tác phê duyệt/từ chối đều ghi nhật ký kiểm toán vào bảng `document_review_log`.
+- **Giám sát Hết hạn Tự động (`DocumentExpiryMonitorService`):**
+  - Job chạy nền định kỳ:
+    - Chuyển trạng thái giấy tờ quá hạn sang `expired`.
+    - Gửi thông báo nhắc hạn trước 30 ngày, 7 ngày và 1 ngày (ghi vết `document_expiry_notice` để tránh trùng lặp).
+    - Tự động hạ trạng thái các đơn `ready_to_depart` có hồ sơ Tầng A bị hết hạn quay về `planning`. Giữ nguyên trạng thái `in_transit` và kích hoạt cảnh báo đỏ tuân thủ (`in_transit_compliance_alert`).

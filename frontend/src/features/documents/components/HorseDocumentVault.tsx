@@ -363,18 +363,27 @@ export function HorseDocumentVault({ horseId, canUpload = true }: HorseDocumentV
   );
 }
 
-interface HorseDocumentUploadModalProps {
+export interface HorseDocumentUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   horseId: string | number;
-  types: DocumentTypeOption[];
+  types?: DocumentTypeOption[];
+  defaultTypeCode?: string;
   onUploaded: () => void;
 }
 
-function HorseDocumentUploadModal({ isOpen, onClose, horseId, types, onUploaded }: HorseDocumentUploadModalProps) {
+export function HorseDocumentUploadModal({
+  isOpen,
+  onClose,
+  horseId,
+  types: initialTypes,
+  defaultTypeCode,
+  onUploaded,
+}: HorseDocumentUploadModalProps) {
   const { language } = useLanguage();
   const isEn = language === 'en';
-  const [typeCode, setTypeCode] = useState('');
+  const [types, setTypes] = useState<DocumentTypeOption[]>(initialTypes || []);
+  const [typeCode, setTypeCode] = useState(defaultTypeCode || '');
   const [docNumber, setDocNumber] = useState('');
   const [issueDate, setIssueDate] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
@@ -383,15 +392,27 @@ function HorseDocumentUploadModal({ isOpen, onClose, horseId, types, onUploaded 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    if (initialTypes && initialTypes.length > 0) {
+      setTypes(initialTypes);
+    } else if (isOpen && types.length === 0) {
+      apiClient<DocumentTypeOption[]>('/documents/types')
+        .then((data) => setTypes(Array.isArray(data) ? data : []))
+        .catch(() => setTypes([]));
+    }
+  }, [initialTypes, isOpen, types.length]);
+
+  useEffect(() => {
     if (!isOpen) {
-      setTypeCode('');
+      setTypeCode(defaultTypeCode || '');
       setDocNumber('');
       setIssueDate('');
       setExpiryDate('');
       setFile(null);
       setError('');
+    } else if (defaultTypeCode) {
+      setTypeCode(defaultTypeCode);
     }
-  }, [isOpen]);
+  }, [isOpen, defaultTypeCode]);
 
   const selectedType = types.find((ty) => ty.code === typeCode);
 

@@ -246,6 +246,12 @@ export const documentsApi = {
       notes?: string;
       expiryDate?: string;
       docNumber?: string;
+      checkedFields?: {
+        microchipMatches?: boolean;
+        passportMatches?: boolean;
+        issueDateOk?: boolean;
+        expiryOk?: boolean;
+      };
     }
   ): Promise<ApiTransportDocument> => {
     const reviewed = await apiClient<ApiTransportDocument>(`/documents/${id}/review`, {

@@ -2,7 +2,8 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { CreateRoadTripDto } from './dto/create-road-trip.dto';
 import { RouteLegDto } from '../routes/dto/build-detailed-plan.dto';
-import { assertRoadCapacity, loadRequiredStallSlots } from './capacity-policy';
+import { applyConvoyCapacity, assertRoadCapacity, loadRequiredStallSlots } from './capacity-policy';
+import { consumeShipmentReservations, findShipmentReservations, INACTIVE_SHIPMENT_SQL } from './vehicle-reservation';
 import { MYSQL_POOL } from '../../common/database/database.module';
 
 @Injectable()
@@ -113,7 +114,19 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
     const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT * FROM vehicle WHERE vehicle_id IN (${ids.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, ids);
     // Số chỗ chuồng: ngựa cần chuồng riêng tính 2 chỗ (Step 3)
     const requiredSlots = await loadRequiredStallSlots(db, Number(order.shipment_id), Number(order.requested_horse_count));
-    assertRoadCapacity(requiredSlots, roadLegs.filter(l => l.vehicleId).map(l => l.vehicleId!), vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })));
+    // Step 9: xe đã giữ chỗ khi tạo đơn; xe trong đoàn giữ chỗ được tính tổng sức chứa của đoàn
+    const reservations = await findShipmentReservations(db, Number(order.shipment_id));
+    const capacityOf = new Map<number, number>(
+      applyConvoyCapacity(vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })), reservations).map(v => [v.id, v.capacity]),
+    );
+    for (const leg of roadLegs) {
+      if (!leg.vehicleId) continue;
+      const sameDirection = reservations.filter(r => r.direction === (leg.direction ?? 'outbound'));
+      if (sameDirection.length && !sameDirection.some(r => r.vehicleId === leg.vehicleId) && (leg.allocationOverrideReason ?? '').trim().length < 5) {
+        throw new BadRequestException(`Chặng #${leg.sequenceNo} dùng xe khác phương án đã giữ chỗ cho khách; phải nhập lý do đổi xe (allocationOverrideReason, tối thiểu 5 ký tự)`);
+      }
+    }
+    assertRoadCapacity(requiredSlots, roadLegs.filter(l => l.vehicleId).map(l => l.vehicleId!), [...capacityOf].map(([id, capacity]) => ({ id, capacity })));
     const roadTripIds = [...new Set(roadLegs.filter(l => l.roadTripId).map(l => Number(l.roadTripId)))].sort((a, b) => a - b);
     if (roadTripIds.length) {
       const [lockedTripRows] = await db.execute<RowDataPacket[]>(
@@ -153,6 +166,11 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
         WHERE sv.vehicle_id = ? AND s.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected')
         AND NOT EXISTS (SELECT 1 FROM route_leg l JOIN route r ON r.route_id = l.route_id WHERE r.shipment_id = s.shipment_id AND l.vehicle_id = sv.vehicle_id)`, [leg.vehicleId, order.shipment_id]);
       if (unscheduled.length) throw new ConflictException('Xe đã phân công cho đơn khác chưa có lịch; cần điều phối lại trước khi giữ chỗ');
+      // Step 9: xe đang được giữ chỗ cho đơn khác trùng khung giờ
+      const [heldByOthers] = await db.execute<RowDataPacket[]>(`SELECT vr.shipment_id FROM vehicle_reservation vr JOIN shipment s ON s.shipment_id = vr.shipment_id
+        WHERE vr.vehicle_id = ? AND vr.shipment_id <> ? AND vr.status IN ('active','consumed') AND s.status NOT IN ${INACTIVE_SHIPMENT_SQL}
+        AND vr.start_at < ? AND vr.end_at > ?`, [leg.vehicleId, order.shipment_id, end, start]);
+      if (heldByOthers.length) throw new ConflictException('Xe đang được giữ chỗ cho đơn khác trong khung giờ này');
       if (conflicts.some(c => !leg.roadTripId || Number(c.road_trip_id) !== leg.roadTripId ||
         c.booking_type === 'dedicated_charter' || order.booking_type === 'dedicated_charter')) {
         throw new ConflictException('Xe đã có chuyến khác trùng thời gian hoặc đang được bao riêng');
@@ -161,7 +179,7 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
         throw new ConflictException('Chuyến đường bộ đã bắt đầu di chuyển, không thể ghép thêm đơn mới');
       }
       const booked = conflicts.reduce((n, c) => n + Number(c.stalls_booked || c.requested_horse_count), 0);
-      if (booked + requiredSlots > Number(vehicle.capacity)) throw new ConflictException('Chuyến đường bộ không còn đủ ô chuồng');
+      if (booked + requiredSlots > (capacityOf.get(Number(leg.vehicleId)) ?? Number(vehicle.capacity))) throw new ConflictException('Chuyến đường bộ không còn đủ ô chuồng');
       if (!leg.roadTripId) {
         const [created] = await db.execute<any>(`INSERT INTO road_trip (vehicle_id, booking_type, origin_location, destination_location, planned_departure, planned_arrival, created_by)
           VALUES (?, ?, ?, ?, ?, ?, ?)`, [leg.vehicleId, order.booking_type, leg.originLocation, leg.destinationLocation, start, end, actorId]);
@@ -170,6 +188,9 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
       usedTrips.add(leg.roadTripId);
       leg.stallsBooked = requiredSlots;
     }
+    // Step 9: xe đã giữ chỗ được kế hoạch dùng đúng → consumed
+    const usedReserved = reservations.filter(r => roadLegs.some(l => l.vehicleId === r.vehicleId)).map(r => r.vehicleId);
+    await consumeShipmentReservations(db, Number(order.shipment_id), usedReserved);
     return prepared;
   }
 }

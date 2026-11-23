@@ -25,9 +25,11 @@ import { InsuranceClaimController } from './insurance-claim.controller';
 import { InsuranceClaimService } from './insurance-claim.service';
 import { InsuranceClaimStore } from './insurance-claim.store';
 import { AuthModule } from '../auth/auth.module';
+import { AllocationModule } from '../fleet/allocation.module';
+import { QuoteAllocationService } from './quote-allocation.service';
 
 @Module({
-  imports: [NotificationsModule, DocumentsModule, DistanceModule, AuthModule],
+  imports: [NotificationsModule, DocumentsModule, DistanceModule, AuthModule, AllocationModule],
   controllers: [
     OrdersOpsController,
     OrdersController,
@@ -45,6 +47,7 @@ import { AuthModule } from '../auth/auth.module';
     PricingStore,
     QuotesService,
     QuotesStore,
+    QuoteAllocationService,
     InsuranceClaimService,
     InsuranceClaimStore,
     MomoPaymentService,

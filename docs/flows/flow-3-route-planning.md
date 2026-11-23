@@ -213,3 +213,30 @@ Hệ thống hỗ trợ 2 dạng vận chuyển đường thủy (`sea`) với c
 - Đơn hàng một chiều (`trip_type = 'one_way'`) bị nghiêm cấm chứa bất kỳ chặng nào có `direction = 'return'`; nếu vi phạm khi gọi `POST /routes/plan/:id/build-detail`, server từ chối với mã lỗi `400 Bad Request`.
 - Đơn hàng khứ hồi (`trip_type = 'round_trip'`) bắt buộc phải có ít nhất 1 chặng `outbound` và ít nhất 1 chặng `return`. Thời điểm xuất phát chặng về (`planned_departure` của chặng `return` đầu tiên) phải thỏa mãn `>= shipment.return_departure_at`.
 - Coordinator có thể bổ sung chặng về bằng nút "Thêm Chặng Về" trên giao diện lập tuyến và linh hoạt điều phối xe/tài xế riêng cho từng chiều di chuyển.
+
+## 10. Phân bổ xe, giữ chỗ xe, trạm own/partner, đổi xe có lý do (Step 9 — Review 11/2026)
+
+**Phân bổ khi báo giá** (`fleet/allocation-policy.ts`, hàm thuần):
+
+1. Lấy xe đường bộ **rảnh** trong khung `[giờ đón − 2h, giờ đón + ETA + 2h]` theo từng trạm `own` đang hoạt động (không bảo dưỡng, không trùng `vehicle_reservation` còn hiệu lực, không trùng `route_leg` của đơn đang hoạt động). Khoảng cách chạy rỗng: OpenRouteService cho 3 trạm gần nhất (Haversine), các trạm còn lại Haversine × 1,3.
+2. Với từng trạm, liệt kê **tổ hợp xe tối thiểu** đủ số chỗ chuồng (ngựa chuồng riêng = 2 chỗ), tối đa 4 xe; xe cùng loại cùng trạm coi là tương đương để tránh nổ tổ hợp.
+3. Không trạm nào đủ một mình → **ghép xe 2 trạm gần nhất** (`two_depots`). Xe lớn nhất của trạm gần nhất không chở hết một lượt → thêm phương án **chia nhiều ngày** (`split_days`, tối đa 4 lượt): cước = cước một lượt × số lượt + chạy rỗng quay đầu (điểm giao → điểm đón) giữa các lượt; `extraDays = số lượt − 1`.
+4. Chọn tối đa **3 phương án**: Rẻ nhất · Ít xe nhất · Đến sớm nhất (trạm gần nhất), gộp phương án trùng tập xe. Đề xuất = Rẻ nhất. Không có phương án → gợi ý 3 ngày gần nhất (trong 14 ngày) có đủ xe.
+
+**Giữ chỗ xe** (`fleet/vehicle-reservation.ts`, bảng `vehicle_reservation`):
+
+- Tạo đơn từ báo giá + `optionCode`: trong **transaction tạo đơn**, khóa xe theo `vehicle_id ASC` (`SELECT … FOR UPDATE`), kiểm tra lại trùng giờ, tạo reservation `active`. Xe đã bị đơn khác giữ → `409` "Xe trong phương án đã được đặt, vui lòng báo giá lại" (toàn bộ đơn rollback).
+- **Nhả** (`released`) khi đơn chuyển sang `cancelled` (khách hủy, hết hạn thanh toán), `refund_requested`, `refunded`, `cancelled_operational`, `rejected` — gọi tập trung trong `transitionShipment` và ở các chỗ cập nhật trạng thái trực tiếp. Truy vấn "xe bận" cũng bỏ qua reservation của đơn đã kết thúc (phòng thủ nếu quên nhả).
+- **Consumed** khi kế hoạch chi tiết lưu chặng dùng đúng xe đã giữ.
+- Reservation không bị xóa: lịch sử giữ/nhả/đổi xe được giữ nguyên.
+
+**Đoàn xe (nhiều xe cho một đơn)**: kế hoạch chi tiết vẫn gắn một **xe dẫn đầu** cho mỗi chặng bộ; xe nằm trong nhóm đã giữ chỗ cùng hướng được tính sức chứa bằng **tổng sức chứa cả đoàn** (`applyConvoyCapacity`). Xe ngoài nhóm giữ nguyên quy tắc Step 3 (mỗi xe phải đủ chỗ cho cả đơn).
+
+**Trạm đối tác nước ngoài**: chặng giao sau sân bay/cảng ở nước ngoài dùng trạm `partner` gần điểm giao nhất (≤ 300 km) và bảng giá `pricing_tariff` mode `road`, `region = 'PARTNER'`; chạy rỗng tính từ trạm đối tác đến sân bay/cảng đến. Không có trạm đối tác trong 300 km → dùng bảng giá VN, cảnh báo `NO_PARTNER_DEPOT`.
+
+**Manager đổi xe/trạm**:
+
+- `POST /fleet/shipments/:id/reservations/swap` (bắt buộc lý do ≥ 5 ký tự): khóa xe, giữ xe mới cùng khung giờ, nhả xe cũ (`released_reason = manager_swap`), cập nhật chặng `pending` đang dùng xe cũ kèm `route_leg.allocation_override_reason`, ghi `trip_status_log` (`milestone_type = allocation_override`) và nối lịch sử vào `shipment.allocation_snapshot.overrides`. Tổng sức chứa sau khi đổi vẫn phải đủ.
+- Trong màn dựng kế hoạch, chặng bộ dùng xe **khác** nhóm đã giữ phải nhập `allocationOverrideReason`, nếu không backend trả `400`.
+
+**Chặng bay**: `route_leg.jet_stall_count` = số ngựa chuồng riêng + ⌈số ngựa thường / 3⌉; `stalls_booked` giữ nghĩa cũ (số chỗ ngựa).

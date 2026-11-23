@@ -71,6 +71,10 @@ export interface RouteLegItem {
   bookingReference?: string | null;
   stallsBooked?: number;
   status?: string;
+  /** Step 9: số jet stall chặng bay (server tính) */
+  jetStallCount?: number | null;
+  /** Step 9: lý do dùng xe khác phương án đã giữ chỗ cho khách */
+  allocationOverrideReason?: string | null;
 }
 
 export interface RouteStopItem {

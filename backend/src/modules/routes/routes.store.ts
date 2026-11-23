@@ -652,6 +652,14 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
         await this.replaceRouteLegs(routeId, legs, db);
         await this.replaceRouteStops(routeId, stopsToSave, db);
       }
+      // Step 9: số jet stall chặng bay + lý do đổi xe so với phương án đã giữ chỗ
+      for (const leg of legs) {
+        if (leg.jetStallCount == null && !leg.allocationOverrideReason) continue;
+        await db.execute(
+          'UPDATE route_leg SET jet_stall_count = ?, allocation_override_reason = ? WHERE route_id = ? AND sequence_no = ?',
+          [leg.jetStallCount ?? null, leg.allocationOverrideReason?.trim().slice(0, 255) || null, routeId, leg.sequenceNo],
+        );
+      }
       const affectedRoadTripIds = new Set<number>();
       for (const l of oldLegs) {
         if (l.road_trip_id) affectedRoadTripIds.add(Number(l.road_trip_id));

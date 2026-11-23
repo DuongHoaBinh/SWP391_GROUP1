@@ -60,6 +60,8 @@ export interface FreightInput {
   airKm?: number;
   seaKm?: number;
   nightPickup?: boolean;
+  /** Step 9: chạy rỗng từ trạm đối tác đến sân bay/cảng đến (chặng from_hub). Mặc định 0. */
+  fromHubDeadheadKm?: number;
 }
 
 export interface FreightLine {
@@ -330,6 +332,8 @@ export function calculateFreight(
     road: RoadTariff & { version?: number };
     air?: AirTariff & { version?: number };
     sea?: SeaTariff & { version?: number };
+    /** Step 9: bảng giá trạm đối tác nước ngoài (region PARTNER) cho chặng from_hub của air/sea */
+    partnerRoad?: RoadTariff & { version?: number };
   },
 ): FreightResult {
   if (!input.horses || input.horses.length === 0) {
@@ -351,6 +355,9 @@ export function calculateFreight(
   if (tariffs.road?.version) tariffVersions.road = tariffs.road.version;
   if (tariffs.air?.version) tariffVersions.air = tariffs.air.version;
   if (tariffs.sea?.version) tariffVersions.sea = tariffs.sea.version;
+  if (tariffs.partnerRoad?.version) tariffVersions.partnerRoad = tariffs.partnerRoad.version;
+  const fromHubTariff = tariffs.partnerRoad ?? tariffs.road;
+  const fromHubDeadheadKm = Math.max(0, Number(input.fromHubDeadheadKm) || 0);
 
   const roundingUnit =
     input.mode === 'air'
@@ -452,8 +459,8 @@ export function calculateFreight(
         'from_hub',
         fromHubLeg.distanceKm,
         fromHubLeg.borderCrossings || 0,
-        input.vehicles.map((v) => ({ ...v, deadheadKm: 0 })), // Chặng đến tạm thời deadhead = 0
-        tariffs.road,
+        input.vehicles.map((v) => ({ ...v, deadheadKm: fromHubDeadheadKm })), // Step 9: xe trạm đối tác gần điểm giao
+        fromHubTariff,
         totalHorseCount,
         false, // Không tính careFee lần 2
         false,
@@ -543,8 +550,8 @@ export function calculateFreight(
           'from_hub',
           fromHubLeg.distanceKm,
           fromHubLeg.borderCrossings || 0,
-          input.vehicles.map((v) => ({ ...v, deadheadKm: 0 })),
-          tariffs.road,
+          input.vehicles.map((v) => ({ ...v, deadheadKm: fromHubDeadheadKm })),
+          fromHubTariff,
           totalHorseCount,
           false,
           false,

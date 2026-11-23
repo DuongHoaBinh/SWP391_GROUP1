@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, OnModuleDestroy, OnModuleInit,
 import { createPool, Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { MYSQL_POOL } from '../../common/database/database.module';
 import { loadRequiredStallSlots } from './capacity-policy';
+import { findShipmentReservations, INACTIVE_SHIPMENT_SQL } from './vehicle-reservation';
 import { CreateDepotDto, UpdateDepotDto } from './dto/depot.dto';
 import {
   AvailableStaff,
@@ -146,9 +147,10 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
              CASE 
                WHEN active_leg.shipment_id IS NOT NULL THEN 'in_use'
                WHEN active_sv.shipment_id IS NOT NULL THEN 'in_use'
+               WHEN active_res.shipment_id IS NOT NULL AND v.status <> 'maintenance' THEN 'in_use'
                ELSE v.status
              END AS computed_status,
-             COALESCE(active_leg.shipment_id, active_sv.shipment_id) AS assigned_shipment_id,
+             COALESCE(active_leg.shipment_id, active_sv.shipment_id, active_res.shipment_id) AS assigned_shipment_id,
              v.created_at
       FROM vehicle v
       LEFT JOIN (
@@ -172,6 +174,15 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
           AND (rl.leg_id IS NULL OR (rl.status != 'completed' AND rl.actual_arrival IS NULL))
         GROUP BY sv.vehicle_id
       ) active_sv ON active_sv.vehicle_id = v.vehicle_id
+      LEFT JOIN (
+        -- Step 9: xe đang được giữ chỗ (đơn còn hoạt động, khung giờ chưa kết thúc)
+        SELECT vr.vehicle_id, MIN(vr.shipment_id) AS shipment_id
+        FROM vehicle_reservation vr
+        JOIN shipment s ON s.shipment_id = vr.shipment_id
+        WHERE vr.status IN ('active','consumed') AND vr.end_at > NOW()
+          AND s.status NOT IN ${INACTIVE_SHIPMENT_SQL}
+        GROUP BY vr.vehicle_id
+      ) active_res ON active_res.vehicle_id = v.vehicle_id
       LEFT JOIN vehicle_class vc ON vc.code = v.vehicle_class_code
        LEFT JOIN depot d ON d.depot_id = v.depot_id
       WHERE 1=1
@@ -689,6 +700,20 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   // --- Số chỗ chuồng, loại phương tiện, trạm xe (Step 3, review 11/2026) ---
   async findRequiredStallSlots(shipmentId: number, fallbackHorseCount: number): Promise<number> {
     return loadRequiredStallSlots(this.pool, shipmentId, fallbackHorseCount);
+  }
+
+  /** Step 9: ngựa của đơn (số lượng + chuồng riêng) để tính jet stall */
+  async findShipmentStallHorses(shipmentId: number): Promise<Array<{ quantity: number; requiresPrivateStall: boolean }>> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT sh.quantity, h.requires_private_stall FROM shipment_horse sh JOIN horse h ON h.horse_id = sh.horse_id WHERE sh.shipment_id = ?`,
+      [shipmentId],
+    );
+    return rows.map((r) => ({ quantity: Number(r.quantity) || 1, requiresPrivateStall: Boolean(r.requires_private_stall) }));
+  }
+
+  /** Step 9: xe đang giữ chỗ (active/consumed) của đơn */
+  async findShipmentReservations(shipmentId: number) {
+    return findShipmentReservations(this.pool, shipmentId);
   }
 
   async findVehicleClasses(): Promise<VehicleClass[]> {

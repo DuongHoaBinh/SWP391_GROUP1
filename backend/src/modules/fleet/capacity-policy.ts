@@ -44,3 +44,22 @@ export function assertRoadCapacity(requiredSlots: number, vehicleIds: number[], 
     }
   }
 }
+
+/**
+ * Step 9: phương án nhiều xe (ví dụ 3 xe 1 chỗ cho 3 ngựa) chạy thành đoàn. Kế hoạch chi tiết vẫn
+ * gắn một xe dẫn đầu cho mỗi chặng; xe nằm trong nhóm đã giữ chỗ cùng hướng được tính sức chứa bằng
+ * TỔNG sức chứa của cả đoàn. Xe ngoài nhóm giữ chỗ giữ nguyên sức chứa riêng.
+ */
+export function applyConvoyCapacity<T extends { id: number; capacity: number }>(
+  vehicles: T[],
+  reservations: Array<{ vehicleId: number; capacity: number; direction?: string | null }>,
+): T[] {
+  return vehicles.map((v) => {
+    const own = reservations.find((r) => Number(r.vehicleId) === Number(v.id));
+    if (!own) return v;
+    const convoy = reservations
+      .filter((r) => (r.direction ?? 'outbound') === (own.direction ?? 'outbound'))
+      .reduce((sum, r) => sum + Number(r.capacity || 0), 0);
+    return { ...v, capacity: Math.max(Number(v.capacity), convoy) };
+  });
+}

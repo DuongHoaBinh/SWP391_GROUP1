@@ -543,19 +543,23 @@ flowchart TD
 
 ### STEP 8. Giấy tờ theo quốc gia ngay khi tạo đơn và Manager duyệt (3 ngày)
 
-- [ ] 8.1 Migration: `regulation` thêm `document_type_code`, `max_issue_age_days`, mode `sea`; seed yêu cầu demo cho 7 quốc gia × mode.
-- [ ] 8.2 API `GET /compliance/requirements?country=&mode=&horseIds=&departDate=&returnDate=`: trả mỗi ngựa × mỗi giấy tờ yêu cầu gồm `status: reusable | expiring | expired | missing`, `tier`, `lead_time_days`, hạn nộp.
-- [ ] 8.3 Luồng tạo đơn (wizard): sau bước "Điểm đến" thêm bước **"Giấy tờ cần chuẩn bị"**: dùng lại giấy còn hạn (tick), tải lên giấy thiếu. Cho phép **nộp sau** với Tier B và Tier A còn trong `lead_time_days` (hiện hạn nộp rõ ràng).
-- [ ] 8.4 Cảnh báo trước khi thanh toán: nếu ngày đi < hôm nay + `lead_time_days` lớn nhất → báo "Không kịp chuẩn bị giấy tờ cho [quốc gia], chọn ngày từ dd/mm".
-- [ ] 8.5 Manager: màn `manager/compliance` duyệt từng giấy (đối chiếu số microchip và số hộ chiếu với ngựa, ngày cấp, hạn), từ chối bắt buộc lý do; lưu `document_approval` (người duyệt, thời điểm, lý do). Giữ thứ tự trạng thái `submitted → approved/rejected → expired`.
-- [ ] 8.6 Job hằng ngày: đánh dấu `expired`, gửi nhắc trước 30, 7, 1 ngày; nếu đơn đã `ready_to_depart` mà giấy hết hạn thì quay về `planning` (giữ quy tắc runtime hiện có cho `in_transit`).
-- [ ] 8.7 Docs: viết lại `flow-2-legal-quarantine.md` theo luồng mới.
+> **Trạng thái: đã hoàn thành (23/11/2026)**. Migration `035_country_document_requirements.sql`, test `backend/test/country-requirements.test.cjs` (8/8 pass, tổng backend 151/151).
+
+- [x] 8.1 Migration: `regulation` thêm `document_type_code`, `max_issue_age_days`, mode `sea`; seed yêu cầu demo cho 7 quốc gia × mode.
+- [x] 8.2 API `GET /compliance/requirements?country=&mode=&horseIds=&departDate=&returnDate=`: trả mỗi ngựa × mỗi giấy tờ yêu cầu gồm `status: reusable | expiring | expired | missing`, `tier`, `lead_time_days`, hạn nộp.
+- [x] 8.3 Luồng tạo đơn (wizard): sau bước "Điểm đến" thêm bước **"Giấy tờ cần chuẩn bị"**: dùng lại giấy còn hạn (tick), tải lên giấy thiếu. Cho phép **nộp sau** với Tier B và Tier A còn trong `lead_time_days` (hiện hạn nộp rõ ràng).
+- [x] 8.4 Cảnh báo trước khi thanh toán: nếu ngày đi < hôm nay + `lead_time_days` lớn nhất → báo "Không kịp chuẩn bị giấy tờ cho [quốc gia], chọn ngày từ dd/mm".
+- [x] 8.5 Manager: màn `manager/compliance` duyệt từng giấy (đối chiếu số microchip và số hộ chiếu với ngựa, ngày cấp, hạn), từ chối bắt buộc lý do; lưu `document_approval` (người duyệt, thời điểm, lý do). Giữ thứ tự trạng thái `submitted → approved/rejected → expired`.
+- [x] 8.6 Job hằng ngày: đánh dấu `expired`, gửi nhắc trước 30, 7, 1 ngày; nếu đơn đã `ready_to_depart` mà giấy hết hạn thì quay về `planning` (giữ quy tắc runtime hiện có cho `in_transit`).
+- [x] 8.7 Docs: viết lại `flow-2-legal-quarantine.md` theo luồng mới.
 
 **Hoàn thành khi:** chọn "Singapore + air" thì hiện đúng danh sách; ngựa đã có hộ chiếu còn hạn thì không phải nộp lại; giấy hết hạn trước ngày về bị chặn.
 
 ---
 
 ### STEP 9. Phân bổ nhiều xe, điều xe từ trạm gần nhất, giờ cấm đô thị (4 ngày)
+
+> **Trạng thái: đã triển khai (23/11/2026)**, chưa commit. Migration `036_allocation_city_restrictions.sql`, test `backend/test/allocation-city-ban.test.cjs` (10/10 pass, tổng backend 143/143). Khác kế hoạch: phương án nhiều xe chạy thành đoàn — kế hoạch chi tiết gắn một xe dẫn đầu mỗi chặng, sức chứa tính theo tổng các xe đã giữ chỗ; Manager đổi xe qua `POST /fleet/shipments/:id/reservations/swap` hoặc nhập `allocationOverrideReason` trên chặng. Phụ phí đêm chỉ cộng khi điểm đón/giao nằm trong vùng cấm và giờ chạy rơi vào khung đêm. Không có phương án thì không lưu báo giá (`quoteId: null`).
 
 **9.1 Thuật toán phân bổ xe (`fleet/allocation-policy.ts`, hàm thuần, có unit test)**
 
@@ -570,20 +574,20 @@ Bước 4  : Trả tối đa 3 phương án: Rẻ nhất · Ít xe nhất · S�
 Bước 5  : Không có phương án → báo khách "Chưa đủ xe ngày này", gợi ý ngày gần nhất có đủ
 ```
 
-- [ ] Trả lời trực tiếp câu hỏi "xe chỉ chở 1 con mà khách đặt 3 con": hệ thống **tự đề xuất** 1 xe 4 chỗ, hoặc 3 xe 1 chỗ, hoặc chia 3 ngày, kèm giá từng phương án (Ví dụ 1 ở C3). Khách chọn lúc báo giá.
-- [ ] Air: số jet stall = ⌈slot cần / 3⌉ (ngựa stall riêng chiếm cả stall). Sea vessel: số ô = N.
-- [ ] Khóa xe khi tạo đơn: giữ cơ chế lock `vehicle_id ASC` đang có để chống đặt trùng.
+- [x] Trả lời trực tiếp câu hỏi "xe chỉ chở 1 con mà khách đặt 3 con": hệ thống **tự đề xuất** 1 xe 4 chỗ, hoặc 3 xe 1 chỗ, hoặc chia 3 ngày, kèm giá từng phương án (Ví dụ 1 ở C3). Khách chọn lúc báo giá.
+- [x] Air: số jet stall = ⌈slot cần / 3⌉ (ngựa stall riêng chiếm cả stall). Sea vessel: số ô = N.
+- [x] Khóa xe khi tạo đơn: giữ cơ chế lock `vehicle_id ASC` đang có để chống đặt trùng.
 
 **9.2 Điều xe theo trạm**
-- [ ] Chặng đón: trạm own gần điểm đón nhất.
-- [ ] Chặng giao ở nước ngoài (sau sân bay hoặc cảng): trạm `partner` gần điểm giao nhất. Giá chặng này theo bảng giá đối tác (`pricing_tariff` mode road + `region`).
-- [ ] Manager vẫn có thể đổi xe hoặc trạm bằng tay (ghi lý do).
+- [x] Chặng đón: trạm own gần điểm đón nhất.
+- [x] Chặng giao ở nước ngoài (sau sân bay hoặc cảng): trạm `partner` gần điểm giao nhất. Giá chặng này theo bảng giá đối tác (`pricing_tariff` mode road + `region`).
+- [x] Manager vẫn có thể đổi xe hoặc trạm bằng tay (ghi lý do).
 
 **9.3 Khung giờ cấm xe đô thị**
-- [ ] Bảng `city_truck_restriction(id, city, center_lat, center_lng, radius_km, applies_to_heavy_truck BOOLEAN, banned_from TIME, banned_to TIME, days_of_week, legal_reference, effective_from, effective_to)` + `city_restriction_exception(date, city, banned_from, banned_to, note)` cho ngày lễ.
-- [ ] Seed HN và HCM theo B5, ghi `legal_reference`; giao diện cấu hình hiện cảnh báo "Cần đối chiếu văn bản gốc".
-- [ ] Khi lập lịch: nếu điểm đón hoặc giao nằm trong vùng và giờ dự kiến rơi vào giờ cấm → **dời giờ** đến khung hợp lệ gần nhất, cộng phụ phí đêm; hiện cho khách khung giờ đón hợp lệ trong date-time picker.
-- [ ] Tính ETA có chèn nghỉ theo B4 (tham số `max_drive_hours_before_rest` v.v.).
+- [x] Bảng `city_truck_restriction(id, city, center_lat, center_lng, radius_km, applies_to_heavy_truck BOOLEAN, banned_from TIME, banned_to TIME, days_of_week, legal_reference, effective_from, effective_to)` + `city_restriction_exception(date, city, banned_from, banned_to, note)` cho ngày lễ.
+- [x] Seed HN và HCM theo B5, ghi `legal_reference`; giao diện cấu hình hiện cảnh báo "Cần đối chiếu văn bản gốc".
+- [x] Khi lập lịch: nếu điểm đón hoặc giao nằm trong vùng và giờ dự kiến rơi vào giờ cấm → **dời giờ** đến khung hợp lệ gần nhất, cộng phụ phí đêm; hiện cho khách khung giờ đón hợp lệ trong date-time picker.
+- [x] Tính ETA có chèn nghỉ theo B4 (tham số `max_drive_hours_before_rest` v.v.).
 
 **Hoàn thành khi:** đơn 3 ngựa ra 3 phương án đúng giá; đón ở Quận 1 lúc 9h sáng được gợi ý dời sang 22h; giao ở Singapore dùng trạm đối tác Singapore.
 

@@ -10,7 +10,8 @@ function database(conflicts = [], capacity = 4, type = 'shared_stall') {
     if (sql.includes('SELECT * FROM vehicle')) return [[{ vehicle_id: 1, vehicle_type: 'truck', capacity, status: 'available' }]];
     if (sql.includes('SELECT l.road_trip_id')) return [conflicts];
     if (sql.includes('SELECT sv.shipment_id')) return [[]];
-    if (sql.includes('FROM shipment_horse')) return [[]]; // Step 3: số chỗ chuồng → fallback requested_horse_count
+    if (sql.includes('FROM shipment_horse')) return [[]];
+    if (sql.includes('vehicle_reservation')) return [[]]; // Step 9: giữ chỗ xe (không có reservation) // Step 3: số chỗ chuồng → fallback requested_horse_count
     throw new Error(`Unexpected query: ${sql}`);
   } };
 }

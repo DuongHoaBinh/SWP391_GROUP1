@@ -22,11 +22,16 @@ export interface Regulation {
   transportMode: RegulationTransportMode;
   docTier: RegulationDocTier;
   leadTimeDays: number;
+  maxIssueAgeDays?: number | null;
   requiresAuthorityApproval: boolean;
   minValidityBufferHours: number;
   documentType: string;
+  documentTypeCode?: string | null;
   description: string | null;
   effectiveDate: string | null;
+  legalReference?: string | null;
+  isDemoData?: boolean;
+  isActive?: boolean;
   createdAt: string;
 }
 
@@ -88,6 +93,27 @@ export interface TransportDocument {
   isExpiringSoonForTrip?: boolean;
   expiryNotice?: string;
   earlyIssuanceWarning?: string | null;
+  reviewedBy?: number | null;
+  reviewedAt?: string | null;
+  reviewerName?: string | null;
+  matchedBy?: 'regulation' | 'document_type';
+}
+
+export interface DocumentReviewLogEntry {
+  reviewId: number;
+  documentId: number;
+  fromStatus: string;
+  toStatus: string;
+  reviewerId: number | null;
+  reviewerName?: string | null;
+  reason: string | null;
+  checkedFieldsJson: {
+    microchipMatches?: boolean;
+    passportMatches?: boolean;
+    issueDateOk?: boolean;
+    expiryOk?: boolean;
+  } | null;
+  createdAt: string;
 }
 
 export interface HorseComplianceItem {
@@ -128,13 +154,17 @@ export interface OrderComplianceChecklist {
 
 export interface RegulationTemplateItem {
   documentType: string;
+  documentTypeCode?: string;
   description: string;
   docTier?: RegulationDocTier;
   leadTimeDays?: number;
+  maxIssueAgeDays?: number | null;
   requiresAuthorityApproval?: boolean;
   minValidityBufferHours?: number;
   transportMode?: RegulationTransportMode;
   borderGate?: string | null;
+  legalReference?: string | null;
+  isDemoData?: boolean;
 }
 
 export interface RegulationTemplatePreset {

@@ -65,6 +65,10 @@ interface DisplayRegulation {
   isMandatory: boolean;
   title: string;
   docType: string;
+  documentTypeCode?: string;
+  maxIssueAgeDays?: number | null;
+  legalReference?: string | null;
+  isDemoData?: boolean;
   status: string;
   updated: string;
   regionKey: string;
@@ -297,6 +301,10 @@ export default function RegulationsPage() {
             isMandatory: r.isMandatory !== undefined ? Boolean(r.isMandatory) : true,
             title: r.description || r.documentType,
             docType: r.documentType,
+            documentTypeCode: r.documentTypeCode || r.documentType,
+            maxIssueAgeDays: r.maxIssueAgeDays !== undefined ? r.maxIssueAgeDays : null,
+            legalReference: r.legalReference || null,
+            isDemoData: r.isDemoData !== false,
             status: 'Active',
             updated:
               r.effectiveDate ||
@@ -608,6 +616,21 @@ export default function RegulationsPage() {
         </div>
       </div>
 
+      {/* Regulatory Demo Disclaimer Banner */}
+      <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-3 shadow-xs">
+        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+        <div className="space-y-0.5">
+          <p className="font-bold text-sm text-amber-950">
+            {language === 'en' ? 'Notice on Regulatory & Quarantine Data' : 'Lưu ý về dữ liệu quy chế & kiểm dịch'}
+          </p>
+          <p className="text-amber-800 leading-relaxed m-0">
+            {language === 'en'
+              ? 'Pre-populated regulatory and quarantine requirements are demo simulation data. Enterprises must verify against official Veterinary and Customs authorities before operational deployment.'
+              : 'Dữ liệu pháp lý/kiểm dịch được nạp sẵn là dữ liệu demo mô phỏng. Doanh nghiệp cần đối chiếu với cơ quan Thú y / Hải quan sở tại trước khi áp dụng vào vận hành thực tế.'}
+          </p>
+        </div>
+      </div>
+
       {/* Main Container Card */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
         {/* ROW 0: Key Jurisdictions Quick Jump (UAE, Singapore, Thailand, Vietnam) */}
@@ -754,24 +777,26 @@ export default function RegulationsPage() {
           <table className="w-full table-fixed text-left text-sm border-collapse min-w-[720px]">
             <thead>
               <tr className="bg-[#F0EEE8] border-b border-[#D8CEBE] text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-                <th className="px-6 py-4 w-[12%]">{language === 'en' ? 'Code' : 'Mã'}</th>
-                <th className="px-6 py-4 w-[24%]">{language === 'en' ? 'Country / Border Gate' : 'Quốc gia / Cửa khẩu'}</th>
-                <th className="px-6 py-4 w-[38%]">{language === 'en' ? 'Requirement Title & Detailed Description' : 'Tiêu đề yêu cầu & Mô tả chi tiết'}</th>
-                <th className="px-6 py-4 w-[14%] text-center">{language === 'en' ? 'Status' : 'Trạng thái'}</th>
-                <th className="px-6 py-4 w-[12%] text-center">{language === 'en' ? 'Actions' : 'Thao tác'}</th>
+                <th className="px-4 py-4 w-[8%]">{language === 'en' ? 'Code #' : 'Mã #'}</th>
+                <th className="px-4 py-4 w-[18%]">{language === 'en' ? 'Country / Border' : 'Quốc gia / Cửa khẩu'}</th>
+                <th className="px-4 py-4 w-[28%]">{language === 'en' ? 'Document / Title' : 'Tiêu đề & Loại giấy tờ'}</th>
+                <th className="px-4 py-4 w-[18%]">{language === 'en' ? 'Legal Reference' : 'Căn cứ pháp lý'}</th>
+                <th className="px-4 py-4 w-[10%] text-center">{language === 'en' ? 'Max Age' : 'Hạn cấp'}</th>
+                <th className="px-4 py-4 w-[10%] text-center">{language === 'en' ? 'Data Type' : 'Dữ liệu'}</th>
+                <th className="px-4 py-4 w-[8%] text-center">{language === 'en' ? 'Actions' : 'Thao tác'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E8E2D8]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="p-12 text-center text-slate-500">
+                  <td colSpan={7} className="p-12 text-center text-slate-500">
                     <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-[#181A17] border-t-transparent mb-2"></div>
                     <div>{language === 'en' ? 'Loading quarantine protocols from database...' : 'Đang tải dữ liệu quy định từ cơ sở dữ liệu...'}</div>
                   </td>
                 </tr>
               ) : fetchError ? (
                 <tr>
-                  <td colSpan={5} className="p-12 text-center">
+                  <td colSpan={7} className="p-12 text-center">
                     <div className="max-w-md mx-auto flex flex-col items-center">
                       <AlertTriangle size={36} className="text-red-500 mb-2" />
                       <h3 className="text-sm font-bold text-slate-800 mb-1">
@@ -790,7 +815,7 @@ export default function RegulationsPage() {
                 </tr>
               ) : paginatedRegulations.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-12 text-center text-slate-500">
+                  <td colSpan={7} className="p-12 text-center text-slate-500">
                     <Info size={32} className="mx-auto text-slate-300 mb-2" />
                     {language === 'en' ? 'No regulations found matching the selected filters.' : 'Không tìm thấy quy định nào phù hợp với bộ lọc đã chọn.'}
                   </td>
@@ -800,10 +825,10 @@ export default function RegulationsPage() {
                   const isBaseline = reg.country === 'Global Baseline';
                   return (
                     <tr key={reg.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-6 py-4 font-mono text-xs font-bold text-slate-600">
+                      <td className="px-4 py-3.5 font-mono text-xs font-bold text-slate-600">
                         #{reg.id}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3.5">
                         <div className="font-semibold text-slate-800 flex items-center gap-1.5">
                           {isBaseline ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FAF8F4] text-[#181A17] border border-[#EAE5DA] text-xs font-bold">
@@ -816,21 +841,43 @@ export default function RegulationsPage() {
                         {reg.borderGate && (
                           <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5 font-medium">
                             <span className="text-[#A67C2E]">📍</span>
-                            <span className="truncate max-w-[220px]" title={reg.borderGate}>
+                            <span className="truncate max-w-[200px]" title={reg.borderGate}>
                               {reg.borderGate}
                             </span>
                           </div>
                         )}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3.5">
                         <div className="font-semibold text-slate-800 leading-snug">{translateDocType(reg.docType, reg.title)}</div>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                            {reg.documentTypeCode || reg.docType}
+                          </span>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${reg.docTier === 'A' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                            Tier {reg.docTier}
+                          </span>
+                        </div>
                       </td>
-                      <td className="px-6 py-4 text-center">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
-                          {translateStatus(reg.status)}
+                      <td className="px-4 py-3.5 text-xs text-slate-600">
+                        <span className="truncate max-w-[180px] block" title={reg.legalReference || undefined}>
+                          {reg.legalReference || '—'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-center">
+                      <td className="px-4 py-3.5 text-center text-xs">
+                        {reg.maxIssueAgeDays ? (
+                          <span className="font-semibold text-slate-700">
+                            ≤ {reg.maxIssueAgeDays} {language === 'en' ? 'days' : 'ngày'}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold ${reg.isDemoData !== false ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
+                          {reg.isDemoData !== false ? 'Demo' : (language === 'en' ? 'Official' : 'Chính thức')}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
                             type="button"

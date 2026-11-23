@@ -114,6 +114,16 @@ export class RouteLegDto {
   @IsOptional()
   @IsInt()
   stallsBooked?: number;
+
+  @ApiPropertyOptional({ description: 'Step 9: số jet stall của chặng bay (server tự tính: 3 ngựa/stall, chuồng riêng 1 stall)' })
+  @IsOptional()
+  @IsInt()
+  jetStallCount?: number;
+
+  @ApiPropertyOptional({ description: 'Step 9: lý do dùng xe khác phương án đã giữ chỗ cho khách (bắt buộc khi đổi xe)' })
+  @IsOptional()
+  @IsString()
+  allocationOverrideReason?: string;
 }
 
 export class RouteStopItemDto {

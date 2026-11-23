@@ -1,6 +1,25 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { DocumentStatus } from '../documents.types';
+
+export class DocumentChecklistFieldsDto {
+  @ApiPropertyOptional({ example: true, description: 'Microchip trên giấy khớp với hồ sơ ngựa' })
+  @IsOptional()
+  microchipMatches?: boolean;
+
+  @ApiPropertyOptional({ example: true, description: 'Số hộ chiếu / nhận dạng khớp với hồ sơ ngựa' })
+  @IsOptional()
+  passportMatches?: boolean;
+
+  @ApiPropertyOptional({ example: true, description: 'Ngày cấp hợp lệ theo quy định (không quá sớm/muộn)' })
+  @IsOptional()
+  issueDateOk?: boolean;
+
+  @ApiPropertyOptional({ example: true, description: 'Hạn sử dụng còn đủ cho chuyến đi + biên an toàn' })
+  @IsOptional()
+  expiryOk?: boolean;
+}
 
 export class ReviewDocumentDto {
   @ApiProperty({
@@ -37,4 +56,13 @@ export class ReviewDocumentDto {
   @IsOptional()
   @IsString()
   docNumber?: string;
+
+  @ApiPropertyOptional({
+    description: '4 tiêu chí đối chiếu kiểm tra thực tế hồ sơ (bắt buộc đạt cả 4 khi approved)',
+    type: DocumentChecklistFieldsDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DocumentChecklistFieldsDto)
+  checkedFields?: DocumentChecklistFieldsDto;
 }

@@ -81,3 +81,14 @@ All authorization checks belong to `backend/src/modules/auth` and must be enforc
 | 21 | Gửi thông tin tài khoản nhận hoàn tiền 100% (`/refund`) | **R / A** | I | I | - |
 | 22 | Phê duyệt hoàn tiền do công ty không đáp ứng | I | **R / A** | C *(Dual-approval nếu ≥ 20tr)* | - |
 | 23 | Thực thi chuyển khoản hoàn tiền 100% (SoD `transferred_by != approved_by`) | I | I | **R / A** | - |
+
+## Bổ sung quyền Step 8 (Review 11/2026)
+
+- **Logistics Manager / Admin**: Kiểm duyệt hồ sơ với danh mục 4 điểm (`microchipMatches`, `passportMatches`, `issueDateOk`, `expiryOk`), từ chối bắt buộc lý do (tối thiểu 10 ký tự); kích hoạt thủ công job quét hết hạn và cảnh báo (`POST /compliance/run-expiry-sweep`); quản trị quy định giấy tờ theo quốc gia, cửa khẩu, phương thức.
+- **Customer**: Tự động nhận diện và tái sử dụng giấy tờ trong kho ngựa cá nhân theo `document_type_code`; chỉ tra cứu được danh mục yêu cầu giấy tờ đối với ngựa thuộc sở hữu của mình (`GET /compliance/requirements`, trả `403 Forbidden` nếu truy cập ngựa khác).
+
+## Bổ sung quyền Step 9 (Review 11/2026)
+
+- **Logistics Manager / Admin**: cấu hình giờ cấm xe tải nội đô và ngoại lệ ngày lễ (`/fleet/city-restrictions`), tham số nghỉ dọc đường (`PATCH /system-settings/journey-rules`), đổi xe đã giữ chỗ của đơn (bắt buộc lý do, `POST /fleet/shipments/:id/reservations/swap`).
+- **Mọi user đã đăng nhập**: xem khung giờ được phép của một điểm (`GET /fleet/city-restrictions/check`) và tham số nghỉ.
+- **Customer**: chọn phương án xe khi báo giá; xem phương án/xe đã giữ của **đơn của mình** (`GET /fleet/shipments/:id/reservations`, đơn khác trả `403`).

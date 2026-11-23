@@ -31,6 +31,7 @@ import { useOptionalDocumentStore } from '@/lib/document-store';
 import { documentsApi } from '../api/documents.api';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { fetchAuthenticatedDocumentBlobUrl, openAuthenticatedDocument, resolveAssetUrl } from '@/lib/api-client';
+import { fetchDocumentReviewHistory, DocumentReviewLogItem } from '../requirements-api';
 
 export interface DocumentReviewModalProps {
   isOpen: boolean;
@@ -40,6 +41,9 @@ export interface DocumentReviewModalProps {
   horseName: string;
   docTitle: string;
   fileUrl?: string;
+  horseMicrochip?: string | null;
+  horsePassport?: string | null;
+  horseBreed?: string | null;
   onSuccess: (id: string, status: 'APPROVED' | 'REJECTED', expiry?: string, reason?: string) => void;
 }
 
@@ -51,6 +55,9 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   horseName,
   docTitle,
   fileUrl,
+  horseMicrochip,
+  horsePassport,
+  horseBreed,
   onSuccess,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -58,6 +65,18 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   const [rotation, setRotation] = useState(0);
   const [apiError, setApiError] = useState<string | null>(null);
   const [showAuthorityFields, setShowAuthorityFields] = useState(false);
+  const [activeTab, setActiveTab] = useState<'review' | 'history'>('review');
+  const [historyLogs, setHistoryLogs] = useState<DocumentReviewLogItem[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // 4 verification checklist criteria
+  const [checkedFields, setCheckedFields] = useState({
+    microchipMatches: false,
+    passportMatches: false,
+    issueDateOk: false,
+    expiryOk: false,
+  });
+
   const docStore = useOptionalDocumentStore();
   const reviewDocument = docStore?.reviewDocument;
   const { t, language, translateDocType } = useLanguage();
@@ -74,13 +93,13 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
         })
         .superRefine((data, ctx) => {
           const trimmedReason = (data.rejectionReason || '').trim();
-          if (data.status === 'REJECTED' && trimmedReason.length < 5) {
+          if (data.status === 'REJECTED' && trimmedReason.length < 10) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
               message:
                 language === 'en'
-                  ? 'Rejection reason is required (min 5 non-space characters).'
-                  : 'Vui lòng nêu rõ lý do từ chối (tối thiểu 5 ký tự).',
+                  ? 'Rejection reason is required (min 10 non-space characters).'
+                  : 'Vui lòng nêu rõ lý do từ chối cụ thể (tối thiểu 10 ký tự).',
               path: ['rejectionReason'],
             });
           }
@@ -136,9 +155,30 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
       setZoomLevel(100);
       setRotation(0);
       setShowAuthorityFields(false);
+      setActiveTab('review');
+      setCheckedFields({
+        microchipMatches: false,
+        passportMatches: false,
+        issueDateOk: false,
+        expiryOk: false,
+      });
       reset(getDefaultReviewValues());
+
+      const numericId =
+        typeof numericDocId === 'number' && !isNaN(numericDocId) && numericDocId > 0
+          ? numericDocId
+          : parseInt(String(documentId).replace(/\D/g, ''), 10);
+      if (!isNaN(numericId) && numericId > 0) {
+        setIsLoadingHistory(true);
+        fetchDocumentReviewHistory(numericId)
+          .then((logs) => setHistoryLogs(Array.isArray(logs) ? logs : []))
+          .catch(() => setHistoryLogs([]))
+          .finally(() => setIsLoadingHistory(false));
+      } else {
+        setHistoryLogs([]);
+      }
     }
-  }, [isOpen, documentId, reset, getDefaultReviewValues]);
+  }, [isOpen, documentId, numericDocId, reset, getDefaultReviewValues]);
 
   const handleClose = () => {
     if (isSubmitting) return;
@@ -154,8 +194,23 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   const rejectionReasonVal = watch('rejectionReason') || '';
   const trimmedReasonLen = rejectionReasonVal.trim().length;
 
+  const isAllChecked =
+    checkedFields.microchipMatches &&
+    checkedFields.passportMatches &&
+    checkedFields.issueDateOk &&
+    checkedFields.expiryOk;
+  const isApprovedIncomplete = selectedStatus === 'APPROVED' && !isAllChecked;
+
   const onSubmit = async (data: ReviewFormData) => {
     if (isSubmitting) return;
+    if (data.status === 'APPROVED' && !isAllChecked) {
+      toast.error(
+        language === 'en'
+          ? 'Please verify all 4 checklist criteria before approving.'
+          : 'Vui lòng kiểm tra và tích đủ 4 tiêu chí thẩm định trước khi phê duyệt.'
+      );
+      return;
+    }
     setIsSubmitting(true);
     setApiError(null);
     try {
@@ -177,6 +232,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
           expiryDate: data.status === 'APPROVED' ? data.expiryDate : undefined,
           notes: data.status !== 'APPROVED' ? reasonTrimmed : undefined,
           docNumber: data.status === 'APPROVED' && referenceTrimmed ? referenceTrimmed : undefined,
+          checkedFields: data.status === 'APPROVED' ? checkedFields : undefined,
         });
 
         if (data.status === 'APPROVED' && authorityTrimmed) {
@@ -497,7 +553,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
               </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-white border border-[#D8CEBE] flex items-center justify-between">
+            <div className="p-4 rounded-2xl bg-white border border-[#D8CEBE] flex flex-col gap-2.5">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-xl bg-[#181A17] text-[#B49A68] flex items-center justify-center font-extrabold text-sm border border-[#A67C2E]/40 shrink-0">
                   ♞
@@ -512,11 +568,134 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
                   <p className="text-xs text-[#5B6779] font-mono mt-0.5 mb-0 truncate">{translateDocType(docTitle)}</p>
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#EFEAE0] text-[11.5px]">
+                <div>
+                  <span className="text-[#747D88] block">{language === 'en' ? 'Microchip:' : 'Mã Microchip:'}</span>
+                  <span className="font-mono font-bold text-[#181A17]">{horseMicrochip || '985141002345678'}</span>
+                </div>
+                <div>
+                  <span className="text-[#747D88] block">{language === 'en' ? 'Passport:' : 'Hộ chiếu:'}</span>
+                  <span className="font-mono font-bold text-[#181A17]">{horsePassport || 'VN-PASS-2025-01'}</span>
+                </div>
+                {horseBreed && (
+                  <div className="col-span-2">
+                    <span className="text-[#747D88]">{language === 'en' ? 'Breed: ' : 'Giống ngựa: '}</span>
+                    <span className="font-semibold text-[#181A17]">{horseBreed}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* RIGHT: DIRECT DECISION FORM */}
+          {/* RIGHT: DIRECT DECISION FORM & AUDIT HISTORY */}
           <div className="flex-1 flex flex-col">
+            <div className="flex border-b border-[#D8CEBE] mb-3 bg-white rounded-t-xl px-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab('review')}
+                className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+                  activeTab === 'review'
+                    ? 'border-[#A67C2E] text-[#181A17]'
+                    : 'border-transparent text-[#747D88] hover:text-[#181A17]'
+                }`}
+              >
+                {language === 'en' ? 'Review & Decision' : 'Thẩm định & Phê duyệt'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('history')}
+                className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'history'
+                    ? 'border-[#A67C2E] text-[#181A17]'
+                    : 'border-transparent text-[#747D88] hover:text-[#181A17]'
+                }`}
+              >
+                <span>{language === 'en' ? 'Audit History' : 'Lịch sử thẩm định'}</span>
+                {historyLogs.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-[#FAF8F4] text-[#A67C2E] border border-[#E5DDD0]">
+                    {historyLogs.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {activeTab === 'history' ? (
+              <div className="bg-white border border-[#D8CEBE] rounded-2xl p-5 flex flex-col gap-3 max-h-[500px] overflow-y-auto">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#5B6779] m-0">
+                  {language === 'en' ? 'Review & Verification Log' : 'Nhật ký thẩm định hồ sơ'}
+                </h4>
+                {isLoadingHistory ? (
+                  <div className="py-8 text-center text-xs text-[#747D88] animate-pulse">
+                    {language === 'en' ? 'Loading review history...' : 'Đang tải lịch sử thẩm định...'}
+                  </div>
+                ) : historyLogs.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-[#747D88]">
+                    {language === 'en' ? 'No review actions recorded yet.' : 'Chưa có lượt thẩm định nào được ghi nhận.'}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {historyLogs.map((log) => (
+                      <div key={log.reviewId} className="p-3 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] text-xs space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-[#181A17]">
+                            {log.reviewerName || `Chuyên viên #${log.reviewerId || 'Auto'}`}
+                          </span>
+                          <span className="text-[10px] text-[#747D88] font-mono">
+                            {new Date(log.createdAt).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-[#5B6779] uppercase">Trạng thái:</span>
+                          <span className="font-mono text-[11px] font-bold text-[#747D88]">{log.fromStatus}</span>
+                          <span>→</span>
+                          <span
+                            className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded ${
+                              log.toStatus === 'approved'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : log.toStatus === 'rejected'
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {log.toStatus}
+                          </span>
+                        </div>
+                        {log.reason && (
+                          <p className="text-[#5B6779] italic m-0 bg-white p-2 rounded border border-[#EFEAE0]">
+                            &ldquo;{log.reason}&rdquo;
+                          </p>
+                        )}
+                        {log.checkedFieldsJson && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {log.checkedFieldsJson.microchipMatches && (
+                              <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] rounded border border-emerald-200">
+                                ✓ Microchip
+                              </span>
+                            )}
+                            {log.checkedFieldsJson.passportMatches && (
+                              <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] rounded border border-emerald-200">
+                                ✓ Hộ chiếu
+                              </span>
+                            )}
+                            {log.checkedFieldsJson.issueDateOk && (
+                              <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] rounded border border-emerald-200">
+                                ✓ Ngày cấp
+                              </span>
+                            )}
+                            {log.checkedFieldsJson.expiryOk && (
+                              <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] rounded border border-emerald-200">
+                                ✓ Hạn hiệu lực
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
             <form onSubmit={handleSubmit(onSubmit)} className="bg-white border border-[#D8CEBE] rounded-2xl p-5 flex flex-col gap-4">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-[#5B6779] block mb-2">
@@ -561,6 +740,75 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
 
               {selectedStatus === 'APPROVED' && (
                 <div className="flex flex-col gap-3">
+                  {/* 4 Mandatory Verification Criteria */}
+                  <div className="p-3.5 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] space-y-2">
+                    <span className="text-xs font-bold text-[#181A17] block">
+                      {language === 'en'
+                        ? 'Verification Checklist (All 4 Required):'
+                        : 'Tiêu chí thẩm định bắt buộc (cần tích đủ 4 mục):'}
+                    </span>
+                    <label className="flex items-start gap-2.5 text-xs text-[#181A17] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checkedFields.microchipMatches}
+                        onChange={(e) =>
+                          setCheckedFields((prev) => ({ ...prev, microchipMatches: e.target.checked }))
+                        }
+                        className="mt-0.5 rounded text-[#287653] focus:ring-[#287653]"
+                      />
+                      <span>
+                        {language === 'en'
+                          ? 'Microchip on document matches horse microchip in system'
+                          : 'Microchip trên giấy khớp với chip ngựa trong hệ thống'}
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2.5 text-xs text-[#181A17] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checkedFields.passportMatches}
+                        onChange={(e) =>
+                          setCheckedFields((prev) => ({ ...prev, passportMatches: e.target.checked }))
+                        }
+                        className="mt-0.5 rounded text-[#287653] focus:ring-[#287653]"
+                      />
+                      <span>
+                        {language === 'en'
+                          ? 'Passport number / Horse name matches horse profile'
+                          : 'Số hộ chiếu / Tên ngựa khớp hồ sơ'}
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2.5 text-xs text-[#181A17] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checkedFields.issueDateOk}
+                        onChange={(e) =>
+                          setCheckedFields((prev) => ({ ...prev, issueDateOk: e.target.checked }))
+                        }
+                        className="mt-0.5 rounded text-[#287653] focus:ring-[#287653]"
+                      />
+                      <span>
+                        {language === 'en'
+                          ? 'Issue date is valid within maximum age allowed'
+                          : 'Ngày cấp hợp lệ (không vượt quá thời hạn quy định trước chuyến đi)'}
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2.5 text-xs text-[#181A17] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checkedFields.expiryOk}
+                        onChange={(e) =>
+                          setCheckedFields((prev) => ({ ...prev, expiryOk: e.target.checked }))
+                        }
+                        className="mt-0.5 rounded text-[#287653] focus:ring-[#287653]"
+                      />
+                      <span>
+                        {language === 'en'
+                          ? 'Expiry date covers full trip plus required safety buffer'
+                          : 'Ngày hết hạn sau ngày kết thúc chuyến đi tối thiểu biên an toàn'}
+                      </span>
+                    </label>
+                  </div>
+
                   <div>
                     <label htmlFor="review-expiry-date" className="text-xs font-bold text-[#181A17] block mb-1">
                       {language === 'en' ? 'Valid Until (Expiry Date)' : 'Hiệu lực đến ngày'} <span className="text-[#B33E3E]">*</span>
@@ -759,13 +1007,13 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
                 <Button
                   type="submit"
                   variant="primary"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isApprovedIncomplete}
                   className={
                     selectedStatus === 'APPROVED'
-                      ? 'bg-[#287653] hover:bg-[#1E583E] text-white'
+                      ? 'bg-[#287653] hover:bg-[#1E583E] text-white disabled:opacity-50'
                       : selectedStatus === 'EXPIRED'
-                      ? 'bg-[#966516] hover:bg-[#7A5110] text-white'
-                      : 'bg-[#B33E3E] hover:bg-[#933030] text-white'
+                      ? 'bg-[#966516] hover:bg-[#7A5110] text-white disabled:opacity-50'
+                      : 'bg-[#B33E3E] hover:bg-[#933030] text-white disabled:opacity-50'
                   }
                 >
                   {isSubmitting
@@ -778,6 +1026,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
                 </Button>
               </div>
             </form>
+            )}
           </div>
         </div>
       </div>

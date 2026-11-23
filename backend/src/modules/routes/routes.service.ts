@@ -36,7 +36,8 @@ import { ReviewPlanDto } from './dto/review-plan.dto';
 import { ConfirmAssignmentDto } from './dto/confirm-assignment.dto';
 import { ShipmentStatus } from '../orders/orders.types';
 import { ShipmentLifecycle } from '../../common/shipment-lifecycle';
-import { assertRoadCapacity } from '../fleet/capacity-policy';
+import { applyConvoyCapacity, assertRoadCapacity } from '../fleet/capacity-policy';
+import { jetStallCount } from '../fleet/allocation-policy';
 
 @Injectable()
 export class RoutesService implements OnModuleInit {
@@ -235,6 +236,12 @@ export class RoutesService implements OnModuleInit {
       }) };
     }
 
+    // Step 9: số jet stall cho chặng bay (3 ngựa thường/stall, ngựa chuồng riêng 1 stall)
+    const stallHorses = dto.legs.some(l => l.legType === 'flight') && typeof (this.fleetStore as any).findShipmentStallHorses === 'function'
+      ? await (this.fleetStore as any).findShipmentStallHorses(shipmentId)
+      : null;
+    const jetStalls = stallHorses && stallHorses.length ? jetStallCount(stallHorses) : undefined;
+
     if (
       dto.legs.some(l => l.legType === 'flight') &&
       typeof (this.routesStore as any).findAllAirlines === 'function' &&
@@ -321,6 +328,7 @@ export class RoutesService implements OnModuleInit {
             arrivalAirportId: leg.arrivalAirportId ?? arrAp?.id,
             arrivalAirportCode: leg.arrivalAirportCode ?? arrAp?.iataCode,
             stallsBooked: requiredStalls,
+            jetStallCount: jetStalls ?? leg.jetStallCount,
           };
         }),
       };
@@ -331,7 +339,10 @@ export class RoutesService implements OnModuleInit {
       const requiredSlots = typeof this.fleetStore.findRequiredStallSlots === 'function'
         ? await this.fleetStore.findRequiredStallSlots(shipmentId, order.requestedHorseCount)
         : order.requestedHorseCount;
-      assertRoadCapacity(requiredSlots, roadVehicles, await this.fleetStore.findVehiclesByIds(roadVehicles));
+      const reservations = typeof (this.fleetStore as any).findShipmentReservations === 'function'
+        ? await (this.fleetStore as any).findShipmentReservations(shipmentId)
+        : [];
+      assertRoadCapacity(requiredSlots, roadVehicles, applyConvoyCapacity(await this.fleetStore.findVehiclesByIds(roadVehicles), reservations));
     }
     let routeId: number;
     if (!route) {

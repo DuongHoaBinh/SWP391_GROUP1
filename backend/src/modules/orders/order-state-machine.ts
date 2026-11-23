@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PoolConnection } from 'mysql2/promise';
+import { RESERVATION_RELEASE_STATUSES, releaseShipmentReservations } from '../fleet/vehicle-reservation';
 
 export type ShipmentStatusValue =
   | 'requested'
@@ -132,6 +133,11 @@ export async function transitionShipment(
     if (!err?.message?.includes("doesn't exist")) {
       throw err;
     }
+  }
+
+  // 5. Step 9: đơn hủy / hết hạn thanh toán / không đáp ứng (hoàn tiền) → nhả xe đã giữ chỗ
+  if (RESERVATION_RELEASE_STATUSES.includes(input.to)) {
+    await releaseShipmentReservations(db, input.shipmentId, input.reasonCode ?? `status_${input.to}`);
   }
 
   return { from: currentStatus, to: input.to };
