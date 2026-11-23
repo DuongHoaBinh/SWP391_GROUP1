@@ -125,7 +125,7 @@ export const DocumentStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     }
     setIsLoaded(true);
 
-    if (!token || (role !== 'TRANSPORT_SPECIALIST' && role !== 'ADMIN')) {
+    if (!token || (role !== 'LOGISTICS_MANAGER' && role !== 'ADMIN')) {
       return;
     }
 

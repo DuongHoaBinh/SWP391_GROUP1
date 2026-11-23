@@ -1,4 +1,5 @@
 import { UserProfile } from './types';
+import { normalizeRole } from './auth-redirect';
 
 const TOKEN_KEY = 'equitransit_token';
 const USER_KEY = 'equitransit_user';
@@ -55,7 +56,8 @@ export function getAuthenticatedUser(): UserProfile | null {
       email: parsed.email || '',
       phone: parsed.phone || '',
       address: parsed.address || '',
-      role: (parsed.role || '') as UserProfile['role'],
+      // Phiên đăng nhập cũ có thể còn role Specialist/Coordinator đã gộp.
+      role: normalizeRole(parsed.role) as UserProfile['role'],
       organization: parsed.organization || '',
       avatarUrl: parsed.avatarUrl || '',
       initials,

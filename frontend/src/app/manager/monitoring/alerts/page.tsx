@@ -358,7 +358,7 @@ export default function CoordinatorAlertsPage() {
                         <span className="font-bold text-sm text-[#181A17]">{alert.type}</span>
                         {alert.shipmentId ? (
                           <Link
-                            href={`/coordinator/monitoring?shipmentId=${alert.shipmentId}`}
+                            href={`/manager/monitoring?shipmentId=${alert.shipmentId}`}
                             className="inline-flex items-center gap-1 text-xs font-mono font-semibold px-2.5 py-0.5 rounded-md bg-white border border-[#D8CEBE] text-[#181A17] hover:border-[#A67C2E] hover:text-[#A67C2E] transition-colors"
                           >
                             <span>{alert.tripCode}</span>

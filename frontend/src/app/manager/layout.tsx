@@ -20,6 +20,16 @@ import {
   X,
   Pin,
   PinOff,
+  ShieldCheck,
+  ClipboardCheck,
+  Scale,
+  FolderOpen,
+  FileSignature,
+  FileX,
+  Navigation,
+  Map as MapIcon,
+  Bus,
+  Radio,
 } from 'lucide-react';
 import { getAuthToken, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
 import { getDashboardRouteForRole } from '@/lib/auth-redirect';
@@ -31,6 +41,7 @@ import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { AmbientCanvas } from '@/components/layout/AmbientCanvas';
 import { FleetRouteStoreProvider } from '@/lib/fleet-route-store';
+import { DocumentStoreProvider } from '@/lib/document-store';
 
 interface NavItem {
   label: string;
@@ -38,6 +49,13 @@ interface NavItem {
   icon: React.ReactNode;
   badge?: number;
   badgeColor?: 'danger' | 'brand';
+  /** Chỉ active khi đúng đường dẫn (trang tổng quan của một nhóm có trang con). */
+  exact?: boolean;
+}
+
+interface NavGroup {
+  title: string;
+  items: NavItem[];
 }
 
 export default function ManagerLayout({
@@ -189,33 +207,105 @@ export default function ManagerLayout({
     };
   }, [router]);
 
-  const navItems: NavItem[] = [
+  // Portal hợp nhất sau review 11/2026: Manager đảm nhận luôn việc của Specialist (hồ sơ) và Coordinator (điều phối).
+  const navGroups: NavGroup[] = [
     {
-      label: t('nav.dashboard', 'Tổng Quan'),
-      href: '/manager',
-      icon: <LayoutDashboard size={18} />,
+      title: t('manager.navGroupOps', 'Điều Hành Vận Tải'),
+      items: [
+        {
+          label: t('nav.dashboard', 'Tổng Quan'),
+          href: '/manager',
+          icon: <LayoutDashboard size={18} />,
+          exact: true,
+        },
+        {
+          label: t('manager.nav.requests', 'Yêu Cầu Vận Chuyển'),
+          href: '/manager/requests',
+          icon: <Truck size={18} />,
+        },
+        {
+          label: t('manager.nav.planning', 'Kế Hoạch Chuyến Đi'),
+          href: '/manager/planning',
+          icon: <MapPin size={18} />,
+        },
+        {
+          label: t('manager.nav.incidents', 'Xử Lý Sự Cố'),
+          href: '/manager/incidents',
+          icon: <AlertTriangle size={18} />,
+        },
+      ],
     },
     {
-      label: t('manager.nav.requests', 'Yêu Cầu Vận Chuyển'),
-      href: '/manager/requests',
-      icon: <Truck size={18} />,
+      title: t('manager.navGroupCompliance', 'Hồ Sơ & Kiểm Dịch'),
+      items: [
+        {
+          label: t('manager.nav.complianceOverview', 'Tổng Quan Hồ Sơ'),
+          href: '/manager/compliance',
+          icon: <ShieldCheck size={18} />,
+          exact: true,
+        },
+        {
+          label: t('specialist.nav.complianceOrders', 'Đơn Kiểm Định Pháp Lý'),
+          href: '/manager/compliance/orders',
+          icon: <ClipboardCheck size={18} />,
+        },
+        {
+          label: t('specialist.nav.regulations', 'Quy Định Kiểm Dịch'),
+          href: '/manager/compliance/regulations',
+          icon: <Scale size={18} />,
+        },
+        {
+          label: t('specialist.nav.documents', 'Hồ Sơ Vận Chuyển'),
+          href: '/manager/compliance/documents',
+          icon: <FolderOpen size={18} />,
+        },
+        {
+          label: t('specialist.nav.approval', 'Thẩm Định Giấy Tờ'),
+          href: '/manager/compliance/approval',
+          icon: <FileSignature size={18} />,
+        },
+        {
+          label: t('specialist.nav.missing', 'Hồ Sơ Còn Thiếu'),
+          href: '/manager/compliance/missing',
+          icon: <FileX size={18} />,
+        },
+      ],
     },
     {
-      label: t('manager.nav.planning', 'Kế Hoạch Chuyến Đi'),
-      href: '/manager/planning',
-      icon: <MapPin size={18} />,
-    },
-    {
-      label: t('manager.nav.staff', 'Phân Bổ Ca Trực & Nhân Sự'),
-      href: '/manager/staff',
-      icon: <Users size={18} />,
-    },
-    {
-      label: t('manager.nav.incidents', 'Xử Lý Sự Cố'),
-      href: '/manager/incidents',
-      icon: <AlertTriangle size={18} />,
+      title: t('manager.navGroupDispatch', 'Đội Xe & Điều Phối'),
+      items: [
+        {
+          label: t('manager.nav.dispatchOverview', 'Tổng Quan Điều Phối'),
+          href: '/manager/dispatch',
+          icon: <Navigation size={18} />,
+          exact: true,
+        },
+        {
+          label: t('nav.routes', 'Lập lộ trình tuyến'),
+          href: '/manager/dispatch/routes',
+          icon: <MapIcon size={18} />,
+        },
+        {
+          label: t('nav.vehicles', 'Quản lý đội xe'),
+          href: '/manager/fleet/vehicles',
+          icon: <Bus size={18} />,
+        },
+        {
+          label: t('manager.nav.staff', 'Phân Bổ Ca Trực & Nhân Sự'),
+          href: '/manager/staff',
+          icon: <Users size={18} />,
+        },
+        {
+          label: t('nav.monitoring', 'Giám sát'),
+          href: '/manager/monitoring',
+          icon: <Radio size={18} />,
+        },
+      ],
     },
   ];
+
+  const isNavActive = (item: NavItem) =>
+    item.exact ? pathname === item.href : pathname === item.href || Boolean(pathname?.startsWith(`${item.href}/`));
 
   const managementItems: NavItem[] = [
     {
@@ -257,6 +347,7 @@ export default function ManagerLayout({
 
   return (
     <FleetRouteStoreProvider>
+      <DocumentStoreProvider>
       <div className="flex h-[100dvh] max-h-[100dvh] bg-[#F4F1E9] overflow-hidden relative font-sans">
       <AmbientCanvas />
       <LogoutConfirmModal
@@ -336,13 +427,14 @@ export default function ManagerLayout({
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: '28px' }}>
-              <div>
+              {navGroups.map((group) => (
+              <div key={group.title}>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: '#7E867B', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px 12px' }}>
-                  {t('manager.navGroupOps', 'Điều Hành Vận Tải')}
+                  {group.title}
                 </p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {navItems.map((item) => {
-                    const isActive = item.href === '/manager' ? pathname === '/manager' : pathname?.startsWith(item.href);
+                  {group.items.map((item) => {
+                    const isActive = isNavActive(item);
                     return (
                       <Link
                         key={item.href}
@@ -378,6 +470,7 @@ export default function ManagerLayout({
                   })}
                 </div>
               </div>
+              ))}
 
               <div>
                 <p style={{ fontSize: '11px', fontWeight: 700, color: '#7E867B', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px 12px' }}>
@@ -520,8 +613,9 @@ export default function ManagerLayout({
               gap: !isExpanded ? '16px' : '28px',
             }}
           >
-            {/* NAVIGATION GROUP */}
-            <div>
+            {/* NAVIGATION GROUPS: Điều hành · Hồ sơ & Kiểm dịch · Đội xe & Điều phối */}
+            {navGroups.map((group) => (
+            <div key={group.title}>
               {isExpanded ? (
                 <p
                   style={{
@@ -535,18 +629,15 @@ export default function ManagerLayout({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {t('manager.navGroupOps', 'Điều Hành Vận Tải')}
+                  {group.title}
                 </p>
               ) : (
                 <div className="w-8 h-[1px] bg-white/10 mx-auto my-2" />
               )}
 
               <nav style={{ display: 'flex', flexDirection: 'column', gap: !isExpanded ? '6px' : '3px' }}>
-                {navItems.map((item) => {
-                  const isActive =
-                    item.href === '/manager'
-                      ? pathname === '/manager'
-                      : pathname?.startsWith(item.href);
+                {group.items.map((item) => {
+                  const isActive = isNavActive(item);
 
                   if (!isExpanded) {
                     return (
@@ -627,6 +718,7 @@ export default function ManagerLayout({
                 })}
               </nav>
             </div>
+            ))}
 
             {/* MANAGEMENT GROUP */}
             <div>
@@ -1055,6 +1147,7 @@ export default function ManagerLayout({
       </main>
       <HelpSupportModal isOpen={showSupportModal} onClose={() => setShowSupportModal(false)} />
     </div>
+      </DocumentStoreProvider>
     </FleetRouteStoreProvider>
   );
 }

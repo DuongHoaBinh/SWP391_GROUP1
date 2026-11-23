@@ -523,7 +523,7 @@ export default function TripSchedulePage() {
                         {isInTransit && (
                           <div className="flex items-center justify-end gap-2">
                             <Link
-                              href={`/coordinator/monitoring?shipmentId=${trip.shipmentId}`}
+                              href={`/manager/monitoring?shipmentId=${trip.shipmentId}`}
                               className="px-3 py-1.5 bg-[#FAF8F4] hover:bg-[#F3EFE4] text-[#181A17] font-bold text-xs rounded-lg border border-[#EAE5DA] inline-flex items-center gap-1.5 transition-colors shadow-sm no-underline whitespace-nowrap"
                             >
                               <Eye size={13} />

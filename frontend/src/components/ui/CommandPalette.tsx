@@ -55,8 +55,9 @@ export function CommandPalette() {
   }, []);
 
   const allItems: PaletteItem[] = useMemo(() => {
+    // Portal Manager hợp nhất (review 11/2026): gồm lệnh điều hành + hồ sơ kiểm dịch + điều phối đội xe.
     if (pathname.startsWith('/manager')) {
-      return [
+      const managerCore: PaletteItem[] = [
         {
           id: 'mgr-dash',
           category: 'actions',
@@ -90,8 +91,8 @@ export function CommandPalette() {
           category: 'actions',
           title: isEn ? 'Staff & Duty Roster' : 'Quản lý nhân sự vận tải',
           subtitle: isEn
-            ? 'Directory of specialists, coordinators, drivers & vets'
-            : 'Danh bạ chuyên viên, điều phối viên, tài xế & thú y',
+            ? 'Directory of drivers, escorts & vets'
+            : 'Danh bạ tài xế, áp tải & thú y',
           icon: <Users className="w-4 h-4 text-[#A67C2E]" />,
           url: '/manager/staff',
         },
@@ -106,10 +107,8 @@ export function CommandPalette() {
           url: '/manager/incidents',
         },
       ];
-    }
 
-    if (pathname.startsWith('/specialist')) {
-      return [
+      const complianceItems: PaletteItem[] = [
         {
           id: 'spec-dash',
           category: 'actions',
@@ -118,7 +117,7 @@ export function CommandPalette() {
             ? 'Inspect pending veterinary and customs documents'
             : 'Theo dõi hồ sơ đang chờ thẩm định',
           icon: <ShieldCheck className="w-4 h-4 text-[#A67C2E]" />,
-          url: '/specialist',
+          url: '/manager/compliance',
         },
         {
           id: 'spec-orders',
@@ -128,7 +127,7 @@ export function CommandPalette() {
             ? 'Shipments requiring border export/import clearance'
             : 'Danh sách đơn cần hoàn tất hồ sơ xuất nhập cảnh',
           icon: <FileText className="w-4 h-4 text-[#B49A68]" />,
-          url: '/specialist/compliance-orders',
+          url: '/manager/compliance/orders',
         },
         {
           id: 'spec-docs',
@@ -138,7 +137,7 @@ export function CommandPalette() {
             ? 'Audit FEI passports, Coggins tests & health certificates'
             : 'Duyệt hộ chiếu FEI, Coggins & kiểm dịch thú y',
           icon: <ShieldCheck className="w-4 h-4 text-[#287653]" />,
-          url: '/specialist/documents',
+          url: '/manager/compliance/documents',
         },
         {
           id: 'spec-approval',
@@ -148,7 +147,7 @@ export function CommandPalette() {
             ? 'Track customs & veterinary authority approvals'
             : 'Theo dõi phê duyệt hải quan & chi cục thú y',
           icon: <Activity className="w-4 h-4 text-[#A67C2E]" />,
-          url: '/specialist/approval',
+          url: '/manager/compliance/approval',
         },
         {
           id: 'spec-reg',
@@ -158,13 +157,11 @@ export function CommandPalette() {
             ? 'Manage mandatory checklists by corridor & country'
             : 'Quản lý danh mục yêu cầu bắt buộc theo tuyến',
           icon: <MapPin className="w-4 h-4 text-[#966516]" />,
-          url: '/specialist/regulations',
+          url: '/manager/compliance/regulations',
         },
       ];
-    }
 
-    if (pathname.startsWith('/coordinator')) {
-      return [
+      const dispatchItems: PaletteItem[] = [
         {
           id: 'coord-dash',
           category: 'actions',
@@ -173,7 +170,7 @@ export function CommandPalette() {
             ? 'Vehicle readiness & upcoming departures'
             : 'Trạng thái phương tiện & các chuyến sắp khởi hành',
           icon: <Truck className="w-4 h-4 text-[#A67C2E]" />,
-          url: '/coordinator',
+          url: '/manager/dispatch',
         },
         {
           id: 'coord-routes',
@@ -183,7 +180,7 @@ export function CommandPalette() {
             ? 'Configure checkpoints, shared stalls & air bookings'
             : 'Lập điểm dừng, chuyến ghép chuồng & booking hàng không',
           icon: <MapPin className="w-4 h-4 text-[#287653]" />,
-          url: '/coordinator/routes',
+          url: '/manager/dispatch/routes',
         },
         {
           id: 'coord-veh',
@@ -193,7 +190,7 @@ export function CommandPalette() {
             ? 'Monitor specialized horseboxes and availability'
             : 'Theo dõi xe thùng chuyên dụng và trạng thái sẵn sàng',
           icon: <Truck className="w-4 h-4 text-[#B49A68]" />,
-          url: '/coordinator/vehicles',
+          url: '/manager/fleet/vehicles',
         },
         {
           id: 'coord-mon',
@@ -203,9 +200,11 @@ export function CommandPalette() {
             ? 'Track active checkpoint progress and overrides'
             : 'Theo dõi tiến độ các chặng đang di chuyển',
           icon: <Activity className="w-4 h-4 text-[#287653]" />,
-          url: '/coordinator/monitoring',
+          url: '/manager/monitoring',
         },
       ];
+
+      return [...managerCore, ...complianceItems, ...dispatchItems];
     }
 
     if (pathname.startsWith('/driver') || pathname.startsWith('/escort')) {

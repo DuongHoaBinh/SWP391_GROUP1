@@ -421,7 +421,7 @@ export default function SpecialistDashboardPage() {
 
           <button
             type="button"
-            onClick={() => router.push('/specialist/regulations')}
+            onClick={() => router.push('/manager/compliance/regulations')}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE] text-xs font-bold cursor-pointer transition-colors"
           >
             <Scale size={14} className="text-[#966516]" />
@@ -430,7 +430,7 @@ export default function SpecialistDashboardPage() {
 
           <button
             type="button"
-            onClick={() => router.push('/specialist/documents')}
+            onClick={() => router.push('/manager/compliance/documents')}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D28] text-white text-xs font-bold cursor-pointer shadow-sm transition-colors"
           >
             <FolderOpen size={14} className="text-[#D4C5A3]" />
@@ -468,7 +468,7 @@ export default function SpecialistDashboardPage() {
         </button>
 
         <Link
-          href="/specialist/compliance-orders"
+          href="/manager/compliance/orders"
           className="no-underline bg-white rounded-2xl p-4 sm:p-5 border border-[#E5DDD0] hover:border-[#C4B38E] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
         >
           <div className="flex items-center justify-between mb-2.5">
@@ -489,7 +489,7 @@ export default function SpecialistDashboardPage() {
         </Link>
 
         <Link
-          href="/specialist/missing"
+          href="/manager/compliance/missing"
           className={`no-underline rounded-2xl p-4 sm:p-5 border shadow-sm flex flex-col justify-between transition-all hover:shadow-md ${
             missingDocs.length > 0
               ? 'bg-[#FDF6F6] border-[#E5B8B8]'
@@ -526,7 +526,7 @@ export default function SpecialistDashboardPage() {
         </Link>
 
         <Link
-          href="/specialist/approval"
+          href="/manager/compliance/approval"
           className="no-underline bg-white rounded-2xl p-4 sm:p-5 border border-[#E5DDD0] hover:border-[#B7DBC4] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
         >
           <div className="flex items-center justify-between mb-2.5">

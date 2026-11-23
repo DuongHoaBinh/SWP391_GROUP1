@@ -265,7 +265,7 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
   const refreshStaff = useCallback(async () => {
     const token = getAuthToken();
     const role = String(getCurrentUser()?.role || '').toUpperCase();
-    if (!token || !['FLEET_ROUTE_COORDINATOR', 'COORDINATOR', 'LOGISTICS_MANAGER', 'ADMIN'].includes(role)) {
+    if (!token || !['LOGISTICS_MANAGER', 'ADMIN'].includes(role)) {
       return;
     }
 

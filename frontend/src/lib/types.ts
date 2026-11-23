@@ -1,8 +1,6 @@
 export type UserRole =
   | 'CUSTOMER'
   | 'LOGISTICS_MANAGER'
-  | 'TRANSPORT_SPECIALIST'
-  | 'FLEET_ROUTE_COORDINATOR'
   | 'DRIVER_ESCORT'
   | 'ADMIN';
 

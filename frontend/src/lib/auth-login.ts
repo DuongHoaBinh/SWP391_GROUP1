@@ -1,6 +1,7 @@
 import type { UserProfile, UserRole } from './types';
+import { normalizeRole } from './auth-redirect';
 
-const roles = new Set(['CUSTOMER', 'LOGISTICS_MANAGER', 'TRANSPORT_SPECIALIST', 'FLEET_ROUTE_COORDINATOR', 'DRIVER_ESCORT', 'ADMIN']);
+const roles = new Set(['CUSTOMER', 'LOGISTICS_MANAGER', 'DRIVER_ESCORT', 'ADMIN']);
 
 export interface LoginSession {
   accessToken: string;
@@ -29,7 +30,7 @@ export async function loginWithPassword(apiUrl: string, email: string, password:
   }
   const user = data?.user;
   const rawRole = typeof user?.role === 'string' ? user.role.trim().toUpperCase() : '';
-  const role = rawRole === 'COORDINATOR' ? 'FLEET_ROUTE_COORDINATOR' : rawRole === 'DRIVER' ? 'DRIVER_ESCORT' : rawRole;
+  const role = normalizeRole(rawRole);
   if (typeof data?.accessToken !== 'string' || !data.accessToken.trim() || !user ||
     !['string', 'number'].includes(typeof user.id) || !String(user.id).trim() ||
     typeof user.email !== 'string' || !user.email.trim() || !roles.has(role)) {
@@ -58,7 +59,7 @@ export async function loginWithGoogle(apiUrl: string, token: string): Promise<Lo
   }
   const user = data?.user;
   const rawRole = typeof user?.role === 'string' ? user.role.trim().toUpperCase() : '';
-  const role = rawRole === 'COORDINATOR' ? 'FLEET_ROUTE_COORDINATOR' : rawRole === 'DRIVER' ? 'DRIVER_ESCORT' : rawRole;
+  const role = normalizeRole(rawRole);
   if (typeof data?.accessToken !== 'string' || !data.accessToken.trim() || !user ||
     !['string', 'number'].includes(typeof user.id) || !String(user.id).trim() ||
     typeof user.email !== 'string' || !user.email.trim() || !roles.has(role)) {

@@ -339,7 +339,7 @@ export default function CoordinatorDashboardPage() {
           </p>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#181A17] m-0">
             {t('coordinator.welcome', 'Xin chào')},{' '}
-            <span className="text-[#966516]">{t('role.coordinator', 'Điều Phối Viên')}</span>
+            <span className="text-[#966516]">{t('role.manager', isEn ? 'Operations Manager' : 'Quản Lý Vận Hành')}</span>
           </h1>
           <p className="text-sm text-[#5F6977] mt-1.5 mb-0 max-w-2xl">
             {t(
@@ -361,7 +361,7 @@ export default function CoordinatorDashboardPage() {
           </button>
 
           <Link
-            href="/coordinator/routes"
+            href="/manager/dispatch/routes"
             className="px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D28] text-white text-xs font-bold shadow-sm inline-flex items-center gap-2 transition-colors no-underline"
           >
             <MapPin className="w-3.5 h-3.5 text-[#D4C5A3]" />
@@ -392,7 +392,7 @@ export default function CoordinatorDashboardPage() {
       {/* 2. CLICKABLE 4-KPI ROW */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Link
-          href="/coordinator/routes"
+          href="/manager/dispatch/routes"
           className={`no-underline rounded-2xl p-5 border shadow-sm flex flex-col justify-between transition-all hover:shadow-md ${
             awaitingPlanningCount > 0
               ? 'bg-[#FAF8F4] border-[#C4B38E]'
@@ -419,7 +419,7 @@ export default function CoordinatorDashboardPage() {
         </Link>
 
         <Link
-          href="/coordinator/monitoring"
+          href="/manager/monitoring"
           className="no-underline bg-white rounded-2xl p-5 border border-[#E5DDD0] hover:border-[#C4B38E] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
         >
           <div className="flex items-center justify-between mb-3">
@@ -442,7 +442,7 @@ export default function CoordinatorDashboardPage() {
         </Link>
 
         <Link
-          href="/coordinator/routes"
+          href="/manager/dispatch/routes"
           className="no-underline bg-white rounded-2xl p-5 border border-[#E5DDD0] hover:border-[#C4B38E] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
         >
           <div className="flex items-center justify-between mb-3">
@@ -469,7 +469,7 @@ export default function CoordinatorDashboardPage() {
         </Link>
 
         <Link
-          href="/coordinator/vehicles"
+          href="/manager/fleet/vehicles"
           className="no-underline bg-white rounded-2xl p-5 border border-[#E5DDD0] hover:border-[#B7DBC4] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
         >
           <div className="flex items-center justify-between mb-3">
@@ -787,7 +787,7 @@ export default function CoordinatorDashboardPage() {
                             {trip.orderCode || trip.id}
                           </span>
                           <Link
-                            href="/coordinator/monitoring"
+                            href="/manager/monitoring"
                             className="block text-xs text-[#181A17] font-bold hover:text-[#966516] mt-1 no-underline"
                           >
                             {trip.horseName || t('common.racehorse', 'Ngựa đua')}
@@ -858,7 +858,7 @@ export default function CoordinatorDashboardPage() {
                     <p className="text-xs text-[#5F6977] mb-3 m-0">{al.message}</p>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <Link
-                        href="/coordinator/alerts"
+                        href="/manager/monitoring/alerts"
                         className="text-[11px] font-bold text-[#966516] hover:underline no-underline"
                       >
                         {t('coordinator.alerts.reviewAlert', 'Xem chi tiết')} ({al.tripCode}) →
@@ -916,7 +916,7 @@ export default function CoordinatorDashboardPage() {
                 </p>
               </div>
               <Link
-                href="/coordinator/vehicles"
+                href="/manager/fleet/vehicles"
                 className="text-xs font-bold text-[#966516] hover:underline no-underline shrink-0"
               >
                 {t('coordinator.viewAllVehicles', 'Xem tất cả →')}

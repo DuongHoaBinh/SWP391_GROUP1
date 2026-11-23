@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { mapLegacyPortalPath } from './lib/auth-redirect';
 
 interface JwtPayload {
   sub?: string | number;
@@ -71,9 +72,10 @@ export async function middleware(request: NextRequest) {
   const roleToPath: Record<string, string> = {
     CUSTOMER: '/customer',
     LOGISTICS_MANAGER: '/manager',
-    TRANSPORT_SPECIALIST: '/specialist',
-    FLEET_ROUTE_COORDINATOR: '/coordinator',
-    COORDINATOR: '/coordinator',
+    // Role cũ đã gộp vào Logistics Manager (review 11/2026).
+    TRANSPORT_SPECIALIST: '/manager',
+    FLEET_ROUTE_COORDINATOR: '/manager',
+    COORDINATOR: '/manager',
     DRIVER_ESCORT: '/driver',
     DRIVER: '/driver',
     ADMIN: '/manager',
@@ -84,13 +86,19 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
+  // 1b. Portal Specialist/Coordinator cũ đã gộp vào /manager: chuyển link cũ (bookmark, thông báo) sang trang mới.
+  const legacyTarget = mapLegacyPortalPath(pathname);
+  if (legacyTarget) {
+    return NextResponse.redirect(new URL(`${legacyTarget}${search}`, request.url));
+  }
+
   // 2. Authentication routes
   if (pathname === '/login' || pathname === '/register' || pathname === '/forgot-password') {
     return NextResponse.next();
   }
 
   // 3. Protected actor routes
-  const protectedPrefixes = ['/customer', '/manager', '/coordinator', '/driver', '/escort', '/specialist', '/admin'];
+  const protectedPrefixes = ['/customer', '/manager', '/driver', '/escort', '/admin'];
   const matchedPrefix = protectedPrefixes.find((prefix) => pathname.startsWith(prefix));
 
   if (matchedPrefix) {

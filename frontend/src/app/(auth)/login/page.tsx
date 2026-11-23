@@ -66,8 +66,6 @@ function LoginFormContent() {
       const roleRoutes: Record<string, string> = {
         CUSTOMER: '/customer',
         LOGISTICS_MANAGER: '/manager',
-        TRANSPORT_SPECIALIST: '/specialist',
-        FLEET_ROUTE_COORDINATOR: '/coordinator',
         DRIVER_ESCORT: isEscortUser ? '/escort' : '/driver',
         ADMIN: '/manager',
       };

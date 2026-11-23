@@ -281,7 +281,7 @@ export default function ComplianceOrdersPage() {
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <Link
-            href="/specialist/regulations"
+            href="/manager/compliance/regulations"
             className="no-underline inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-[#242722] bg-[#FAF9F5] hover:bg-[#F0EEE8] transition-all border border-[#D8CEBE]"
           >
             <Scale size={14} className="text-[#A67C2E]" />
