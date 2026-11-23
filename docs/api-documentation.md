@@ -809,5 +809,80 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
   - `GET /reports/performance` (`LOGISTICS_MANAGER`, `ADMIN`): Live DB aggregations for Gross/Adjusted OTD, Quarantine pass rates, revenue, `retainedCancellationRevenue`, `creditLiabilityBalance`, `netRealizedCashRevenue`, operating costs, and gross profit.
   - `GET /reports/shipments/:shipmentId/operating-costs` & `POST /reports/shipments/:shipmentId/operating-costs` (`LOGISTICS_MANAGER`, `FLEET_ROUTE_COORDINATOR`, `ADMIN`), `DELETE /reports/operating-costs/:costId` (`LOGISTICS_MANAGER`, `ADMIN`), and `PATCH /reports/shipments/:shipmentId/excused-delay` (`LOGISTICS_MANAGER`, `ADMIN`; locked `409 Conflict` after 48h from arrival).
 
+## Equine Insurance v2 & Claims Endpoints (Step 6 — Migration 033)
+
+- **GET `/orders/:id/insurance/payout-table`**
+  - **Access:** Authenticated (`CUSTOMER` owns the order, `LOGISTICS_MANAGER`, `ADMIN`).
+  - **Description:** Returns the dynamic M1–M4 payout calculation table for each horse in the order, showing declared value, insurance package, fee paid, and maximum payable amount for M1 (minor injury / vet cost), M2 (minor permanent disability - 30%), M3 (severe permanent disability - 50%), M4 (death / humane destruction - 80% or 100%).
+  - **Response 200:**
+    ```json
+    {
+      "horses": [
+        {
+          "shipmentHorseId": 12,
+          "horseName": "Thần Mã",
+          "declaredValueVnd": 1000000000,
+          "package": "standard",
+          "insuranceFee": 15000000,
+          "payoutRules": [
+            { "severity": "M1", "payoutType": "vet_cost_capped", "capVnd": 100000000, "formula": "Chi phí thú y thực tế (tối đa 100,000,000 VNĐ)" },
+            { "severity": "M2", "payoutType": "percent_of_value", "percentBps": 3000, "amountVnd": 300000000, "formula": "30% giá trị khai báo" },
+            { "severity": "M3", "payoutType": "percent_of_value", "percentBps": 5000, "amountVnd": 500000000, "formula": "50% giá trị khai báo" },
+            { "severity": "M4", "payoutType": "percent_of_value", "percentBps": 8000, "amountVnd": 800000000, "formula": "80% giá trị khai báo" }
+          ]
+        }
+      ]
+    }
+    ```
+
+- **POST `/orders/:id/horses/:shipmentHorseId/claims`**
+  - **Access:** `CUSTOMER` (must be the order owner).
+  - **Description:** Submits an insurance claim for a specific horse. Requires multipart form-data.
+  - **Constraints:**
+    - Order must be in `completed` status within 72 hours of completion (or `in_transit` if severity is `M4` death).
+    - An active claim (status `submitted` or `under_review`) cannot exist concurrently for the same horse (`409 Conflict`).
+    - At least one evidence file (photo, vet report) must be attached.
+  - **Request (multipart/form-data):**
+    - `severity`: `"M1"` | `"M2"` | `"M3"` | `"M4"` (mandatory)
+    - `description`: string, min 10 chars (mandatory)
+    - `requestedAmount`: number, >= 0 (mandatory)
+    - `vetCostVnd`: number (optional, used for M1 calculations)
+    - `files`: file attachments (JPEG, PNG, PDF <= 10MB each)
+  - **Response 201:** Created `InsuranceClaimItem` with status `"submitted"` and auto-computed `suggestedAmount`.
+
+- **GET `/orders/:id/claims`**
+  - **Access:** `CUSTOMER` (order owner), `LOGISTICS_MANAGER`, `ADMIN`.
+  - **Description:** Lists all insurance claims filed for horses within the specified order.
+
+- **GET `/insurance/claims`**
+  - **Access:** `LOGISTICS_MANAGER`, `ADMIN`.
+  - **Description:** Manager console endpoint to query all claims across the system with optional filters (`status`, `severity`, `search`, pagination).
+
+- **GET `/insurance/claims/:claimId`**
+  - **Access:** Claim owner (`CUSTOMER`), `LOGISTICS_MANAGER`, `ADMIN`.
+  - **Description:** Retrieves detailed claim record, including horse profile, evidence list, suggested amount, review notes, and audit event history.
+
+- **GET `/insurance/claims/:claimId/evidence/:fileIndex`**
+  - **Access:** Claim owner (`CUSTOMER`), `LOGISTICS_MANAGER`, `ADMIN`.
+  - **Description:** Streams the uploaded evidence document/photo with secure sandbox headers.
+
+- **PATCH `/insurance/claims/:claimId/review`**
+  - **Access:** `LOGISTICS_MANAGER`, `ADMIN`.
+  - **Description:** Reviews and decides on a claim (`approve` or `reject`).
+  - **Constraints:**
+    - Status must be `submitted` or `under_review`.
+    - If `action = 'approve'`: `approvedAmount` is mandatory, must not exceed policy rule cap (`400 Bad Request`). If `approvedAmount != suggestedAmount`, `reason` is required. Automatically creates `shipment_refund_record` with category `insurance_claim`. If `approvedAmount >= 20,000,000 VND`, marks `requires_dual_approval = true`.
+    - If `action = 'reject'`: `rejectionCode` and `reason` are mandatory.
+  - **Request Body (JSON):**
+    ```json
+    {
+      "action": "approve",
+      "approvedAmount": 800000000,
+      "notes": "Hồ sơ giám định tử vong hợp lệ từ phòng thú y chỉ định.",
+      "reason": ""
+    }
+    ```
+  - **Response 200:** Updated `InsuranceClaimItem`.
+
 - **Migrations:** Run `024_wave0_schema_hotfixes.sql`, `025_wave1_g1_g2_reports_compliance.sql`, `026_wave2_g3_g4_ops_refunds_sla_vitals.sql`, and `027_wave3_flow5_incidents_and_flow6_handover.sql` (or `npm run migrate:all` in `backend/`).
 

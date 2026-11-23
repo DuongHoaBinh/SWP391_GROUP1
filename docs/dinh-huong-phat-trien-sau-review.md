@@ -496,12 +496,14 @@ flowchart TD
 
 ### STEP 6. Bảo hiểm mới theo % và mức độ sự cố (2 ngày)
 
-- [ ] 6.1 Viết lại `orders/insurance-policy.ts` theo bảng C4.2 (giữ tên mã `basic`/`standard`/`premium` để không vỡ dữ liệu; đổi tên hiển thị thành Cơ bản / Tiêu chuẩn / Toàn diện). Tăng `insurance_policy_version`.
-- [ ] 6.2 Bảng `insurance_payout_rule(package, severity ENUM('M1','M2','M3','M4'), payout_type ENUM('percent_of_value','vet_cost_capped'), percent_bps, cap_vnd)`: cấu hình được, không hard-code.
-- [ ] 6.3 Bảng `insurance_claim(claim_id, shipment_horse_id, severity, description, vet_report_document_id, requested_amount, approved_amount, status ENUM('submitted','under_review','approved','rejected','paid'), decided_by, decided_at, reason)`.
-- [ ] 6.4 API `POST /shipments/:id/horses/:shId/claims` (Customer, trong 72 giờ sau bàn giao); Manager duyệt; hệ thống **tự gợi ý số tiền** theo rule; ≥ 20 triệu thì duyệt kép, Admin chuyển.
-- [ ] 6.5 UI chọn gói lúc tạo đơn: **bảng so sánh 3 gói** (phí của chính con ngựa đó, đền bao nhiêu cho mỗi mức M1-M4 tính bằng tiền thật theo giá trị khai báo).
-- [ ] 6.6 Cập nhật `docs/equine-insurance-delivery.md`, `requirements.md` (xóa mâu thuẫn ở Phần A), `filethongtin.md` mục 5.1.
+> **Trạng thái: đã triển khai (23/11/2026)**. Migration `033_insurance_payout_claims.sql`, chính sách `equine-v2`, phí tối thiểu (Standard 1tr, Premium 2tr), khứ hồi giảm 10%, bảng mức độ sự cố M1–M4 cấu hình động trong DB, API claim 72h và duyệt kép SoD tài chính, UI so sánh gói bảo hiểm thời gian thực theo giá trị khai báo, Manager claim review console. Test suite `insurance-v2.test.cjs` 8/8 pass (tổng test backend 121/121 pass).
+
+- [x] 6.1 Viết lại `orders/insurance-policy.ts` theo bảng C4.2 (giữ tên mã `basic`/`standard`/`premium` để không vỡ dữ liệu; đổi tên hiển thị thành Cơ bản / Tiêu chuẩn / Toàn diện). Tăng `insurance_policy_version` (`equine-v2`).
+- [x] 6.2 Bảng `insurance_payout_rule(package, severity ENUM('M1','M2','M3','M4'), payout_type ENUM('percent_of_value','vet_cost_capped'), payout_percent_bps, cap_vnd)`: cấu hình được, không hard-code.
+- [x] 6.3 Bảng `insurance_claim(claim_id, shipment_horse_id, severity, description, requested_amount, approved_amount, status ENUM('submitted','under_review','approved','rejected','paid'), reviewed_by, reviewed_at, reason)` và `insurance_claim_event`.
+- [x] 6.4 API `POST /orders/:id/horses/:shId/claims` (Customer, trong 72 giờ sau bàn giao); Manager duyệt; hệ thống **tự gợi ý số tiền** theo rule; ≥ 20 triệu thì duyệt kép, Admin chuyển.
+- [x] 6.5 UI chọn gói lúc tạo đơn: **bảng so sánh 3 gói** (phí của chính con ngựa đó, đền bao nhiêu cho mỗi mức M1-M4 tính bằng tiền thật theo giá trị khai báo).
+- [x] 6.6 Cập nhật `docs/equine-insurance-delivery.md`, `requirements.md` (xóa mâu thuẫn ở Phần A), `filethongtin.md` mục 5.1.
 
 **Hoàn thành khi:** khách thấy rõ "ngựa 2 tỷ, gói Tiêu chuẩn: phí 30 triệu; chết đền 1,6 tỷ"; Manager xử lý được một claim từ đầu đến cuối.
 

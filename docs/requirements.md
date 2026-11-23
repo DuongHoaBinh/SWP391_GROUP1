@@ -188,3 +188,22 @@ Toàn bộ KPI của Logistics Manager phải tính trực tiếp từ dữ li�
   - Hủy dưới 72h: hoàn 0% cước chặng về.
   - Công ty chủ động hủy: hoàn 100% cước và bảo hiểm chặng về.
   - Đổi ngày đón chặng về trước ≥ 168 giờ: miễn phí. Đổi dưới 168 giờ: phụ thu 10% cước chặng về.
+
+
+## 10. Chính sách Bảo hiểm v2 và Bồi thường theo Mức độ Sự cố M1–M4 (Step 6 — Review 11/2026)
+
+- **3 Gói Bảo hiểm Chuẩn hóa theo % và Mức tối thiểu (C4.2):**
+  - **Cơ bản (`basic`):** Phí 0 VNĐ, đã bao gồm trong cước. Bồi thường M1: chi phí thú y thực tế ≤ 5.000.000 VNĐ; M2: chi phí thú y thực tế ≤ 10.000.000 VNĐ; M3: 20% giá trị khai báo (tối đa 50.000.000 VNĐ); M4: 100% giá trị khai báo (tối đa 50.000.000 VNĐ). Không hỗ trợ thú y khẩn cấp trên đường.
+  - **Tiêu chuẩn (`standard`):** Phí 1,5% giá trị khai báo, mức tối thiểu 1.000.000 VNĐ. Bồi thường M1: chi phí thú y thực tế ≤ 1% giá trị khai báo; M2: 15% giá trị; M3: 50% giá trị; M4: 80% giá trị. Thú y khẩn cấp trên đường tối đa 20.000.000 VNĐ.
+  - **Toàn diện (`premium`):** Phí 3,0% giá trị khai báo, mức tối thiểu 2.000.000 VNĐ. Bồi thường M1: chi phí thú y thực tế ≤ 2% giá trị khai báo; M2: 30% giá trị; M3: 80% giá trị; M4: 100% giá trị. Thú y khẩn cấp trên đường: toàn bộ chi phí thực tế.
+- **Phân loại Mức độ Sự cố M1–M4:**
+  - **M1 (Nhẹ):** Trầy xước, mất nước, căng thẳng nhẹ; hồi phục < 7 ngày; không ảnh hưởng thi đấu. Bằng chứng: ảnh chụp bàn giao và nhật ký sinh hiệu.
+  - **M2 (Trung bình):** Chấn thương/bệnh cần điều trị 7–30 ngày; tạm nghỉ thi đấu. Bằng chứng: giấy khám thú y và hóa đơn điều trị.
+  - **M3 (Nặng / Loss of Use):** Điều trị > 30 ngày hoặc mất khả năng thi đấu vĩnh viễn. Bằng chứng: kết luận bác sĩ thú y độc lập.
+  - **M4 (Tử vong / An tử):** Tử vong hoặc an tử nhân đạo theo chỉ định thú y trong lúc vận chuyển hoặc trong vòng 72 giờ sau bàn giao. Bằng chứng: biên bản hiện trường và kết luận giám định thú y.
+- **Quy trình Quản lý Yêu cầu Bồi thường (Claims):**
+  - Khách hàng nộp yêu cầu trong vòng 72 giờ sau khi hoàn tất bàn giao ngựa (riêng M4 được nộp ngay trong lúc vận chuyển).
+  - Hệ thống tự động tính toán số tiền gợi ý (`suggested_amount`) theo quy tắc cấu hình trong cơ sở dữ liệu (`insurance_payout_rule`).
+  - Quản lý vận tải (Logistics Manager) thẩm định hồ sơ: duyệt trong hạn mức quy định (nếu khác số tiền gợi ý bắt buộc có lý do) hoặc từ chối (bắt buộc chọn mã lý do hợp lệ).
+  - Khi phê duyệt, hệ thống tự động khởi tạo hồ sơ hoàn tiền (`shipment_refund_record`) với phân loại `insurance_claim`.
+  - Khoản bồi thường ≥ 20.000.000 VNĐ bắt buộc trải qua cơ chế phê duyệt kép (Dual-Approval) và lệnh giải ngân chuyển khoản do System Administrator thực hiện (tuân thủ nguyên tắc Tách biệt Trách nhiệm - SoD).

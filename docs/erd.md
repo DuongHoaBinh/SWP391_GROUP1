@@ -73,11 +73,21 @@ The database schema is the executable source of truth; this document explains ow
 `shipment_invoice` (migration `016_route_payment_gate.sql`) belongs to `orders` billing. It references `shipment`, the confirmed `route`, and the paying customer (`user`). `route_id` is unique: repeated confirmations reuse the issued invoice. `amount` is a positive integer VND value; `snapshot` retains the customer, route and scheduled legs at issue time. `issued_at` is the server timestamp. Existing SePay receipts and sandbox history remain separate and unchanged.
 
 
-## Equine insurance (migration 017)
+## Equine insurance (migration 017 & migration 033 v2)
 
 - `shipment_horse`: `declared_value DECIMAL(15,2)`, `declared_currency`, `exchange_rate DECIMAL(18,6)`, `declared_value_vnd DECIMAL(15,2)`, `insurance_package`, per-horse `insurance_fee DECIMAL(15,2)`, `max_compensation DECIMAL(15,2)`, `emergency_vet_covered`, `insurance_policy_version`. The existing quantity multiplies premiums, not the declared unit value or unit compensation cap.
 - `shipment`: `transport_cost DECIMAL(15,2) NULL` distinguishes pending freight from zero freight; `insurance_fee DECIMAL(15,2)` stores the sum of unit premiums multiplied by quantities. Existing `total_cost` becomes the combined quoted total after approval.
 - `shipment_insurance_revision`: append-only `previous_snapshot` (JSON), shipment, changing customer, reason and server timestamp. It preserves policy data across pre-approval resubmissions without creating new horse identities.
+- **Chính sách bảo hiểm equine-v2 & bồi thường theo mức độ sự cố M1–M4 (migration `033_insurance_payout_claims.sql`, Step 6)**:
+  - `insurance_package_config(package PK, display_name, rate_bps, min_fee_vnd, max_compensation_fixed_vnd, is_active, notes)`: Cấu hình gói bảo hiểm động trong DB. Basic: 0%, trần cố định 50.000.000 VNĐ, không có phí tối thiểu. Standard: 1,5% (150 bps), phí tối thiểu 1.000.000 VNĐ/ngựa, trần 80% giá trị khai báo. Premium: 3,0% (300 bps), phí tối thiểu 2.000.000 VNĐ/ngựa, trần 100% giá trị khai báo + hỗ trợ cấp cứu thú y.
+  - `insurance_payout_rule(rule_id PK, package, severity ENUM('M1','M2','M3','M4'), payout_type ENUM('percent_of_value','vet_cost_capped'), payout_percent_bps, cap_vnd, description, is_active)`: Bảng quy tắc đền bù theo 4 mức độ:
+    - M1 (Thương tích nhẹ/bệnh vãng lai): chi phí thú y thực tế, Basic tối đa 50tr; Standard tối đa 100tr; Premium chi trả 100% hóa đơn thú y.
+    - M2 (Thương tật vĩnh viễn nhẹ, giảm 30% giá trị thi đấu): Standard đền 30% giá trị khai báo; Premium đền 30% giá trị khai báo (Basic: 0).
+    - M3 (Thương tật vĩnh viễn nặng, mất khả năng thi đấu hoàn toàn): Standard đền 50% giá trị; Premium đền 50% giá trị (Basic: 0).
+    - M4 (Tử vong hoặc buộc phải tiêu hủy nhân đạo): Basic tối đa 50tr; Standard đền 80% giá trị khai báo; Premium đền 100% giá trị khai báo.
+  - `insurance_claim(claim_id PK, shipment_horse_id FK, shipment_id FK, customer_id FK, severity ENUM('M1','M2','M3','M4'), description, vet_cost_vnd, requested_amount, suggested_amount, approved_amount, status ENUM('submitted','under_review','approved','rejected','paid'), evidence_urls JSON, refund_record_id FK, rejection_code, rejection_reason, review_notes, reviewed_by FK, reviewed_at, created_at, updated_at)`: Quản lý vòng đời yêu cầu bồi thường (claim). Cửa sổ nộp claim là 72 giờ sau khi đơn `completed` (hoặc đang `in_transit` đối với mức tử vong M4).
+  - `insurance_claim_event(event_id PK, claim_id FK, action, actor_id FK, note, payload JSON, created_at)`: Audit log append-only theo dõi mọi biến động trạng thái của claim.
+  - Tích hợp tài chính SoD: Khi duyệt claim, hệ thống tự động tạo bản ghi `shipment_refund_record` loại `insurance_claim`. Duyệt số tiền `>= 20.000.000 VNĐ` kích hoạt duyệt kép (`requires_dual_approval = true`). Admin thực hiện chuyển khoản, nếu người chuyển trùng người duyệt sẽ bị từ chối 403 Forbidden. Khi Admin hoàn tất chuyển tiền, claim tự động cập nhật trạng thái `paid`.
 - Migration 017 is rerunnable. Existing horses default to Basic with no added fee, historical totals remain unchanged, and existing quoted totals are copied to base freight. No prior trip is retrospectively charged insurance. The insurance record remains attached to its original shipment/horse relationship.
 - Schema/migration 017 also supply missing nullable horse-profile columns (`color`, `weight`, `medical_status`, `special_requirements`) required by the existing horse selection and order detail API. Existing columns and profile values are preserved.
 
