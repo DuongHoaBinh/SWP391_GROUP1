@@ -29,7 +29,7 @@ export class ComplianceController {
   ) {}
 
   @Get('requirements')
-  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.TRANSPORT_SPECIALIST)
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Lấy danh mục hồ sơ cần chuẩn bị theo quốc gia và phương thức (Step 8)',
     description:
@@ -92,7 +92,7 @@ export class ComplianceController {
   }
 
   @Get('documents/:id/history')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.TRANSPORT_SPECIALIST)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem lịch sử thẩm định của tài liệu (document_review_log)' })
   async getDocumentReviewHistory(
     @CurrentUser() user: AuthenticatedUser,

@@ -10,41 +10,39 @@ The system must preserve an auditable history of approvals, documents, route cha
 
 ## Actors and scope
 
-### Logistics Manager
+### Logistics Manager (Quản lý vận hành)
 
-- Receive and approve domestic and international transport orders.
-- Create the overall transport plan, including vehicle, airline, route, and transfer points.
-- Assign work to the Transport Specialist, Fleet & Route Coordinator, and Driver / Escort.
-- Approve route changes and additional costs during emergencies.
-- View revenue, operating cost, and on-time delivery performance reports.
+- Gộp toàn bộ trách nhiệm của Logistics Manager, Transport Specialist và Fleet & Route Coordinator cũ (G1).
+- Tiếp nhận, thẩm định khả thi (`feasibility_status`), duyệt/từ chối đơn vận chuyển trả trước và đơn truyền thống.
+- Thẩm định hồ sơ pháp lý/kiểm dịch của ngựa (`microchipMatches`, `passportMatches`, `issueDateOk`, `expiryOk`), quét hết hạn tự động, yêu cầu bổ sung giấy tờ.
+- Quản trị bảng giá đa phương thức (`pricing_tariff`), định mức trạm trung chuyển (`depot`), giờ cấm đô thị (`city_restriction`), và quy định kiểm dịch theo quốc gia.
+- Lập kế hoạch lộ trình chi tiết, phân công xe chuyên dụng, trạm dừng, tài xế và bác sĩ thú y áp tải.
+- Giám sát toàn bộ chuyến đi trên bản đồ trực tiếp (`live-overview`), tiếp nhận cảnh báo sinh hiệu và mốc hành trình.
+- Thẩm định hồ sơ hoàn tiền vận hành và hồ sơ bồi thường bảo hiểm (`insurance_claim`).
+- Xem báo cáo doanh thu, chi phí, tỷ lệ đúng giờ (OTD) và xác nhận `excused_delay`.
 
-### Transport Specialist
+### Vehicle Driver / Escort (Tài xế / Bác sĩ thú y áp tải)
 
-- Maintain medical, quarantine, and customs rules by country and border gate.
-- Create and store a digital transport file for each horse, including vaccination certificates, horse passports, and import/export permits.
-- Track approval progress with agricultural authorities, customs, and quarantine agencies.
-- Notify customers about missing documents and submission deadlines.
+- Xem danh sách chuyến đi, cá thể ngựa và điểm dừng được phân công.
+- Thực hiện cập nhật mốc hành trình thực địa kèm tọa độ GPS định vị (tự động gắn cờ nếu check-in ngoài vùng geofence).
+- Bác sĩ thú y (Escort Vet) ghi nhận nhật ký sinh hiệu định kỳ (nhiệt độ, nhịp tim, nhịp thở), kích hoạt cảnh báo sốt vận chuyển.
+- Báo cáo sự cố khẩn cấp, ghi nhận biên bản chờ đón chặng về (120 phút) và báo cáo No-show có ảnh chụp hiện trường.
+- Thực hiện giao nhận ngựa và lập biên bản bàn giao tại điểm đích.
 
-### Fleet & Route Coordinator
+### Customer (Chủ ngựa / Câu lạc bộ đua)
 
-- Manage specialized vehicles, aircraft cargo capacity, and horse stalls.
-- Build routes with rest stops, quarantine stations, fuel stations, transfer points, and border gates.
-- Update trip progress by leg: departed, arrived at stop, customs cleared, and delivered.
-- Adjust schedules and issue alerts for traffic, weather, or border congestion.
+- Quản lý kho hồ sơ ngựa đua cá nhân (hộ chiếu, giấy tiêm chủng, xét nghiệm Coggins, giấy chứng nhận sức khỏe).
+- Tạo yêu cầu vận chuyển một chiều hoặc khứ hồi, chọn phương thức (đường bộ, hàng không, đường thủy), nhận báo giá tự động 3 phương án.
+- Chọn gói bảo hiểm (Cơ bản M1, Tiêu chuẩn M2, Toàn diện M3), khai báo giá trị ngựa bằng VND hoặc USD quy đổi.
+- Thanh toán trả trước trực tuyến qua SePay (VietQR) / MoMo, tải hóa đơn điện tử (PDF).
+- Theo dõi chuyến đi theo thời gian thực trên bản đồ vệ tinh và Timeline dọc chi tiết (được bảo mật ẩn danh thông tin nhân sự).
+- Xác nhận nghiệm thu hoặc khiếu nại bàn giao; nộp yêu cầu bồi thường bảo hiểm trong vòng 72 giờ sau khi hoàn thành.
 
-### Vehicle Driver / Escort
+### Admin (Quản trị viên & Kế toán tài chính SoD)
 
-- View assigned schedules, horses, and rest stops.
-- Submit milestone updates during the trip.
-- Record horse health observations in text and images.
-- Report vehicle, traffic, and horse medical emergencies to the operations center.
-
-### Customer (club / horse owner)
-
-- Create a transport request with origin, destination, dates, number of horses, and special requirements.
-- Upload horse identity and medical documents.
-- Track trip location and leg status.
-- Receive notifications when customs is completed or the horse reaches the safe handover location.
+- Khởi tạo tài khoản nội bộ và cấu hình toàn hệ thống.
+- Bật/tắt chế độ giả lập GPS và tùy chọn hiển thị chi tiết sinh hiệu cho khách hàng (`PATCH /system-settings/tracking`).
+- Độc lập thực thi giải ngân chuyển khoản hoàn tiền và bồi thường bảo hiểm (bắt buộc `transferred_by != approved_by` theo nguyên tắc Segregation of Duties).
 
 ## Mandatory flows
 
@@ -81,15 +79,11 @@ Each flow owns its business rules and API contract. Cross-flow changes must be r
 - The Manager quotes **base transport freight**, separately from insurance. Once quoted, `totalCost = transportCost + insuranceFee`. Before a quote exists, base freight is pending and the API keeps `totalCost = 0`, returning the known insurance premium separately.
 - Insurance values, premiums, compensation limits and the policy version belong to the shipment horse, not the reusable My Horses profile. Changing a later request never modifies a prior trip's policy.
 
-## Shared stall and dedicated charter booking
+## Dedicated charter booking & Biosecurity isolation (G10)
 
-- Customer chooses `shared_stall` (default) or `dedicated_charter`, independently of domestic/international scope and road/air mode. Recommend shared for 1–2 horses and dedicated for 3+ or special-care horses, but neither threshold restricts the choice.
-- Shared purchases one slot per horse on a fixed corridor; freight equals the Manager's unit stall price multiplied by the total selected horse quantity. Dedicated purchases a private vehicle/charter service with one flat freight price for the entire group, flexible requested departure and priority for direct routing.
-- The Manager sees the customer's choice before quoting. The backend computes freight, then adds the saved aggregate insurance once. Quotes, invoices and bank amounts use the same combined total.
-- Customer can change the choice only in `change_requested`; preserve the old choice in an append-only booking revision and clear the old quote for Manager review. Approval validates the quoted booking/count against the locked order.
-- Coordinator uses the selected service when arranging shared capacity on compatible corridors or a private trip. Actual flight/stall booking remains operational work as in Flow 3; this requirement does not introduce airline reservation integration or automatic cross-customer trip matching.
-- Approved road scope: manual shared-trip selection, one stall per horse, aggregate capacity checked under vehicle locks, dedicated vehicle exclusivity during the booked interval, and customer data isolation. Coordinator assesses compatibility; no automatic route/time tolerance is imposed. Operational air sharing/chartering remains an open decision.
-- New Manager approvals require explicit positive base freight. Omitted amendment fields preserve existing policy and quantity. MoMo sandbox never supplies real payment status or operational readiness.
+- **Loại bỏ hoàn toàn ghép chuyến (No Shared Ride):** Theo khuyến nghị của Hội đồng và nguyên tắc an toàn sinh học đối với ngựa đua giá trị cao, hệ thống chỉ hỗ trợ **Bao nguyên xe / Bao chuyến chuyên dụng (Dedicated Charter)**. Không cho phép ghép ngựa của các chủ sở hữu khác nhau trên cùng một phương tiện (`shared_stall` bị cấm hoàn toàn trên các đơn mới).
+- **Cấu hình ô chuồng & Xe chuyên dụng:** Khách hàng được chọn xe 1, 2, 4 hoặc 6 chỗ tùy theo số lượng ngựa cần vận chuyển. Ngựa có yêu cầu chuồng riêng (`requires_private_stall = true`) chiếm 2 khoang tiêu chuẩn để đảm bảo không gian và sự thoải mái.
+- **Giá cước trọn gói xe:** Cước vận chuyển được tính trọn gói cho toàn bộ xe chuyên dụng theo khoảng cách thực tế từ trạm trung chuyển (Depot) đến điểm đón và điểm trả; không chia nhỏ cước theo từng chỗ lẻ.
 
 ## BA Specification v3.1 — Scope, Control Gates, Reporting & NFRs
 
@@ -217,3 +211,50 @@ Toàn bộ KPI của Logistics Manager phải tính trực tiếp từ dữ li�
 - **FR-S9-05**: ETA chèn điểm nghỉ theo tham số B4 cấu hình được (`journey.rules`).
 - **FR-S9-06**: Manager đổi xe/trạm đã giữ phải nhập lý do; hệ thống lưu lịch sử.
 - **FR-S9-07**: Chặng bay tính số jet stall = ngựa chuồng riêng + ⌈ngựa thường / 3⌉; tàu gia súc 1 ô/ngựa.
+
+## 12. Luồng đặt chỗ trả trước, duyệt khả thi, hóa đơn VAT và hoàn tiền SoD (Step 7 — Review 11/2026)
+
+- **Quy trình thanh toán trả trước (Prepaid Booking Flow):** Khách hàng thanh toán đặt cọc 100% ngay sau khi chọn phương án báo giá. Sau khi thanh toán thành công, đơn chuyển sang trạng thái `paid_pending_feasibility` để Logistics Manager thẩm định tính khả thi vận hành (`feasibility_status`).
+- **Thẩm định khả thi (`PATCH /orders/:id/feasibility`):**
+  - Nếu khả thi (`feasible`): Đơn được phê duyệt chính thức (`approved`), chuyển sang lập kế hoạch lộ trình chi tiết (Flow 3).
+  - Nếu không khả thi (`unfeasible`): Manager từ chối với lý do cụ thể, hệ thống tự động sinh hồ sơ hoàn tiền 100% (`shipment_refund_record`) và form tiếp nhận tài khoản ngân hàng của khách hàng.
+- **Hóa đơn điện tử PDF & Hóa đơn bổ sung:** Phát hành hóa đơn VAT PDF chính thức ngay sau khi thanh toán. Nếu phát sinh chi phí hoặc thay đổi lộ trình khẩn cấp, phát hành hóa đơn điều chỉnh bổ sung (`supplemental_invoice`).
+- **Tách nhiệm vụ tài chính (Segregation of Duties - SoD):**
+  - Mọi khoản hoàn tiền hoặc bồi thường: Logistics Manager phê duyệt số tiền (`approved_by`), Quản trị viên (Admin) độc lập thực thi lệnh chuyển khoản (`transferred_by`). Hệ thống kiểm tra ràng buộc cứng `transferred_by != approved_by` ở tầng server (`403 Forbidden` nếu trùng người).
+  - Khoản tiền hoàn hoặc bồi thường ≥ 20.000.000 VNĐ bắt buộc áp dụng cơ chế phê duyệt kép (Dual-Approval: `second_approved_by != approved_by`).
+
+## 13. Yêu cầu giấy tờ pháp lý theo quốc gia đến và tái sử dụng hồ sơ (Step 8 — Review 11/2026)
+
+- **Danh mục giấy tờ theo quốc gia (`country_document_requirement`):** Cấu hình linh hoạt theo quốc gia đến (Việt Nam, Campuchia, Thái Lan, Singapore, Malaysia, Úc, UAE), loại hình vận chuyển (nội địa, xuất cảnh, nhập cảnh, quá cảnh) và phương thức (`road`, `air`, `sea`).
+- **Kho hồ sơ ngựa đua tập trung:** Giấy tờ pháp lý gắn trực tiếp vào từng cá thể ngựa (`horse_document`), loại bỏ nhập thủ công theo từng đơn hàng.
+- **Tự động đối chiếu và tái sử dụng:** Khi tạo đơn, hệ thống tự động quét hồ sơ của từng ngựa được chọn và phân loại trạng thái:
+  - *Dùng lại được (`reusable`):* Hộ chiếu FEI, kết quả xét nghiệm Coggins còn hạn.
+  - *Sắp hết hạn (`expiring`):* Còn hạn dưới 14 ngày trước ngày đến nơi.
+  - *Hết hạn (`expired`) hoặc Thiếu (`missing`):* Cảnh báo bắt buộc nộp bổ sung.
+  - *Cấp quá sớm (`issued_too_early`):* Giấy kiểm dịch cấp trước ngày xuất phát quy định.
+- **Quy trình thẩm định 4 tiêu chí:** Logistics Manager duyệt hồ sơ theo checklist 4 điểm: trùng khớp vi chip, trùng số hộ chiếu, ngày cấp hợp lệ, ngày hết hạn bao phủ toàn bộ hành trình.
+
+## 14. Giám sát GPS trực tuyến, phát hiện ngoài luồng geofence và cảnh báo sinh hiệu (Step 10 — Review 11/2026)
+
+- **Giả lập định vị GPS an toàn (`Simulation Mode`):** Phục vụ kiểm thử và diễn tập vận hành mà không ảnh hưởng môi trường thật. Chỉ Admin mới có quyền bật/tắt cờ giả lập hệ thống (`PATCH /system-settings/tracking`).
+- **Geofence trạm dừng:** Tự động phát hiện khi xe đi vào bán kính trạm trung chuyển hoặc điểm giao nhận (`geofence_radius_km`). Nếu tài xế check-in ngoài phạm vi geofence, bắt buộc nhập lý do và ảnh minh chứng; hệ thống tự động gắn cờ `flagged = 1`.
+- **Phát hiện bất thường sinh hiệu 3 tầng:** Cấu hình chuẩn hóa nhiệt độ và nhịp tim của ngựa đua. Ghi nhận liên tiếp 2 mốc sinh hiệu vàng trong vòng 6 giờ trên cùng một cá thể ngựa sẽ tự động kích hoạt **Cảnh báo đỏ (Red Alert)** thông báo khẩn cấp tới Logistics Manager và Bác sĩ thú y.
+
+## 15. Timeline tiến độ dọc đa góc nhìn cho 3 actor (Step 11 — Review 11/2026)
+
+- **Đồng bộ hóa tiến độ qua API chuẩn hóa (`GET /tracking/shipments/:id/timeline`):** Chuẩn hóa toàn bộ vòng đời đơn hàng và sự kiện thực địa thành chuỗi mốc tiến độ dọc (Vertical Timeline).
+- **Phân quyền và bảo mật hiển thị theo góc nhìn (`viewer`):**
+  - *Góc nhìn Khách hàng (`customer`):* Hiển thị trạng thái lộ trình, trạm dừng công khai, thời gian dự kiến/thực tế và cảnh báo sinh hiệu đã được ẩn danh thông tin nhân sự nội bộ và trạm kỹ thuật trung gian.
+  - *Góc nhìn Tài xế / Áp tải (`driver`):* Hiển thị danh sách mốc phân công, hướng dẫn hành trình, tích hợp nút check-in nhanh và form ghi nhận sinh hiệu tại điểm nghỉ.
+  - *Góc nhìn Quản lý (`manager`):* Hiển thị toàn diện dữ liệu kỹ thuật, vị trí GPS thực tế, sai lệch geofence, thời gian trễ, lịch sử audit và nút ghi đè mốc hành trình khi cần thiết.
+
+## 16. Kiểm thử ma trận phân quyền, dữ liệu demo và chuẩn bị bảo vệ (Step 12 — Review 11/2026)
+
+- **Ma trận phân quyền tự động (`authorization-matrix.test.cjs`):**
+  - Cô lập dữ liệu khách hàng tuyệt đối (Customer A không thể xem đơn, ngựa, báo giá, hóa đơn, hồ sơ hay tracking của Customer B).
+  - Giới hạn quyền tài xế (Tài xế chỉ được thao tác trên chuyến đi được phân công).
+  - Rà soát tĩnh 100% controller: Loại bỏ hoàn toàn mã role cũ, đảm bảo mọi route nhạy cảm được bảo vệ bởi `JwtAuthGuard` và `RolesGuard`.
+  - Kiểm tra tự động quy tắc SoD tài chính và ngưỡng phê duyệt kép (Dual-Approval ≥ 20.000.000 VNĐ).
+- **Bộ dữ liệu demo hoàn chỉnh (`database/seed-demo.cjs`):** Khởi tạo đầy đủ 8 tài khoản demo, 7 trạm trung chuyển, 12 xe chuyên dụng, 5 ngựa đua kèm các tệp PDF hợp lệ minh họa hồ sơ kiểm dịch còn hạn, hết hạn và sắp hết hạn.
+- **Kịch bản bảo vệ đồ án:** 8 kịch bản trình diễn chi tiết trong `docs/demo-scenarios.md` và tài liệu nguồn slide bảo vệ trong `docs/bao-ve-do-an.md`.
+

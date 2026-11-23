@@ -637,9 +637,10 @@ Bước 5  : Không có phương án → báo khách "Chưa đủ xe ngày này"
 ---
 
 ### STEP 12. Kiểm thử, dữ liệu demo, chuẩn bị bảo vệ (2-3 ngày)
+**Trạng thái:** Đã hoàn thành (23/11/2026). Đã tạo script seed demo an toàn idempotent (`database/seed-demo.cjs`, `npm run seed:demo`), bộ 8 kịch bản demo (`docs/demo-scenarios.md`), test ma trận phân quyền tự động 25 controller (`backend/test/authorization-matrix.test.cjs`), rà soát đồng bộ 100% tài liệu kiến trúc, và xây dựng tài liệu nguồn bảo vệ đồ án 9 phần (`docs/bao-ve-do-an.md`). 171/171 unit & integration test backend pass; Next.js frontend build thành công.
 
-- [ ] 12.1 Seed demo: 4 trạm VN + 3 trạm đối tác, 12 xe đủ loại, bảng giá v1, 7 quốc gia, ngựa có giấy tờ còn hạn, hết hạn và thiếu.
-- [ ] 12.2 Kịch bản demo (mỗi kịch bản dưới 3 phút):
+- [x] 12.1 Seed demo: 4 trạm VN + 3 trạm đối tác, 12 xe đủ loại, bảng giá v1, 7 quốc gia, ngựa có giấy tờ còn hạn, hết hạn và thiếu.
+- [x] 12.2 Kịch bản demo (mỗi kịch bản dưới 3 phút):
   1. Nội địa HCM → Đà Lạt, 3 ngựa, xe 1 chỗ hay 4 chỗ, đón trong giờ cấm → dời 22h.
   2. Quốc tế HCM → Singapore bằng máy bay, khứ hồi, gói Toàn diện, dùng lại hộ chiếu, nộp chứng nhận sức khỏe.
   3. Đường thủy Rạch Giá → Phú Quốc (ferry).
@@ -647,9 +648,10 @@ Bước 5  : Không có phương án → báo khách "Chưa đủ xe ngày này"
   5. Live tracking giả lập, sinh hiệu vàng 2 lần → cảnh báo đỏ.
   6. No-show chặng về.
   7. Claim bảo hiểm M3.
-- [ ] 12.3 Test: unit test cho mọi `*-policy.ts` (giá, bảo hiểm, khứ hồi, phân bổ xe, geofence, giờ cấm); test phân quyền (Customer A không xem được đơn, ngựa, giấy tờ của B; Driver không check-in chuyến không được phân công).
-- [ ] 12.4 Rà docs: `requirements.md`, `actors-and-roles.md`, `api-documentation.md`, `erd.md`, `flows/*`, `.env.example`, Swagger.
-- [ ] 12.5 Slide bảo vệ: bảng "Góp ý → Đã làm → Ở đâu" (dùng bảng Phần A làm khung).
+  8. Gộp actor: đăng nhập specialist/coordinator cũ vào thẳng `/manager`; hồ sơ ngựa tập trung; không ghép chuyến.
+- [x] 12.3 Test: unit test cho mọi `*-policy.ts` (giá, bảo hiểm, khứ hồi, phân bổ xe, geofence, giờ cấm); test phân quyền (Customer A không xem được đơn, ngựa, giấy tờ của B; Driver không check-in chuyến không được phân công; SoD tài chính; scan role cũ trên 25 controller).
+- [x] 12.4 Rà docs: `requirements.md`, `actors-and-roles.md`, `api-documentation.md`, `erd.md`, `flows/*`, `.env.example`, Swagger.
+- [x] 12.5 Slide bảo vệ: tài liệu nguồn `docs/bao-ve-do-an.md` đầy đủ 9 phần (bảng "Góp ý → Đã làm → Ở đâu", sơ đồ kiến trúc mermaid, state machine, công thức giá/bảo hiểm, phân bổ xe, giới hạn kỹ thuật, SoD bảo mật, hạn chế & 12 câu hỏi phản biện).
 
 ---
 

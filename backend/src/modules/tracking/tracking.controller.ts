@@ -55,7 +55,7 @@ export class TrackingController {
   }
 
   @Get('live-overview')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Bản đồ tổng quan giám sát toàn bộ chuyến đi đang chạy' })
   async getLiveOverview(
     @CurrentUser() user: AuthenticatedUser,
@@ -65,7 +65,7 @@ export class TrackingController {
   }
 
   @Get('settings')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Lấy cấu hình hệ thống tracking (geofence, simulation, vitals)' })
   async getTrackingSettings(): Promise<TrackingSystemSettings> {
     return this.trackingService.getTrackingSettings();
@@ -108,7 +108,7 @@ export class TrackingController {
   }
 
   @Post('shipments/:shipmentId/pings')
-  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR)
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Nhận batch tọa độ GPS từ thiết bị / app tài xế (tối đa 100 điểm)' })
   async recordPositionPings(
     @CurrentUser() user: AuthenticatedUser,

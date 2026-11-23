@@ -93,3 +93,15 @@ All authorization checks belong to `backend/src/modules/auth` and must be enforc
 - **Logistics Manager / Admin**: cấu hình giờ cấm xe tải nội đô và ngoại lệ ngày lễ (`/fleet/city-restrictions`), tham số nghỉ dọc đường (`PATCH /system-settings/journey-rules`), đổi xe đã giữ chỗ của đơn (bắt buộc lý do, `POST /fleet/shipments/:id/reservations/swap`).
 - **Mọi user đã đăng nhập**: xem khung giờ được phép của một điểm (`GET /fleet/city-restrictions/check`) và tham số nghỉ.
 - **Customer**: chọn phương án xe khi báo giá; xem phương án/xe đã giữ của **đơn của mình** (`GET /fleet/shipments/:id/reservations`, đơn khác trả `403`).
+
+## Bổ sung quyền Step 10 & 11 (Review 11/2026)
+
+- **Admin**: Độc quyền cấu hình hệ thống giám sát và bật/tắt chế độ giả lập GPS (`PATCH /system-settings/tracking`).
+- **Driver / Escort**: Gửi vị trí GPS và check-in mốc thực địa kèm định vị (`POST /tracking/shipments/:id/pings`, `POST /tracking/shipments/:id/milestones/:type/check-in`). Bác sĩ thú y (Escort) ghi nhận nhật ký sinh hiệu ngựa.
+- **Logistics Manager**: Giám sát toàn bộ chuyến đi trên bản đồ `live-overview`, ghi đè mốc hành trình hoặc sinh hiệu khi có sự cố.
+- **Customer**: Xem live tracking và Timeline dọc tiến độ đơn hàng của mình (`GET /tracking/shipments/:id/timeline`), tự động che giấu thông tin nhân sự nội bộ và trạm kỹ thuật trung gian. Khách hàng khác truy cập bị từ chối `403 Forbidden`.
+
+## Bổ sung quyền Step 12 (Review 11/2026)
+
+- **Admin / Finance**: Thực thi giải ngân chuyển khoản tiền hoàn hoặc bồi thường bảo hiểm, tuân thủ nghiêm ngặt nguyên tắc Tách biệt nhiệm vụ SoD (`transferred_by != approved_by` và `transferred_by != second_approved_by`).
+- **Tất cả các bên**: Dữ liệu demo và kịch bản thử nghiệm được khởi tạo chuẩn hóa qua `npm run seed:demo` để phục vụ đánh giá và bảo vệ đồ án.

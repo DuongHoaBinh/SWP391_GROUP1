@@ -23,7 +23,7 @@ export class SystemSettingsController {
   constructor(private readonly trackingService: TrackingService) {}
 
   @Get('tracking')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Lấy cấu hình hệ thống tracking (geofence, simulation, vitals)' })
   async getTrackingSettings(): Promise<TrackingSystemSettings> {
     return this.trackingService.getTrackingSettings();
