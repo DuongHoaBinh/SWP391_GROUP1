@@ -451,24 +451,26 @@ flowchart TD
 
 ### STEP 4. Khoảng cách, bảng giá cấu hình, thêm đường thủy (4 ngày)
 
+> **Trạng thái: đã triển khai (23/11/2026)**, chưa commit (tuân thủ quy tắc không tự commit). Đã hoàn thành toàn bộ migration 031, policy tính giá thuần, DistanceService ORS/Haversine cache 24h, API quotes/pricing, khóa giá snapshot bất biến, 104 unit test pass, UI báo giá tự động 30m countdown, Manager settings pricing và snapshot breakdown.
+
 **4.1 Thêm mode `sea`**
-- [ ] Migration: `shipment.transport_mode` và `regulation.transport_mode` thêm `'sea'`; bảng `seaport(port_id, name, country, lat, lng)` và `sea_route(from_port, to_port, distance_km, sea_mode ENUM('ferry','vessel'), typical_hours, is_active)`.
-- [ ] Seed: Rạch Giá ↔ Phú Quốc (ferry), Cát Lái ↔ Singapore, Cát Lái ↔ Laem Chabang (vessel), là dữ liệu demo.
+- [x] Migration: `shipment.transport_mode` và `regulation.transport_mode` thêm `'sea'`; bảng `seaport(port_id, name, country, lat, lng)` và `sea_route(from_port, to_port, distance_km, sea_mode ENUM('ferry','vessel'), typical_hours, is_active)`.
+- [x] Seed: Rạch Giá ↔ Phú Quốc (ferry), Cát Lái ↔ Singapore, Cát Lái ↔ Laem Chabang (vessel), là dữ liệu demo.
 
 **4.2 Dịch vụ khoảng cách (backend, module `routes`)**
-- [ ] `DistanceService.getRoadDistance(from, to)`: gọi OpenRouteService `driving-hgv`, cache kết quả 24 giờ theo cặp tọa độ đã làm tròn; timeout 5 giây; lỗi thì dùng Haversine × 1,3 và gắn `distance_source='estimated'`.
-- [ ] `.env.example`: `ORS_API_KEY=`, `ORS_BASE_URL=https://api.openrouteservice.org`, `DISTANCE_FALLBACK_FACTOR=1.3`.
-- [ ] Chuyển phần tính toán chính từ `frontend/src/lib/geo-corridors.ts` sang backend (frontend chỉ còn hiển thị), vì **giá phải do server tính**.
-- [ ] Geocoding địa chỉ (Photon đang dùng ở frontend): giữ để gợi ý; **backend nhận tọa độ và tự kiểm tra lại**.
+- [x] `DistanceService.getRoadDistance(from, to)`: gọi OpenRouteService `driving-hgv`, cache kết quả 24 giờ theo cặp tọa độ đã làm tròn; timeout 5 giây; lỗi thì dùng Haversine × 1,25 và gắn `distance_source='estimated'`.
+- [x] `.env.example`: `ORS_API_KEY=`, `ORS_BASE_URL=https://api.openrouteservice.org`, `DISTANCE_FALLBACK_FACTOR=1.25`.
+- [x] Chuyển phần tính toán chính sang backend (frontend hiển thị và countdown), bảo đảm **giá luôn do server tính**.
+- [x] Geocoding địa chỉ: frontend gửi tọa độ và địa chỉ; **backend nhận tọa độ và tự kiểm tra lại**.
 
 **4.3 Bảng giá `pricing_tariff`**
-- [ ] `pricing_tariff(tariff_id, version, mode, params JSON, effective_from, is_active, created_by)`. `params` chứa toàn bộ hằng số ở C3; mỗi lần sửa tạo **version mới** (không sửa đè).
-- [ ] `pricing-policy.ts` trong `orders` (giống `insurance-policy.ts`): hàm thuần `calculateFreight(input, tariff)`, trả **chi tiết từng dòng** (breakdown) để hiển thị và in hóa đơn.
-- [ ] Trang `manager/settings/pricing`: sửa tham số, xem trước giá với một tuyến mẫu, lịch sử version.
+- [x] `pricing_tariff(tariff_id, version, mode, params JSON, effective_from, is_active, created_by)`. `params` chứa toàn bộ hằng số ở C3; mỗi lần sửa tạo **version mới** (không sửa đè).
+- [x] `pricing-policy.ts` trong `orders`: hàm thuần `calculateFreight(input, tariff)`, trả **chi tiết từng dòng** (breakdown) để hiển thị và in hóa đơn.
+- [x] Trang `manager/settings/pricing`: sửa tham số, xem trước giá với một tuyến mẫu, lịch sử version.
 
 **4.4 API báo giá**
-- [ ] `POST /quotes` (Customer): đầu vào gồm điểm đón, điểm giao (tọa độ + địa chỉ), ngày đi, mode, danh sách ngựa, khứ hồi (Step 5), gói bảo hiểm (Step 6). Đầu ra gồm danh sách **phương án** (Step 9 bổ sung phương án xe), breakdown, tổng, `quote_id`, `expires_at`.
-- [ ] Bảng `shipment_quote` lưu snapshot (input, tariff_version, breakdown, total, expires_at). Đơn chỉ được tạo từ `quote_id` còn hạn.
+- [x] `POST /quotes` (Customer): đầu vào gồm điểm đón, điểm giao (tọa độ + địa chỉ), ngày đi, mode, seaMode, danh sách ngựa, bảo hiểm. Đầu ra gồm danh sách **phương án**, breakdown, tổng, `quote_id`, `expires_at`.
+- [x] Bảng `shipment_quote` lưu snapshot (input, tariff_version, breakdown, total, expires_at). Đơn chỉ được tạo từ `quote_id` còn hạn; Manager duyệt không ghi đè thủ công.
 
 **4.5 Unit test** cho `pricing-policy.ts`: biên các bậc km 100/101/500/501, ví dụ C3, làm tròn 1.000, air và sea.
 
@@ -478,13 +480,15 @@ flowchart TD
 
 ### STEP 5. Vận chuyển khứ hồi (2 ngày)
 
-- [ ] 5.1 Migration: `shipment.trip_type ENUM('one_way','round_trip') DEFAULT 'one_way'`, `return_date`, `return_pickup_window`, `return_status ENUM('not_applicable','scheduled','cancelled','no_show','completed')`, `return_no_show BOOLEAN`.
-- [ ] 5.2 Báo giá: thêm chặng về (đảo chiều, −10%), bảo hiểm 2 chặng.
-- [ ] 5.3 Route: sinh 2 nhóm chặng `direction ENUM('outbound','return')` trong `route_leg`.
-- [ ] 5.4 `return-policy.ts` (hàm thuần): tính % hoàn khi hủy chặng về theo C5; unit test các mốc 7 ngày và 72 giờ.
-- [ ] 5.5 Driver đánh dấu **no-show** tại điểm đón chặng về sau thời gian chờ tối đa (bắt buộc GPS ở Step 10 hoặc ảnh làm bằng chứng). Hệ thống đóng đơn, ghi audit.
-- [ ] 5.6 UI tạo đơn: toggle "Khứ hồi", chọn ngày về, **hộp chính sách no-show bắt buộc tick**.
-- [ ] 5.7 Docs: `flow-1-request-approval.md` thêm mục khứ hồi và no-show.
+> **Trạng thái: đã triển khai (23/11/2026)**, chưa commit. Migration `032_round_trip.sql`, unit test `backend/test/round-trip.test.cjs` (9/9 pass).
+
+- [x] 5.1 Migration: `032_round_trip.sql` thêm `shipment.trip_type`, `return_departure_at`, `return_wait_minutes`, `return_policy_snapshot`, `return_status`, `return_cancelled_at`, `return_reschedule_fee`, `return_no_show`, `shipment_return_change` table, `route_leg.direction`, `route_stop.direction`.
+- [x] 5.2 Báo giá: thêm chặng về (đảo chiều, −10%), bảo hiểm 2 chặng nhân ưu đãi 0.9.
+- [x] 5.3 Route: sinh 2 nhóm chặng `direction ENUM('outbound','return')` trong `route_leg` và `route_stop`.
+- [x] 5.4 `return-policy.ts` (hàm thuần): tính % hoàn khi hủy chặng về theo C5; unit test các mốc 168h, 72h và 0h (`backend/test/round-trip.test.cjs`).
+- [x] 5.5 Driver đánh dấu **no-show** tại điểm đón chặng về sau thời gian chờ tối thiểu 120 phút (`POST /tracking/shipments/:id/return/no-show`). Hệ thống đóng đơn `completed`, ghi audit.
+- [x] 5.6 UI tạo đơn: toggle "Khứ hồi", chọn ngày về, **hộp chính sách no-show bắt buộc tick**.
+- [x] 5.7 Docs: `flow-1-request-approval.md`, `flow-3-route-planning.md`, `flow-4-status-tracking.md`, `api-documentation.md` thêm mục khứ hồi và no-show.
 
 **Hoàn thành khi:** đơn khứ hồi có giá 2 chiều; hủy chặng về ra đúng % hoàn; no-show đóng đơn và không hoàn.
 

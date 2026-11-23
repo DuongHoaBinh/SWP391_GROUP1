@@ -106,3 +106,55 @@ Role notifications use existing active accounts with the requested role. If no a
 - **AC-F1-05 (Hủy `vet_unfit_certified` ở `T - 12h` & Khấu trừ Phí Ứng trước):** *Given* đơn `ready_to_depart` đã trả SePay `7,000,000 VND` (`4,000,000` cước + `3,000,000` bảo hiểm), trượt kiểm dịch tại `T - 12h` có biên bản thú y, phí ứng nộp biên lai `500,000 VND`. *When* chuyển `cancelled_operational` và khách rút tiền mặt. *Then* SePay/Invoice gốc giữ nguyên; sinh `shipment_refund_record` ở `pending_approval` với `refund_amount = 5,700,000 VND` (`6,200,000` nếu không có biên lai ứng trước).
 - **AC-F1-06 (Thực thi Hoàn tiền Thủ công & SoD):** *Given* Manager A duyệt `approved_for_transfer`. *When* Manager A tự gọi `transferred`, sau đó Admin/Finance B gọi `transferred` kèm STK, mã giao dịch, ủy nhiệm chi. *Then* Manager A bị từ chối `403 Forbidden`; Admin/Finance B thành công.
 - **AC-F1-07 (Nâng cấp `shared_stall` → `dedicated_charter` tại `D - 3`):** *Given* đơn `shared_stall` tổng `7,000,000`, nâng cấp charter `9,000,000` (chênh `+5,000,000`). *When* chưa trả tiền vs đã trả SePay `7,000,000`. *Then* chưa trả → `void` hóa đơn cũ & xuất hóa đơn `12,000,000 VND`; đã trả → giữ hóa đơn gốc & xuất `supplemental_invoice` `5,000,000 VND`.
+
+---
+
+## Báo giá tự động & Khóa giá theo Bảng giá (Step 4 — Review 11/2026)
+
+### 1. Cơ chế Báo giá Tự động (`POST /quotes`)
+1. **Tính toán khoảng cách chính xác:** Gọi ORS (OpenRouteService) qua `DistanceService` với HTTP timeout 5s, bộ nhớ đệm 24h (tối đa 5.000 cặp tọa độ). Nếu ORS gặp sự cố hoặc timeout, tự động fallback sang công thức Haversine nhân hệ số đường quanh co 1.25.
+2. **Bảng giá có phiên bản (`pricing_tariff`):** Lưu trữ cấu hình giá cước tách biệt cho 3 phương thức:
+   - **Đường bộ (`road`):** Bậc khoảng cách lũy tiến (`minKm`-`maxKm`, `pricePerKmPerVehicle`), cước tối thiểu mở cửa (`minChargePerTrip`), phụ thu deadhead khi xe rỗng về trạm, hệ số theo kích cỡ xe (`truck_1`, `truck_2`, `truck_4`, `truck_6`).
+   - **Hàng không (`air`):** Cước mở chuồng bay theo cá thể (`baseFeePerHorse`), đơn giá theo km bay (`pricePerKmPerHorse`), phụ phí phục vụ mặt đất/sân bay (`airportHandlingPerHorse`). Ngựa cần chuồng riêng (`requiresPrivateStall`) phụ thu +50% trên phần cước bay.
+   - **Đường thủy (`sea`):** Gồm 2 hình thức:
+     - `ferry`: Ngựa ở trên xe chuyên dụng đưa lên phà (tối đa 12 giờ biển), gồm cước đường bộ suốt tuyến cộng vé phà theo xe.
+     - `vessel`: Ngựa vào chuồng cố định trên tàu biển chuyên dụng, gồm cước 2 chặng bộ kết nối cảng (mỗi chặng ≤ 400km) cộng cước đường biển theo hải lý/ngựa.
+3. **Thời hạn báo giá & Khóa giá:**
+   - Mỗi báo giá sinh ra tồn tại trong 30 phút (`expires_at = NOW() + 30m`), trạng thái `active`.
+   - Lưu toàn bộ chi tiết tính toán vào `pricing_snapshot` (các chặng leg, bậc giá áp dụng, phiên bản bảng giá, chi tiết bảo hiểm, tổng cước).
+4. **Tạo đơn từ Báo giá:**
+   - Khi khách hàng gửi yêu cầu tạo đơn có kèm `quote_id`, hệ thống kiểm tra hiệu lực báo giá (quá 30 phút trả `410 Gone`, báo giá đã dùng trả `409 Conflict`, sai tài khoản trả `403 Forbidden`).
+   - Đơn hàng lưu vĩnh viễn `quote_id`, `pricing_snapshot`, `transport_cost`, `insurance_fee`, `total_cost`. Báo giá chuyển trạng thái `used`.
+   - **Quy tắc bất biến (Immutability):** Logistics Manager khi duyệt đơn (`PATCH /orders/:id/approve`) không được chỉnh sửa đè giá thủ công nếu đơn đã có `quote_id`; hệ thống tự động giữ nguyên mức giá đã khóa trong snapshot.
+
+
+---
+
+## Khứ hồi và Chính sách No-Show (Step 5 — Review 11/2026)
+
+### 1. Báo giá & Chiết khấu Khứ hồi
+1. **Chặng về:** Tự động tính chặng đảo chiều (origin <-> destination), áp dụng chiết khấu **-10%** trên cước vận chuyển chặng về (`discountedReturnFreight = Math.ceil(returnFreight * 0.9 / 1000) * 1000`).
+2. **Bảo hiểm khứ hồi:** Tính phí 2 chặng nhân ưu đãi 0.9: `insuranceTotal = Math.round(oneWayInsurance * 2 * 0.9)`. Phí bảo hiểm chặng về: `returnInsuranceFee = insuranceTotal - oneWayInsurance`.
+3. **Thời điểm hẹn đón chặng về (`returnDepartureAt`):** Phải sau thời điểm xuất phát tối thiểu `thời gian di chuyển chặng đi + 12 giờ nghỉ ngơi` (`returnDepartureAt >= departureDate + estimatedHours + 12h`). Nếu sớm hơn, server trả `400 Bad Request`.
+
+### 2. Cam kết Chính sách & Tạo đơn Khứ hồi
+- Bắt buộc khách hàng tích chọn xác nhận đã đọc và đồng ý chính sách hủy/no-show (`acceptReturnPolicy = true`).
+- Nếu `trip_type = 'round_trip'` mà thiếu `acceptReturnPolicy`, server từ chối tạo đơn với lỗi `400 Bad Request`.
+- Khi tạo đơn thành công, hệ thống lưu snapshot chính sách hiện hành (`currentReturnPolicy()`) vào `shipment.return_policy_snapshot` để đảm bảo việc thay đổi chính sách trong tương lai không ảnh hưởng đến đơn đã cam kết.
+
+### 3. Chính sách Hủy & Đổi ngày Chặng về
+- **Bảng hoàn tiền hủy chặng về (theo thời gian còn lại trước giờ đón chặng về):**
+  - Trước ≥ 168 giờ (7 ngày): Hoàn **80%** cước chặng về.
+  - Từ 72 giờ đến < 168 giờ (3 - 7 ngày): Hoàn **50%** cước chặng về.
+  - Dưới 72 giờ: Hoàn **0%** cước chặng về.
+  - Công ty chủ động hủy (`return_leg_company_cancel`): Hoàn **100%** cước chặng về.
+  - Phí bảo hiểm chặng về: Hoàn **100%** nếu hủy trước khi chặng về xuất phát.
+  - Khoản tiền hoàn ≥ 20.000.000 VND tuân thủ cơ chế duyệt 2 cấp (SoD: Manager duyệt, Admin chuyển khoản).
+- **Đổi ngày đón chặng về (`POST /orders/:id/return/reschedule`):**
+  - Đổi trước ≥ 168 giờ: **Miễn phí hoàn toàn**.
+  - Đổi trong vòng < 168 giờ: Thu phí đổi ngày trễ **10%** cước chặng về, làm tròn lên 1.000 VND (`return_reschedule_fee`). Lưu lịch sử thay đổi vào bảng `shipment_return_change`.
+- **Khách không giao ngựa (No-Show chặng về):**
+  - Tài xế phải chờ tối thiểu 120 phút (`return_wait_minutes`) tại điểm đón chặng về.
+  - Trước khi đủ thời gian chờ, tài xế không được đánh dấu no-show (`409 Conflict` kèm thời điểm `allowedAt`).
+  - Sau thời gian chờ, tài xế gọi `POST /tracking/shipments/:id/return/no-show` kèm ghi chú và ảnh bằng chứng.
+  - Hệ thống đóng đơn với trạng thái `completed`, ghi nhận `return_no_show = true`, `return_status = 'no_show'`, nhả ngựa và phương tiện về trạng thái sẵn sàng, ghi `trip_status_log`. **Khách hàng mất 100% cước chặng về, không phát sinh hoàn tiền.**

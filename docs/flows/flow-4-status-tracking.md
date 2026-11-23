@@ -57,3 +57,22 @@ Current trip status, chronological route log, horse health log, delay alerts, an
 - **AC-F4-01 (Chặn Xuất phát thiếu Gate 2):** *Given* đơn `confirmed`, đủ hồ sơ Flow 2 nhưng mới thanh toán MoMo Sandbox (chưa có SePay `succeeded`). *When* Driver gọi `checkInLegStart` chặng 1. *Then* trả `422 Unprocessable Entity` kèm danh sách `missingRequirements`.
 - **AC-F4-02 (Hoàn tất Từng phần Chuyến Ghép):** *Given* `road_trip` chở Đơn A (đích Đà Nẵng `transfer_hub`) và Đơn B (Hà Nội) trên xe `51C-888.99`. *When* Driver check-in rời `transfer_hub` Đà Nẵng. *Then* Đơn A → `completed`, ngựa Đơn A → `active`, Customer A nhận thông báo; Đơn B giữ `in_transit` và xe giữ `in_use`.
 - **AC-F4-03 (Ranh giới Sinh hiệu Kín, Cửa sổ 6h & Chống Alert Fatigue):** *Given* Ngựa X đang `in_transit` (`consecutive_alert_window_hours = 6`). *When* (1) 08:00 & 10:00 ghi `climate_change` sinh hiệu Xanh; (2) 12:00 ghi `stable`, `t = 38.55`, `hr = 25`; (3) 15:00 (cách 3h `<= 6h`) ghi `not_eating`, `t = 38.0`, `hr = 40`. *Then* (1) chỉ sinh Amber quan sát; (2) 12:00 phân loại `escalatable_amber` (không hở tại `38.55°C` và `25 bpm`); (3) 15:00 kích hoạt **Red Alert** cho Manager & Coordinator.
+
+
+## 9. Vòng đời Trạng thái Đơn Khứ hồi & No-Show (Step 5 — Review 11/2026)
+
+- **Trạng thái `return_pending`:**
+  - Đối với đơn một chiều (`one_way`), khi chặng cuối hoàn tất, đơn chuyển ngay sang `completed` và ngựa chuyển về `active`.
+  - Đối với đơn khứ hồi (`round_trip`), khi chặng đi (`outbound`) hoàn tất:
+    - Đơn chuyển sang trạng thái `return_pending`.
+    - Ngựa tiếp tục giữ trạng thái `in_transit` (được lưu giữ chăm sóc tại trang trại/trung tâm điểm đến).
+    - Toàn bộ các kiểm tra active shipment (hồ sơ, sự cố, đổi lịch) đều coi `return_pending` là trạng thái đang hoạt động bình đẳng như `in_transit`.
+- **Khởi hành Chặng về:**
+  - Khi tài xế xuất phát chặng về đầu tiên, đơn chuyển từ `return_pending` sang `in_transit`, và `return_status` chuyển thành `'in_progress'`.
+- **Hoàn thành Toàn bộ Chuyến đi:**
+  - Khi chặng về cuối cùng cập bến, đơn chuyển sang `completed`, `return_status` chuyển sang `'completed'`, và ngựa được giải phóng về trạng thái `active`.
+- **Quy trình Xử lý No-Show Chặng về (`POST /tracking/shipments/:id/return/no-show`):**
+  - Tài xế được phân công chặng về có trách nhiệm có mặt tại điểm đón trước giờ khởi hành và chờ tối thiểu 120 phút (`return_wait_minutes`).
+  - Trước mốc `return_departure_at + return_wait_minutes`: Hệ thống chặn không cho đánh dấu no-show (`409 Conflict` kèm thông tin `allowedAt`).
+  - Sau mốc chờ: Tài xế chụp ảnh làm bằng chứng và gửi yêu cầu no-show.
+  - Server cập nhật `shipment.status = 'completed'`, `shipment.return_status = 'no_show'`, `shipment.return_no_show = true`, giải phóng ngựa về `active`, giải phóng xe về `active`, ghi `trip_status_log` (milestone `no_show`) và gửi thông báo cho khách hàng cùng Logistics Manager. Khách hàng không được hoàn lại bất kỳ khoản cước chặng về nào.

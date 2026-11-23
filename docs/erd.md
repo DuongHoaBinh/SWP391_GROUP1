@@ -7,7 +7,7 @@ The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with
 - `role`, `user`, `otp_verification`
 - `horse`
 - `regulation`, `document_type`, `transport_document`, `document_approval`
-- `shipment`, `shipment_horse`
+- `shipment`, `shipment_horse`, `shipment_quote`, `pricing_tariff`, `seaport`, `sea_route`
 - `depot`, `vehicle_class`, `vehicle`, `shipment_vehicle`, `route`, `route_stop`, `shipment_assignment`
 - `route_stop_update`, `horse_condition_log`, `attachment`
 - `incident_report`, `shipment_change_request`, `delivery_handover`
@@ -33,6 +33,34 @@ The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with
   - `transport_document.document_type_code` là FK nullable tới `document_type.code`. `transport_document.regulation_id` cho phép NULL: giấy tờ chung của ngựa (hộ chiếu, vi mạch...) không thuộc riêng quy định nào và được dùng lại cho nhiều đơn.
   - Giấy tờ vẫn append-only: tải bản mới thì bản cũ cùng loại có `is_archived = TRUE` và `superseded_by_document_id` trỏ sang bản mới.
 - A trip uses a route made of ordered legs and stops, and has assigned vehicle/capacity and staff.
+
+- **Báo giá, bảng giá cấu hình, đường thủy và khoảng cách (migration `031_pricing_distance_sea.sql`, Step 4)**:
+  - `seaport(port_id PK, code UNIQUE, name, country, city, lat, lng, is_active)`. Seed demo: Rạch Giá, Bãi Vòng (Phú Quốc), Cát Lái (VN), Pasir Panjang (Singapore), Laem Chabang (Thái Lan).
+  - `sea_route(sea_route_id PK, from_port_id FK, to_port_id FK, sea_mode ENUM('ferry','vessel'), distance_km, typical_hours, is_active, notes)`. Tuyến 2 chiều (VN-RGI <-> VN-PQC ferry, VN-CLI <-> SG-PSA vessel, VN-CLI <-> TH-LCB vessel).
+  - `pricing_tariff(tariff_id PK, mode ENUM('road','air','sea'), region, version, params JSON, effective_from, is_active, notes, created_by FK)`. Bảng giá có phiên bản; mỗi mode/region có 1 bản `is_active = TRUE`. Tạo version mới tắt version cũ trong 1 transaction; không bao giờ UPDATE params cũ.
+  - `shipment_quote(quote_id PK, customer_id FK, transport_mode, sea_mode, input_json JSON, result_json JSON, tariff_versions_json JSON, freight_total BIGINT, insurance_total BIGINT, total BIGINT, status ENUM('active','used','expired'), expires_at, used_by_shipment_id FK)`. Báo giá có hạn 30 phút, lưu snapshot kết quả.
+  - `shipment`: thêm `quote_id FK`, `pricing_snapshot JSON`, `distance_km`, `distance_source ENUM('ors','estimated','table')`, `origin_lat`, `origin_lng`, `destination_lat`, `destination_lng`, `sea_mode ENUM('ferry','vessel')`. Mở rộng `shipment.transport_mode` thành `ENUM('road','air','sea')`, `regulation.transport_mode` thành `ENUM('road','air','sea','both')`.
+
+- **Vận chuyển khứ hồi và chính sách no-show (migration `032_round_trip.sql`, Step 5)**:
+  - `shipment`: mở rộng `status` thêm `return_pending`. Thêm `trip_type ENUM('one_way','round_trip')`, `return_departure_at`, `return_wait_minutes DEFAULT 120`, `return_status ENUM('not_applicable','scheduled','in_progress','cancelled','no_show','completed')`, `return_no_show BOOLEAN`, `return_freight BIGINT`, `return_insurance_fee BIGINT`, `return_policy_snapshot JSON`, `return_policy_accepted_at`, `return_cancelled_at`, `return_cancel_reason`, `return_reschedule_fee`.
+  - `route_leg` & `route_stop`: thêm `direction ENUM('outbound','return') NOT NULL DEFAULT 'outbound'`.
+  - `shipment_quote`: thêm `trip_type ENUM('one_way','round_trip') NOT NULL DEFAULT 'one_way'`.
+  - `shipment_return_change(change_id PK, shipment_id FK, old_return_departure_at, new_return_departure_at, reschedule_fee, requested_by FK, created_at)`. Lưu vết lịch sử đổi lịch chặng về.
+
+
+- **Báo giá, bảng giá cấu hình, đường thủy và khoảng cách (migration `031_pricing_distance_sea.sql`, Step 4)**:
+  - `seaport(port_id PK, code UNIQUE, name, country, city, lat, lng, is_active)`. Seed demo: Rạch Giá, Bãi Vòng (Phú Quốc), Cát Lái (VN), Pasir Panjang (Singapore), Laem Chabang (Thái Lan).
+  - `sea_route(sea_route_id PK, from_port_id FK, to_port_id FK, sea_mode ENUM('ferry','vessel'), distance_km, typical_hours, is_active, notes)`. Tuyến 2 chiều (VN-RGI <-> VN-PQC ferry, VN-CLI <-> SG-PSA vessel, VN-CLI <-> TH-LCB vessel).
+  - `pricing_tariff(tariff_id PK, mode ENUM('road','air','sea'), region, version, params JSON, effective_from, is_active, notes, created_by FK)`. Bảng giá có phiên bản; mỗi mode/region có 1 bản `is_active = TRUE`. Tạo version mới tắt version cũ trong 1 transaction; không bao giờ UPDATE params cũ.
+  - `shipment_quote(quote_id PK, customer_id FK, transport_mode, sea_mode, input_json JSON, result_json JSON, tariff_versions_json JSON, freight_total BIGINT, insurance_total BIGINT, total BIGINT, status ENUM('active','used','expired'), expires_at, used_by_shipment_id FK)`. Báo giá có hạn 30 phút, lưu snapshot kết quả.
+  - `shipment`: thêm `quote_id FK`, `pricing_snapshot JSON`, `distance_km`, `distance_source ENUM('ors','estimated','table')`, `origin_lat`, `origin_lng`, `destination_lat`, `destination_lng`, `sea_mode ENUM('ferry','vessel')`. Mở rộng `shipment.transport_mode` thành `ENUM('road','air','sea')`, `regulation.transport_mode` thành `ENUM('road','air','sea','both')`.
+
+- **Vận chuyển khứ hồi và chính sách no-show (migration `032_round_trip.sql`, Step 5)**:
+  - `shipment`: mở rộng `status` thêm `return_pending`. Thêm `trip_type ENUM('one_way','round_trip')`, `return_departure_at`, `return_wait_minutes DEFAULT 120`, `return_status ENUM('not_applicable','scheduled','in_progress','cancelled','no_show','completed')`, `return_no_show BOOLEAN`, `return_freight BIGINT`, `return_insurance_fee BIGINT`, `return_policy_snapshot JSON`, `return_policy_accepted_at`, `return_cancelled_at`, `return_cancel_reason`, `return_reschedule_fee`.
+  - `route_leg` & `route_stop`: thêm `direction ENUM('outbound','return') NOT NULL DEFAULT 'outbound'`.
+  - `shipment_quote`: thêm `trip_type ENUM('one_way','round_trip') NOT NULL DEFAULT 'one_way'`.
+  - `shipment_return_change(change_id PK, shipment_id FK, old_return_departure_at, new_return_departure_at, reschedule_fee, requested_by FK, created_at)`. Lưu vết lịch sử đổi lịch chặng về.
+
 - Tracking events and horse health logs belong to a trip and record their author and timestamp.
 - Incidents can create route-change and additional-cost approval records linked to the trip.
 - Handover records close a trip only after the required horse/document checklist is confirmed.

@@ -213,6 +213,139 @@ Requests modifications on a pending `requested` order with a mandatory explanati
 Customer updates editable order details (dates, route locations, horse info, special requirements) only while the owned order is `change_requested`, then resubmits it. Resets status back to `requested` for manager review. Other states return 400.
 - **Body:** Partial or full fields from `CreateOrderDto`.
 
+## Pricing & Quotes endpoints (Step 4: Báo giá tự động & Bảng giá có phiên bản)
+
+Tự động tính khoảng cách qua ORS (hoặc fallback Haversine) và áp biểu cước theo bậc khoảng cách (tiered km), bậc kích thước xe (`truck_1`..`truck_6`), cước bay theo đầu ngựa, cước phà (`ferry`) và cước tàu biển chuyên dụng (`vessel`). Khóa giá trong 30 phút.
+
+### `POST /quotes` (Customer / Authenticated)
+Tạo báo giá tự động máy chủ có hiệu lực trong 30 phút (`expires_at`), tính toán khoảng cách leg qua ORS/fallback và lưu `pricing_snapshot`.
+- **Request Body:**
+```json
+{
+  "origin": { "address": "Quận 7, TP.HCM", "lat": 10.734, "lng": 106.7216, "country": "Vietnam" },
+  "destination": { "address": "Singapore Turf Club", "lat": 1.4239, "lng": 103.7618, "country": "Singapore" },
+  "departureDate": "2026-12-10",
+  "transportMode": "air",
+  "seaMode": null,
+  "horses": [
+    {
+      "horseId": 12,
+      "quantity": 1,
+      "declaredValue": 2000000000,
+      "declaredCurrency": "VND",
+      "insurancePackage": "standard"
+    }
+  ]
+}
+```
+- **Response (201 Created):**
+```json
+{
+  "quoteId": 101,
+  "expiresAt": "2026-11-23T11:45:00.000Z",
+  "transportMode": "air",
+  "seaMode": null,
+  "legs": [
+    { "key": "flight", "from": "Quận 7, TP.HCM", "to": "Singapore Turf Club", "distanceKm": 1085, "durationHours": 3.5, "source": "estimated" }
+  ],
+  "requiredStallSlots": 1,
+  "options": [
+    {
+      "optionCode": "charter",
+      "label": "Chuyến bay chuyên dụng",
+      "vehicles": [],
+      "freight": { "lines": [], "subtotal": 125000000, "rounding": 0, "total": 125000000 }
+    }
+  ],
+  "recommendedOptionCode": "charter",
+  "insurance": { "total": 6000000, "horses": [] },
+  "total": 131000000,
+  "tariffVersions": { "air": 1 },
+  "warnings": []
+}
+```
+
+### `GET /quotes/:id` (Customer / Logistics Manager / Admin)
+Lấy chi tiết báo giá tự động, kiểm tra thời gian hết hạn (`isExpired`), chi tiết từng dòng cước và danh sách phương án xe. Khách hàng chỉ xem được báo giá của chính mình.
+- **Response (200 OK):** Đối tượng `ShipmentQuoteDto`.
+- **Errors:** `404 Not Found`, `403 Forbidden`.
+
+### `GET /pricing/tariffs/active` (All Authenticated)
+Lấy danh sách các bảng giá cước đang kích hoạt (`active = 1`) cho cả 3 phương thức `road`, `air`, `sea`.
+- **Response (200 OK):** Mảng các bản ghi `pricing_tariff` kèm `params_json`.
+
+### `GET /pricing/tariffs` (Logistics Manager / Admin)
+Lấy danh sách toàn bộ phiên bản bảng giá cước (kể cả phiên bản lưu trữ cũ) phục vụ kiểm toán và quản lý định mức. Hỗ trợ query `?mode=road`.
+- **Response (200 OK):** Mảng các bản ghi `pricing_tariff`.
+
+### `POST /pricing/tariffs` (Logistics Manager / Admin)
+Tạo phiên bản bảng giá mới cho một phương thức vận tải. Tự động chuyển các phiên bản cũ của phương thức đó sang `active = 0`.
+- **Request Body:**
+```json
+{
+  "transportMode": "road",
+  "name": "Bảng giá đường bộ Q1/2027",
+  "effectiveFrom": "2027-01-01",
+  "params": {
+    "distanceTiers": [
+      { "minKm": 0, "maxKm": 100, "pricePerKmPerVehicle": 45000 },
+      { "minKm": 100, "maxKm": 300, "pricePerKmPerVehicle": 38000 },
+      { "minKm": 300, "maxKm": null, "pricePerKmPerVehicle": 32000 }
+    ],
+    "minChargePerTrip": 5000000,
+    "deadheadPricePerKm": 18000,
+    "classMultipliers": { "truck_1": 0.85, "truck_2": 1.0, "truck_4": 1.35, "truck_6": 1.7 }
+  }
+}
+```
+- **Response (201 Created):** Bản ghi `pricing_tariff` vừa tạo.
+
+### `POST /pricing/preview` (Logistics Manager / Admin)
+Thử tính toán giá cước với các tham số biểu giá và khoảng cách giả định mà không ghi vào cơ sở dữ liệu.
+- **Request Body:**
+```json
+{
+  "transportMode": "road",
+  "distanceKm": 450,
+  "horseCount": 2,
+  "customParams": { ... }
+}
+```
+- **Response (200 OK):**
+```json
+{
+  "freight": { "lines": [], "subtotal": 18500000, "rounding": 0, "total": 18500000 }
+}
+```
+
+### `GET /orders/return-policy` (All Authenticated)
+Trả về chính sách vận chuyển khứ hồi hiện hành của hệ thống, bao gồm mức chiết khấu chặng về (-10%), chiết khấu bảo hiểm khứ hồi (-10%), thời gian chờ tối đa tại điểm đón (120 phút), thang tỷ lệ hoàn tiền khi hủy (≥ 168h: 80%, 72h-168h: 50%, < 72h: 0%), và quy định phí đổi ngày đón.
+
+### `GET /orders/:id/return/cancellation-preview` (Customer / Logistics Manager / Admin)
+Tính toán và hiển thị trước số tiền hoàn nếu khách hàng hủy chặng về ở thời điểm hiện tại. Trả về chi tiết: số giờ còn lại trước giờ đón, tỷ lệ hoàn cước, số tiền cước hoàn, số tiền bảo hiểm hoàn (100%), tổng tiền hoàn và cờ `requiresDualApproval` (nếu tổng hoàn ≥ 20.000.000 đ).
+- **Errors:** `404 Not Found`, `403 Forbidden` (khách khác chủ), `400 Bad Request` (không phải đơn khứ hồi), `409 Conflict` (chặng về đã bắt đầu hoặc đã kết thúc).
+
+### `POST /orders/:id/return/cancel` (Customer)
+Khách hàng chủ đơn hủy chặng về.
+- **Body:** `{ "reason": "Kế hoạch thi đấu thay đổi" }`
+- **Logic:** Cập nhật `return_status = 'cancelled'`, ghi nhận `return_cancelled_at = NOW()`. Nếu số tiền hoàn > 0, tạo `shipment_refund_record` (`cancellation_category = 'return_leg_customer_cancel'`) đi qua luồng duyệt và chuyển khoản SoD.
+- **Errors:** `400 Bad Request`, `403 Forbidden`, `409 Conflict`.
+
+### `POST /orders/:id/return/company-cancel` (Logistics Manager / Admin)
+Công ty chủ động hủy chặng về do điều kiện bất khả kháng hoặc giới hạn vận hành.
+- **Body:** `{ "reason": "Bão lớn cấm đường và chuyến bay bị đình trệ" }`
+- **Logic:** Cập nhật `return_status = 'cancelled'`, tạo `shipment_refund_record` hoàn 100% cước chặng về và 100% bảo hiểm chặng về (`cancellation_category = 'return_leg_company_cancel'`). Gửi thông báo cho khách hàng.
+
+### `POST /orders/:id/return/reschedule` (Customer)
+Khách hàng đổi ngày hẹn đón chặng về.
+- **Body:** `{ "newReturnDepartureAt": "2026-12-25T08:00:00.000Z" }`
+- **Logic:** Kiểm tra thời điểm hợp lệ (sau khi chặng đi kết thúc + 12h nghỉ). Nếu đổi trước ≥ 168 giờ: miễn phí. Nếu đổi trong vòng < 168 giờ: thu phí đổi ngày trễ 10% cước chặng về (`return_reschedule_fee`). Lưu lịch sử vào `shipment_return_change`.
+
+### `POST /tracking/shipments/:id/return/no-show` (Driver / Escort được phân công)
+Tài xế đánh dấu khách không giao ngựa tại điểm đón chặng về sau khi đã chờ đủ 120 phút.
+- **Body:** `{ "notes": "Đã chờ 125 phút tại cổng trang trại, gọi khách 3 lần không liên lạc được", "evidenceUrls": ["https://.../photo1.jpg"] }`
+- **Logic:** Xác thực tài xế được phân công chặng về. Kiểm tra điều kiện thời gian chờ (trước `returnDepartureAt + waitMinutes` trả `409 Conflict` kèm `allowedAt`). Khi hợp lệ: đóng đơn với trạng thái `completed`, `return_status = 'no_show'`, `return_no_show = true`, nhả ngựa và phương tiện, ghi `trip_status_log`. Không tạo hoàn tiền.
+
 ## Documents endpoints (Flow 2: Legal, Quarantine, and Customs Documents)
 
 Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)

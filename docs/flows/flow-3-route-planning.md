@@ -183,3 +183,30 @@ Ready to depart ──► [Chuyển giao sang Flow 4: Theo dõi hành trình]
 - **AC-F3-03 (Cô lập Dữ liệu Khách trên Chuyến Ghép):** *Given* Đơn A (TP.HCM → Hà Nội) và Đơn B (Đồng Nai → Đà Nẵng) ghép chung 1 `road_trip`. *When* Customer A xem lộ trình đơn A. *Then* response ẩn hoàn toàn `transfer_hub` của Đơn B, `roadTripId` và danh tính Đơn B.
 - **AC-F3-04 (Backup SLA & Hard Cap `T - 52h`):** *Given* Driver chính quá SLA lúc `T - 58h`, Coordinator gán Backup Driver B (kế hoạch giữ nguyên `approved`); Backup Driver B xác nhận lúc `T - 54h`. *Then* hóa đơn phát hành lúc `T - 54h` với `payment_due_at = T - 30h`. Nếu tới `T - 52h` vẫn chưa xác nhận đủ, hệ thống phát cảnh báo High `BR-F3-06` tới Manager.
 - **AC-F3-05 (Gia hạn Thanh toán Trần `T - 24h` & Tự động Hủy):** *Given* hóa đơn quá hạn lúc `T - 34h` (`payment_overdue`), đến `T - 28h` Manager bấm gia hạn 1 lần. *Then* `grace_due_at` bị chặn cứng tại `T - 24h` (còn 4 giờ); bấm gia hạn lần 2 trả `409 Conflict`; tại `T - 24h` nếu vẫn chưa có SePay `succeeded`, đơn tự động chuyển `cancelled_operational` (`payment_overdue_expired`).
+
+---
+
+## 5. Quy định Vận chuyển Đường Thủy (Sea Transport — Step 4)
+
+Hệ thống hỗ trợ 2 dạng vận chuyển đường thủy (`sea`) với các ràng buộc an toàn nghiêm ngặt:
+
+1. **Phà kết hợp xe tải (`sea_mode = 'ferry'` / RoRo):**
+   - Áp dụng cho các chặng vượt biển ngắn (ví dụ: đất liền ra đảo Phú Quốc, vịnh, eo biển).
+   - Ngựa lưu lại bên trong xe thùng chuyên dụng có điều hòa nhiệt độ (`truck_1`, `truck_2`, `truck_4`, `truck_6`).
+   - **Giới hạn thời gian biển:** Thời gian di chuyển đường biển thực tế tối đa không được vượt quá **12 giờ** (`typical_hours <= 12`). Nếu tuyến biển vượt quá 12 giờ, hệ thống từ chối phương thức `ferry`.
+   - **Cấu trúc cước:** Tính cước đường bộ lũy tiến suốt quãng đường từ điểm đón đến điểm giao, cộng thêm vé xe tải lên phà (`vehicle_ticket_vnd`).
+
+2. **Tàu biển chuyên dụng (`sea_mode = 'vessel'`):**
+   - Ngựa được đưa vào ô chuồng/pen chuyên dụng trên boong hoặc hầm tàu chở gia súc/tàu chuyên dùng.
+   - **Ràng buộc kết nối cảng:** Gồm 3 chặng vận chuyển: Xe đường bộ đến cảng đi $\rightarrow$ Tàu biển giữa 2 cảng $\rightarrow$ Xe đường bộ từ cảng đến về đích.
+   - **Giới hạn khoảng cách đường bộ ra vào cảng:** Mỗi chặng đường bộ nối với cảng không được vượt quá **400 km** để tránh ngựa kiệt sức trước và sau hải trình dài.
+   - **Cảnh báo sức khỏe:** Bắt buộc hiển thị khuyến cáo minh bạch cho khách hàng: *"Đường thủy rẻ hơn nhưng lâu hơn và rủi ro sức khỏe cao hơn. Khuyến nghị đường hàng không cho ngựa đua thi đấu."*
+   - Cước tính dựa trên biểu cước hải trình cảng - cảng kết hợp phí bốc dỡ và chăm sóc tại cảng.
+
+
+## 9. Định hướng Lộ trình Khứ hồi & Phân bổ Chặng (Step 5 — Review 11/2026)
+
+- Mỗi chặng `route_leg` và điểm dừng `route_stop` được phân định rõ trường `direction: 'outbound' | 'return'` (mặc định `'outbound'`).
+- Đơn hàng một chiều (`trip_type = 'one_way'`) bị nghiêm cấm chứa bất kỳ chặng nào có `direction = 'return'`; nếu vi phạm khi gọi `POST /routes/plan/:id/build-detail`, server từ chối với mã lỗi `400 Bad Request`.
+- Đơn hàng khứ hồi (`trip_type = 'round_trip'`) bắt buộc phải có ít nhất 1 chặng `outbound` và ít nhất 1 chặng `return`. Thời điểm xuất phát chặng về (`planned_departure` của chặng `return` đầu tiên) phải thỏa mãn `>= shipment.return_departure_at`.
+- Coordinator có thể bổ sung chặng về bằng nút "Thêm Chặng Về" trên giao diện lập tuyến và linh hoạt điều phối xe/tài xế riêng cho từng chiều di chuyển.

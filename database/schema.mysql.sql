@@ -88,7 +88,7 @@ CREATE TABLE regulation (
   regulation_id INT AUTO_INCREMENT PRIMARY KEY,
   country VARCHAR(100) NOT NULL,
   border_gate VARCHAR(100) NULL,
-  transport_mode ENUM('road','air','both') NOT NULL DEFAULT 'both',
+  transport_mode ENUM('road','air','sea','both') NOT NULL DEFAULT 'both',
   doc_tier ENUM('A','B') NOT NULL DEFAULT 'A',
   lead_time_days INT NOT NULL DEFAULT 2,
   requires_authority_approval BOOLEAN NOT NULL DEFAULT FALSE,
@@ -176,7 +176,7 @@ CREATE TABLE shipment (
   special_requirements TEXT,
   rejection_reason VARCHAR(500),
   change_request_notes VARCHAR(500),
-  status ENUM('requested','change_requested','approved','rejected','planning','confirmed','ready_to_depart','in_transit','completed','cancelled','cancelled_operational') NOT NULL DEFAULT 'requested',
+  status ENUM('requested','under_review','change_requested','approved','rejected','planning','confirmed','ready_to_depart','in_transit','return_pending','completed','delivered','cancelled','cancelled_operational') NOT NULL DEFAULT 'requested',
   total_cost DECIMAL(15,2) NOT NULL DEFAULT 0,
   transport_cost DECIMAL(15,2) NULL DEFAULT NULL,
   insurance_fee DECIMAL(15,2) NOT NULL DEFAULT 0,
@@ -184,7 +184,28 @@ CREATE TABLE shipment (
   -- shared_stall: chỉ còn ở đơn cũ (bỏ gom chuyến sau review 11/2026)
   booking_type ENUM('shared_stall','dedicated_charter') NOT NULL DEFAULT 'dedicated_charter',
   stall_unit_price DECIMAL(15,2) NULL DEFAULT NULL,
-  transport_mode ENUM('road','air') NULL DEFAULT NULL,
+  quote_id INT NULL,
+  pricing_snapshot JSON NULL,
+  distance_km DECIMAL(10,2) NULL,
+  distance_source ENUM('ors','estimated','table') NULL,
+  origin_lat DECIMAL(10,6) NULL,
+  origin_lng DECIMAL(10,6) NULL,
+  destination_lat DECIMAL(10,6) NULL,
+  destination_lng DECIMAL(10,6) NULL,
+  transport_mode ENUM('road','air','sea') NULL DEFAULT NULL,
+  sea_mode ENUM('ferry','vessel') NULL DEFAULT NULL,
+  trip_type ENUM('one_way','round_trip') NOT NULL DEFAULT 'one_way',
+  return_departure_at DATETIME NULL,
+  return_wait_minutes INT NOT NULL DEFAULT 120,
+  return_status ENUM('not_applicable','scheduled','in_progress','cancelled','no_show','completed') NOT NULL DEFAULT 'not_applicable',
+  return_no_show BOOLEAN NOT NULL DEFAULT FALSE,
+  return_freight BIGINT NOT NULL DEFAULT 0,
+  return_insurance_fee BIGINT NOT NULL DEFAULT 0,
+  return_policy_snapshot JSON NULL,
+  return_policy_accepted_at DATETIME NULL,
+  return_cancelled_at DATETIME NULL,
+  return_cancel_reason VARCHAR(255) NULL,
+  return_reschedule_fee BIGINT NOT NULL DEFAULT 0,
   excused_delay BOOLEAN NOT NULL DEFAULT FALSE,
   excused_delay_reason TEXT NULL,
   excused_delay_confirmed_by INT NULL,
@@ -342,6 +363,7 @@ CREATE TABLE route_stop (
   planned_arrival DATETIME,
   planned_departure DATETIME,
   status ENUM('pending','arrived','cleared','customs_cleared','departed') NOT NULL DEFAULT 'pending',
+  direction ENUM('outbound','return') NOT NULL DEFAULT 'outbound',
   CONSTRAINT fk_stop_route FOREIGN KEY (route_id) REFERENCES route(route_id),
   UNIQUE KEY uq_route_sequence (route_id, sequence_no)
 ) ENGINE=InnoDB;
@@ -630,6 +652,7 @@ CREATE TABLE IF NOT EXISTS route_leg (
   booking_reference VARCHAR(100) NULL,
   stalls_booked INT NOT NULL DEFAULT 0,
   status ENUM('pending', 'active', 'completed') NOT NULL DEFAULT 'pending',
+  direction ENUM('outbound', 'return') NOT NULL DEFAULT 'outbound',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   road_trip_id INT NULL,
   INDEX idx_route_leg_road_trip (road_trip_id),
@@ -908,3 +931,139 @@ CREATE TABLE IF NOT EXISTS horse_health_log (
   recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_hhl_shipment (shipment_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================
+-- STEP 4: CẢNG BIỂN, TUYẾN BIỂN, BẢNG GIÁ, BÁO GIÁ (Review 11/2026)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS seaport (
+  port_id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(20) NOT NULL UNIQUE,
+  name VARCHAR(150) NOT NULL,
+  country VARCHAR(100) NOT NULL,
+  city VARCHAR(100) NULL,
+  lat DECIMAL(10,6) NOT NULL,
+  lng DECIMAL(10,6) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO seaport (code, name, country, city, lat, lng, is_active) VALUES
+  ('VN-RGI', 'Cảng Rạch Giá', 'Vietnam', 'Kiên Giang', 10.012500, 105.080900, TRUE),
+  ('VN-PQC', 'Cảng Bãi Vòng (Phú Quốc)', 'Vietnam', 'Phú Quốc', 10.155700, 104.040200, TRUE),
+  ('VN-CLI', 'Cảng Cát Lái', 'Vietnam', 'Hồ Chí Minh', 10.761700, 106.789400, TRUE),
+  ('SG-PSA', 'Cảng Pasir Panjang', 'Singapore', 'Singapore', 1.273700, 103.790900, TRUE),
+  ('TH-LCB', 'Cảng Laem Chabang', 'Thailand', 'Chonburi', 13.082700, 100.883000, TRUE)
+ON DUPLICATE KEY UPDATE
+  name = VALUES(name), country = VALUES(country), city = VALUES(city),
+  lat = VALUES(lat), lng = VALUES(lng), is_active = VALUES(is_active);
+
+CREATE TABLE IF NOT EXISTS sea_route (
+  sea_route_id INT AUTO_INCREMENT PRIMARY KEY,
+  from_port_id INT NOT NULL,
+  to_port_id INT NOT NULL,
+  sea_mode ENUM('ferry','vessel') NOT NULL,
+  distance_km DECIMAL(10,2) NOT NULL,
+  typical_hours DECIMAL(6,2) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  notes VARCHAR(255) NULL,
+  UNIQUE KEY uq_sea_route (from_port_id, to_port_id, sea_mode),
+  CONSTRAINT fk_sea_route_from FOREIGN KEY (from_port_id) REFERENCES seaport(port_id),
+  CONSTRAINT fk_sea_route_to FOREIGN KEY (to_port_id) REFERENCES seaport(port_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sea_route (from_port_id, to_port_id, sea_mode, distance_km, typical_hours, is_active, notes)
+SELECT p1.port_id, p2.port_id, 'ferry', 115.00, 2.50, TRUE, 'Tuyến phà cao tốc Rạch Giá - Phú Quốc'
+FROM seaport p1, seaport p2
+WHERE p1.code = 'VN-RGI' AND p2.code = 'VN-PQC';
+
+INSERT IGNORE INTO sea_route (from_port_id, to_port_id, sea_mode, distance_km, typical_hours, is_active, notes)
+SELECT p1.port_id, p2.port_id, 'vessel', 1300.00, 60.00, TRUE, 'Tuyến vận tải biển Cát Lái - Singapore'
+FROM seaport p1, seaport p2
+WHERE p1.code = 'VN-CLI' AND p2.code = 'SG-PSA';
+
+INSERT IGNORE INTO sea_route (from_port_id, to_port_id, sea_mode, distance_km, typical_hours, is_active, notes)
+SELECT p1.port_id, p2.port_id, 'vessel', 1250.00, 66.00, TRUE, 'Tuyến vận tải biển Cát Lái - Laem Chabang'
+FROM seaport p1, seaport p2
+WHERE p1.code = 'VN-CLI' AND p2.code = 'TH-LCB';
+
+CREATE TABLE IF NOT EXISTS pricing_tariff (
+  tariff_id INT AUTO_INCREMENT PRIMARY KEY,
+  mode ENUM('road','air','sea') NOT NULL,
+  region VARCHAR(20) NOT NULL DEFAULT 'VN',
+  version INT NOT NULL,
+  params JSON NOT NULL,
+  effective_from DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  is_active BOOLEAN NOT NULL DEFAULT FALSE,
+  notes VARCHAR(255) NULL,
+  created_by INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_tariff_version (mode, region, version),
+  CONSTRAINT fk_tariff_creator FOREIGN KEY (created_by) REFERENCES `user`(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO pricing_tariff (mode, region, version, params, effective_from, is_active, notes, created_by) VALUES
+('road', 'VN', 1, '{
+  "openingFeePerVehicle": 2000000,
+  "distanceTiers": [
+    { "upToKm": 100, "pricePerKm": 45000 },
+    { "upToKm": 500, "pricePerKm": 35000 },
+    { "upToKm": null, "pricePerKm": 28000 }
+  ],
+  "careFeePerHorse": 500000,
+  "deadheadPerKm": 15000,
+  "nightSurchargePerVehicle": 1000000,
+  "borderCrossingFee": 3000000,
+  "roundingUnit": 1000,
+  "averageSpeedKmh": 50
+}', CURRENT_TIMESTAMP, TRUE, 'Bảng giá demo v1 theo file định hướng C3', NULL),
+
+('air', 'VN', 1, '{
+  "baseFeePerHorse": 60000000,
+  "pricePerKmPerHorse": 25000,
+  "airportHandlingPerHorse": 5000000,
+  "privateStallMultiplier": 1.5,
+  "roundingUnit": 1000,
+  "averageSpeedKmh": 700
+}', CURRENT_TIMESTAMP, TRUE, 'Bảng giá demo v1 theo file định hướng C3', NULL),
+
+('sea', 'VN', 1, '{
+  "ferry": { "ticketPerVehicle": 3000000 },
+  "vessel": { "baseFeePerHorse": 15000000, "pricePerKmPerHorse": 8000 },
+  "roundingUnit": 1000
+}', CURRENT_TIMESTAMP, TRUE, 'Bảng giá demo v1 theo file định hướng C3', NULL);
+
+CREATE TABLE IF NOT EXISTS shipment_quote (
+  quote_id INT AUTO_INCREMENT PRIMARY KEY,
+  customer_id INT NOT NULL,
+  transport_mode ENUM('road','air','sea') NOT NULL,
+  sea_mode ENUM('ferry','vessel') NULL,
+  trip_type ENUM('one_way','round_trip') NOT NULL DEFAULT 'one_way',
+  input_json JSON NOT NULL,
+  result_json JSON NOT NULL,
+  tariff_versions_json JSON NOT NULL,
+  freight_total BIGINT NOT NULL,
+  insurance_total BIGINT NOT NULL DEFAULT 0,
+  total BIGINT NOT NULL,
+  status ENUM('active','used','expired') NOT NULL DEFAULT 'active',
+  expires_at DATETIME NOT NULL,
+  used_by_shipment_id INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_quote_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id),
+  CONSTRAINT fk_quote_shipment FOREIGN KEY (used_by_shipment_id) REFERENCES shipment(shipment_id) ON DELETE SET NULL,
+  INDEX idx_quote_customer (customer_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS shipment_return_change (
+  change_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  old_return_departure_at DATETIME NOT NULL,
+  new_return_departure_at DATETIME NOT NULL,
+  reschedule_fee BIGINT NOT NULL DEFAULT 0,
+  requested_by INT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_return_change_shipment (shipment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE shipment ADD CONSTRAINT fk_shipment_quote FOREIGN KEY (quote_id) REFERENCES shipment_quote(quote_id) ON DELETE SET NULL;
+

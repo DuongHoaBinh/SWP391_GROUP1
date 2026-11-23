@@ -154,3 +154,37 @@ Toàn bộ KPI của Logistics Manager phải tính trực tiếp từ dữ li�
 | **DEC-06** | Ngưỡng Sinh hiệu 3 Tầng (`equine_vital_config`) | Phân hoạch toán học kín thân nhiệt `t` & nhịp tim `hr`; tách `escalatable_amber` vs `observational_amber`; Red Alert khi `>= 2` mốc `escalatable_amber` liên tiếp trong `<= 6h` trên cùng ngựa. | **Structurally Approved — Pending Vet Calibration** |
 | **DEC-07** | Phân tách `driver` vs `escort` | Đường bộ ưu tiên `driver`, chặng bay & sức khỏe ưu tiên `escort`; cho check-in chéo dự phòng nhưng bắt buộc lưu `updated_by_role`. | **Approved** |
 | **DEC-08** | Vận hành Đường hàng không | Release 1 giữ quản lý chặng bay qua `airline_id`, `flight_number`, `booking_reference`, `stalls_booked` nhập thủ công. | **Approved** |
+| **DEC-09** | Báo giá tự động, Định mức khoảng cách & Đường thủy (Step 4) | Tính giá tự động theo bậc khoảng cách (tiered km), bảng giá có version (`pricing_tariff`), khóa giá 30m trong `pricing_snapshot`; cấm Manager ghi đè khi có `quote_id`; hỗ trợ đường thủy 2 dạng (`ferry` <= 12h, `vessel` kết nối cảng <= 400km kèm cảnh báo sức khỏe). | **Approved** |
+
+### 7. Báo giá tự động, Định mức khoảng cách & Đường thủy (`DEC-09` — Step 4)
+
+1. **Báo giá tự động theo Bảng giá có phiên bản:**
+   - Hệ thống cho phép khách hàng nhận báo giá chính thức ngay khi nhập điểm đón, điểm giao, ngày khởi hành và chọn ngựa.
+   - Bảng giá cước (`pricing_tariff`) được phiên bản hóa, tách theo từng phương thức (`road`, `air`, `sea`).
+   - Báo giá có hiệu lực trong 30 phút (`expires_at`), ghi nhận snapshot đầy đủ phương án xe và chi tiết bảo hiểm.
+   - Khi tạo đơn kèm `quote_id`, giá cước được khóa bất biến. Manager không thể ghi đè thủ công khi phê duyệt.
+
+2. **Dịch vụ Tính khoảng cách (`DistanceService`):**
+   - Kết nối ORS (OpenRouteService) với thời gian chờ 5s và bộ đệm 24h (tối đa 5.000 điểm).
+   - Tự động fallback sang công thức Haversine nhân hệ số uốn lượn 1.25 khi ORS timeout hoặc lỗi kết nối.
+
+3. **Vận tải Đường thủy Đa phương thức:**
+   - Hỗ trợ `ferry` (xe tải lên phà, giới hạn thời gian trên biển `<= 12` giờ).
+   - Hỗ trợ `vessel` (ô chuồng cố định trên tàu biển chuyên dụng, khoảng cách đường bộ ra vào cảng `<= 400` km mỗi chặng).
+   - Hiển thị khuyến cáo an toàn sinh học và sức khỏe cho ngựa đua khi chọn tàu biển chuyên dụng.
+
+
+## 9. Yêu cầu Vận chuyển Khứ hồi và Chính sách No-Show (Step 5 — Review 11/2026)
+
+- **Hỗ trợ đơn vận chuyển khứ hồi:** Cho phép khách hàng chọn hình thức "Khứ hồi" (`trip_type = 'round_trip'`) khi tạo đơn. Hệ thống tự động tính toán chặng về đảo chiều với chiết khấu **-10%** cước vận chuyển và **-10%** phí bảo hiểm.
+- **Cam kết chính sách bắt buộc:** Khách hàng phải xác nhận đồng ý chính sách hủy chặng về và thời gian chờ no-show (`acceptReturnPolicy = true`) trước khi gửi đơn.
+- **Thời gian chờ và xử lý No-show:**
+  - Tài xế chặng về phải chờ tối thiểu 120 phút tại điểm đón chặng về.
+  - Sau thời gian chờ quy định, nếu khách hàng không giao ngựa, tài xế chụp ảnh làm bằng chứng và thực hiện báo cáo no-show trên ứng dụng (`POST /tracking/shipments/:id/return/no-show`).
+  - Hệ thống đóng chuyến đi với trạng thái hoàn thành (`completed`), ghi nhận `return_no_show = true`, không phát sinh hoàn tiền cước chặng về cho khách hàng.
+- **Quy định hủy và đổi ngày chặng về:**
+  - Hủy trước ≥ 168 giờ: hoàn 80% cước chặng về.
+  - Hủy từ 72h đến 168h: hoàn 50% cước chặng về.
+  - Hủy dưới 72h: hoàn 0% cước chặng về.
+  - Công ty chủ động hủy: hoàn 100% cước và bảo hiểm chặng về.
+  - Đổi ngày đón chặng về trước ≥ 168 giờ: miễn phí. Đổi dưới 168 giờ: phụ thu 10% cước chặng về.
