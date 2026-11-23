@@ -58,6 +58,8 @@ export interface HorseDocument {
   fileUrl?: string;
 }
 
+export type HorseTemperament = 'calm' | 'normal' | 'difficult';
+
 export interface Horse {
   id: string;
   backendId?: number;
@@ -66,13 +68,16 @@ export interface Horse {
   breed: string;
   age: number;
   quantity?: number;
-  gender: 'Stallion' | 'Mare' | 'Gelding' | string;
+  /** @deprecated Bỏ giới tính sau review 11/2026; chỉ còn ở dữ liệu cũ */
+  gender?: string;
+  /** Cần chuồng riêng (thay cho phân loại theo giới tính) */
+  requiresPrivateStall?: boolean;
+  temperament?: HorseTemperament;
   microchipNumber: string;
   passportNumber: string;
   ownerName: string;
   photoUrl?: string;
   avatarUrl?: string;
-  dob?: string;
   color?: string;
   weight?: string;
   location?: string;

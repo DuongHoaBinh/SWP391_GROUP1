@@ -104,7 +104,7 @@ type FormData = z.infer<ReturnType<typeof getFormSchema>>;
 
 function CreateTransportRequestForm() {
   const router = useRouter();
-  const { t, language, translateBreed, translateGender, translateCountry } = useLanguage();
+  const { t, language, translateBreed, translateCountry } = useLanguage();
   const searchParams = useSearchParams();
   const preselectedHorseId = searchParams.get('horseId');
 
@@ -420,7 +420,6 @@ function CreateTransportRequestForm() {
         horseId?: number;
         name: string;
         breed?: string;
-        gender?: 'male' | 'female' | 'gelding';
         age?: number;
         quantity: number; declaredValue: number; declaredCurrency: 'VND' | 'USD'; insurancePackage: 'basic' | 'standard' | 'premium';
       }> = [];
@@ -428,18 +427,10 @@ function CreateTransportRequestForm() {
       for (const h of selectedHorses) {
         const qty = h.quantity || 1;
         const numericHorseId = h.backendId || (Number(h.id) > 0 ? Number(h.id) : undefined);
-        const g = String(h.gender || '').toLowerCase();
-        const normalizedGender: 'male' | 'female' | 'gelding' =
-          g.includes('male') || g.includes('stallion')
-            ? 'male'
-            : g.includes('female') || g.includes('mare')
-            ? 'female'
-            : 'gelding';
         selectedHorsesData.push({
           horseId: numericHorseId,
           name: h.name,
           breed: h.breed,
-          gender: normalizedGender,
           age: h.age,
           quantity: qty,
           declaredValue: Number((insuranceValues[h.id] ?? defaultInsurance).declaredValue || 0),
@@ -467,7 +458,6 @@ function CreateTransportRequestForm() {
         // Fallback for single horse if array is not preferred by backend yet
         horseName: selectedHorsesData[0]?.name,
         horseBreed: selectedHorsesData[0]?.breed,
-        horseGender: selectedHorsesData[0]?.gender,
         horseAge: selectedHorsesData[0]?.age,
       };
 
@@ -926,7 +916,7 @@ function CreateTransportRequestForm() {
                         {t('customer.table.breed', 'Breed')}
                       </th>
                       <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
-                        {t('customer.newRequest.ageGender', 'Age / Gender')}
+                        {t('customer.newRequest.ageHandling', 'Tuổi / Lưu ý')}
                       </th>
                       <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
                         {t('customer.newRequest.medicalStatus', 'Medical Status')}
@@ -1114,7 +1104,7 @@ function CreateTransportRequestForm() {
                               {translateBreed(h.breed)}
                             </td>
                             <td className="py-2.5 px-3 text-[13px] text-[#3F443D] whitespace-nowrap">
-                              {h.age} {t('horses.yearsOld', 'years old')} • {translateGender(h.gender)}
+                              {h.age} {t('horses.yearsOld', 'years old')}{h.requiresPrivateStall ? ` • ${t('horses.privateStallShort', 'Chuồng riêng')}` : ''}
                             </td>
                             <td className="py-2.5 px-3 whitespace-nowrap">
                               <span

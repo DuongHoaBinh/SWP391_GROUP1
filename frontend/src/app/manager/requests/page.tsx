@@ -89,8 +89,8 @@ interface OrderHorse extends Partial<InsuredHorse> {
   horseId?: number;
   name?: string;
   breed?: string | null;
-  gender?: string | null;
   age?: number | null;
+  requiresPrivateStall?: boolean;
   color?: string | null;
   weight?: number | null;
   medicalStatus?: string | null;
@@ -203,12 +203,11 @@ function exportQuotationPDF(order: TransportOrder, isEn = false, statusLabel?: s
       <tr>
         <td style="padding:10px 14px;border-bottom:1px solid #D8CEBE;font-weight:600;">${escapeQuotationText(h.name || '—')}</td>
         <td style="padding:10px 14px;border-bottom:1px solid #D8CEBE;">${escapeQuotationText(h.breed || '—')}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #D8CEBE;">${escapeQuotationText(h.gender || '—')}</td>
         <td style="padding:10px 14px;border-bottom:1px solid #D8CEBE;">${h.age !== null && h.age !== undefined ? `${h.age} ${isEn ? 'yo' : 'tuổi'}` : '—'}</td>
       </tr>`
           )
           .join('')
-      : `<tr><td colspan="4" style="padding:12px;text-align:center;color:#5C6658;">${isEn ? 'No horse manifest information' : 'Chưa có thông tin ngựa'}</td></tr>`;
+      : `<tr><td colspan="3" style="padding:12px;text-align:center;color:#5C6658;">${isEn ? 'No horse manifest information' : 'Chưa có thông tin ngựa'}</td></tr>`;
 
   const html = `<!DOCTYPE html>
 <html lang="${isEn ? 'en' : 'vi'}">
@@ -310,7 +309,6 @@ function exportQuotationPDF(order: TransportOrder, isEn = false, statusLabel?: s
         <tr>
           <th>${isEn ? 'Horse Name' : 'Tên ngựa'}</th>
           <th>${isEn ? 'Breed' : 'Giống'}</th>
-          <th>${isEn ? 'Gender' : 'Giới tính'}</th>
           <th>${isEn ? 'Age' : 'Tuổi'}</th>
         </tr>
       </thead>
@@ -1234,7 +1232,7 @@ export default function ManagerRequestsPage() {
                       <tr>
                         <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseName', 'Tên ngựa')}</th>
                         <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseBreed', 'Giống')}</th>
-                        <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseGender', 'Giới tính')}</th>
+                        <th className="p-2.5 font-bold text-slate-600">{t('horses.requiresPrivateStall', 'Cần chuồng riêng')}</th>
                         <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseAge', 'Tuổi')}</th>
                       </tr>
                     </thead>
@@ -1243,7 +1241,7 @@ export default function ManagerRequestsPage() {
                         <tr key={idx}>
                           <td className="p-2.5 font-bold text-slate-900">{h.name || '—'}</td>
                           <td className="p-2.5 text-slate-600">{h.breed || '—'}</td>
-                          <td className="p-2.5 text-slate-600">{h.gender || '—'}</td>
+                          <td className="p-2.5 text-slate-600">{h.requiresPrivateStall ? t('common.yes', isEn ? 'Yes' : 'Có') : t('common.no', isEn ? 'No' : 'Không')}</td>
                           <td className="p-2.5 text-slate-600">{h.age !== null && h.age !== undefined ? `${h.age}` : '—'}</td>
                         </tr>
                       ))}

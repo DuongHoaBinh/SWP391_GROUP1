@@ -3,7 +3,8 @@
 import React, { useState, useRef } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
-import { Horse } from '@/lib/types';
+import { Horse, HorseTemperament } from '@/lib/types';
+import { HorseHandlingFields } from './HorseHandlingFields';
 import { HORSE_COAT_COLORS, HORSE_MEDICAL_STATUSES } from '@/lib/horse-constants';
 import {
   Award,
@@ -17,7 +18,6 @@ import {
   Tag,
   X,
   AlertCircle,
-  Calendar,
   FileText,
   Upload,
 } from 'lucide-react';
@@ -63,15 +63,14 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   onHorseAdded,
 }) => {
   const { addHorse, horses, refreshHorses, uploadStandalonePhoto } = useCustomerStore();
-  const { t, language, translateBreed, translateGender } = useLanguage();
+  const { t, language, translateBreed } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<'identity' | 'passport'>('identity');
   const [name, setName] = useState('');
   const [breed, setBreed] = useState('Thoroughbred');
-  const defaultDob = new Date(Date.now() - 5 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const [dateOfBirth, setDateOfBirth] = useState<string>(defaultDob);
   const [age, setAge] = useState<number>(5);
-  const [gender, setGender] = useState<'Stallion' | 'Mare' | 'Gelding'>('Stallion');
+  const [temperament, setTemperament] = useState<HorseTemperament>('normal');
+  const [requiresPrivateStall, setRequiresPrivateStall] = useState(false);
   const [color, setColor] = useState('Bay');
   const [weight, setWeight] = useState('480 kg');
   const [medicalStatus, setMedicalStatus] = useState<'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention'>('Healthy');
@@ -92,27 +91,13 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
     };
   }, [photoPreview]);
 
-  const handleDobChange = (dobStr: string) => {
-    setDateOfBirth(dobStr);
-    if (!dobStr) return;
-    const birth = new Date(dobStr);
-    const today = new Date();
-    let calculated = today.getFullYear() - birth.getFullYear();
-    const m = today.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
-      calculated--;
-    }
-    setAge(Math.max(1, calculated));
-  };
-
   const resetForm = React.useCallback(() => {
-    const freshDob = new Date(Date.now() - 5 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     setActiveTab('identity');
     setName('');
     setBreed('Thoroughbred');
-    setDateOfBirth(freshDob);
     setAge(5);
-    setGender('Stallion');
+    setTemperament('normal');
+    setRequiresPrivateStall(false);
     setColor('Bay');
     setWeight('480 kg');
     setMedicalStatus('Healthy');
@@ -196,9 +181,9 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
           name: trimmedName,
           breed,
           age: Number(age) || 1,
-          dateOfBirth: dateOfBirth || undefined,
           quantity: 1,
-          gender: gender === 'Stallion' ? 'male' : gender === 'Mare' ? 'female' : 'gelding',
+          temperament,
+          requiresPrivateStall,
           passportNo: trimmedPassport,
           microchipNo: trimmedMicrochip,
           status: 'active',
@@ -219,9 +204,9 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         name: trimmedName,
         breed,
         age: Number(age) || 1,
-        dateOfBirth: dateOfBirth || undefined,
         quantity: 1,
-        gender,
+        temperament,
+        requiresPrivateStall,
         passportNumber: trimmedPassport,
         microchipNumber: trimmedMicrochip,
         medicalStatus,
@@ -473,54 +458,12 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
-                    {t('horses.gender', 'Giới Tính')}
-                  </label>
-                  <div className="grid grid-cols-3 gap-2 bg-surface-muted p-1.5 rounded-xl border border-border">
-                    {[
-                      { key: 'Stallion', label: translateGender('Stallion'), icon: '♂' },
-                      { key: 'Mare', label: translateGender('Mare'), icon: '♀' },
-                      { key: 'Gelding', label: translateGender('Gelding'), icon: '⚲' },
-                    ].map((g) => {
-                      const isSel = gender === g.key;
-                      return (
-                        <button
-                          key={g.key}
-                          type="button"
-                          onClick={() => setGender(g.key as any)}
-                          className={`py-2 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                            isSel
-                              ? 'bg-primary text-white shadow-sm'
-                              : 'text-text-secondary hover:text-text-primary hover:bg-white/70'
-                          }`}
-                        >
-                          <span className="text-sm font-extrabold">{g.icon}</span>
-                          <span>{g.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
-                    {t('horses.dateOfBirth', 'Ngày Sinh')} <span className="text-danger">*</span>
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
-                      <Calendar size={16} />
-                    </div>
-                    <input
-                      type="date"
-                      max={new Date().toISOString().split('T')[0]}
-                      value={dateOfBirth}
-                      onChange={(e) => handleDobChange(e.target.value)}
-                      required
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
-                    />
-                  </div>
-                </div>
+                <HorseHandlingFields
+                  temperament={temperament}
+                  onTemperamentChange={setTemperament}
+                  requiresPrivateStall={requiresPrivateStall}
+                  onRequiresPrivateStallChange={setRequiresPrivateStall}
+                />
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -529,11 +472,11 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                     </label>
                     <input
                       type="number"
+                      min={1}
+                      max={35}
                       value={age}
-                      readOnly
-                      tabIndex={-1}
-                      aria-readonly="true"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-muted text-sm font-semibold text-text-secondary cursor-not-allowed outline-none"
+                      onChange={(e) => setAge(Math.min(35, Math.max(1, Number(e.target.value) || 1)))}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
                     />
                   </div>
                   <div>

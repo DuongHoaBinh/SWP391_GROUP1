@@ -39,7 +39,6 @@ interface OrderHorse {
   horseId: number;
   name: string;
   breed: string | null;
-  gender: string | null;
   age: number | null;
 }
 
@@ -157,12 +156,11 @@ function exportQuotationPDF(order: TransportOrder) {
     <tr>
       <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.name)}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.breed || '—')}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.gender || '—')}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.age ?? '—')} yrs</td>
     </tr>`,
       )
       .join('') ||
-    '<tr><td colspan="4" style="padding:12px;color:#787770;text-align:center;">Không có thông tin ngựa</td></tr>';
+    '<tr><td colspan="3" style="padding:12px;color:#787770;text-align:center;">Không có thông tin ngựa</td></tr>';
 
   const html = `<!DOCTYPE html>
 <html lang="vi">
@@ -253,7 +251,7 @@ function exportQuotationPDF(order: TransportOrder) {
     <table>
       <thead>
         <tr>
-          <th>Tên ngựa</th><th>Giống</th><th>Giới tính</th><th>Tuổi</th>
+          <th>Tên ngựa</th><th>Giống</th><th>Tuổi</th>
         </tr>
       </thead>
       <tbody>${horsesRows}</tbody>

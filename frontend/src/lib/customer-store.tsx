@@ -73,15 +73,8 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
           name: item.name,
           breed: item.breed || 'Thoroughbred',
           age: Number(item.age) || 4,
-          gender:
-            item.gender === 'female'
-              ? 'Mare'
-              : item.gender === 'gelding'
-              ? 'Gelding'
-              : 'Stallion',
-          dob: item.dateOfBirth
-            ? new Date(item.dateOfBirth).toISOString().split('T')[0]
-            : '2022-01-15',
+          requiresPrivateStall: Boolean(item.requiresPrivateStall),
+          temperament: item.temperament || 'normal',
           microchipNumber: item.microchipNo || '',
           passportNumber: item.passportNo || '',
           ownerName: 'You',
@@ -448,8 +441,8 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
       name: horseData.name || 'New Horse',
       breed: horseData.breed || 'Thoroughbred',
       age: horseData.age || 4,
-      gender: horseData.gender || 'Stallion',
-      dob: horseData.dob || '2022-01-15',
+      requiresPrivateStall: Boolean(horseData.requiresPrivateStall),
+      temperament: horseData.temperament || 'normal',
       location: horseData.location || 'Ho Chi Minh City, Vietnam',
       availabilityStatus: 'Available',
       medicalStatus: horseData.medicalStatus || 'Healthy',

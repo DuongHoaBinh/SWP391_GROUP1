@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { useCustomerStore } from '@/lib/customer-store';
-import { Horse } from '@/lib/types';
+import { Horse, HorseTemperament } from '@/lib/types';
+import { HorseHandlingFields } from './HorseHandlingFields';
 import { HORSE_COAT_COLORS, HORSE_MEDICAL_STATUSES } from '@/lib/horse-constants';
 import {
   Award,
@@ -16,7 +17,6 @@ import {
   Tag,
   X,
   AlertCircle,
-  Calendar,
   FileText,
   Upload,
 } from 'lucide-react';
@@ -65,20 +65,14 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
   onHorseUpdated,
 }) => {
   const { updateHorse, uploadHorseAvatar, refreshHorses } = useCustomerStore();
-  const { t, language, translateBreed, translateGender, translateStatus } = useLanguage();
+  const { t, language, translateBreed, translateStatus } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<'identity' | 'passport'>('identity');
   const [name, setName] = useState(horse.name || '');
   const [breed, setBreed] = useState(horse.breed || 'Thoroughbred');
   const [age, setAge] = useState(horse.age || 5);
-  const [gender, setGender] = useState<'Stallion' | 'Mare' | 'Gelding'>(
-    horse.gender === 'Mare' || horse.gender === 'female'
-      ? 'Mare'
-      : horse.gender === 'Gelding' || horse.gender === 'gelding'
-      ? 'Gelding'
-      : 'Stallion'
-  );
-  const [dob, setDob] = useState(horse.dob || '2021-04-15');
+  const [temperament, setTemperament] = useState<HorseTemperament>(horse.temperament || 'normal');
+  const [requiresPrivateStall, setRequiresPrivateStall] = useState(Boolean(horse.requiresPrivateStall));
   const [color, setColor] = useState(horse.color || 'Bay');
   const [weight, setWeight] = useState(horse.weight || '480 kg');
   const [medicalStatus, setMedicalStatus] = useState<'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention'>(
@@ -106,27 +100,9 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
     if (isOpen && horse) {
       setName(horse.name || '');
       setBreed(horse.breed || 'Thoroughbred');
-      const initialDob = horse.dob || '2021-04-15';
-      setDob(initialDob);
-      const birth = new Date(initialDob);
-      if (!isNaN(birth.getTime())) {
-        const today = new Date();
-        let calculated = today.getFullYear() - birth.getFullYear();
-        const m = today.getMonth() - birth.getMonth();
-        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
-          calculated--;
-        }
-        setAge(Math.max(1, calculated));
-      } else {
-        setAge(horse.age || 5);
-      }
-      setGender(
-        horse.gender === 'Mare' || horse.gender === 'female'
-          ? 'Mare'
-          : horse.gender === 'Gelding' || horse.gender === 'gelding'
-          ? 'Gelding'
-          : 'Stallion'
-      );
+      setAge(horse.age || 5);
+      setTemperament(horse.temperament || 'normal');
+      setRequiresPrivateStall(Boolean(horse.requiresPrivateStall));
       let initialColor = horse.color || 'Bay';
       if (initialColor.toLowerCase() === 'grey' || initialColor.toLowerCase() === 'gray') {
         initialColor = 'Gray / Grey';
@@ -143,19 +119,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
       setActiveTab('identity');
     }
   }, [isOpen, horse]);
-
-  const handleDobChange = (newDob: string) => {
-    setDob(newDob);
-    if (!newDob) return;
-    const birth = new Date(newDob);
-    const today = new Date();
-    let calculated = today.getFullYear() - birth.getFullYear();
-    const m = today.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
-      calculated--;
-    }
-    setAge(Math.max(1, calculated));
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,8 +164,8 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
             breed,
             age: Number(age) || 4,
             quantity: 1,
-            gender: gender === 'Stallion' ? 'male' : gender === 'Mare' ? 'female' : 'gelding',
-            dateOfBirth: dob || undefined,
+            temperament,
+            requiresPrivateStall,
             passportNo: passportNumber.trim() || undefined,
             microchipNo: microchipNumber.trim() || undefined,
             color: color.trim() || undefined,
@@ -220,8 +183,8 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
         breed,
         age: Number(age) || 4,
         quantity: 1,
-        gender,
-        dob,
+        temperament,
+        requiresPrivateStall,
         color,
         weight: weight.trim() || '480 kg',
         medicalStatus,
@@ -295,10 +258,8 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               <p className="text-slate-300 text-sm mt-1 flex items-center gap-2 flex-wrap">
                 <span>{translateBreed(breed)}</span>
                 <span className="text-slate-500">•</span>
-                <span>{translateGender(gender)}</span>
-                <span className="text-slate-500">•</span>
                 <span>
-                  {age} {t('horses.yearsOld', 'tuổi')} ({dob})
+                  {age} {t('horses.yearsOld', 'tuổi')}
                 </span>
               </p>
             </div>
@@ -505,52 +466,12 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
-                    {t('horses.gender', 'Giới Tính')}
-                  </label>
-                  <div className="grid grid-cols-3 gap-2 bg-surface-muted p-1.5 rounded-xl border border-border">
-                    {[
-                      { key: 'Stallion', label: translateGender('Stallion'), icon: '♂' },
-                      { key: 'Mare', label: translateGender('Mare'), icon: '♀' },
-                      { key: 'Gelding', label: translateGender('Gelding'), icon: '⚲' },
-                    ].map((g) => {
-                      const isSel = gender === g.key;
-                      return (
-                        <button
-                          key={g.key}
-                          type="button"
-                          onClick={() => setGender(g.key as any)}
-                          className={`py-2 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                            isSel
-                              ? 'bg-primary text-white shadow-sm'
-                              : 'text-text-secondary hover:text-text-primary hover:bg-white/70'
-                          }`}
-                        >
-                          <span className="text-sm font-extrabold">{g.icon}</span>
-                          <span>{g.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
-                    {t('horses.dateOfBirth', 'Ngày Sinh')}
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
-                      <Calendar size={16} />
-                    </div>
-                    <input
-                      type="date"
-                      value={dob}
-                      onChange={(e) => handleDobChange(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
-                    />
-                  </div>
-                </div>
+                <HorseHandlingFields
+                  temperament={temperament}
+                  onTemperamentChange={setTemperament}
+                  requiresPrivateStall={requiresPrivateStall}
+                  onRequiresPrivateStallChange={setRequiresPrivateStall}
+                />
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -559,11 +480,11 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                     </label>
                     <input
                       type="number"
+                      min={1}
+                      max={35}
                       value={age}
-                      readOnly
-                      tabIndex={-1}
-                      aria-readonly="true"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-muted text-sm font-semibold text-text-secondary cursor-not-allowed outline-none"
+                      onChange={(e) => setAge(Math.min(35, Math.max(1, Number(e.target.value) || 1)))}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
                     />
                   </div>
                   <div>

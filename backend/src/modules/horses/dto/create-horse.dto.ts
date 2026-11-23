@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
-import { HorseGender, HorseStatus } from '../horses.types';
+import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
+import { HorseStatus, HorseTemperament } from '../horses.types';
 
 export class CreateHorseDto {
   @ApiProperty({ description: 'Tên con ngựa', example: 'Thunder Bolt' })
@@ -13,22 +13,12 @@ export class CreateHorseDto {
   @IsOptional()
   breed?: string;
 
-  @ApiPropertyOptional({ description: 'Giới tính', enum: HorseGender, example: HorseGender.MALE })
-  @IsEnum(HorseGender)
-  @IsOptional()
-  gender?: HorseGender;
-
   @ApiPropertyOptional({ description: 'Tuổi của ngựa', example: 5 })
   @IsInt()
   @Min(1)
   @Max(35)
   @IsOptional()
   age?: number;
-
-  @ApiPropertyOptional({ description: 'Ngày sinh (YYYY-MM-DD)', example: '2021-04-15' })
-  @IsString()
-  @IsOptional()
-  dateOfBirth?: string;
 
   @ApiProperty({ description: 'Số vi mạch microchip', example: '985141001248999' })
   @IsString()
@@ -75,4 +65,14 @@ export class CreateHorseDto {
   @IsString()
   @IsOptional()
   specialRequirements?: string;
+
+  @ApiPropertyOptional({ description: 'Cần chuồng riêng (ngựa đực giống, ngựa khó tính)', example: false, default: false })
+  @IsBoolean()
+  @IsOptional()
+  requiresPrivateStall?: boolean;
+
+  @ApiPropertyOptional({ description: 'Tính khí', enum: HorseTemperament, example: HorseTemperament.NORMAL, default: HorseTemperament.NORMAL })
+  @IsEnum(HorseTemperament)
+  @IsOptional()
+  temperament?: HorseTemperament;
 }

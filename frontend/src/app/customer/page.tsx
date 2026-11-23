@@ -64,7 +64,6 @@ export default function CustomerDashboardPage() {
     t,
     language,
     translateStatus,
-    translateGender,
     translateBreed,
     translateNotification,
   } = useLanguage();
@@ -207,7 +206,6 @@ export default function CustomerDashboardPage() {
         name: firstHorse.name || upcomingHorseName,
         breed: firstHorse.breed || 'Thoroughbred',
         age: firstHorse.age || 5,
-        gender: firstHorse.gender || 'Stallion',
         microchipNumber: firstHorse.microchipNumber || '',
         passportNumber: firstHorse.passportNumber || '',
         ownerName: currentUser?.fullName || currentUser?.name || '',
@@ -758,7 +756,6 @@ export default function CustomerDashboardPage() {
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs font-bold text-[#181A17] truncate">{horse.name}</span>
-                            <span className="text-[10px] text-[#747D88] shrink-0">({translateGender(horse.gender)})</span>
                           </div>
                           <div className="text-[11px] text-[#5F6977] truncate">
                             {translateBreed(horse.breed)} • {horse.age} {t('horse.yearsOld', 'tuổi')}

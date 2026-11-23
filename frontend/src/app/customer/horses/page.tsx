@@ -38,7 +38,7 @@ function formatHorseLocation(loc?: string, availabilityStatus?: string, lang: st
 
 export default function HorsesPage() {
   const router = useRouter();
-  const { t, language, translateGender, translateBreed, translateStatus, translateHealthStatus } = useLanguage();
+  const { t, language, translateBreed, translateStatus, translateHealthStatus } = useLanguage();
   const isEn = language === 'en';
   const { horses, requests, refreshHorses } = useCustomerStore();
 
@@ -358,7 +358,7 @@ export default function HorsesPage() {
                         </span>
                       </div>
                       <p className="text-xs text-[#5F6977] mt-0.5 mb-0 truncate">
-                        {translateBreed(horse.breed)} • {translateGender(horse.gender)} • {horse.age} {t('common.yearsOld', 'tuổi')}
+                        {translateBreed(horse.breed)} • {horse.age} {t('common.yearsOld', 'tuổi')}{horse.requiresPrivateStall ? ` • ${t('horses.privateStallShort', 'Chuồng riêng')}` : ''}
                       </p>
                     </div>
 

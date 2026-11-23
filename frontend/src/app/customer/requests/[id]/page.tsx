@@ -74,20 +74,11 @@ const fetcher = async (url: string) => {
 
   const normalizedHorses = rawHorses.map((item: any, idx: number) => {
     const rawObj = item.horse || item;
-    const rawGender = String(rawObj.gender || item.gender || '').toLowerCase();
-    const normalizedGender =
-      rawGender.includes('female') || rawGender.includes('mare')
-        ? 'Mare'
-        : rawGender.includes('gelding')
-        ? 'Gelding'
-        : 'Stallion';
-
     const horseObj = {
       id: String(rawObj.horseId || rawObj.id || item.horseId || item.id || `hrs-${idx + 1}`),
       name: rawObj.name || item.name || 'Racehorse',
       breed: rawObj.breed || item.breed || 'Thoroughbred',
       age: rawObj.age || item.age || 5,
-      gender: normalizedGender,
     };
     return {
       horse: horseObj,
@@ -283,7 +274,6 @@ export default function RequestDetailPage() {
     language = 'vi',
     translateStatus = (s?: string | null) => s || '',
     translateDocType = (s?: string | null) => s || '',
-    translateGender = (s?: string | null) => s || '',
     translateBreed = (s?: string | null) => s || '',
     translateUrgency = (s?: string | null) => s || '',
     translateTransportType = (s?: string | null) => s || '',
@@ -597,12 +587,11 @@ export default function RequestDetailPage() {
       <tr>
         <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.horse?.name || h.name)}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(translateBreed(h.horse?.breed || h.breed) || '—')}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(translateGender(h.horse?.gender || h.gender) || '—')}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #EAE5DA;">${escapeQuotationText(h.horse?.age ?? h.age ?? '—')} ${language === 'en' ? 'yrs' : 'tuổi'}</td>
       </tr>`
         )
         .join('') ||
-      `<tr><td colspan="4" style="padding:12px;color:#787770;text-align:center;">${language === 'en' ? 'No horse information available' : 'Không có thông tin ngựa'}</td></tr>`;
+      `<tr><td colspan="3" style="padding:12px;color:#787770;text-align:center;">${language === 'en' ? 'No horse information available' : 'Không có thông tin ngựa'}</td></tr>`;
 
     const orderCodeSafe = escapeQuotationText(request.requestCode || request.id);
     const totalNum = Number(request.totalCost) || 0;
@@ -651,7 +640,7 @@ export default function RequestDetailPage() {
   <div class="section">
     <div class="section-title">${language === 'en' ? `Horse List (${request.horses?.length || 1} horses)` : `Danh sách ngựa (${request.horses?.length || 1} con)`}</div>
     <table>
-      <thead><tr><th>${language === 'en' ? 'Horse Name' : 'Tên ngựa'}</th><th>${language === 'en' ? 'Breed' : 'Giống'}</th><th>${language === 'en' ? 'Gender' : 'Giới tính'}</th><th>${language === 'en' ? 'Age' : 'Tuổi'}</th></tr></thead>
+      <thead><tr><th>${language === 'en' ? 'Horse Name' : 'Tên ngựa'}</th><th>${language === 'en' ? 'Breed' : 'Giống'}</th><th>${language === 'en' ? 'Age' : 'Tuổi'}</th></tr></thead>
       <tbody>${horsesRows}</tbody>
     </table>
   </div>
@@ -1231,7 +1220,7 @@ export default function RequestDetailPage() {
                     <tr style={{ borderBottom: '1px solid var(--border-light)' }}>
                       <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.horse', 'Chiến mã')}</th>
                       <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.breed', 'Giống')}</th>
-                      <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.ageGender', 'Tuổi / Giới tính')}</th>
+                      <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.age', 'Tuổi')}</th>
                       <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.medicalStatus', 'Sức khỏe')}</th>
                       <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{t('customer.table.profile', 'Hồ sơ')}</th>
                       <th style={{ padding: '12px 20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'right' }}>{language === 'en' ? 'Actions' : 'Thao tác'}</th>
@@ -1259,7 +1248,7 @@ export default function RequestDetailPage() {
                           </td>
                           <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>{translateBreed(horse.breed)}</td>
                           <td style={{ padding: '16px 20px', color: 'var(--text-body)' }}>
-                            {horse.age} {t('common.yearsOld', 'tuổi')} • {translateGender(horse.gender)}
+                            {horse.age} {t('common.yearsOld', 'tuổi')}
                           </td>
                           <td style={{ padding: '16px 20px' }}>
                             <span
