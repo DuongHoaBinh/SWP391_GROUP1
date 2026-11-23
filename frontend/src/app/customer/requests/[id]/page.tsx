@@ -120,6 +120,10 @@ const fetcher = async (url: string) => {
 
   const statusLabels: Record<string, string> = {
     requested: 'Pending Approval',
+    awaiting_payment: 'Awaiting Payment',
+    paid_pending_review: 'Paid - Feasibility Review',
+    refund_requested: 'Refund Requested',
+    refunded: 'Refunded',
     under_review: 'Under Review',
     in_review: 'Under Review',
     approved: 'Approved',
@@ -265,7 +269,7 @@ const fetcher = async (url: string) => {
   };
 };
 
-const PAYABLE_SHIPMENT_STATUSES = ['planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'];
+const PAYABLE_SHIPMENT_STATUSES = ['awaiting_payment', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'];
 
 export default function RequestDetailPage() {
   const params = useParams();
@@ -739,6 +743,13 @@ export default function RequestDetailPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+          <Link
+            href={`/customer/requests/${request.id || requestId}/invoice`}
+            className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] inline-flex items-center gap-1.5 cursor-pointer transition-colors no-underline"
+          >
+            <FileText size={14} className="text-[#A67C2E]" aria-hidden="true" />
+            {language === 'en' ? 'E-Invoice' : 'Xem Hóa Đơn'}
+          </Link>
           <button
             type="button"
             onClick={() => router.push('/customer/tracking')}
@@ -809,6 +820,70 @@ export default function RequestDetailPage() {
           >
             {language === 'en' ? 'Edit & Resubmit' : 'Chỉnh sửa & Gửi lại'}
           </button>
+        </div>
+      )}
+
+      {/* Prepaid Feasibility & 100% Refund Alerts */}
+      {statusLower === 'refund_requested' && (
+        <div className="bg-[#F8EAEA] border border-[#E5B8B8] rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#F0D5D5] text-[#B33E3E] flex items-center justify-center shrink-0 mt-0.5">
+              <AlertTriangle size={20} />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-[#8C2E2E] m-0">
+                {language === 'en' ? 'Shipment Cannot Be Fulfilled - 100% Refund Guaranteed' : 'Rất tiếc, chuyến xe không thể đáp ứng - Cam kết hoàn tiền 100%'}
+              </h4>
+              <p className="text-xs text-[#963232] mt-1 mb-0 leading-relaxed">
+                {language === 'en'
+                  ? 'Due to operational constraints, we cannot fulfill this transport request. Please provide your bank transfer details to receive your 100% refund within 3-5 business days.'
+                  : 'Do hạn chế về năng lực vận tải/kiểm dịch, hệ thống không thể thực hiện chuyến đi. Quý khách vui lòng cung cấp thông tin tài khoản ngân hàng để nhận hoàn trả 100% chi phí trong vòng 3-5 ngày làm việc.'}
+              </p>
+            </div>
+          </div>
+          <Link
+            href={`/customer/requests/${request.id || requestId}/refund`}
+            className="no-underline px-4 py-2.5 rounded-xl bg-[#B33E3E] hover:bg-[#963232] text-white text-xs font-bold shrink-0 transition-colors shadow-sm flex items-center gap-1.5"
+          >
+            <CreditCard size={15} />
+            <span>{language === 'en' ? 'Submit Refund Form' : 'Điền form nhận hoàn tiền 100%'}</span>
+          </Link>
+        </div>
+      )}
+
+      {statusLower === 'paid_pending_review' && (
+        <div className="bg-[#E8F2EB] border border-[#B7DBC4] rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+          <div className="w-8 h-8 rounded-lg bg-[#D3E8D9] text-[#287653] flex items-center justify-center shrink-0">
+            <CheckCircle2 size={18} />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold text-[#287653] m-0">
+              {language === 'en' ? 'Payment Received - Logistics Feasibility Review' : 'Đã nhận thanh toán - Quản lý đang thẩm định tính khả thi'}
+            </h4>
+            <p className="text-xs text-[#3E6B4E] mt-0.5 mb-0">
+              {language === 'en'
+                ? 'Your payment was confirmed. Our Logistics Manager is currently assessing transport vehicle availability and quarantine corridors.'
+                : 'Đơn hàng đã được thanh toán thành công qua SePay VietQR. Logistics Manager đang tiến hành thẩm định khả năng đáp ứng xe chuyên dụng và trạm kiểm dịch.'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {statusLower === 'refunded' && (
+        <div className="bg-[#FAF8F4] border border-[#D4C5A3] rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+          <div className="w-8 h-8 rounded-lg bg-[#EFE9DC] text-[#7A591C] flex items-center justify-center shrink-0">
+            <CheckCircle2 size={18} />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold text-[#7A591C] m-0">
+              {language === 'en' ? '100% Refund Completed' : 'Đã hoàn tất hoàn tiền 100%'}
+            </h4>
+            <p className="text-xs text-[#5C6658] mt-0.5 mb-0">
+              {language === 'en'
+                ? 'The refund payment has been successfully transferred to your declared bank account.'
+                : 'Tiền cước và bảo hiểm đã được chuyển khoản hoàn trả 100% về tài khoản ngân hàng của quý khách.'}
+            </p>
+          </div>
         </div>
       )}
 

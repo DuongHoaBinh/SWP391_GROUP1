@@ -47,6 +47,10 @@ import { buildEquineRoute } from '@/lib/geo-corridors';
 // ─── Types ─────────────────────────────────────────────────────────────────────
 type ShipmentStatus =
   | 'requested'
+  | 'awaiting_payment'
+  | 'paid_pending_review'
+  | 'refund_requested'
+  | 'refunded'
   | 'change_requested'
   | 'under_review'
   | 'approved'
@@ -60,6 +64,10 @@ type ShipmentStatus =
 
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
   requested: 'Pending Approval',
+  awaiting_payment: 'Awaiting Payment',
+  paid_pending_review: 'Paid - Pending Review',
+  refund_requested: 'Refund Requested',
+  refunded: 'Refunded',
   under_review: 'Under Review',
   change_requested: 'Change Requested',
   approved: 'Approved',
@@ -74,6 +82,10 @@ const STATUS_LABELS: Record<ShipmentStatus, string> = {
 
 const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border: string }> = {
   requested: { bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
+  awaiting_payment: { bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
+  paid_pending_review: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
+  refund_requested: { bg: '#F8EAEA', color: '#B33E3E', border: '#E5B8B8' },
+  refunded: { bg: '#F0EEE8', color: '#5B6779', border: '#D8CEBE' },
   under_review: { bg: '#FAF8F4', color: '#A67C2E', border: '#D4C5A3' },
   change_requested: { bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
   approved: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
@@ -146,6 +158,14 @@ function getStatusBadgeConfig(status: ShipmentStatus): { variant: BadgeVariant }
   switch (status) {
     case 'requested':
       return { variant: 'info' };
+    case 'awaiting_payment':
+      return { variant: 'pending' };
+    case 'paid_pending_review':
+      return { variant: 'info' };
+    case 'refund_requested':
+      return { variant: 'danger' };
+    case 'refunded':
+      return { variant: 'neutral' };
     case 'under_review':
       return { variant: 'pending' };
     case 'approved':
@@ -726,6 +746,14 @@ export default function ManagerRequestsPage() {
     switch (s) {
       case 'requested':
         return t('manager.requests.statusRequested', 'Mới tạo');
+      case 'awaiting_payment':
+        return t('manager.requests.statusAwaitingPayment', 'Chờ thanh toán');
+      case 'paid_pending_review':
+        return t('manager.requests.statusPaidPendingReview', 'Đã thanh toán, chờ duyệt');
+      case 'refund_requested':
+        return t('manager.requests.statusRefundRequested', 'Chờ hoàn tiền');
+      case 'refunded':
+        return t('manager.requests.statusRefunded', 'Đã hoàn tiền');
       case 'under_review':
         return t('manager.requests.statusUnderReview', 'Đang thẩm định');
       case 'approved':
@@ -815,7 +843,11 @@ export default function ManagerRequestsPage() {
               className="bg-transparent text-xs font-bold text-slate-700 focus:outline-none cursor-pointer py-1"
             >
               <option value="all">{t('manager.requests.filterAllStatus', 'Tất cả trạng thái')}</option>
+              <option value="paid_pending_review">{t('manager.requests.statusPaidPendingReview', 'Đã thanh toán, chờ duyệt')}</option>
+              <option value="awaiting_payment">{t('manager.requests.statusAwaitingPayment', 'Chờ thanh toán')}</option>
               <option value="requested">{t('manager.requests.statusRequested', 'Mới tạo')}</option>
+              <option value="refund_requested">{t('manager.requests.statusRefundRequested', 'Chờ hoàn tiền')}</option>
+              <option value="refunded">{t('manager.requests.statusRefunded', 'Đã hoàn tiền')}</option>
               <option value="under_review">{t('manager.requests.statusUnderReview', 'Đang thẩm định')}</option>
               <option value="approved">{t('manager.requests.statusApproved', 'Đã duyệt / Báo giá')}</option>
               <option value="rejected">{t('manager.requests.statusRejected', 'Đã từ chối')}</option>

@@ -55,6 +55,10 @@ interface StatusMeta {
 
 const STATUS_CONFIG: Record<string, StatusMeta> = {
   requested: { vi: 'Chờ duyệt', en: 'Pending Approval', bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
+  awaiting_payment: { vi: 'Chờ thanh toán', en: 'Awaiting Payment', bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
+  paid_pending_review: { vi: 'Đã thanh toán, chờ duyệt khả thi', en: 'Paid - Pending Review', bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
+  refund_requested: { vi: 'Chờ hoàn tiền 100%', en: 'Refund Requested', bg: '#F8EAEA', color: '#B33E3E', border: '#E5B8B8' },
+  refunded: { vi: 'Đã hoàn tiền', en: 'Refunded', bg: '#F0EEE8', color: '#5C6658', border: '#D8CEBE' },
   under_review: { vi: 'Đang thẩm định', en: 'Under Review', bg: '#FAF8F4', color: '#242722', border: '#D4C5A3' },
   change_requested: { vi: 'Yêu cầu chỉnh sửa', en: 'Change Requested', bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
   approved: { vi: 'Đã duyệt báo giá', en: 'Approved / Quoted', bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
@@ -109,6 +113,12 @@ export default function ManagerRequestDetailPage() {
   const [costCurrency, setCostCurrency] = useState<'VND' | 'USD'>('VND');
   const [selectedTransportMode, setSelectedTransportMode] = useState<'road' | 'air'>('road');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Feasibility review modal state
+  const [feasibilityModal, setFeasibilityModal] = useState<'NONE' | 'APPROVE' | 'CANNOT_FULFIL'>('NONE');
+  const [cannotFulfilReason, setCannotFulfilReason] = useState<string>('no_vehicle_available');
+  const [cannotFulfilNote, setCannotFulfilNote] = useState<string>('');
+  const [feasibilitySubmitting, setFeasibilitySubmitting] = useState(false);
 
   // Fetch order details
   const {
@@ -361,6 +371,42 @@ export default function ManagerRequestDetailPage() {
     }
   };
 
+  const handleFeasibilitySubmit = async (decision: 'approve' | 'cannot_fulfil') => {
+    if (!order || feasibilitySubmitting) return;
+    if (decision === 'cannot_fulfil') {
+      if (!cannotFulfilReason) {
+        toast.error(isEn ? 'Please select a reason' : 'Vui lòng chọn lý do không thể đáp ứng');
+        return;
+      }
+      if (cannotFulfilNote.trim().length < 10) {
+        toast.error(isEn ? 'Note must be at least 10 characters' : 'Ghi chú giải trình phải có ít nhất 10 ký tự');
+        return;
+      }
+    }
+    setFeasibilitySubmitting(true);
+    try {
+      const payload = decision === 'approve'
+        ? { decision: 'approve' }
+        : { decision: 'cannot_fulfil', reasonCode: cannotFulfilReason, note: cannotFulfilNote.trim() };
+      await apiClient(`/orders/${order.id}/feasibility`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      toast.success(
+        decision === 'approve'
+          ? (isEn ? 'Order feasibility approved! Transferred to route planning.' : 'Đã duyệt khả thi đơn hàng thành công! Sẵn sàng lập tuyến.')
+          : (isEn ? 'Marked order as cannot fulfil. Transferred to 100% refund.' : 'Đã xác nhận không đáp ứng được đơn. Đã chuyển sang luồng hoàn tiền 100%.')
+      );
+      setFeasibilityModal('NONE');
+      setCannotFulfilNote('');
+      mutateOrder();
+    } catch (err: any) {
+      toast.error(err?.message || (isEn ? 'Failed to submit feasibility review' : 'Thao tác thẩm định thất bại'));
+    } finally {
+      setFeasibilitySubmitting(false);
+    }
+  };
+
   const handleExportPDF = () => {
     window.print();
   };
@@ -504,6 +550,14 @@ export default function ManagerRequestDetailPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5 flex-wrap">
+          <Link
+            href={`/manager/requests/${order.id}/invoice`}
+            className="no-underline px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:bg-[#FAF8F4] text-[#181A17] text-xs font-bold shadow-sm flex items-center gap-1.5 transition-colors"
+          >
+            <FileText size={14} className="text-[#A67C2E]" />
+            <span>{isEn ? 'View E-Invoice' : 'Xem Hóa Đơn'}</span>
+          </Link>
+
           <Button
             type="button"
             variant="outline"
@@ -514,6 +568,30 @@ export default function ManagerRequestDetailPage() {
             <Download size={14} />
             <span>{t('manager.detail.exportPdf', 'Xuất PDF')}</span>
           </Button>
+
+          {statusKey === 'paid_pending_review' && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setFeasibilityModal('CANNOT_FULFIL')}
+                className="text-[#B33E3E] border-[#E5B8B8] hover:bg-[#F8EAEA] text-xs font-bold"
+              >
+                {isEn ? 'Cannot Fulfil' : 'Không đáp ứng được'}
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => setFeasibilityModal('APPROVE')}
+                className="bg-[#287653] hover:bg-[#1f5e42] text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+              >
+                <Check size={15} />
+                <span>{isEn ? 'Approve Feasibility' : 'Duyệt khả thi'}</span>
+              </Button>
+            </>
+          )}
 
           {statusKey === 'requested' && (
             <>
@@ -1270,6 +1348,130 @@ export default function ManagerRequestDetailPage() {
                   : activeModal === 'CHANGE'
                   ? t('manager.requests.btnSendChange', 'Gửi yêu cầu chỉnh sửa')
                   : t('manager.requests.btnConfirmApprove', 'Xác nhận phê duyệt')}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Feasibility Review Modal */}
+      {feasibilityModal !== 'NONE' && (
+        <Modal
+          isOpen={true}
+          onClose={() => setFeasibilityModal('NONE')}
+          title={
+            feasibilityModal === 'APPROVE'
+              ? (isEn ? 'Approve Shipment Feasibility' : 'Duyệt tính khả thi của đơn hàng')
+              : (isEn ? 'Cannot Fulfil Shipment Request' : 'Xác nhận không thể đáp ứng đơn hàng')
+          }
+        >
+          <div className="flex flex-col gap-4">
+            {feasibilityModal === 'APPROVE' ? (
+              <div className="p-3.5 bg-[#E8F2EB] border border-[#B7DBC4] rounded-xl text-xs text-[#287653] leading-relaxed">
+                <p className="font-bold mb-1">
+                  {isEn
+                    ? 'Confirm operational feasibility for this paid shipment?'
+                    : 'Xác nhận tính khả thi vận hành cho đơn hàng đã thanh toán này?'}
+                </p>
+                <p className="m-0">
+                  {isEn
+                    ? 'The transport vehicle, stall capacity, and cross-border quarantine corridors are confirmed workable. The shipment will advance to trip and route planning.'
+                    : 'Xe chuyên dụng, sức chứa chuồng và hành lang kiểm dịch đã được đối chiếu khả thi. Đơn hàng sẽ chuyển sang trạng thái đã duyệt khả thi để điều phối viên lập tuyến.'}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <div className="p-3.5 bg-[#F8EAEA] border border-[#E5B8B8] rounded-xl text-xs text-[#B33E3E]">
+                  <p className="font-bold mb-1">
+                    {isEn
+                      ? 'Shipment will be cancelled with 100% refund guarantee'
+                      : 'Đơn hàng sẽ chuyển sang trạng thái hoàn tiền 100%'}
+                  </p>
+                  <p className="m-0">
+                    {isEn
+                      ? 'Customer will be notified to submit their banking information for 100% reimbursement within 3-5 business days.'
+                      : 'Khách hàng sẽ nhận thông báo cung cấp thông tin tài khoản ngân hàng để hoàn tiền 100% không trừ phí trong vòng 3-5 ngày làm việc.'}
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="feasibility-reason-select" className="block text-xs font-bold text-[#181A17] mb-1">
+                    {isEn ? 'Reason Code *' : 'Mã lý do không đáp ứng *'}
+                  </label>
+                  <select
+                    id="feasibility-reason-select"
+                    value={cannotFulfilReason}
+                    onChange={(e) => setCannotFulfilReason(e.target.value)}
+                    className="w-full p-2.5 border border-[#D8CEBE] rounded-lg text-xs font-semibold text-[#181A17] bg-white focus:outline-none focus:ring-2 focus:ring-[#C4B38E]"
+                  >
+                    <option value="no_vehicle_available">
+                      {isEn ? 'No vehicle/stall available at requested schedule' : 'Không có xe/khoang phù hợp thời gian yêu cầu'}
+                    </option>
+                    <option value="route_restricted">
+                      {isEn ? 'Route or border crossing temporarily restricted' : 'Tuyến đường tạm thời hạn chế/đóng cửa khẩu'}
+                    </option>
+                    <option value="quarantine_capacity_full">
+                      {isEn ? 'Quarantine station at maximum capacity' : 'Trạm kiểm dịch quá tải'}
+                    </option>
+                    <option value="weather_or_force_majeure">
+                      {isEn ? 'Severe weather or force majeure' : 'Thời tiết xấu/bất khả kháng'}
+                    </option>
+                    <option value="other">
+                      {isEn ? 'Other reason (specify in notes)' : 'Lý do khác (bắt buộc nêu chi tiết trong ghi chú)'}
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label htmlFor="feasibility-note-input" className="text-xs font-bold text-[#181A17]">
+                      {isEn ? 'Detailed Explanation * (min 10 chars)' : 'Giải trình chi tiết gửi khách hàng * (tối thiểu 10 ký tự)'}
+                    </label>
+                    <span className="text-[11px] text-[#7E867B]">{cannotFulfilNote.trim().length} / 10+</span>
+                  </div>
+                  <textarea
+                    id="feasibility-note-input"
+                    rows={4}
+                    value={cannotFulfilNote}
+                    onChange={(e) => setCannotFulfilNote(e.target.value)}
+                    placeholder={
+                      isEn
+                        ? 'Provide specific explanation why the shipment cannot be fulfilled...'
+                        : 'Nêu rõ lý do cụ thể vì sao hệ thống không thể phục vụ chuyến này...'
+                    }
+                    className="w-full p-2.5 border border-[#D8CEBE] rounded-lg text-xs text-[#181A17] focus:outline-none focus:ring-2 focus:ring-[#C4B38E]"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2.5 pt-3 border-t border-[#F0EEE8]">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={feasibilitySubmitting}
+                onClick={() => setFeasibilityModal('NONE')}
+              >
+                {isEn ? 'Cancel' : 'Hủy bỏ'}
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={feasibilitySubmitting}
+                onClick={() => handleFeasibilitySubmit(feasibilityModal === 'APPROVE' ? 'approve' : 'cannot_fulfil')}
+                className={
+                  feasibilityModal === 'APPROVE'
+                    ? 'bg-[#287653] hover:bg-[#1f5e42] text-white font-bold'
+                    : 'bg-[#B33E3E] hover:bg-[#963232] text-white font-bold'
+                }
+              >
+                {feasibilitySubmitting
+                  ? (isEn ? 'Processing...' : 'Đang xử lý...')
+                  : feasibilityModal === 'APPROVE'
+                  ? (isEn ? 'Confirm Approval' : 'Xác nhận duyệt khả thi')
+                  : (isEn ? 'Confirm 100% Refund' : 'Xác nhận hoàn tiền 100%')}
               </Button>
             </div>
           </div>
