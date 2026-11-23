@@ -14,12 +14,21 @@ import { OrdersOpsController } from './orders-ops.controller';
 import { OrdersOpsService } from './orders-ops.service';
 import { OrdersOpsStore } from './orders-ops.store';
 import { SlaMonitorService } from './sla-monitor.service';
+import { DistanceModule } from '../routes/distance.module';
+import { PricingController } from './pricing.controller';
+import { PricingService } from './pricing.service';
+import { PricingStore } from './pricing.store';
+import { QuotesController } from './quotes.controller';
+import { QuotesService } from './quotes.service';
+import { QuotesStore } from './quotes.store';
 
 @Module({
-  imports: [NotificationsModule, DocumentsModule],
+  imports: [NotificationsModule, DocumentsModule, DistanceModule],
   controllers: [
     OrdersOpsController,
     OrdersController,
+    PricingController,
+    QuotesController,
     MomoPaymentController,
     SepayPaymentController,
     SepayWebhookController,
@@ -27,6 +36,10 @@ import { SlaMonitorService } from './sla-monitor.service';
   providers: [
     OrdersService,
     OrdersStore,
+    PricingService,
+    PricingStore,
+    QuotesService,
+    QuotesStore,
     MomoPaymentService,
     MomoPaymentStore,
     SepayPaymentService,
@@ -38,6 +51,10 @@ import { SlaMonitorService } from './sla-monitor.service';
   exports: [
     OrdersService,
     OrdersStore,
+    PricingService,
+    PricingStore,
+    QuotesService,
+    QuotesStore,
     MomoPaymentService,
     MomoPaymentStore,
     SepayPaymentService,

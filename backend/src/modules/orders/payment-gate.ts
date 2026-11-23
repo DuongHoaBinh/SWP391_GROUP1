@@ -1,7 +1,7 @@
 import { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 export const WAITING_FOR_PLAN = 'Lộ trình và chuyến xe đang được bộ phận điều phối thiết lập chi tiết. Cổng thanh toán sẽ tự động mở sau khi lịch trình được xác nhận.';
-export const CONFIRMED_PLAN_STATUSES = ['confirmed', 'ready_to_depart', 'in_transit', 'completed'];
+export const CONFIRMED_PLAN_STATUSES = ['confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed'];
 
 export async function paymentGate(db: Pool | PoolConnection, shipmentId: number) {
   const [rows] = await db.execute<RowDataPacket[]>(`SELECT s.customer_id, s.status, s.total_cost, s.payment_overdue,

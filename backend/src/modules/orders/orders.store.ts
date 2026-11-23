@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, GoneException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { MYSQL_POOL } from '../../common/database/database.module';
 import { ShipmentAttachment, ShipmentStatus, TransportOrder, OrderHorse } from './orders.types';
@@ -6,9 +6,20 @@ import { CreateOrderDto, HorseInfoDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { calculateInsurance, totalInsuranceFee } from './insurance-policy';
 import { BookingQuote, BookingType, assertNewBookingType, calculateBookingQuote, resolveResubmitBookingType } from './booking-policy';
+import { parseJsonField } from './pricing.store';
+import { currentReturnPolicy, calculateReturnCancellationRefund } from './return-policy';
 
 interface ShipmentRow extends RowDataPacket {
-  transport_mode: 'road' | 'air' | null;
+  transport_mode: 'road' | 'air' | 'sea' | null;
+  sea_mode?: 'ferry' | 'vessel' | null;
+  quote_id?: number | null;
+  pricing_snapshot?: string | any | null;
+  distance_km?: number | string | null;
+  distance_source?: 'ors' | 'estimated' | 'table' | null;
+  origin_lat?: number | string | null;
+  origin_lng?: number | string | null;
+  destination_lat?: number | string | null;
+  destination_lng?: number | string | null;
   booking_type: BookingType;
   stall_unit_price: number | string | null;
   shipment_id: number;
@@ -27,6 +38,18 @@ interface ShipmentRow extends RowDataPacket {
   expected_arrival_date: Date | null;
   actual_arrival_date: Date | null;
   transportation_type: string | null;
+  trip_type?: 'one_way' | 'round_trip';
+  return_departure_at?: Date | string | null;
+  return_wait_minutes?: number | null;
+  return_status?: 'not_applicable' | 'scheduled' | 'in_progress' | 'cancelled' | 'no_show' | 'completed';
+  return_no_show?: boolean | number;
+  return_freight?: number | string;
+  return_insurance_fee?: number | string;
+  return_policy_snapshot?: string | any | null;
+  return_policy_accepted_at?: Date | string | null;
+  return_cancelled_at?: Date | string | null;
+  return_cancel_reason?: string | null;
+  return_reschedule_fee?: number | string;
   special_requirements: string | null;
   rejection_reason: string | null;
   change_request_notes: string | null;
@@ -154,16 +177,193 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
   async createShipment(customerId: number, dto: CreateOrderDto): Promise<number> {
     return this.transaction(async db => {
+      if (dto.quoteId) {
+        const [quoteRows] = await db.execute<RowDataPacket[]>(
+          'SELECT * FROM shipment_quote WHERE quote_id = ? FOR UPDATE',
+          [dto.quoteId],
+        );
+        if (!quoteRows.length) {
+          throw new NotFoundException(`Không tìm thấy báo giá #${dto.quoteId}`);
+        }
+        const qRow = quoteRows[0];
+        if (Number(qRow.customer_id) !== customerId) {
+          throw new ForbiddenException('Báo giá không thuộc tài khoản của bạn');
+        }
+        if (qRow.status === 'used') {
+          throw new ConflictException('Báo giá này đã được sử dụng để tạo đơn');
+        }
+        if (qRow.status === 'expired' || new Date(qRow.expires_at) <= new Date()) {
+          throw new GoneException('Báo giá đã hết hạn, vui lòng báo giá lại');
+        }
+
+        const qInput = parseJsonField(qRow.input_json);
+        const qResult = parseJsonField(qRow.result_json);
+
+        if (dto.originLocation && dto.originLocation !== qInput.origin.address) {
+          throw new ConflictException('Địa điểm đón không khớp với báo giá');
+        }
+        if (dto.destinationLocation && dto.destinationLocation !== qInput.destination.address) {
+          throw new ConflictException('Địa điểm giao không khớp với báo giá');
+        }
+
+        const quoteHorseIds = (qInput.horses || []).map((h: any) => Number(h.horseId)).sort();
+        const clientHorseInputs = this.horseInputs(dto);
+        if (clientHorseInputs.length) {
+          const clientHorseIds = clientHorseInputs.map((h: any) => Number(h.horseId)).sort();
+          if (JSON.stringify(quoteHorseIds) !== JSON.stringify(clientHorseIds)) {
+            throw new ConflictException('Danh sách ngựa không khớp với báo giá');
+          }
+        }
+
+        const quoteHorses = qInput.horses || [];
+        const insuredList: HorseInfoDto[] = quoteHorses.map((qh: any) => ({
+          horseId: qh.horseId,
+          name: qh.name,
+          quantity: qh.quantity || 1,
+          declaredValue: qh.declaredValue,
+          declaredCurrency: qh.declaredCurrency,
+          insurancePackage: qh.insurancePackage,
+        }));
+
+        const horses = await this.insuredHorses(db, customerId, insuredList);
+        const count = horses.reduce((sum, h) => sum + h.quantity, 0);
+
+        const optionCode = dto.optionCode || qResult.recommendedOptionCode || 'default';
+        const selectedOption =
+          (qResult.options || []).find((o: any) => o.optionCode === optionCode) ||
+          qResult.options?.[0];
+
+        const transportCost = Number(selectedOption?.freight?.total ?? qRow.freight_total);
+        const insuranceFee = Number(qResult.insurance?.total ?? qRow.insurance_total);
+        const totalCost = transportCost + insuranceFee;
+
+        const isRoundTrip = qRow.trip_type === 'round_trip' || qInput.tripType === 'round_trip' || dto.tripType === 'round_trip';
+        if (isRoundTrip && !dto.acceptReturnPolicy) {
+          throw new BadRequestException('Bạn phải đồng ý chính sách hủy chặng về và no-show để đặt chuyến khứ hồi');
+        }
+
+        const tripType = isRoundTrip ? 'round_trip' : 'one_way';
+        const returnDepartureAt = isRoundTrip
+          ? (dto.returnDepartureAt ? new Date(dto.returnDepartureAt) : (qInput.returnDepartureAt ? new Date(qInput.returnDepartureAt) : null))
+          : null;
+        const returnFreight = isRoundTrip ? Number(qResult.returnFreight || qResult.return?.freight?.total || 0) : 0;
+        const returnInsuranceFee = isRoundTrip ? Number(qResult.returnInsuranceFee || qResult.insurance?.returnTotal || 0) : 0;
+        const returnStatus = isRoundTrip ? 'scheduled' : 'not_applicable';
+        const returnPolicySnapshot = isRoundTrip ? JSON.stringify(currentReturnPolicy()) : null;
+        const returnPolicyAcceptedAt = isRoundTrip ? new Date() : null;
+
+        const pricingSnapshot = {
+          option: selectedOption,
+          tariffVersions: qResult.tariffVersions,
+          legs: qResult.legs,
+          return: qResult.return ?? null,
+          tripType,
+        };
+
+        const distanceKm = qResult.legs?.[0]?.distanceKm != null ? Number(qResult.legs[0].distanceKm) : null;
+        const distanceSource = qResult.legs?.[0]?.source ?? null;
+        const originLat = qInput.origin?.lat ?? dto.originLat ?? null;
+        const originLng = qInput.origin?.lng ?? dto.originLng ?? null;
+        const destinationLat = qInput.destination?.lat ?? dto.destinationLat ?? null;
+        const destinationLng = qInput.destination?.lng ?? dto.destinationLng ?? null;
+        const originLocation = qInput.origin?.address || dto.originLocation;
+        const destinationLocation = qInput.destination?.address || dto.destinationLocation;
+        const transportMode = qRow.transport_mode;
+        const seaMode = qRow.sea_mode ?? null;
+
+        const [result] = await db.execute(
+          `INSERT INTO shipment (
+            customer_id, requested_by, contact_name, contact_address, contact_phone,
+            contact_email, requested_horse_count, origin_location, destination_location,
+            requested_date, transportation_type, special_requirements, status,
+            total_cost, transport_cost, insurance_fee, booking_type,
+            quote_id, pricing_snapshot, distance_km, distance_source,
+            origin_lat, origin_lng, destination_lat, destination_lng,
+            transport_mode, sea_mode,
+            trip_type, return_departure_at, return_wait_minutes, return_status, return_no_show,
+            return_freight, return_insurance_fee, return_policy_snapshot, return_policy_accepted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 120, ?, FALSE, ?, ?, ?, ?)`,
+          [
+            customerId,
+            customerId,
+            dto.contactName ?? null,
+            dto.contactAddress ?? null,
+            dto.contactPhone,
+            dto.contactEmail,
+            count,
+            originLocation,
+            destinationLocation,
+            dto.requestedDate ? new Date(dto.requestedDate) : new Date(qInput.departureDate || Date.now()),
+            dto.transportationType ?? null,
+            dto.specialRequirements ?? null,
+            totalCost,
+            transportCost,
+            insuranceFee,
+            assertNewBookingType(dto.bookingType),
+            dto.quoteId,
+            JSON.stringify(pricingSnapshot),
+            distanceKm,
+            distanceSource,
+            originLat,
+            originLng,
+            destinationLat,
+            destinationLng,
+            transportMode,
+            seaMode,
+            tripType,
+            returnDepartureAt,
+            returnStatus,
+            returnFreight,
+            returnInsuranceFee,
+            returnPolicySnapshot,
+            returnPolicyAcceptedAt,
+          ],
+        );
+
+        const shipmentId = (result as { insertId: number }).insertId;
+
+        await db.execute(
+          `UPDATE shipment_quote SET status = 'used', used_by_shipment_id = ? WHERE quote_id = ?`,
+          [shipmentId, dto.quoteId],
+        );
+
+        await this.insertInsuredHorses(db, shipmentId, horses);
+        if (dto.medicalDocumentUrl) {
+          await db.execute(
+            "INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'document', ?)",
+            [shipmentId, dto.medicalDocumentUrl, customerId],
+          );
+        }
+        return shipmentId;
+      }
+
       const horses = await this.insuredHorses(db, customerId, this.horseInputs(dto));
       const count = horses.reduce((sum, h) => sum + h.quantity, 0);
       if (count !== dto.requestedHorseCount) throw new BadRequestException('Số lượng ngựa khai báo phải khớp danh sách được chọn');
+
+      const isRoundTrip = dto.tripType === 'round_trip';
+      if (isRoundTrip && !dto.acceptReturnPolicy) {
+        throw new BadRequestException('Bạn phải đồng ý chính sách hủy chặng về và no-show để đặt chuyến khứ hồi');
+      }
+
+      const tripType = isRoundTrip ? 'round_trip' : 'one_way';
+      const returnDepartureAt = isRoundTrip && dto.returnDepartureAt ? new Date(dto.returnDepartureAt) : null;
+      const returnStatus = isRoundTrip ? 'scheduled' : 'not_applicable';
+      const returnPolicySnapshot = isRoundTrip ? JSON.stringify(currentReturnPolicy()) : null;
+      const returnPolicyAcceptedAt = isRoundTrip ? new Date() : null;
+
       const [result] = await db.execute(`INSERT INTO shipment (customer_id, requested_by, contact_name, contact_address, contact_phone,
         contact_email, requested_horse_count, origin_location, destination_location, requested_date, transportation_type,
-        special_requirements, status, total_cost, transport_cost, insurance_fee, booking_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0, NULL, ?, ?)`,
+        special_requirements, status, total_cost, transport_cost, insurance_fee, booking_type, transport_mode, sea_mode,
+        origin_lat, origin_lng, destination_lat, destination_lng,
+        trip_type, return_departure_at, return_wait_minutes, return_status, return_no_show,
+        return_freight, return_insurance_fee, return_policy_snapshot, return_policy_accepted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 120, ?, FALSE, 0, 0, ?, ?)`,
         [customerId, customerId, dto.contactName ?? null, dto.contactAddress ?? null, dto.contactPhone, dto.contactEmail,
         count, dto.originLocation, dto.destinationLocation, dto.requestedDate ? new Date(dto.requestedDate) : new Date(),
-        dto.transportationType ?? null, dto.specialRequirements ?? null, totalInsuranceFee(horses), assertNewBookingType(dto.bookingType)]);
+        dto.transportationType ?? null, dto.specialRequirements ?? null, totalInsuranceFee(horses), assertNewBookingType(dto.bookingType),
+        dto.transportMode ?? null, dto.seaMode ?? null, dto.originLat ?? null, dto.originLng ?? null, dto.destinationLat ?? null, dto.destinationLng ?? null,
+        tripType, returnDepartureAt, returnStatus, returnPolicySnapshot, returnPolicyAcceptedAt]);
       const shipmentId = (result as { insertId: number }).insertId;
       await this.insertInsuredHorses(db, shipmentId, horses);
       if (dto.medicalDocumentUrl) await db.execute("INSERT INTO attachment (related_type, related_id, file_url, file_type, uploaded_by) VALUES ('shipment', ?, ?, 'document', ?)", [shipmentId, dto.medicalDocumentUrl, customerId]);
@@ -307,23 +507,42 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     status: ShipmentStatus.APPROVED | ShipmentStatus.REJECTED,
     rejectionReason: string | null = null,
     totalCost: number = 0,
-    transportMode?: "road" | "air",
+    transportMode?: "road" | "air" | "sea",
     quote?: BookingQuote,
   ): Promise<boolean> {
     return this.transaction(async db => {
-    const [orders] = await db.execute<RowDataPacket[]>('SELECT insurance_fee, transport_cost, total_cost, booking_type, requested_horse_count, stall_unit_price FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+    const [orders] = await db.execute<RowDataPacket[]>('SELECT insurance_fee, transport_cost, total_cost, booking_type, requested_horse_count, stall_unit_price, quote_id FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
     if (!orders.length) throw new BadRequestException('Không tìm thấy đơn hàng');
-    const pricing = status === ShipmentStatus.APPROVED
-      ? calculateBookingQuote(orders[0].booking_type, Number(orders[0].requested_horse_count), quote ?? { transportCost: totalCost })
-      : { transportCost: totalCost, stallUnitPrice: orders[0].stall_unit_price };
-    totalCost = pricing.transportCost;
-    const insuranceFee = Number(orders[0].insurance_fee);
-    const combined = totalCost + insuranceFee;
-    if (!Number.isSafeInteger(totalCost) || totalCost < 0 || !Number.isSafeInteger(combined) || combined > 9999999999999) throw new BadRequestException('Tổng cước và bảo hiểm vượt giới hạn VNĐ hợp lệ');
+
+    const isQuoted = Boolean(orders[0].quote_id);
+    let calculatedTotalCost: number;
+    let stallUnitPrice: number | null = null;
+    let combined: number;
+
+    if (isQuoted && status === ShipmentStatus.APPROVED) {
+      // Đơn đã có báo giá (quote_id): KHÔNG được ghi đè giá, giữ nguyên giá đã khóa theo snapshot
+      calculatedTotalCost = Number(orders[0].transport_cost ?? orders[0].total_cost);
+      stallUnitPrice = orders[0].stall_unit_price != null ? Number(orders[0].stall_unit_price) : null;
+      combined = Number(orders[0].total_cost);
+    } else {
+      const pricing = status === ShipmentStatus.APPROVED
+        ? calculateBookingQuote(orders[0].booking_type, Number(orders[0].requested_horse_count), quote ?? { transportCost: totalCost })
+        : { transportCost: totalCost, stallUnitPrice: orders[0].stall_unit_price };
+      calculatedTotalCost = pricing.transportCost;
+      stallUnitPrice = pricing.stallUnitPrice;
+      const insuranceFee = Number(orders[0].insurance_fee);
+      combined = calculatedTotalCost + insuranceFee;
+      if (!Number.isSafeInteger(calculatedTotalCost) || calculatedTotalCost < 0 || !Number.isSafeInteger(combined) || combined > 9999999999999) {
+        throw new BadRequestException('Tổng cước và bảo hiểm vượt giới hạn VNĐ hợp lệ');
+      }
+    }
+
     let modeNote: string | null = null;
     if (status === ShipmentStatus.APPROVED && transportMode) {
       if (transportMode === "air") {
         modeNote = "[Phương thức: Đường Hàng Không]";
+      } else if (transportMode === "sea") {
+        modeNote = "[Phương thức: Đường Thủy]";
       } else {
         modeNote = "[Phương thức: Đường Bộ Liên Vận]";
       }
@@ -331,7 +550,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
     let query = `UPDATE shipment
        SET status = ?, approved_by = ?, rejection_reason = ?, total_cost = ?, transport_cost = ?, stall_unit_price = ?`;
-    const params: any[] = [status, approvedBy, rejectionReason, status === ShipmentStatus.APPROVED ? combined : orders[0].total_cost, status === ShipmentStatus.APPROVED ? totalCost : orders[0].transport_cost, pricing.stallUnitPrice];
+    const params: any[] = [status, approvedBy, rejectionReason, status === ShipmentStatus.APPROVED ? combined : orders[0].total_cost, status === ShipmentStatus.APPROVED ? calculatedTotalCost : orders[0].transport_cost, stallUnitPrice];
 
     if (status === ShipmentStatus.APPROVED && transportMode) {
       query += ', transport_mode = ?';
@@ -344,7 +563,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         WHEN special_requirements LIKE ? THEN special_requirements
         ELSE CONCAT(special_requirements, ' | ', ?)
       END`;
-      const matchKeyword = transportMode === "air" ? "%Hàng không%" : "%Đường bộ%";
+      const matchKeyword = transportMode === "air" ? "%Hàng không%" : transportMode === "sea" ? "%Đường thủy%" : "%Đường bộ%";
       params.push(modeNote, matchKeyword, modeNote);
     }
     query += ` WHERE shipment_id = ? AND status = 'requested'`;
@@ -445,6 +664,137 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return this.findShipmentById(shipmentId);
   }
 
+  async cancelReturnLeg(data: {
+    shipmentId: number;
+    actorId: number;
+    reason: string;
+    refund: ReturnType<typeof calculateReturnCancellationRefund>;
+    cause: 'customer' | 'company';
+  }): Promise<void> {
+    return this.transaction(async (db) => {
+      const [rows] = await db.execute<RowDataPacket[]>(
+        'SELECT status, return_status, customer_id FROM shipment WHERE shipment_id = ? FOR UPDATE',
+        [data.shipmentId],
+      );
+      const ship = rows[0];
+      if (!ship) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
+      if (ship.return_status === 'in_progress') {
+        throw new ConflictException('Chặng về đã xuất phát (in_progress), không thể hủy');
+      }
+      if (ship.return_status !== 'scheduled') {
+        throw new ConflictException(`Không thể hủy chặng về ở trạng thái "${ship.return_status}"`);
+      }
+
+      const category = data.cause === 'company' ? 'return_leg_company_cancel' : 'return_leg_customer_cancel';
+      const now = new Date();
+
+      // If outbound trip already completed (status === 'return_pending'), cancelling the return leg finishes the shipment
+      const nextShipmentStatus = ship.status === 'return_pending' ? 'completed' : ship.status;
+
+      await db.execute(
+        `UPDATE shipment
+         SET return_status = 'cancelled',
+             return_cancelled_at = ?,
+             return_cancel_reason = ?,
+             status = ?
+         WHERE shipment_id = ?`,
+        [now, data.reason, nextShipmentStatus, data.shipmentId],
+      );
+
+      // If finished to 'completed', release horses
+      if (nextShipmentStatus === 'completed') {
+        await db.execute(
+          `UPDATE horse
+           SET status = 'active'
+           WHERE horse_id IN (SELECT horse_id FROM shipment_horse WHERE shipment_id = ?)
+             AND status NOT IN ('retired', 'deceased')`,
+          [data.shipmentId],
+        );
+      }
+
+      // If refund amount > 0, insert refund record
+      if (data.refund.total > 0) {
+        const requiresDualApproval = data.refund.total >= 20_000_000 ? 1 : 0;
+        await db.execute(
+          `INSERT INTO shipment_refund_record (
+            shipment_id, customer_id, cancellation_category, refund_mode,
+            freight_refund_amount, insurance_refund_amount, non_refundable_air_deduction,
+            disbursement_deduction, amount, receivable_excess_amount,
+            status, requires_dual_approval, requested_by, notes
+          ) VALUES (?, ?, ?, 'cash_refund', ?, ?, 0, 0, ?, 0, 'pending_approval', ?, ?, ?)`,
+          [
+            data.shipmentId,
+            ship.customer_id,
+            category,
+            data.refund.freightRefund,
+            data.refund.insuranceRefund,
+            data.refund.total,
+            requiresDualApproval,
+            data.actorId,
+            data.reason,
+          ],
+        );
+      }
+    });
+  }
+
+  async rescheduleReturnLeg(data: {
+    shipmentId: number;
+    actorId: number;
+    oldAt: Date;
+    newAt: Date;
+    fee: number;
+  }): Promise<void> {
+    return this.transaction(async (db) => {
+      const [rows] = await db.execute<RowDataPacket[]>(
+        'SELECT status, return_status, return_reschedule_fee, customer_id FROM shipment WHERE shipment_id = ? FOR UPDATE',
+        [data.shipmentId],
+      );
+      const ship = rows[0];
+      if (!ship) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
+      if (ship.return_status !== 'scheduled') {
+        throw new ConflictException(`Không thể đổi ngày về khi chặng về ở trạng thái "${ship.return_status}"`);
+      }
+
+      await db.execute(
+        `INSERT INTO shipment_return_change (shipment_id, old_at, new_at, fee, requested_by)
+         VALUES (?, ?, ?, ?, ?)`,
+        [data.shipmentId, data.oldAt, data.newAt, data.fee, data.actorId],
+      );
+
+      const nextFee = Number(ship.return_reschedule_fee || 0) + data.fee;
+      await db.execute(
+        `UPDATE shipment
+         SET return_departure_at = ?,
+             return_reschedule_fee = ?
+         WHERE shipment_id = ?`,
+        [data.newAt, nextFee, data.shipmentId],
+      );
+
+      if (data.fee > 0) {
+        const [routes] = await db.execute<RowDataPacket[]>(
+          'SELECT route_id FROM route WHERE shipment_id = ? LIMIT 1',
+          [data.shipmentId],
+        );
+        const routeId = routes[0]?.route_id ?? null;
+        const dueAt = new Date(Date.now() + 24 * 3600 * 1000);
+        await db.execute(
+          `INSERT INTO shipment_invoice (
+            shipment_id, route_id, customer_id, invoice_type, status, amount, snapshot, payment_due_at
+          ) VALUES (?, ?, ?, 'supplemental', 'active', ?, ?, ?)`,
+          [
+            data.shipmentId,
+            routeId,
+            ship.customer_id,
+            data.fee,
+            JSON.stringify({ invoiceKind: 'return_reschedule_fee', fee: data.fee, oldAt: data.oldAt, newAt: data.newAt }),
+            dueAt,
+          ],
+        );
+      }
+    });
+  }
+
   async updateStatus(shipmentId: number, status: ShipmentStatus): Promise<boolean> {
     return this.updateShipmentStatus(shipmentId, status);
   }
@@ -530,6 +880,15 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return {
       id: row.shipment_id,
       transportMode: row.transport_mode ?? null,
+      seaMode: row.sea_mode ?? null,
+      quoteId: row.quote_id != null ? Number(row.quote_id) : null,
+      pricingSnapshot: parseJsonField(row.pricing_snapshot),
+      distanceKm: row.distance_km != null ? Number(row.distance_km) : null,
+      distanceSource: row.distance_source ?? null,
+      originLat: row.origin_lat != null ? Number(row.origin_lat) : null,
+      originLng: row.origin_lng != null ? Number(row.origin_lng) : null,
+      destinationLat: row.destination_lat != null ? Number(row.destination_lat) : null,
+      destinationLng: row.destination_lng != null ? Number(row.destination_lng) : null,
       bookingType: row.booking_type ?? 'dedicated_charter',
       stallUnitPrice: row.stall_unit_price == null ? null : Number(row.stall_unit_price),
       requestCode,
@@ -570,6 +929,18 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       customerEmail: row.customer_email,
       customerName: (row as any).customer_name || row.contact_name || undefined,
       approverName: row.approver_name,
+      tripType: row.trip_type ?? 'one_way',
+      returnDepartureAt: row.return_departure_at ? new Date(row.return_departure_at).toISOString() : null,
+      returnWaitMinutes: row.return_wait_minutes != null ? Number(row.return_wait_minutes) : 120,
+      returnStatus: row.return_status ?? 'not_applicable',
+      returnNoShow: Boolean(row.return_no_show),
+      returnFreight: Number(row.return_freight ?? 0),
+      returnInsuranceFee: Number(row.return_insurance_fee ?? 0),
+      returnPolicySnapshot: parseJsonField(row.return_policy_snapshot),
+      returnPolicyAcceptedAt: row.return_policy_accepted_at ? new Date(row.return_policy_accepted_at).toISOString() : null,
+      returnCancelledAt: row.return_cancelled_at ? new Date(row.return_cancelled_at).toISOString() : null,
+      returnCancelReason: row.return_cancel_reason ?? null,
+      returnRescheduleFee: Number(row.return_reschedule_fee ?? 0),
       attachments: attachments.map((att) => ({
         id: att.attachment_id,
         fileUrl: att.file_url,

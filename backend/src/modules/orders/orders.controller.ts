@@ -37,6 +37,10 @@ export class OrdersController {
   @ApiOperation({ summary: 'Chính sách bảo hiểm và tỷ giá khai báo do server cấu hình' })
   getInsurancePolicy() { return insurancePolicy(); }
 
+  @Get('return-policy')
+  @ApiOperation({ summary: 'Chính sách hủy chặng về, đổi ngày và no-show do server cấu hình' })
+  getReturnPolicy() { return this.ordersService.getReturnPolicy(); }
+
   @Get('cutoff-policy')
   @ApiOperation({ summary: 'Tính mốc đặt đơn tối thiểu (Order Cutoff) theo điểm đến, loại booking và quy định kiểm dịch Tầng A' })
   getCutoffPolicy(
@@ -154,5 +158,50 @@ export class OrdersController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.ordersService.cancelOrder(user, id);
+  }
+
+  // --- Step 5: Vận chuyển khứ hồi endpoints ---
+
+  @Get(':id/return/cancellation-preview')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Xem trước số tiền hoàn khi hủy chặng về (tính theo snapshot chính sách của đơn)' })
+  getReturnCancellationPreview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.getReturnCancellationPreview(user, id);
+  }
+
+  @Post(':id/return/cancel')
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({ summary: 'Khách hàng hủy chặng về của đơn khứ hồi' })
+  cancelReturnLeg(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { reason?: string },
+  ) {
+    return this.ordersService.cancelReturnLegByCustomer(user, id, body?.reason);
+  }
+
+  @Post(':id/return/company-cancel')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Công ty hủy chặng về (hoàn 100% cước và bảo hiểm chặng về)' })
+  companyCancelReturnLeg(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { reason: string },
+  ) {
+    return this.ordersService.cancelReturnLegByCompany(user, id, body?.reason);
+  }
+
+  @Post(':id/return/reschedule')
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({ summary: 'Khách hàng đổi ngày hẹn đón chặng về' })
+  rescheduleReturnLeg(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { newReturnDepartureAt: string },
+  ) {
+    return this.ordersService.rescheduleReturnLeg(user, id, body?.newReturnDepartureAt);
   }
 }

@@ -243,9 +243,9 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
       if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
 
       const curStatus = String(order.status);
-      if (curStatus === 'in_transit') {
+      if (curStatus === 'in_transit' || curStatus === 'return_pending') {
         throw new ConflictException(
-          'Đơn hàng đang vận chuyển (in_transit), cấm hủy vận hành. Vui lòng xử lý qua quy trình sự cố Flow 5.',
+          'Đơn hàng đang vận chuyển (in_transit / return_pending), cấm hủy vận hành. Vui lòng xử lý qua quy trình sự cố Flow 5.',
         );
       }
       if (!ALLOWED_OPERATIONAL_CANCEL_FROM.includes(curStatus as any)) {
@@ -812,7 +812,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
         [shipmentId],
       );
       if (!orders[0]) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
-      if (['in_transit', 'completed', 'cancelled', 'cancelled_operational', 'rejected'].includes(orders[0].status)) {
+      if (['in_transit', 'return_pending', 'completed', 'cancelled', 'cancelled_operational', 'rejected'].includes(orders[0].status)) {
         throw new ConflictException(`Không thể dời chuyến ở trạng thái "${orders[0].status}".`);
       }
 

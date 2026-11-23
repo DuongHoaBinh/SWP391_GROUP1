@@ -77,6 +77,60 @@ export class HorseInfoDto {
 }
 
 export class CreateOrderDto {
+  @ApiPropertyOptional({ example: 501, description: 'ID báo giá hợp lệ từ POST /quotes' })
+  @IsOptional()
+  @IsInt()
+  quoteId?: number;
+
+  @ApiPropertyOptional({ enum: ['one_way', 'round_trip'], default: 'one_way', description: 'Loại chuyến đi' })
+  @IsOptional()
+  @IsIn(['one_way', 'round_trip'])
+  tripType?: 'one_way' | 'round_trip';
+
+  @ApiPropertyOptional({ example: '2026-12-15T08:00:00.000Z', description: 'Thời điểm hẹn đón chặng về (bắt buộc khi khứ hồi)' })
+  @IsOptional()
+  @IsString()
+  returnDepartureAt?: string;
+
+  @ApiPropertyOptional({ description: 'Đồng ý chính sách no-show và hủy chặng về (bắt buộc khi khứ hồi)' })
+  @IsOptional()
+  acceptReturnPolicy?: boolean;
+
+  @ApiPropertyOptional({ example: 'default', description: 'Mã phương án xe trong báo giá' })
+  @IsOptional()
+  @IsString()
+  optionCode?: string;
+
+  @ApiPropertyOptional({ enum: ['road', 'air', 'sea'], description: 'Phương thức vận tải' })
+  @IsOptional()
+  @IsIn(['road', 'air', 'sea'])
+  transportMode?: 'road' | 'air' | 'sea';
+
+  @ApiPropertyOptional({ enum: ['ferry', 'vessel'], description: 'Hình thức đường thủy' })
+  @IsOptional()
+  @IsIn(['ferry', 'vessel'])
+  seaMode?: 'ferry' | 'vessel';
+
+  @ApiPropertyOptional({ example: 10.734, description: 'Vĩ độ điểm đón' })
+  @IsOptional()
+  @IsNumber()
+  originLat?: number;
+
+  @ApiPropertyOptional({ example: 106.7216, description: 'Kinh độ điểm đón' })
+  @IsOptional()
+  @IsNumber()
+  originLng?: number;
+
+  @ApiPropertyOptional({ example: 11.9404, description: 'Vĩ độ điểm giao' })
+  @IsOptional()
+  @IsNumber()
+  destinationLat?: number;
+
+  @ApiPropertyOptional({ example: 108.4583, description: 'Kinh độ điểm giao' })
+  @IsOptional()
+  @IsNumber()
+  destinationLng?: number;
+
   @ApiPropertyOptional({ enum: ['dedicated_charter'], default: 'dedicated_charter', description: 'Luôn bao chuyến. shared_stall đã ngừng sau review 11/2026 và trả 400' })
   @IsOptional()
   @IsIn(['shared_stall', 'dedicated_charter'])

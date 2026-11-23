@@ -9,6 +9,7 @@ export enum ShipmentStatus {
   CONFIRMED = 'confirmed',
   READY_TO_DEPART = 'ready_to_depart',
   IN_TRANSIT = 'in_transit',
+  RETURN_PENDING = 'return_pending',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
   CANCELLED_OPERATIONAL = 'cancelled_operational',
@@ -43,7 +44,16 @@ export interface OrderHorse {
 }
 
 export interface TransportOrder {
-  transportMode?: 'road' | 'air' | null;
+  transportMode?: 'road' | 'air' | 'sea' | null;
+  seaMode?: 'ferry' | 'vessel' | null;
+  quoteId?: number | null;
+  pricingSnapshot?: any | null;
+  distanceKm?: number | null;
+  distanceSource?: 'ors' | 'estimated' | 'table' | null;
+  originLat?: number | null;
+  originLng?: number | null;
+  destinationLat?: number | null;
+  destinationLng?: number | null;
   bookingType: BookingType;
   stallUnitPrice: number | null;
   id: number;
@@ -87,4 +97,16 @@ export interface TransportOrder {
   customerEmail?: string;
   customerName?: string;
   approverName?: string;
+  tripType?: 'one_way' | 'round_trip' | null;
+  returnDepartureAt?: string | null;
+  returnWaitMinutes?: number | null;
+  returnStatus?: 'not_applicable' | 'scheduled' | 'in_progress' | 'cancelled' | 'no_show' | 'completed' | null;
+  returnNoShow?: boolean | null;
+  returnFreight?: number | null;
+  returnInsuranceFee?: number | null;
+  returnPolicySnapshot?: any | null;
+  returnPolicyAcceptedAt?: string | null;
+  returnCancelledAt?: string | null;
+  returnCancelReason?: string | null;
+  returnRescheduleFee?: number | null;
 }

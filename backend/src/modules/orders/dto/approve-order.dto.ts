@@ -41,11 +41,20 @@ export class ApproveOrderDto {
   note?: string;
 
   @ApiPropertyOptional({
-    example: 'air',
-    enum: ['road', 'air'],
-    description: 'Phương thức vận tải: road (đường bộ) hoặc air (hàng không)',
+    example: 'road',
+    enum: ['road', 'air', 'sea'],
+    description: 'Phương thức vận tải: road (đường bộ), air (hàng không) hoặc sea (đường thủy)',
   })
   @IsOptional()
-  @IsIn(['road', 'air'])
-  transportMode?: 'road' | 'air';
+  @IsIn(['road', 'air', 'sea'])
+  transportMode?: 'road' | 'air' | 'sea';
+
+  @ApiPropertyOptional({
+    example: 'ferry',
+    enum: ['ferry', 'vessel'],
+    description: 'Hình thức đường thủy (ferry hoặc vessel)',
+  })
+  @IsOptional()
+  @IsIn(['ferry', 'vessel'])
+  seaMode?: 'ferry' | 'vessel';
 }

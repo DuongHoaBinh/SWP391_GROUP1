@@ -19,6 +19,11 @@ import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DocumentsService } from '../documents/documents.service';
+import {
+  currentReturnPolicy,
+  calculateReturnCancellationRefund,
+  calculateRescheduleFee,
+} from './return-policy';
 
 @Injectable()
 export class OrdersService {
@@ -356,7 +361,7 @@ export class OrdersService {
     if (![UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.DRIVER_ESCORT].includes(user.role)) {
       throw new ForbiddenException('Bạn không có quyền hoàn tất chuyến');
     }
-    if (![ShipmentStatus.IN_TRANSIT, ShipmentStatus.COMPLETED].includes(order.status)) {
+    if (![ShipmentStatus.IN_TRANSIT, ShipmentStatus.RETURN_PENDING, ShipmentStatus.COMPLETED].includes(order.status)) {
       throw new ConflictException('Chỉ được hoàn tất chuyến đã xuất phát');
     }
     const changed = await this.ordersStore.completeShipment(orderId, Number(user.id), user.role === UserRole.DRIVER_ESCORT);
@@ -400,5 +405,194 @@ export class OrdersService {
 
     const updated = await this.ordersStore.findShipmentById(orderId);
     return updated!;
+  }
+
+  // --- Step 5: Vận chuyển khứ hồi, hủy chặng về và đổi ngày ---
+
+  getReturnPolicy() {
+    return currentReturnPolicy();
+  }
+
+  async getReturnCancellationPreview(user: AuthenticatedUser, shipmentId: number) {
+    const order = await this.getOrderById(user, shipmentId);
+    if (order.tripType !== 'round_trip') {
+      throw new BadRequestException('Đơn vận chuyển không phải là chuyến khứ hồi');
+    }
+    if (!order.returnDepartureAt) {
+      throw new BadRequestException('Đơn khứ hồi chưa có thời điểm khởi hành chặng về');
+    }
+    if (order.returnStatus === 'in_progress') {
+      throw new ConflictException('Chặng về đã xuất phát (in_progress), không thể hủy');
+    }
+    if (order.returnStatus !== 'scheduled') {
+      throw new ConflictException(`Không thể xem phí hủy chặng về ở trạng thái "${order.returnStatus}"`);
+    }
+
+    const policy = order.returnPolicySnapshot || currentReturnPolicy();
+    return calculateReturnCancellationRefund({
+      returnFreight: order.returnFreight || 0,
+      returnInsuranceFee: order.returnInsuranceFee || 0,
+      returnDepartureAt: new Date(order.returnDepartureAt),
+      cancelledAt: new Date(),
+      cause: 'customer',
+      policy,
+    });
+  }
+
+  async cancelReturnLegByCustomer(user: AuthenticatedUser, shipmentId: number, reason?: string) {
+    const order = await this.getOrderById(user, shipmentId);
+    if (order.customerId !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ được hủy chặng về của đơn hàng thuộc tài khoản mình');
+    }
+    if (order.tripType !== 'round_trip') {
+      throw new BadRequestException('Đơn vận chuyển không phải là chuyến khứ hồi');
+    }
+    if (order.returnStatus === 'in_progress') {
+      throw new ConflictException('Chặng về đã xuất phát (in_progress), không thể hủy');
+    }
+    if (order.returnStatus !== 'scheduled') {
+      throw new ConflictException(`Không thể hủy chặng về ở trạng thái "${order.returnStatus}"`);
+    }
+
+    const policy = order.returnPolicySnapshot || currentReturnPolicy();
+    const refund = calculateReturnCancellationRefund({
+      returnFreight: order.returnFreight || 0,
+      returnInsuranceFee: order.returnInsuranceFee || 0,
+      returnDepartureAt: new Date(order.returnDepartureAt!),
+      cancelledAt: new Date(),
+      cause: 'customer',
+      policy,
+    });
+
+    const finalReason = reason?.trim() || 'Khách hàng hủy chặng về';
+    await this.ordersStore.cancelReturnLeg({
+      shipmentId,
+      actorId: Number(user.id),
+      reason: finalReason,
+      refund,
+      cause: 'customer',
+    });
+
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+    await this.notificationsService.notifyRole(
+      'Logistics Manager',
+      `Khách hàng hủy chặng về - Đơn ${code}`,
+      `Khách hàng vừa hủy chặng về của đơn ${code}. Tiền hoàn dự kiến: ${refund.total.toLocaleString('vi-VN')} VND (Cước: ${refund.freightRefund.toLocaleString('vi-VN')}, Bảo hiểm: ${refund.insuranceRefund.toLocaleString('vi-VN')}). Lý do: ${finalReason}`,
+      'status_update',
+      shipmentId,
+    );
+
+    return {
+      success: true,
+      returnStatus: 'cancelled',
+      refund,
+    };
+  }
+
+  async cancelReturnLegByCompany(user: AuthenticatedUser, shipmentId: number, reason: string) {
+    if (!reason?.trim()) {
+      throw new BadRequestException('Bắt buộc phải nhập lý do hủy chặng về');
+    }
+    const order = await this.getOrderById(user, shipmentId);
+    if (order.tripType !== 'round_trip') {
+      throw new BadRequestException('Đơn vận chuyển không phải là chuyến khứ hồi');
+    }
+    if (order.returnStatus === 'in_progress') {
+      throw new ConflictException('Chặng về đã xuất phát (in_progress), không thể hủy');
+    }
+    if (order.returnStatus !== 'scheduled') {
+      throw new ConflictException(`Không thể hủy chặng về ở trạng thái "${order.returnStatus}"`);
+    }
+
+    const policy = order.returnPolicySnapshot || currentReturnPolicy();
+    const refund = calculateReturnCancellationRefund({
+      returnFreight: order.returnFreight || 0,
+      returnInsuranceFee: order.returnInsuranceFee || 0,
+      returnDepartureAt: new Date(order.returnDepartureAt!),
+      cancelledAt: new Date(),
+      cause: 'company',
+      policy,
+    });
+
+    const finalReason = reason.trim();
+    await this.ordersStore.cancelReturnLeg({
+      shipmentId,
+      actorId: Number(user.id),
+      reason: finalReason,
+      refund,
+      cause: 'company',
+    });
+
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+    await this.notificationsService.createNotification(
+      order.customerId,
+      `Công ty hủy chặng về - Đơn ${code}`,
+      `Công ty rất tiếc phải hủy chặng về của đơn vận chuyển ${code}. Bạn được hoàn 100% chi phí chặng về (${refund.total.toLocaleString('vi-VN')} VND). Lý do: ${finalReason}`,
+      'status_update',
+      shipmentId,
+    );
+
+    return {
+      success: true,
+      returnStatus: 'cancelled',
+      refund,
+    };
+  }
+
+  async rescheduleReturnLeg(user: AuthenticatedUser, shipmentId: number, newReturnDepartureAt: string) {
+    const order = await this.getOrderById(user, shipmentId);
+    if (order.customerId !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ được đổi ngày về của đơn hàng thuộc tài khoản mình');
+    }
+    if (order.tripType !== 'round_trip') {
+      throw new BadRequestException('Đơn vận chuyển không phải là chuyến khứ hồi');
+    }
+    if (order.returnStatus !== 'scheduled') {
+      throw new ConflictException(`Không thể đổi ngày về khi chặng về ở trạng thái "${order.returnStatus}"`);
+    }
+
+    const newDate = new Date(newReturnDepartureAt);
+    if (isNaN(newDate.getTime()) || newDate.getTime() <= Date.now()) {
+      throw new BadRequestException('Thời điểm hẹn đón chặng về mới không hợp lệ hoặc ở quá khứ');
+    }
+
+    if (order.departureDate) {
+      const depDate = new Date(order.departureDate);
+      if (newDate <= depDate) {
+        throw new BadRequestException('Thời điểm hẹn đón chặng về phải sau thời điểm khởi hành chặng đi');
+      }
+    }
+
+    const policy = order.returnPolicySnapshot || currentReturnPolicy();
+    const reschedule = calculateRescheduleFee({
+      returnFreight: order.returnFreight || 0,
+      returnDepartureAt: new Date(order.returnDepartureAt!),
+      requestedAt: new Date(),
+      policy,
+    });
+
+    await this.ordersStore.rescheduleReturnLeg({
+      shipmentId,
+      actorId: Number(user.id),
+      oldAt: new Date(order.returnDepartureAt!),
+      newAt: newDate,
+      fee: reschedule.fee,
+    });
+
+    const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
+    await this.notificationsService.notifyRole(
+      'Logistics Manager',
+      `Khách hàng đổi ngày chặng về - Đơn ${code}`,
+      `Khách hàng đã đổi ngày chặng về đơn ${code} sang ${newDate.toISOString()} (Phí đổi: ${reschedule.fee.toLocaleString('vi-VN')} VND).`,
+      'status_update',
+      shipmentId,
+    );
+
+    return {
+      success: true,
+      newReturnDepartureAt: newDate.toISOString(),
+      fee: reschedule.fee,
+      free: reschedule.free,
+    };
   }
 }
