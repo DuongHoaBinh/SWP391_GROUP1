@@ -143,10 +143,7 @@ export class IncidentsService {
 
       const title = `🚨 Sự cố #${created.id} (${created.requestCode})`;
       const msg = `[${dto.incidentType} / ${created.severity}] ${dto.description.trim()}`;
-      await Promise.allSettled([
-        this.notificationsService.notifyRole('Fleet & Route Coordinator', title, msg, 'incident', shipmentId),
-        this.notificationsService.notifyRole('Logistics Manager', title, msg, 'incident', shipmentId),
-      ]);
+      await this.notificationsService.notifyRole('Logistics Manager', title, msg, 'incident', shipmentId);
 
       return created;
     } catch (err) {
@@ -218,7 +215,7 @@ export class IncidentsService {
     );
 
     await this.notificationsService.notifyRole(
-      'Fleet & Route Coordinator',
+      'Logistics Manager',
       `Manager đã ${dto.decision === 'approved' ? 'PHÊ DUYỆT' : 'TỪ CHỐI'} đề xuất #${record.id} (${record.requestCode})`,
       `Quyết định: ${dto.decision}. ${dto.decisionNotes || ''}`.trim(),
       'status_update',
@@ -235,10 +232,10 @@ export class IncidentsService {
     const { record, affectedBorderGate, affectedCustomers } =
       await this.incidentsStore.publishChangeRequest(changeId, Number(user.id));
 
-    // Flow 5 Invariant 1: Alert Specialist when detour touches a new border/transit gate
+    // Flow 5 Invariant 1: yêu cầu rà soát lại hồ sơ Flow 2 khi lộ trình mới đi qua cửa khẩu mới
     if (record.crossesNewBorder) {
       await this.notificationsService.notifyRole(
-        'Transport Specialist',
+        'Logistics Manager',
         `⚠️ Cảnh báo rà soát cửa khẩu mới (${record.requestCode})`,
         `Phương án thay đổi #${record.id} đã xuất bản làm thay đổi cửa khẩu/quốc gia quá cảnh${affectedBorderGate ? ` (${affectedBorderGate})` : ''}. Vui lòng kiểm tra lại bộ quy chuẩn kiểm dịch Flow 2.`,
         'document_missing',

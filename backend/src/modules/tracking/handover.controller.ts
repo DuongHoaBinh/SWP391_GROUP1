@@ -55,7 +55,7 @@ export class HandoverController {
   }
 
   @Get('handovers')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Danh sách biên bản bàn giao toàn hệ thống (lọc tranh chấp cho Manager)' })
   listAllHandovers(@Query('status') status?: string) {
     return this.handoverService.listAllHandovers(status);
@@ -71,12 +71,7 @@ export class HandoverController {
   }
 
   @Post('shipments/:shipmentId/handovers')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @UseInterceptors(
     FilesInterceptor('files', 5, {
       fileFilter: documentFileFilter,

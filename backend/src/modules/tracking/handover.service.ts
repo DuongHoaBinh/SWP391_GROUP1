@@ -175,22 +175,13 @@ export class HandoverService {
       });
 
       if (dto.action === 'dispute') {
-        await Promise.allSettled([
-          this.notificationsService.notifyRole(
-            'Logistics Manager',
-            `⚠️ Tranh chấp bàn giao #${updated.id} (${updated.requestCode})`,
-            `Khách hàng mở tranh chấp bàn giao ngựa "${updated.horseName}": ${updated.disputeReason}. Trần bảo hiểm tối đa: ${updated.maxCompensation.toLocaleString('vi-VN')} VND.`,
-            'incident',
-            updated.shipmentId,
-          ),
-          this.notificationsService.notifyRole(
-            'Fleet & Route Coordinator',
-            `⚠️ Tranh chấp bàn giao #${updated.id} (${updated.requestCode})`,
-            `Ngựa "${updated.horseName}" bị đánh dấu disputed khi bàn giao.`,
-            'incident',
-            updated.shipmentId,
-          ),
-        ]);
+        await this.notificationsService.notifyRole(
+          'Logistics Manager',
+          `⚠️ Tranh chấp bàn giao #${updated.id} (${updated.requestCode})`,
+          `Khách hàng mở tranh chấp bàn giao ngựa "${updated.horseName}": ${updated.disputeReason}. Trần bảo hiểm tối đa: ${updated.maxCompensation.toLocaleString('vi-VN')} VND.`,
+          'incident',
+          updated.shipmentId,
+        );
       } else {
         await this.notificationsService.notifyRole(
           'Logistics Manager',

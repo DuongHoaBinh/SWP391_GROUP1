@@ -66,42 +66,24 @@ export class SlaMonitorService implements OnModuleInit, OnModuleDestroy {
 
       for (const br of sweep.primaryBreaches) {
         const code = `REQ-${String(br.shipmentId).padStart(3, '0')}`;
-        await Promise.allSettled([
-          this.notificationsService.notifyRole(
-            'Fleet & Route Coordinator',
-            `Escalation Backup Pool: Đơn ${code}`,
-            `Nhân sự phân công chính cho đơn ${code} đã quá SLA xác nhận. Vui lòng gán nhân sự từ Backup Pool (kế hoạch vẫn giữ nguyên approved).`,
-            'incident',
-            br.shipmentId,
-          ),
-          this.notificationsService.notifyRole(
-            'Logistics Manager',
-            `Cảnh báo quá SLA nhân sự: Đơn ${code}`,
-            `Nhân sự chính cho đơn ${code} chưa xác nhận đúng SLA và đã chuyển sang trạng thái chờ Backup Pool.`,
-            'incident',
-            br.shipmentId,
-          ),
-        ]);
+        await this.notificationsService.notifyRole(
+          'Logistics Manager',
+          `Cảnh báo quá SLA nhân sự: Đơn ${code}`,
+          `Nhân sự chính cho đơn ${code} chưa xác nhận đúng SLA và đã chuyển sang trạng thái chờ Backup Pool. Vui lòng gán nhân sự từ Backup Pool (kế hoạch vẫn giữ nguyên approved).`,
+          'incident',
+          br.shipmentId,
+        );
       }
 
       for (const sid of sweep.hardCapShipmentIds) {
         const code = `REQ-${String(sid).padStart(3, '0')}`;
-        await Promise.allSettled([
-          this.notificationsService.notifyRole(
-            'Logistics Manager',
-            `URGENT BR-F3-06: Quá trần hóa đơn T-52h - Đơn ${code}`,
-            `Đơn ${code} đã vượt trần T-52h nhưng chưa hoàn tất xác nhận nhân sự/phát hành hóa đơn. Vui lòng chọn phương án fallback (điều chuyển / đối tác ngoài / dời chuyến).`,
-            'incident',
-            sid,
-          ),
-          this.notificationsService.notifyRole(
-            'Fleet & Route Coordinator',
-            `URGENT BR-F3-06: Quá trần hóa đơn T-52h - Đơn ${code}`,
-            `Đơn ${code} đã chạm trần cứng T-52h, cần phối hợp Manager xử lý khẩn cấp.`,
-            'incident',
-            sid,
-          ),
-        ]);
+        await this.notificationsService.notifyRole(
+          'Logistics Manager',
+          `URGENT BR-F3-06: Quá trần hóa đơn T-52h - Đơn ${code}`,
+          `Đơn ${code} đã vượt trần T-52h nhưng chưa hoàn tất xác nhận nhân sự/phát hành hóa đơn. Vui lòng chọn phương án fallback (điều chuyển / đối tác ngoài / dời chuyến).`,
+          'incident',
+          sid,
+        );
       }
 
       for (const rem of sweep.paymentReminders) {

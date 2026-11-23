@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { getJwtSecret } from '../config/jwt.config';
 import { MYSQL_POOL } from '../database/database.module';
+import { normalizeUserRole } from '../../modules/auth/auth.types';
 
 interface HttpRequest {
   headers: {
@@ -55,7 +56,8 @@ export class JwtAuthGuard implements CanActivate {
     request['user'] = {
       id: String(payload.sub),
       email: payload.email,
-      role: payload.role,
+      // Token phát hành trước khi gộp actor có thể còn role Specialist/Coordinator.
+      role: normalizeUserRole(payload.role),
     };
 
     return true;

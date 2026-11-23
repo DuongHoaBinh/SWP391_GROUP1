@@ -415,9 +415,10 @@ CREATE TABLE delivery_handover (
 
 INSERT INTO `role` (role_name, description) VALUES
 ('Admin', 'System administrator'),
-('Logistics Manager', 'Approves orders and manages transport plans'),
-('Transport Specialist', 'Manages legal, quarantine, and customs documents'),
-('Fleet & Route Coordinator', 'Manages fleet and routes'),
+('Logistics Manager', 'Operations Manager: approves orders, reviews compliance documents, plans routes and dispatches the fleet'),
+-- Hai role dưới đây đã gộp vào Logistics Manager (review 11/2026); giữ lại để không lệch role_id của dữ liệu cũ.
+('Transport Specialist', 'Deprecated (review 11/2026): merged into Logistics Manager'),
+('Fleet & Route Coordinator', 'Deprecated (review 11/2026): merged into Logistics Manager'),
 ('Vehicle Driver / Escort', 'Executes assigned trips and records horse health'),
 ('Customer', 'Club or horse owner; self-registers with email and OTP');
 

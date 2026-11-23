@@ -73,7 +73,7 @@ export class OrdersController {
   }
 
   @Get()
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.DRIVER_ESCORT)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.DRIVER_ESCORT)
   @ApiOperation({ summary: 'Logistics Manager, Coordinator and Driver view transport requests (Drivers only see assigned trips)' })
   @ApiQuery({ name: 'status', enum: ShipmentStatus, required: false })
   getAllOrders(

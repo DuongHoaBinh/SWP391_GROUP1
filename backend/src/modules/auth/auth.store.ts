@@ -369,8 +369,9 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
       [UserRole.CUSTOMER]: 'Customer',
       [UserRole.ADMIN]: 'Admin',
       [UserRole.LOGISTICS_MANAGER]: 'Logistics Manager',
-      [UserRole.TRANSPORT_SPECIALIST]: 'Transport Specialist',
-      [UserRole.FLEET_ROUTE_COORDINATOR]: 'Fleet & Route Coordinator',
+      // Vai trò cũ đã gộp: tạo mới luôn ghi thành Logistics Manager.
+      [UserRole.TRANSPORT_SPECIALIST]: 'Logistics Manager',
+      [UserRole.FLEET_ROUTE_COORDINATOR]: 'Logistics Manager',
       [UserRole.DRIVER_ESCORT]: 'Vehicle Driver / Escort',
     };
     return names[role];
@@ -380,8 +381,9 @@ export class AuthStore implements OnModuleInit, OnModuleDestroy {
     const roles: Record<string, UserRole> = {
       Admin: UserRole.ADMIN,
       'Logistics Manager': UserRole.LOGISTICS_MANAGER,
-      'Transport Specialist': UserRole.TRANSPORT_SPECIALIST,
-      'Fleet & Route Coordinator': UserRole.FLEET_ROUTE_COORDINATOR,
+      // Tài khoản chưa chạy migration 028 vẫn đăng nhập như Logistics Manager.
+      'Transport Specialist': UserRole.LOGISTICS_MANAGER,
+      'Fleet & Route Coordinator': UserRole.LOGISTICS_MANAGER,
       'Vehicle Driver / Escort': UserRole.DRIVER_ESCORT,
       Customer: UserRole.CUSTOMER,
     };

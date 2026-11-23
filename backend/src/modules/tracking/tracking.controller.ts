@@ -56,12 +56,7 @@ export class TrackingController {
   }
 
   @Post('shipments/:shipmentId/legs/:legId/start')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   async checkInLegStart(
     @CurrentUser() user: AuthenticatedUser,
     @Param('shipmentId', ParseIntPipe) shipmentId: number,
@@ -72,12 +67,7 @@ export class TrackingController {
   }
 
   @Post('shipments/:shipmentId/stops/:stopId/status')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   async checkInStop(
     @CurrentUser() user: AuthenticatedUser,
     @Param('shipmentId', ParseIntPipe) shipmentId: number,
@@ -88,12 +78,7 @@ export class TrackingController {
   }
 
   @Post('shipments/:shipmentId/legs/:legId/complete')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   async checkInLegArrival(
     @CurrentUser() user: AuthenticatedUser,
     @Param('shipmentId', ParseIntPipe) shipmentId: number,
@@ -104,7 +89,7 @@ export class TrackingController {
   }
 
   @Post('shipments/:shipmentId/coordinator-override')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   async coordinatorOverride(
     @CurrentUser() user: AuthenticatedUser,
     @Param('shipmentId', ParseIntPipe) shipmentId: number,
@@ -120,7 +105,7 @@ export class TrackingController {
   }
 
   @Patch('vital-config')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.TRANSPORT_SPECIALIST)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Hiệu chỉnh ngưỡng sinh hiệu thú y 3 tầng theo DEC-06' })
   updateVitalConfig(
     @CurrentUser() user: AuthenticatedUser,
@@ -145,12 +130,7 @@ export class TrackingController {
   }
 
   @Post('shipments/:shipmentId/health-logs/upload')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @UseInterceptors(
     FilesInterceptor('files', 5, {
       fileFilter: imageFileFilter,
@@ -179,12 +159,7 @@ export class TrackingController {
   }
 
   @Post('shipments/:shipmentId/health-logs')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   async createHealthLog(
     @CurrentUser() user: AuthenticatedUser,
     @Param('shipmentId', ParseIntPipe) shipmentId: number,
@@ -203,12 +178,7 @@ export class TrackingController {
   }
 
   @Post('shipments/:shipmentId/complete')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   async completeShipment(
     @CurrentUser() user: AuthenticatedUser,
     @Param('shipmentId', ParseIntPipe) shipmentId: number,

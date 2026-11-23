@@ -36,14 +36,14 @@ export class ReportsController {
   }
 
   @Get('shipments/:shipmentId/operating-costs')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'List actual operating costs recorded for a shipment' })
   async getOperatingCosts(@Param('shipmentId', ParseIntPipe) shipmentId: number): Promise<OperatingCostItem[]> {
     return this.reportsService.getOperatingCosts(shipmentId);
   }
 
   @Post('shipments/:shipmentId/operating-costs')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Record an operating cost entry for a shipment' })
   async addOperatingCost(
     @CurrentUser() user: AuthenticatedUser,

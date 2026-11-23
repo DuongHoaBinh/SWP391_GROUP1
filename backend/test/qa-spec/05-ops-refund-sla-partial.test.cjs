@@ -932,11 +932,7 @@ describe('QA Spec v3.1 Tier 2/5/6: Revisions, Refunds & SoD, Charter Upgrade, SL
       "SELECT title FROM notification WHERE shipment_id = ? AND user_id = ? AND title LIKE '%RED ALERT%'",
       [ordId, seed.users['manager.a@test.local'].id],
     );
-    const [coordRed] = await db.execute(
-      "SELECT title FROM notification WHERE shipment_id = ? AND user_id = ? AND title LIKE '%RED ALERT%'",
-      [ordId, seed.users['coordinator.qa@test.local'].id],
-    );
+    // Sau review 11/2026, Coordinator đã gộp vào Logistics Manager nên Red Alert chỉ gửi cho Manager.
     assert.ok(mgrRed.length >= 1, 'Expected Logistics Manager Red Alert notification');
-    assert.ok(coordRed.length >= 1, 'Expected Fleet & Route Coordinator Red Alert notification');
   });
 });

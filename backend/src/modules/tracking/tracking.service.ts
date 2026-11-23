@@ -951,7 +951,7 @@ export class TrackingService {
         );
       } else {
         await this.notificationsService.notifyRole(
-          'FLEET_ROUTE_COORDINATOR',
+          'LOGISTICS_MANAGER',
           coordTitle,
           coordMessage,
           'status_update',
@@ -1239,7 +1239,7 @@ export class TrackingService {
         );
       } else {
         await this.notificationsService.notifyRole(
-          'FLEET_ROUTE_COORDINATOR',
+          'LOGISTICS_MANAGER',
           coordEndTitle,
           coordEndMessage,
           'handover_complete',
@@ -1447,13 +1447,6 @@ export class TrackingService {
           'incident',
           shipmentId,
         ),
-        this.notificationsService.notifyRole(
-          'Fleet & Route Coordinator',
-          `🚨 RED ALERT THÚ Y: ${dto.horseName} (${reqCode})`,
-          redMsg,
-          'incident',
-          shipmentId,
-        ),
       ]);
 
       for (const staff of assigned) {
@@ -1468,26 +1461,17 @@ export class TrackingService {
     } else if (evaluation.alertTier === 'amber_escalatable') {
       const reqCode = shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`;
       const amberMsg = `${evaluation.alertReason || 'Theo dõi Vàng (leo thang)'} - Ngựa ${dto.horseName} (Đơn ${reqCode}).`.trim();
-      await Promise.allSettled([
-        this.notificationsService.notifyRole(
-          'Fleet & Route Coordinator',
-          `⚠️ Cảnh báo VÀNG (Leo thang): ${dto.horseName} (${reqCode})`,
-          amberMsg,
-          'incident',
-          shipmentId,
-        ),
-        this.notificationsService.notifyRole(
-          'Transport Specialist',
-          `⚠️ Cảnh báo VÀNG (Leo thang): ${dto.horseName} (${reqCode})`,
-          amberMsg,
-          'incident',
-          shipmentId,
-        ),
-      ]);
+      await this.notificationsService.notifyRole(
+        'Logistics Manager',
+        `⚠️ Cảnh báo VÀNG (Leo thang): ${dto.horseName} (${reqCode})`,
+        amberMsg,
+        'incident',
+        shipmentId,
+      );
     } else if (evaluation.alertTier === 'amber_observational') {
       const reqCode = shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`;
       await this.notificationsService.notifyRole(
-        'Fleet & Route Coordinator',
+        'Logistics Manager',
         `Theo dõi môi trường Vàng: ${dto.horseName} (${reqCode})`,
         evaluation.alertReason || `Ghi nhận quan sát môi trường cho ngựa ${dto.horseName}.`,
         'status_update',
@@ -1648,7 +1632,7 @@ export class TrackingService {
     if (coordinatorId) {
       await this.notificationsService.createNotification(coordinatorId, title, message, notifType, shipmentId);
     } else {
-      await this.notificationsService.notifyRole('FLEET_ROUTE_COORDINATOR', title, message, notifType, shipmentId);
+      await this.notificationsService.notifyRole('LOGISTICS_MANAGER', title, message, notifType, shipmentId);
     }
   }
 

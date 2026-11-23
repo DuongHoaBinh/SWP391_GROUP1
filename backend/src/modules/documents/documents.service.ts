@@ -115,11 +115,7 @@ export class DocumentsService {
     const message =
       reason ||
       `Đơn ${code} đang in_transit nhưng phát sinh hồ sơ hết hạn hoặc không đạt chuẩn (BR-F2-06). Thao tác thông quan customs_cleared đã bị khóa cho đến khi gia hạn hoặc mở sự cố biên giới (Flow 5).`;
-    await Promise.allSettled([
-      this.notificationsService.notifyRole('Transport Specialist', title, message, 'incident', orderId),
-      this.notificationsService.notifyRole('Fleet & Route Coordinator', title, message, 'incident', orderId),
-      this.notificationsService.notifyRole('Logistics Manager', title, message, 'incident', orderId),
-    ]);
+    await this.notificationsService.notifyRole('Logistics Manager', title, message, 'incident', orderId);
   }
 
   // --- Regulations ---
@@ -1120,7 +1116,7 @@ export class DocumentsService {
     documentId: number,
   ): Promise<{ success: boolean; message: string }> {
     const isAdminOrSpecialist =
-      user.role === UserRole.ADMIN || user.role === UserRole.TRANSPORT_SPECIALIST;
+      user.role === UserRole.ADMIN || user.role === UserRole.LOGISTICS_MANAGER;
     const doc = await this.documentsStore.findDocumentById(documentId);
     if (!doc || doc.isArchived) {
       throw new NotFoundException(`Tài liệu #${documentId} không tồn tại hoặc đã bị lưu trữ`);

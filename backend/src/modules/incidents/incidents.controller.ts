@@ -76,7 +76,7 @@ export class IncidentsController {
   }
 
   @Get('change-requests')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Danh sách đề xuất đổi lộ trình/lịch trình/chi phí (Flow 5)' })
   listChangeRequests(
     @Query('incidentId') incidentId?: string,
@@ -104,7 +104,7 @@ export class IncidentsController {
 
   @Post('change-requests/:changeId/publish')
   @HttpCode(200)
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Coordinator xuất bản phương án thay đổi đã duyệt kèm ripple alert cô lập' })
   publishChangeRequest(
     @CurrentUser() user: AuthenticatedUser,
@@ -114,12 +114,7 @@ export class IncidentsController {
   }
 
   @Post('shipments/:shipmentId')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @UseInterceptors(
     FilesInterceptor('files', 5, {
       fileFilter: documentFileFilter,
@@ -158,7 +153,7 @@ export class IncidentsController {
   }
 
   @Patch(':incidentId/assess')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Coordinator tiếp nhận đánh giá sự cố (open -> in_review)' })
   assessIncident(
     @Param('incidentId', ParseIntPipe) incidentId: number,
@@ -168,7 +163,7 @@ export class IncidentsController {
   }
 
   @Post(':incidentId/change-requests')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Coordinator lập đề xuất thay đổi lộ trình / chi phí phát sinh trình Manager' })
   createChangeRequest(
     @CurrentUser() user: AuthenticatedUser,
@@ -180,7 +175,7 @@ export class IncidentsController {
 
   @Post(':incidentId/resolve')
   @HttpCode(200)
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Đóng sự cố và ghi kết quả xử lý cuối cùng' })
   resolveIncident(
     @CurrentUser() user: AuthenticatedUser,

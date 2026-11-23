@@ -164,7 +164,7 @@ export class OrdersOpsController {
   }
 
   @Post(':id/disbursements')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.TRANSPORT_SPECIALIST)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('receipt', {
       fileFilter: documentFileFilter,

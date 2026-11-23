@@ -140,10 +140,11 @@ export class NotificationsStore implements OnModuleInit, OnModuleDestroy {
     const roleMapping: Record<string, string[]> = {
       'Logistics Manager': ['Logistics Manager', 'LOGISTICS_MANAGER'],
       'LOGISTICS_MANAGER': ['Logistics Manager', 'LOGISTICS_MANAGER'],
-      'Transport Specialist': ['Transport Specialist', 'TRANSPORT_SPECIALIST'],
-      'TRANSPORT_SPECIALIST': ['Transport Specialist', 'TRANSPORT_SPECIALIST'],
-      'Fleet & Route Coordinator': ['Fleet & Route Coordinator', 'FLEET_ROUTE_COORDINATOR'],
-      'FLEET_ROUTE_COORDINATOR': ['Fleet & Route Coordinator', 'FLEET_ROUTE_COORDINATOR'],
+      // Specialist/Coordinator đã gộp vào Logistics Manager: thông báo gửi cho role cũ đến Manager.
+      'Transport Specialist': ['Logistics Manager', 'LOGISTICS_MANAGER'],
+      'TRANSPORT_SPECIALIST': ['Logistics Manager', 'LOGISTICS_MANAGER'],
+      'Fleet & Route Coordinator': ['Logistics Manager', 'LOGISTICS_MANAGER'],
+      'FLEET_ROUTE_COORDINATOR': ['Logistics Manager', 'LOGISTICS_MANAGER'],
       'Vehicle Driver / Escort': ['Vehicle Driver / Escort', 'DRIVER_ESCORT'],
       'DRIVER_ESCORT': ['Vehicle Driver / Escort', 'DRIVER_ESCORT'],
       'Admin': ['Admin', 'ADMIN'],

@@ -65,7 +65,7 @@ export class DocumentsController {
   }
 
   @Post('regulations')
-  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Transport Specialist tạo mới quy định yêu cầu chứng từ cho quốc gia' })
   createRegulation(
     @CurrentUser() user: AuthenticatedUser,
@@ -75,7 +75,7 @@ export class DocumentsController {
   }
 
   @Post('regulations/apply-template')
-  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Áp dụng nhanh bộ mẫu quy chế khu vực cho một quốc gia (1 click tạo đầy đủ chứng từ chuẩn)' })
   applyPresetTemplate(
     @CurrentUser() user: AuthenticatedUser,
@@ -85,7 +85,7 @@ export class DocumentsController {
   }
 
   @Delete('regulations/:id')
-  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xóa một quy định kiểm dịch (nếu chưa có hồ sơ của khách hàng liên kết)' })
   deleteRegulation(
     @CurrentUser() user: AuthenticatedUser,
@@ -95,7 +95,7 @@ export class DocumentsController {
   }
 
   @Patch('regulations/:id')
-  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật nội dung hoặc ngày hiệu lực quy định kiểm dịch' })
   updateRegulation(
     @CurrentUser() user: AuthenticatedUser,
@@ -107,7 +107,7 @@ export class DocumentsController {
 
   // --- Documents Upload & Viewing ---
   @Post('upload')
-  @Roles(UserRole.CUSTOMER, UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('file', {
       fileFilter: documentFileFilter,
@@ -161,7 +161,7 @@ export class DocumentsController {
   }
 
   @Post(':id/re-upload')
-  @Roles(UserRole.CUSTOMER, UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('file', {
       fileFilter: documentFileFilter,
@@ -213,7 +213,7 @@ export class DocumentsController {
 
   // --- Compliance Orders List for Specialist ---
   @Get('compliance-orders')
-  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN, UserRole.LOGISTICS_MANAGER)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Lấy danh sách các đơn hàng đã duyệt cần chuyên viên kiểm dịch rà soát và thiết lập hồ sơ',
   })
@@ -283,7 +283,7 @@ export class DocumentsController {
   }
 
   @Post('order/:orderId/send-requirements')
-  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Chuyên viên kiểm dịch phát lệnh yêu cầu khách hàng nộp hồ sơ kiểm dịch cho đơn hàng',
   })
@@ -297,7 +297,7 @@ export class DocumentsController {
 
   // --- Document Review ---
   @Patch(':id/review')
-  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Transport Specialist thẩm định tài liệu (chấp thuận, từ chối hoặc hết hạn)' })
   reviewDocument(
     @CurrentUser() user: AuthenticatedUser,
@@ -309,7 +309,7 @@ export class DocumentsController {
 
   // --- Authority Approval Tracking ---
   @Post(':id/authority-approval')
-  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Ghi nhận tiến độ và kết quả thẩm định từ Cục thú y / Hải quan' })
   recordAuthorityApproval(
     @CurrentUser() user: AuthenticatedUser,
@@ -321,7 +321,7 @@ export class DocumentsController {
 
   // --- Remind / Notify Missing Documents ---
   @Post('order/:orderId/notify-missing')
-  @Roles(UserRole.TRANSPORT_SPECIALIST, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Gửi thông báo nhắc nhở tự động đến khách hàng về các chứng từ còn thiếu' })
   notifyMissingDocuments(
     @CurrentUser() user: AuthenticatedUser,

@@ -5,7 +5,7 @@
     "migrate:booking": "node ../database/apply-booking-migration.cjs",
     "test:booking": "npm run build && node scripts/test-payment-gate.cjs",
     "build": "nest build",
-    "test": "npm run build && node --test test/controlled-fixes.test.cjs test/road-trips-policy.test.cjs test/merge-resolution.test.cjs test/booking-policy.test.cjs test/insurance-policy.test.cjs test/tracking-road-trip-sync.test.cjs test/wave0-hotfixes.test.cjs test/wave1-g1-g2.test.cjs test/wave2-g3-g4.test.cjs test/wave3-flow5-flow6.test.cjs test/wave4-closure.test.cjs scripts/sepay-webhook.test.cjs",
+    "test": "npm run build && node --test test/controlled-fixes.test.cjs test/merge-actors.test.cjs test/road-trips-policy.test.cjs test/merge-resolution.test.cjs test/booking-policy.test.cjs test/insurance-policy.test.cjs test/tracking-road-trip-sync.test.cjs test/wave0-hotfixes.test.cjs test/wave1-g1-g2.test.cjs test/wave2-g3-g4.test.cjs test/wave3-flow5-flow6.test.cjs test/wave4-closure.test.cjs scripts/sepay-webhook.test.cjs",
     "migrate:all": "node ../database/migrate.cjs",
     "start": "nest start",
     "start:dev": "nest start --watch",

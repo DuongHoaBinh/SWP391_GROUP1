@@ -96,7 +96,7 @@ test('W0-documents: owner auth, authority rejection invalidation, supersession, 
   assert.equal(checklist.approvedDocumentsCount, 0);
 
   // recordAuthorityApproval rejected updates review status & re-evaluates lifecycle & notifies owner #6
-  await service.recordAuthorityApproval({ id: '3', role: UserRole.TRANSPORT_SPECIALIST }, 55, {
+  await service.recordAuthorityApproval({ id: '3', role: UserRole.LOGISTICS_MANAGER }, 55, {
     authorityName: 'Cục Thú y',
     status: 'rejected',
     notes: 'Expired lab',
@@ -127,7 +127,7 @@ test('W0-fleet: assignStaff locks reassignment after confirmed unless someone is
     {},
   );
   await assert.rejects(
-    lockedService.assignStaff({ id: '4', role: UserRole.FLEET_ROUTE_COORDINATOR }, 88, {
+    lockedService.assignStaff({ id: '4', role: UserRole.LOGISTICS_MANAGER }, 88, {
       assignments: [{ userId: 20, roleInShipment: 'driver' }],
     }),
     (e) => e.getStatus?.() === 409,
@@ -145,7 +145,7 @@ test('W0-fleet: assignStaff locks reassignment after confirmed unless someone is
     { findById: async () => ({ id: 88, status: 'confirmed' }) },
     { createNotification: async () => {} },
   );
-  await recoveryService.assignStaff({ id: '4', role: UserRole.FLEET_ROUTE_COORDINATOR }, 88, {
+  await recoveryService.assignStaff({ id: '4', role: UserRole.LOGISTICS_MANAGER }, 88, {
     assignments: [{ userId: 20, roleInShipment: 'driver' }],
   });
   assert.equal(replaced, true);
@@ -184,7 +184,7 @@ test('W0-routes: reviewTripPlan preserves Flow 1 transportCost (409 on change) a
     pendingConditions: ['Missing compliance'],
   });
   await assert.rejects(
-    routesSvc.publishTripPlan({ id: '4', role: UserRole.FLEET_ROUTE_COORDINATOR }, 44, {}),
+    routesSvc.publishTripPlan({ id: '4', role: UserRole.LOGISTICS_MANAGER }, 44, {}),
     (e) => e.getStatus?.() === 422,
   );
 });

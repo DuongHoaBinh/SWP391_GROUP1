@@ -216,11 +216,11 @@ export class OrdersService {
       orderId,
     );
 
-    // 2. Chuyển giao sang Flow 2: Gửi thông báo đến Transport Specialist (dùng mã hệ thống)
+    // 2. Chuyển giao sang Flow 2: nhắc Manager thiết lập hồ sơ kiểm dịch (dùng mã hệ thống)
     const staffCode = `REQ-${String(orderId).padStart(3, '0')}`;
     const customerName = order.customerName || order.contactName || 'Khách hàng';
     await this.notificationsService.notifyRole(
-      'Transport Specialist',
+      'Logistics Manager',
       `Đơn hàng mới ${staffCode} cần thiết lập hồ sơ kiểm dịch`,
       `Đơn vận chuyển ${staffCode} của ${customerName} đi "${order.destinationLocation}" vừa được phê duyệt. Vui lòng rà soát quy chế nước đến và gửi yêu cầu danh mục hồ sơ cho khách hàng.`,
       'status_update',

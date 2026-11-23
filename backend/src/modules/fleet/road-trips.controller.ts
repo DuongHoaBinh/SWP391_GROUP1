@@ -11,7 +11,7 @@ import { CreateRoadTripDto } from './dto/create-road-trip.dto';
 
 @ApiTags('Fleet - Road trips') @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+@Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
 @Controller('fleet/road-trips')
 export class RoadTripsController {
   constructor(private readonly store: RoadTripsStore) {}

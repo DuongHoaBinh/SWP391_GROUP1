@@ -19,16 +19,15 @@ SELECT role_id, 'Logistics Manager', 'manager@example.com', '$2a$12$quGJF8AqfNcY
 FROM `role` WHERE role_name = 'Logistics Manager'
 ON DUPLICATE KEY UPDATE full_name = VALUES(full_name);
 
--- 3. Transport Specialist
+-- 3 + 4. Tài khoản specialist/coordinator cũ: role Specialist và Coordinator đã gộp vào Logistics Manager (review 11/2026).
 INSERT INTO `user` (role_id, full_name, email, password_hash, account_origin, auth_provider, email_verified, status)
-SELECT role_id, 'Transport Specialist', 'specialist@example.com', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'system_created', 'local', TRUE, 'active'
-FROM `role` WHERE role_name = 'Transport Specialist'
+SELECT role_id, 'Logistics Manager (Hồ sơ)', 'specialist@example.com', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'system_created', 'local', TRUE, 'active'
+FROM `role` WHERE role_name = 'Logistics Manager'
 ON DUPLICATE KEY UPDATE full_name = VALUES(full_name);
 
--- 4. Fleet & Route Coordinator
 INSERT INTO `user` (role_id, full_name, email, password_hash, account_origin, auth_provider, email_verified, status)
-SELECT role_id, 'Fleet Coordinator', 'coordinator@example.com', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'system_created', 'local', TRUE, 'active'
-FROM `role` WHERE role_name = 'Fleet & Route Coordinator'
+SELECT role_id, 'Logistics Manager (Điều phối)', 'coordinator@example.com', '$2a$12$quGJF8AqfNcYhzz7SECw6e587nncfQc653h55ns39/hR5ALggJST2', 'system_created', 'local', TRUE, 'active'
+FROM `role` WHERE role_name = 'Logistics Manager'
 ON DUPLICATE KEY UPDATE full_name = VALUES(full_name);
 
 -- 5. Vehicle Driver / Escort

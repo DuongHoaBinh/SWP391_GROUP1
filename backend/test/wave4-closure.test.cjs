@@ -26,7 +26,7 @@ test('BR-F3-03: buildDetailedPlan rejects duplicate sequenceNo and overlapping l
   await assert.rejects(
     () =>
       service.buildDetailedPlan(
-        { id: 4, role: UserRole.FLEET_ROUTE_COORDINATOR },
+        { id: 4, role: UserRole.LOGISTICS_MANAGER },
         100,
         {
           routeName: 'Overlapping Legs',
@@ -58,7 +58,7 @@ test('BR-F3-03: buildDetailedPlan rejects duplicate sequenceNo and overlapping l
   await assert.rejects(
     () =>
       service.buildDetailedPlan(
-        { id: 4, role: UserRole.FLEET_ROUTE_COORDINATOR },
+        { id: 4, role: UserRole.LOGISTICS_MANAGER },
         100,
         {
           routeName: 'Duplicate Seq',
@@ -74,7 +74,7 @@ test('BR-F3-03: buildDetailedPlan rejects duplicate sequenceNo and overlapping l
 
   // Valid sequential legs accepted
   await service.buildDetailedPlan(
-    { id: 4, role: UserRole.FLEET_ROUTE_COORDINATOR },
+    { id: 4, role: UserRole.LOGISTICS_MANAGER },
     100,
     {
       routeName: 'Sequential Legs',
@@ -356,7 +356,7 @@ test('Wave 5 BR-F3-03: International routes require >= 1 border_check or quarant
   await assert.rejects(
     () =>
       routesService.buildDetailedPlan(
-        { id: 4, role: UserRole.FLEET_ROUTE_COORDINATOR },
+        { id: 4, role: UserRole.LOGISTICS_MANAGER },
         200,
         {
           routeName: 'Intl Missing Stop',
@@ -369,7 +369,7 @@ test('Wave 5 BR-F3-03: International routes require >= 1 border_check or quarant
 
   // International with border_check stop -> succeeds
   await routesService.buildDetailedPlan(
-    { id: 4, role: UserRole.FLEET_ROUTE_COORDINATOR },
+    { id: 4, role: UserRole.LOGISTICS_MANAGER },
     200,
     {
       routeName: 'Intl Valid Border Stop',
@@ -389,7 +389,7 @@ test('Wave 5 BR-F3-03: International routes require >= 1 border_check or quarant
     destinationLocation: 'Đà Nẵng, Vietnam',
   };
   await routesService.buildDetailedPlan(
-    { id: 4, role: UserRole.FLEET_ROUTE_COORDINATOR },
+    { id: 4, role: UserRole.LOGISTICS_MANAGER },
     201,
     {
       routeName: 'Domestic Direct',

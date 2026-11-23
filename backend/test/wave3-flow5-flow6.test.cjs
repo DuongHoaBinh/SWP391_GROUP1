@@ -26,7 +26,7 @@ test('Flow 5: emergency_vet_covered rejects non-Premium shipments with 422', asy
   await assert.rejects(
     () =>
       service.createChangeRequest(
-        { id: 4, role: UserRole.FLEET_ROUTE_COORDINATOR },
+        { id: 4, role: UserRole.LOGISTICS_MANAGER },
         10,
         {
           changeType: 'cost',
@@ -138,7 +138,7 @@ test('Flow 5: approving operating_cost change request inserts shipment_operating
   );
 });
 
-test('Flow 5: publishChangeRequest alerts Transport Specialist on crossesNewBorder and isolates sibling customer ripple alerts', async () => {
+test('Flow 5: publishChangeRequest alerts Logistics Manager (merged compliance role) on crossesNewBorder and isolates sibling customer ripple alerts', async () => {
   const roleNotifs = [];
   const userNotifs = [];
 
@@ -184,11 +184,11 @@ test('Flow 5: publishChangeRequest alerts Transport Specialist on crossesNewBord
     },
   });
 
-  await service.publishChangeRequest({ id: 4, role: UserRole.FLEET_ROUTE_COORDINATOR }, 77);
+  await service.publishChangeRequest({ id: 4, role: UserRole.LOGISTICS_MANAGER }, 77);
 
   assert.ok(
-    roleNotifs.some((n) => n.roleName === 'Transport Specialist' && n.type === 'document_missing'),
-    'Must notify Transport Specialist when route crosses new border',
+    roleNotifs.some((n) => n.roleName === 'Logistics Manager' && n.type === 'document_missing'),
+    'Must notify Logistics Manager when route crosses new border',
   );
   assert.equal(userNotifs.length, 2);
   const cust60Notif = userNotifs.find((n) => n.userId === 60);

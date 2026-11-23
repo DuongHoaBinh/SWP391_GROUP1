@@ -80,7 +80,7 @@ export class RoutesController {
 
   // --- Step 1b: Coordinator Builds Detailed Plan ---
   @Post('plan/:shipmentId/build-detail')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.ADMIN, UserRole.LOGISTICS_MANAGER)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Bước 1b: Coordinator dựng kế hoạch chi tiết các chặng (Legs), gán xe cụ thể, chuyến bay và điểm dừng',
   })
@@ -93,7 +93,7 @@ export class RoutesController {
   }
 
   @Post('plan/:shipmentId/submit')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Coordinator gửi duyệt kế hoạch chi tiết cho Manager (chuyển sang pending_approval)',
   })
@@ -159,7 +159,7 @@ export class RoutesController {
 
   // --- Legacy Compatibility ---
   @Post('shipment/:shipmentId')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary:
       'Fleet Coordinator lập/cập nhật lộ trình di chuyển gồm các chặng/điểm dừng',
@@ -173,7 +173,7 @@ export class RoutesController {
   }
 
   @Patch(':routeId/schedule')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary:
       'Điều chỉnh lịch trình các chặng (Bắt buộc phải có lý do điều chỉnh reason để bảo toàn audit trail)',
@@ -187,7 +187,7 @@ export class RoutesController {
   }
 
   @Post('shipment/:shipmentId/publish')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary:
       'Logistics Manager / Coordinator xuất bản chuyến đi và chuyển sang in_transit',
@@ -201,12 +201,7 @@ export class RoutesController {
   }
 
   @Post('stops/:stopId/progress')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary:
       'Tài xế (Driver) / Hộ tống (Escort) cập nhật mốc thực tế tại điểm dừng',
@@ -220,12 +215,7 @@ export class RoutesController {
   }
 
   @Post('shipment/:shipmentId/incident')
-  @Roles(
-    UserRole.DRIVER_ESCORT,
-    UserRole.FLEET_ROUTE_COORDINATOR,
-    UserRole.LOGISTICS_MANAGER,
-    UserRole.ADMIN,
-  )
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Tài xế, Escort hoặc Coordinator báo cáo sự cố (tắc đường, sạt lở, hỏng xe...) để mở quyền hiệu chỉnh chặng',
   })
@@ -238,14 +228,14 @@ export class RoutesController {
   }
 
   @Get('incidents')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.FLEET_ROUTE_COORDINATOR, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Danh sách sự cố hiện trường thực tế từ bảng incident_report' })
   getAllIncidents() {
     return this.routesService.getAllIncidents();
   }
 
   @Post('incident/:incidentId/resolve')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Coordinator hoặc Manager xác nhận đã giải quyết sự cố / Cập nhật xong lộ trình thay thế',
   })

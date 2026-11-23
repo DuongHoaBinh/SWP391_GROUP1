@@ -801,7 +801,6 @@ export class RoutesService implements OnModuleInit {
   ): Promise<{ success: boolean; incidentId: number }> {
     const allowedRoles = new Set<string>([
       UserRole.DRIVER_ESCORT,
-      UserRole.FLEET_ROUTE_COORDINATOR,
       UserRole.LOGISTICS_MANAGER,
       UserRole.ADMIN,
     ]);

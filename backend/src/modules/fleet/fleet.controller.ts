@@ -51,14 +51,14 @@ export class FleetController {
   }
 
   @Post('vehicles')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Fleet Coordinator tạo mới phương tiện vận chuyển' })
   createVehicle(@Body() dto: CreateVehicleDto) {
     return this.fleetService.createVehicle(dto);
   }
 
   @Patch('vehicles/:id')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật thông tin phương tiện vận chuyển' })
   updateVehicle(
     @Param('id', ParseIntPipe) id: number,
@@ -68,14 +68,14 @@ export class FleetController {
   }
 
   @Delete('vehicles/:id')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xóa phương tiện khỏi đội xe (khi không đang thực hiện chuyến)' })
   deleteVehicle(@Param('id', ParseIntPipe) id: number) {
     return this.fleetService.deleteVehicle(id);
   }
 
   @Get('staff')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Lấy danh sách tài xế, hộ tống và nhân sự vận hành sẵn sàng' })
   getAvailableStaff() {
     return this.fleetService.getAvailableStaff();
@@ -108,7 +108,7 @@ export class FleetController {
   }
 
   @Post('shipments/:id/assign-vehicles')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Phân công phương tiện xe/máy bay cho đơn hàng (Kiểm tra sức chứa capacity)' })
   assignVehicles(
     @CurrentUser() user: AuthenticatedUser,
@@ -119,7 +119,7 @@ export class FleetController {
   }
 
   @Post('shipments/:id/assign-staff')
-  @Roles(UserRole.FLEET_ROUTE_COORDINATOR, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Phân công tài xế (driver) và hộ tống (escort) cho chuyến đi' })
   assignStaff(
     @CurrentUser() user: AuthenticatedUser,
