@@ -1,5 +1,7 @@
 # Ghép Stall / Bao chuyến
 
+> **Đã bỏ sau review (Step 3, 11/2026).** Hình thức Ghép ô chuồng (`shared_stall`) không còn cho đơn mới: mọi đơn là Bao chuyến (`dedicated_charter`). Tài liệu dưới đây chỉ còn giá trị cho đơn ghép cũ (xem, báo giá, gửi lại, điều phối). Xem `docs/flows/flow-3-route-planning.md` mục 0.
+
 > Cập nhật Phase 2 ngày 12/11/2026: đã bổ sung ghép thủ công và giữ chỗ độc quyền đường bộ theo phê duyệt, migration 019/020, UI Coordinator và các sửa lỗi audit. Kết quả kiểm thử trước đó ở tài liệu này là lịch sử. Xem [báo cáo kiểm chứng hiện tại](controlled-fixes-audit.md); MySQL/HTTP/browser vẫn BLOCKED cho đến khi Docker được xác nhận hoạt động và test chạy thành công. Mô hình vận hành hàng không vẫn chờ phê duyệt.
 
 ## Hành vi

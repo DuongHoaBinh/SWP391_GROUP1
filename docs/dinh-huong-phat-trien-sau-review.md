@@ -424,6 +424,8 @@ flowchart TD
 
 ### STEP 3. Trạm xe, loại phương tiện, sức chứa; bỏ gom chuyến (3 ngày)
 
+> **Trạng thái: đã triển khai (23/11/2026)**, chưa commit. Migration `030_depots_vehicle_classes.sql`, test `backend/test/depots-capacity.test.cjs`. Khác kế hoạch: bảng `road_trip` vẫn được dùng nội bộ (mỗi chặng đường bộ của đơn mới tự tạo một chuyến riêng), chỉ chặn việc ghép; RoadTripPicker và lựa chọn hình thức chỉ còn hiện cho đơn ghép cũ để điều phối nốt. Số jet stall cho chặng bay (3 ngựa/stall) để lại Step 9.
+
 **3.1 Bảng trạm `depot`**
 - [ ] `depot(depot_id, name, country, city, address, lat, lng, type ENUM('own','partner'), is_active)`.
   - `partner` = trạm đối tác ở nước ngoài, dùng cho chặng giao cuối.

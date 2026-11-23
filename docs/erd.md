@@ -8,12 +8,19 @@ The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with
 - `horse`
 - `regulation`, `document_type`, `transport_document`, `document_approval`
 - `shipment`, `shipment_horse`
-- `vehicle`, `shipment_vehicle`, `route`, `route_stop`, `shipment_assignment`
+- `depot`, `vehicle_class`, `vehicle`, `shipment_vehicle`, `route`, `route_stop`, `shipment_assignment`
 - `route_stop_update`, `horse_condition_log`, `attachment`
 - `incident_report`, `shipment_change_request`, `delivery_handover`
 - `notification`
 
 ## Important relationships
+
+- **Trạm xe, loại phương tiện, sức chứa (migration `030_depots_vehicle_classes.sql`, Step 3)**:
+  - `depot(depot_id, code UNIQUE, name, country, city, address, lat, lng, type ENUM('own','partner'), is_active)`. Seed demo: Thủ Đức, Long Biên, Đà Nẵng, Cần Thơ (own) và Phnom Penh, Bangkok, Singapore (partner).
+  - `vehicle_class(code PK, mode ENUM('road','air','sea'), name_vi, name_en, horse_capacity NULL, price_coefficient, is_heavy_truck, sort_order)`.
+  - `vehicle.depot_id` là FK nullable tới `depot`; xe đường bộ cũ được gán Trạm Thủ Đức. `vehicle.vehicle_class_code` là FK nullable tới `vehicle_class`, backfill theo `capacity`. `vehicle.capacity` được giữ để tương thích và luôn lấy theo loại khi tạo hoặc đổi loại. Cột `vehicle.current_location` có trong schema (trước đây chỉ được thêm lúc backend khởi động).
+  - Số chỗ chuồng của đơn = tổng `shipment_horse.quantity` × (2 nếu `horse.requires_private_stall`, ngược lại 1). `route_leg.stalls_booked` lưu số chỗ này.
+  - `shipment.booking_type` mặc định đổi sang `dedicated_charter`; giá trị `shared_stall` giữ trong ENUM cho đơn cũ. Bảng `road_trip` được giữ: mỗi chặng đường bộ của đơn mới vẫn có một `road_trip` riêng.
 
 - A customer owns one or more horses and creates transport orders.
 - `horse.status` uses `ENUM('active','in_transit','retired','deceased')` (`'delivered'` is not used): `'in_transit'` means the horse is currently held/reserved by a non-terminal shipment (`requested` through `in_transit`) and returns to `'active'` upon removal during `change_requested` or terminal shipment states (`cancelled`, `rejected`, `cancelled_operational`, `completed`).

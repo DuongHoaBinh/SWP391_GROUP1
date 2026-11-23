@@ -363,22 +363,36 @@ Deletes a horse profile. If the horse has been part of past shipments, it is sof
 Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bearer <token>`)
 
 ### `GET /fleet/vehicles`
-Lists transport vehicles. Supports optional query filters: `?status=available|in_use|maintenance` and `?type=truck|aircraft_stall|container`.
+Lists transport vehicles. Supports optional query filters: `?status=available|in_use|maintenance`, `?type=truck|aircraft_stall|container` and `?depotId=<id>` (Step 3). Each vehicle includes `vehicleClassCode`, `vehicleClassName`, `isHeavyTruck`, `depotId`, `depotName`.
 
 ### `GET /fleet/vehicles/:id`
 Retrieves details of a specific vehicle.
 
-### `POST /fleet/vehicles` (Fleet Coordinator / Manager / Admin)
-Registers a new transport vehicle with plate/code and horse capacity.
-- **Body:**
+### `POST /fleet/vehicles` (Manager / Admin)
+Registers a new transport vehicle.
+- **Body (Step 3):**
 ```json
 {
-  "vehicleType": "truck",
+  "vehicleClassCode": "truck_4",
+  "depotId": 1,
   "plateOrCode": "51C-888.99",
-  "capacity": 4,
   "status": "available"
 }
 ```
+- `vehicleClassCode` (from `GET /fleet/vehicle-classes`) decides `vehicleType` (road → `truck`, air → `aircraft_stall`, sea → `container`) and `capacity`. A `capacity` sent for a fixed-capacity class is ignored. `ferry_slot` has no fixed capacity, so `capacity` is required for it.
+- Road vehicles must belong to an **active** depot (`depotId`); otherwise `400`. An unknown class or depot returns `400`.
+- Legacy body `{ vehicleType, capacity }` without a class is still accepted.
+- `PATCH /fleet/vehicles/:id` accepts `vehicleClassCode` and `depotId`; changing the class recalculates `capacity`.
+
+### `GET /fleet/vehicle-classes`
+Vehicle class catalog: `code`, `mode` (`road` | `air` | `sea`), `nameVi`, `nameEn`, `horseCapacity` (`null` = depends on the vehicle on the ferry), `priceCoefficient`, `isHeavyTruck`. Seed: `truck_1` (1), `truck_2` (2), `truck_4` (4, heavy, ×1.3), `truck_6` (6, heavy, ×1.6), `jet_stall` (3), `ferry_slot` (null), `vessel_pen` (1).
+
+### Depots (Step 3) — Manager / Admin
+- `GET /fleet/depots`: all depots with `vehicleCount`. `type`: `own` | `partner` (partner depot abroad, used for last-mile delivery).
+- `GET /fleet/depots/:id`: depot plus `vehicles[]`.
+- `POST /fleet/depots`: `{ code, name, country, city, address?, lat, lng, type?, isActive? }`. A duplicate `code` (case-insensitive) returns `409`.
+- `PATCH /fleet/depots/:id`: partial update; `{ "isActive": false }` pauses the depot (no new vehicles can be assigned to it).
+- `DELETE /fleet/depots/:id`: only when the depot has no vehicles; otherwise `409`.
 
 ### `GET /fleet/staff` (Fleet Coordinator / Manager / Admin)
 Lists drivers, escorts, and coordinators available for trip assignment.
@@ -387,7 +401,7 @@ Lists drivers, escorts, and coordinators available for trip assignment.
 Retrieves all vehicles and staff assigned to a specific shipment.
 
 ### `POST /fleet/shipments/:id/assign-vehicles` (Fleet Coordinator / Manager / Admin)
-Assigns vehicles to an approved transport order. Enforces rule: total vehicle capacity must be >= `requestedHorseCount`. Sets vehicle status to `in_use` and order status to `planning`.
+Assigns vehicles to an approved transport order. Enforces rule: total vehicle capacity must be >= the order's **required stall slots** (each horse 1 slot; a horse with `requiresPrivateStall` takes 2 slots — Step 3). Sets vehicle status to `in_use` and order status to `planning`.
 - **Body:** `{ "vehicleIds": [1, 2] }`
 
 ### `POST /fleet/shipments/:id/assign-staff` (Fleet Coordinator / Manager / Admin)
@@ -569,6 +583,8 @@ From `backend`: `npm run migrate:insurance` applies rerunnable migration 017 to 
 
 ## Shared stall / dedicated charter API
 
+> **Cập nhật Step 3 (review 11/2026): đã bỏ gom chuyến.** Đơn mới luôn là `dedicated_charter` (mỗi đơn đi xe riêng); gửi `shared_stall` khi tạo đơn trả `400`. `POST /fleet/road-trips` trả `410 Gone`. Đơn `shared_stall` cũ vẫn xem, báo giá, gửi lại và điều phối được; khi gửi lại, khách được chuyển sang bao chuyến nhưng không được chuyển ngược về ghép chuyến.
+
 - `POST /orders`: optional `bookingType`, enum `shared_stall` / `dedicated_charter`, default shared. Unknown values return 400; no horse-count threshold is enforced. Values are accepted with either domestic/international or road/air scope. Prices supplied by Customer cannot quote the order.
 - `PUT /orders/:id`: owned `change_requested` orders may set `bookingType`. Omitted type keeps the saved selection. A changed type appends a booking revision transactionally; the former freight, unit price and total are cleared for reapproval. Insurance is preserved unless changed explicitly. Other states return 400; other owners receive 403.
 - Responses from order list/detail/create/update include `bookingType`, nullable `stallUnitPrice`, existing total `transportCost`, aggregate `insuranceFee`, combined `totalCost` and `requestedHorseCount`. Full trip plan's `order` includes these fields for Coordinator use.
@@ -600,7 +616,8 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
 - Approval prices must be explicitly provided and positive whole VND. Omitted/null/empty/zero/negative/invalid prices return 400. This does not rewrite historical quotes. `totalCost = transportCost + insuranceFee` remains the response contract; the legacy approval input `totalCost` means base freight.
 - On owned `change_requested` orders, omitted horse policy fields and quantity preserve saved values. Actual declaration changes recalculate the policy; unchanged declarations preserve saved FX rates. Approval mode never overwrites Domestic/International scope.
 - `GET /fleet/road-trips`: Coordinator/Manager/Admin only. Returns id, vehicleId, vehiclePlate, bookingType, originLocation, destinationLocation, plannedDeparture, plannedArrival, capacity and bookedStalls. No other customers' identity or horses are included.
-- `POST /fleet/road-trips`: same staff roles, body `{vehicleId, bookingType, originLocation, destinationLocation, plannedDeparture, plannedArrival}`; returns 201 `{id}`. Creates trip metadata; capacity is committed when a plan allocates a shipment.
+- `POST /fleet/road-trips`: **410 Gone since Step 3** (trip consolidation removed; hidden from Swagger). Road legs of new plans still create their own `road_trip` automatically when the plan is saved.
+- Road capacity checks (plan save, vehicle assignment) count **stall slots**: a horse with `requiresPrivateStall` takes 2 slots; `stallsBooked` stores slots.
 - `POST /routes/plan/:shipmentId/build-detail`: each road leg may send `roadTripId`. The backend uses that trip's vehicle/route/times, validates booking type, and sets `stallsBooked` from the shipment. Without an id, a timed road leg creates its own trip when saved. All leg/stop/vehicle changes and capacity checks are transactional. Insufficient slots or an overlapping exclusive/other trip return 400; the plan is not partially saved. No automatic compatibility tolerance is imposed.
 - Flight legs cannot set roadTripId; existing air fields retain their meaning. Air operational shared/dedicated rules await approval.
 - Customer route/full-plan reads enforce order ownership. `PATCH /orders/:id/complete` requires an in-transit order and Manager/Admin or an assigned Driver/Escort; completed retries do not duplicate notifications.

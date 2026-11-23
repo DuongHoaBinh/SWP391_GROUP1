@@ -2,6 +2,13 @@
 
 > **Cập nhật sau review 11/2026:** Transport Specialist và Fleet & Route Coordinator đã gộp vào **Logistics Manager** (xem `docs/actors-and-roles.md`). Trong tài liệu này, mọi chỗ ghi Specialist/Coordinator được hiểu là Logistics Manager; role `TRANSPORT_SPECIALIST`/`FLEET_ROUTE_COORDINATOR` chỉ còn để tương thích dữ liệu cũ.
 
+## 0. Cập nhật Step 3 (review 11/2026)
+
+- **Đã bỏ gom chuyến.** Mỗi đơn mới đi xe riêng (`dedicated_charter`). Lựa chọn "Ghép ô chuồng" đã bị gỡ khỏi form tạo đơn; backend trả `400` nếu đơn mới gửi `shared_stall`, và `POST /fleet/road-trips` trả `410`. Đơn ghép cũ giữ nguyên để xem lại và điều phối nốt (RoadTripPicker chỉ hiện với đơn `shared_stall` cũ). Các mục 7 và AC liên quan đến ghép chuyến bên dưới chỉ còn áp dụng cho đơn cũ.
+- **Trạm xe.** Mỗi xe đường bộ thuộc một trạm đang hoạt động (`/manager/fleet/depots`, có bản đồ). Trạm `partner` là trạm đối tác ở nước ngoài, dùng cho chặng giao cuối. Trạm còn xe không xóa được, chỉ tạm ngưng. Việc chọn trạm gần nhất khi điều xe làm ở Step 9.
+- **Loại phương tiện và sức chứa.** Khi tạo xe, Manager chọn loại (`truck_1/2/4/6`, `jet_stall`, `ferry_slot`, `vessel_pen`); sức chứa lấy theo loại. `truck_4` và `truck_6` là xe tải nặng (dùng cho giờ cấm đô thị ở Step 9).
+- **Ngựa cần chuồng riêng chiếm 2 chỗ** khi kiểm tra sức chứa đường bộ (lưu kế hoạch, phân công xe). Ví dụ: 3 ngựa, trong đó 1 ngựa cần chuồng riêng, cần 4 chỗ, nên xe 3 chỗ bị từ chối. Phân bổ nhiều xe cho một đơn và số jet stall cho chặng bay làm ở Step 9.
+
 ## 1. Bối cảnh và nguyên tắc cốt lõi
 
 - **Thời điểm kích hoạt:** Bắt đầu ngay khi đơn vận chuyển đã được Manager phê duyệt và khách hàng chấp nhận báo giá (kết thúc Flow 1). Đơn hàng chuyển sang trạng thái `planning`.
