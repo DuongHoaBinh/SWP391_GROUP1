@@ -177,13 +177,11 @@ Creates and submits a new transport request.
   "medicalDocumentUrl": "https://example.com/docs/medical-rules.pdf",
   "horseName": "Xích Thố",
   "horseBreed": "Thoroughbred",
-  "horseGender": "male",
   "horseAge": 4,
   "horses": [
     {
       "name": "Xích Thố",
       "breed": "Thoroughbred",
-      "gender": "male",
       "age": 4
     }
   ]
@@ -316,14 +314,43 @@ Registers a new racehorse profile directly into the database.
 {
   "name": "Pegasus Star",
   "breed": "Thoroughbred",
-  "gender": "male",
   "age": 5,
-  "dateOfBirth": "2021-04-15",
   "microchipNo": "985141001248999",
   "passportNo": "FEI-VN-2026-888",
+  "requiresPrivateStall": false,
+  "temperament": "normal",
   "status": "active"
 }
 ```
+- Sau review 11/2026 (Step 2): **bỏ `gender` và `dateOfBirth`**. Hai trường này không còn trong DTO; nếu client cũ vẫn gửi thì bị bỏ qua (ValidationPipe `whitelist`). Cột DB được giữ cho dữ liệu cũ nhưng API không trả về nữa.
+- `requiresPrivateStall` (boolean, mặc định `false`): ngựa cần chuồng riêng (đực giống, dễ kích động). Dùng khi xếp ngựa lên phương tiện.
+- `temperament`: `calm` | `normal` | `difficult` (mặc định `normal`).
+- Order detail (`GET /orders/:id`) trả thêm `horses[].requiresPrivateStall`.
+
+### Horse documents (Step 2: giấy tờ lưu trên ngựa)
+
+Giấy tờ thuộc về con ngựa và dùng lại cho nhiều đơn. Các endpoint này thuộc module `documents`. Quyền: Customer chỉ truy cập ngựa của mình (khác chủ trả `403`, ngựa không tồn tại trả `404`); Logistics Manager/Admin truy cập mọi ngựa; Driver/Escort bị chặn ở role guard.
+
+#### `GET /documents/types`
+Danh mục loại giấy tờ (`document_type`): `code`, `nameVi`, `nameEn`, `defaultValidityDays`, `isIdentity`, `sortOrder`.
+
+#### `GET /horses/:horseId/documents`
+Các giấy tờ đang hiệu lực của ngựa (cả giấy tờ chung lẫn giấy tờ nộp theo quy định của đơn). Mỗi bản ghi có thêm:
+- `documentTypeCode`, `documentTypeNameVi`, `documentTypeNameEn`;
+- `regulationId` = `null` với giấy tờ chung;
+- `validityStatus`: `valid` | `expiring_soon` (còn dưới 30 ngày) | `expired` | `no_expiry`, và `daysUntilExpiry`. Hai trường này tính khi đọc, không lưu DB.
+
+#### `POST /horses/:horseId/documents` (multipart/form-data)
+- Field: `file` (PDF/PNG/JPG/DOCX, tối đa 10MB, có kiểm tra magic bytes) hoặc `fileUrl`; `documentTypeCode` (bắt buộc, phải có trong danh mục); `docNumber`; `issueDate`, `expiryDate` (`YYYY-MM-DD`).
+- Bỏ trống `expiryDate` thì hạn được tính bằng `issueDate + defaultValidityDays` của loại giấy tờ.
+- `expiryDate` trước `issueDate` trả `400`.
+- Append-only: bản chung đang hiệu lực cùng loại của cùng ngựa được đánh `is_archived = true` và `superseded_by_document_id` trỏ sang bản mới. Bản mới có `status = submitted` và chờ Manager duyệt qua `PATCH /documents/:id/review`.
+
+#### `GET /horses/:horseId/documents/:docId/history`
+Toàn bộ phiên bản (gồm bản đã lưu trữ) của cùng loại giấy tờ trên ngựa, mới nhất trước.
+
+#### `GET /horses/:horseId/documents/:docId/file`
+Stream tệp, có kiểm tra giấy tờ thuộc đúng ngựa và đúng chủ sở hữu.
 
 ### `PUT /horses/:id`
 Updates details of a racehorse profile owned by the customer.

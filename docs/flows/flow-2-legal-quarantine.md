@@ -22,6 +22,17 @@ Transport Specialist, Customer, Logistics Manager, external authorities
 - The trip cannot reach `READY_TO_DEPART` while mandatory documents are missing, rejected, or expired.
 - Customers can upload and replace their own documents; only the Transport Specialist can accept them.
 
+### Kho giấy tờ của ngựa (Step 2, review 11/2026)
+
+- Giấy tờ **thuộc về con ngựa** và dùng lại cho nhiều đơn. Khách tải hộ chiếu một lần trên trang hồ sơ ngựa (`/customer/horses/[id]`); không cần tải lại cho từng đơn.
+- Mỗi giấy tờ có **loại chuẩn hóa** từ danh mục `document_type` (hộ chiếu, vi mạch, quyền sở hữu, tiêm cúm, tiêm uốn ván, EIA/Coggins, sức khỏe, kiểm dịch xuất khẩu, giấy phép nhập khẩu...). Giấy tờ chung có `regulation_id = NULL`.
+- Bỏ trống ngày hết hạn thì hệ thống tính bằng ngày cấp cộng thời hạn mặc định của loại giấy tờ. Ngày hết hạn trước ngày cấp bị từ chối.
+- **Trạng thái hạn tính khi đọc**: `valid` (xanh), `expiring_soon` (vàng, còn dưới 30 ngày), `expired` (đỏ), `no_expiry`. Ngày hết hạn vẫn còn hiệu lực trọn ngày đó.
+- **Append-only**: tải bản mới cùng loại thì bản cũ được lưu trữ (`is_archived`) và trỏ `superseded_by_document_id` sang bản mới. Lịch sử phiên bản luôn xem lại được.
+- Bản mới có trạng thái `submitted`; Logistics Manager duyệt hoặc từ chối (bắt buộc lý do) như giấy tờ theo đơn.
+- Quyền: Customer chỉ xem và tải giấy tờ ngựa của mình (`403` nếu khác chủ); Manager/Admin xem mọi ngựa; Driver/Escort không truy cập kho này.
+- Giới hạn của Step 2: checklist đơn hàng vẫn đối chiếu theo `regulation_id`. Việc dùng lại giấy tờ chung còn hạn theo `document_type_code` khi tạo đơn được làm ở Step 8.
+
 ## Outputs
 
 Document checklist, authority approval status, missing-document notifications, and a compliance readiness result.

@@ -397,6 +397,8 @@ flowchart TD
 
 ### STEP 2. Hồ sơ ngựa và kho giấy tờ của ngựa (2 ngày)
 
+> **Trạng thái: đã triển khai (23/11/2026)**, chưa commit. Migration `029_horse_profile_after_review.sql`, test `backend/test/horse-documents.test.cjs`. Ngoài kế hoạch: thêm 3 mã `vaccination_certificate`, `quarantine_certificate`, `customs_declaration` (đã dùng trong preset quy định) để giấy tờ cũ khớp danh mục; giữ ô "Tuổi" (nhập tay, 1–35) thay cho tuổi tự tính từ ngày sinh.
+
 **2.1 Bỏ giới tính, ngày sinh; thêm cờ chuồng riêng**
 - [ ] Frontend: bỏ ô `gender`, `date_of_birth` khỏi form thêm, sửa ngựa và khỏi thẻ hiển thị.
 - [ ] Backend DTO: 2 trường thành optional và bị bỏ qua khi tạo mới (không xóa cột, tránh mất dữ liệu cũ).

@@ -6,7 +6,7 @@ The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with
 
 - `role`, `user`, `otp_verification`
 - `horse`
-- `regulation`, `transport_document`, `document_approval`
+- `regulation`, `document_type`, `transport_document`, `document_approval`
 - `shipment`, `shipment_horse`
 - `vehicle`, `shipment_vehicle`, `route`, `route_stop`, `shipment_assignment`
 - `route_stop_update`, `horse_condition_log`, `attachment`
@@ -19,6 +19,12 @@ The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with
 - `horse.status` uses `ENUM('active','in_transit','retired','deceased')` (`'delivered'` is not used): `'in_transit'` means the horse is currently held/reserved by a non-terminal shipment (`requested` through `in_transit`) and returns to `'active'` upon removal during `change_requested` or terminal shipment states (`cancelled`, `rejected`, `cancelled_operational`, `completed`).
 - An order contains one or more horses and can become one transport plan/trip.
 - A horse has a document set whose required documents depend on destination country and border gate.
+- **Hồ sơ ngựa sau review 11/2026 (migration `029_horse_profile_after_review.sql`)**:
+  - `horse.gender` và `horse.date_of_birth` ngừng dùng. Cột được giữ để không mất dữ liệu cũ, nhưng API không đọc/ghi nữa.
+  - Thêm `horse.requires_private_stall BOOLEAN DEFAULT FALSE` và `horse.temperament ENUM('calm','normal','difficult') DEFAULT 'normal'` để xếp ngựa lên phương tiện.
+  - `document_type(code PK, name_vi, name_en, default_validity_days, is_identity, sort_order)` là danh mục loại giấy tờ.
+  - `transport_document.document_type_code` là FK nullable tới `document_type.code`. `transport_document.regulation_id` cho phép NULL: giấy tờ chung của ngựa (hộ chiếu, vi mạch...) không thuộc riêng quy định nào và được dùng lại cho nhiều đơn.
+  - Giấy tờ vẫn append-only: tải bản mới thì bản cũ cùng loại có `is_archived = TRUE` và `superseded_by_document_id` trỏ sang bản mới.
 - A trip uses a route made of ordered legs and stops, and has assigned vehicle/capacity and staff.
 - Tracking events and horse health logs belong to a trip and record their author and timestamp.
 - Incidents can create route-change and additional-cost approval records linked to the trip.
