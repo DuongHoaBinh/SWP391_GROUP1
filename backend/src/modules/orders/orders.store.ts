@@ -948,6 +948,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         uploadedAt: new Date(att.uploaded_at).toISOString(),
       })),
       horses: (horses as any[]).map((h) => ({
+        shipmentHorseId: h.shipment_horse_id ? Number(h.shipment_horse_id) : undefined,
         horseId: h.horse_id,
         name: h.name,
         breed: h.breed,

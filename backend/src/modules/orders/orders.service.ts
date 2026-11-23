@@ -323,6 +323,10 @@ export class OrdersService {
       throw new ForbiddenException('Bạn chỉ có thể chỉnh sửa đơn vận chuyển của chính mình');
     }
 
+    if (order.status === ShipmentStatus.IN_TRANSIT || (order.status as string) === 'return_pending') {
+      throw new ConflictException('Không thể chỉnh sửa đơn hàng hoặc thay đổi gói bảo hiểm khi đang trong hành trình vận chuyển');
+    }
+
     if (order.status !== ShipmentStatus.CHANGE_REQUESTED) {
       throw new ConflictException(
         `Chỉ đơn hàng ở trạng thái "${ShipmentStatus.CHANGE_REQUESTED}" mới có thể chỉnh sửa. Trạng thái hiện tại: "${order.status}"`,

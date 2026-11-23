@@ -16,6 +16,7 @@ export enum CancellationCategory {
   PAYMENT_OVERDUE_EXPIRED = 'payment_overdue_expired',
   CUSTOMER_REQUEST_POST_APPROVAL = 'customer_request_post_approval',
   FORCE_MAJEURE = 'force_majeure',
+  INSURANCE_CLAIM = 'insurance_claim',
 }
 
 export enum RefundMode {

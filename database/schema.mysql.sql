@@ -1067,3 +1067,72 @@ CREATE TABLE IF NOT EXISTS shipment_return_change (
 
 ALTER TABLE shipment ADD CONSTRAINT fk_shipment_quote FOREIGN KEY (quote_id) REFERENCES shipment_quote(quote_id) ON DELETE SET NULL;
 
+
+-- Migration 033: Insurance Policy v2, Payout Rules, Package Config and Claims Workflow
+
+CREATE TABLE IF NOT EXISTS insurance_package_config (
+  config_id INT AUTO_INCREMENT PRIMARY KEY,
+  policy_version VARCHAR(20) NOT NULL,
+  package_code ENUM('basic','standard','premium') NOT NULL,
+  fee_bps INT NOT NULL DEFAULT 0,
+  minimum_fee_vnd BIGINT NOT NULL DEFAULT 0,
+  emergency_vet_cap_vnd BIGINT NULL,
+  emergency_vet_covered BOOLEAN NOT NULL DEFAULT FALSE,
+  display_name_vi VARCHAR(100) NOT NULL,
+  display_name_en VARCHAR(100) NOT NULL,
+  UNIQUE KEY uq_package_config (policy_version, package_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS insurance_payout_rule (
+  rule_id INT AUTO_INCREMENT PRIMARY KEY,
+  policy_version VARCHAR(20) NOT NULL,
+  package_code ENUM('basic','standard','premium') NOT NULL,
+  severity ENUM('M1','M2','M3','M4') NOT NULL,
+  payout_type ENUM('percent_of_value','vet_cost_capped') NOT NULL,
+  percent_bps INT NULL,
+  cap_vnd BIGINT NULL,
+  UNIQUE KEY uq_payout_rule (policy_version, package_code, severity)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS insurance_claim (
+  claim_id INT AUTO_INCREMENT PRIMARY KEY,
+  shipment_id INT NOT NULL,
+  shipment_horse_id INT NOT NULL,
+  customer_id INT NOT NULL,
+  severity ENUM('M1','M2','M3','M4') NOT NULL,
+  description TEXT NOT NULL,
+  vet_cost_vnd BIGINT NULL,
+  evidence_json JSON NULL,
+  vet_report_document_id INT NULL,
+  requested_amount BIGINT NOT NULL,
+  suggested_amount BIGINT NOT NULL,
+  approved_amount BIGINT NULL,
+  policy_version VARCHAR(20) NOT NULL,
+  package_code ENUM('basic','standard','premium') NOT NULL,
+  declared_value_vnd BIGINT NOT NULL,
+  status ENUM('submitted','under_review','approved','rejected','paid') NOT NULL DEFAULT 'submitted',
+  rejection_reason_code VARCHAR(50) NULL,
+  decision_reason TEXT NULL,
+  decided_by INT NULL,
+  decided_at DATETIME NULL,
+  refund_record_id INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_claim_horse_status (shipment_horse_id, status),
+  INDEX idx_claim_shipment (shipment_id),
+  CONSTRAINT fk_claim_shipment FOREIGN KEY (shipment_id) REFERENCES shipment(shipment_id),
+  CONSTRAINT fk_claim_horse FOREIGN KEY (shipment_horse_id) REFERENCES shipment_horse(shipment_horse_id),
+  CONSTRAINT fk_claim_customer FOREIGN KEY (customer_id) REFERENCES `user`(user_id),
+  CONSTRAINT fk_claim_doc FOREIGN KEY (vet_report_document_id) REFERENCES transport_document(document_id),
+  CONSTRAINT fk_claim_refund FOREIGN KEY (refund_record_id) REFERENCES shipment_refund_record(refund_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS insurance_claim_event (
+  event_id INT AUTO_INCREMENT PRIMARY KEY,
+  claim_id INT NOT NULL,
+  from_status VARCHAR(20) NULL,
+  to_status VARCHAR(20) NOT NULL,
+  actor_id INT NOT NULL,
+  note TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_claim_event_claim FOREIGN KEY (claim_id) REFERENCES insurance_claim(claim_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

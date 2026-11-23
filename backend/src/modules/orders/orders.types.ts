@@ -23,6 +23,7 @@ export interface ShipmentAttachment {
 }
 
 export interface OrderHorse {
+  shipmentHorseId?: number;
   horseId: number;
   name: string;
   breed: string | null;

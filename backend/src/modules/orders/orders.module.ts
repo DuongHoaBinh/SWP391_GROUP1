@@ -21,6 +21,9 @@ import { PricingStore } from './pricing.store';
 import { QuotesController } from './quotes.controller';
 import { QuotesService } from './quotes.service';
 import { QuotesStore } from './quotes.store';
+import { InsuranceClaimController } from './insurance-claim.controller';
+import { InsuranceClaimService } from './insurance-claim.service';
+import { InsuranceClaimStore } from './insurance-claim.store';
 
 @Module({
   imports: [NotificationsModule, DocumentsModule, DistanceModule],
@@ -29,6 +32,7 @@ import { QuotesStore } from './quotes.store';
     OrdersController,
     PricingController,
     QuotesController,
+    InsuranceClaimController,
     MomoPaymentController,
     SepayPaymentController,
     SepayWebhookController,
@@ -40,6 +44,8 @@ import { QuotesStore } from './quotes.store';
     PricingStore,
     QuotesService,
     QuotesStore,
+    InsuranceClaimService,
+    InsuranceClaimStore,
     MomoPaymentService,
     MomoPaymentStore,
     SepayPaymentService,
@@ -55,6 +61,8 @@ import { QuotesStore } from './quotes.store';
     PricingStore,
     QuotesService,
     QuotesStore,
+    InsuranceClaimService,
+    InsuranceClaimStore,
     MomoPaymentService,
     MomoPaymentStore,
     SepayPaymentService,

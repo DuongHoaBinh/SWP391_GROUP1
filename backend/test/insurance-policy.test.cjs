@@ -11,8 +11,8 @@ test('basic is free with the transport cap; standard and premium use declared va
 });
 
 test('fees round once per horse to whole VND and multiply by quantity', () => {
-  assert.equal(calculateInsurance({ declaredValue: 100, insurancePackage: 'standard' }).insuranceFee, 2);
-  assert.equal(calculateInsurance({ declaredValue: 33.33, insurancePackage: 'standard' }).insuranceFee, 0);
+  assert.equal(calculateInsurance({ declaredValue: 100, insurancePackage: 'standard' }, undefined, 'equine-v1').insuranceFee, 2);
+  assert.equal(calculateInsurance({ declaredValue: 33.33, insurancePackage: 'standard' }, undefined, 'equine-v1').insuranceFee, 0);
   assert.equal(totalInsuranceFee([{ insuranceFee: 1500000, quantity: 2 }, { insuranceFee: 3000000, quantity: 1 }]), 6000000);
 });
 
