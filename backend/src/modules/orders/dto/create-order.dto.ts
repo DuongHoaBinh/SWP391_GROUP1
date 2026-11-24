@@ -79,6 +79,7 @@ export class HorseInfoDto {
 export class CreateOrderDto {
   @ApiPropertyOptional({ example: 501, description: 'ID báo giá hợp lệ từ POST /quotes' })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   quoteId?: number;
 

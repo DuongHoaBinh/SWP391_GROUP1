@@ -738,7 +738,7 @@ function CreateTransportRequestForm() {
         tripType,
         returnDepartureAt: tripType === 'round_trip' && returnDepartureAt ? new Date(returnDepartureAt).toISOString() : undefined,
         acceptReturnPolicy: tripType === 'round_trip' ? acceptReturnPolicy : undefined,
-        quoteId: quote?.quoteId ? String(quote.quoteId) : undefined,
+        quoteId: quote?.quoteId ? Number(quote.quoteId) : undefined,
         optionCode: selectedOptionCode,
         specialRequirements: combinedReqs || undefined,
         horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
