@@ -2861,6 +2861,8 @@ export class TrackingService {
 
     return {
       geofence,
+      geofenceRadiusDefaultM: geofence.defaultRadiusM,
+      geofenceRadiusLargeSiteM: geofence.largeSiteRadiusM,
       simulationEnabled,
       customerVitalsDetail,
     };
@@ -2877,6 +2879,19 @@ export class TrackingService {
 
     if (patch.geofence !== undefined && typeof this.trackingStore?.setSetting === 'function') {
       await this.trackingStore.setSetting('tracking.geofence', patch.geofence);
+    } else if (
+      (patch.geofenceRadiusDefaultM !== undefined || patch.geofenceRadiusLargeSiteM !== undefined) &&
+      typeof this.trackingStore?.setSetting === 'function'
+    ) {
+      const current = await this.getTrackingSettings();
+      const updatedGeofence = {
+        ...current.geofence,
+        defaultRadiusM: patch.geofenceRadiusDefaultM ?? current.geofence?.defaultRadiusM ?? 300,
+        largeSiteRadiusM: patch.geofenceRadiusLargeSiteM ?? current.geofence?.largeSiteRadiusM ?? 1000,
+        bufferAccuracyM: current.geofence?.bufferAccuracyM ?? 100,
+        maxAccuracyM: current.geofence?.maxAccuracyM ?? 200,
+      };
+      await this.trackingStore.setSetting('tracking.geofence', updatedGeofence);
     }
     if (patch.simulationEnabled !== undefined && typeof this.trackingStore?.setSetting === 'function') {
       await this.trackingStore.setSetting('tracking.simulation_enabled', patch.simulationEnabled);

@@ -336,6 +336,8 @@ export interface TrackingSystemSettings {
     bufferAccuracyM: number;
     maxAccuracyM: number;
   };
+  geofenceRadiusDefaultM?: number;
+  geofenceRadiusLargeSiteM?: number;
   simulationEnabled: boolean;
   customerVitalsDetail: boolean;
 }

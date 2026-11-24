@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS depot (
   type ENUM('own','partner') NOT NULL DEFAULT 'own',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Dữ liệu demo: tọa độ trung tâm khu vực, cần thay bằng địa chỉ thật của doanh nghiệp.
 INSERT INTO depot (code, name, country, city, address, lat, lng, type) VALUES
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS vehicle_class (
   price_coefficient DECIMAL(4,2) NOT NULL DEFAULT 1.00,
   is_heavy_truck BOOLEAN NOT NULL DEFAULT FALSE,
   sort_order INT NOT NULL DEFAULT 0
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO vehicle_class (code, mode, name_vi, name_en, horse_capacity, price_coefficient, is_heavy_truck, sort_order) VALUES
   ('truck_1', 'road', 'Xe chở ngựa 1 chỗ', '1-horse transporter', 1, 1.00, FALSE, 10),

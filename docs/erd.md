@@ -206,3 +206,9 @@ erDiagram
   VEHICLE ||--o{ VEHICLE_POSITION_PING : reports
   ROUTE_STOP ||--o{ TRIP_STATUS_LOG : audits
 ```
+
+### Migration 038 — Thời gian thực tế của chặng/điểm dừng (hot-fix sau review)
+
+- **`route_leg`**: `actual_departure DATETIME NULL`, `actual_arrival DATETIME NULL` (dùng cho OTD trong `reports`, trạng thái xe bận trong `fleet`, timeline trong `tracking`).
+- **`route_stop`**: `actual_arrival DATETIME NULL`, `actual_departure DATETIME NULL`, `updated_by INT NULL`, `notes TEXT NULL` (check-in điểm dừng và đồng bộ chuyến ghép trong `routes`).
+- Trước đây các cột này chỉ được thêm khi `TrackingStore` khởi động; nay đã có trong `schema.mysql.sql` và migration `038_route_actual_times.sql` (idempotent).

@@ -888,7 +888,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       }
 
       await db.execute(
-        `INSERT INTO shipment_return_change (shipment_id, old_at, new_at, fee, requested_by)
+        `INSERT INTO shipment_return_change (shipment_id, old_return_departure_at, new_return_departure_at, reschedule_fee, requested_by)
          VALUES (?, ?, ?, ?, ?)`,
         [data.shipmentId, data.oldAt, data.newAt, data.fee, data.actorId],
       );

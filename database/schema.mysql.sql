@@ -412,6 +412,10 @@ CREATE TABLE route_stop (
   geofence_radius_m INT NULL,
   location_ref_type ENUM('master_stop','airport','seaport','depot','address','manual') NULL,
   location_ref_id INT NULL,
+  actual_arrival DATETIME NULL,
+  actual_departure DATETIME NULL,
+  updated_by INT NULL,
+  notes TEXT NULL,
   CONSTRAINT fk_stop_route FOREIGN KEY (route_id) REFERENCES route(route_id),
   UNIQUE KEY uq_route_sequence (route_id, sequence_no)
 ) ENGINE=InnoDB;
@@ -723,6 +727,8 @@ CREATE TABLE IF NOT EXISTS route_leg (
   destination_lat DECIMAL(10,6) NULL,
   destination_lng DECIMAL(10,6) NULL,
   route_polyline MEDIUMTEXT NULL,
+  actual_departure DATETIME NULL,
+  actual_arrival DATETIME NULL,
   INDEX idx_route_leg_road_trip (road_trip_id),
   CONSTRAINT fk_leg_route FOREIGN KEY (route_id) REFERENCES route(route_id) ON DELETE CASCADE,
   CONSTRAINT fk_leg_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicle(vehicle_id) ON DELETE SET NULL,

@@ -28,13 +28,13 @@ DEALLOCATE PREPARE m029_ht_stmt;
 
 -- 2. Danh mục loại giấy tờ
 CREATE TABLE IF NOT EXISTS document_type (
-  code VARCHAR(50) PRIMARY KEY,
+  code VARCHAR(50) COLLATE utf8mb4_unicode_ci PRIMARY KEY,
   name_vi VARCHAR(150) NOT NULL,
   name_en VARCHAR(150) NOT NULL,
   default_validity_days INT NULL,
   is_identity BOOLEAN NOT NULL DEFAULT FALSE,
   sort_order INT NOT NULL DEFAULT 0
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO document_type (code, name_vi, name_en, default_validity_days, is_identity, sort_order) VALUES
   ('horse_passport', 'Hộ chiếu ngựa', 'Horse passport', NULL, TRUE, 10),
@@ -61,7 +61,7 @@ ON DUPLICATE KEY UPDATE
 SET @m029_tdc = IF(
   (SELECT COUNT(*) FROM information_schema.COLUMNS
    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transport_document' AND COLUMN_NAME = 'document_type_code') = 0,
-  'ALTER TABLE transport_document ADD COLUMN document_type_code VARCHAR(50) NULL AFTER regulation_id',
+  'ALTER TABLE transport_document ADD COLUMN document_type_code VARCHAR(50) COLLATE utf8mb4_unicode_ci NULL AFTER regulation_id',
   'SELECT 1'
 );
 PREPARE m029_tdc_stmt FROM @m029_tdc;

@@ -82,10 +82,11 @@ export class InsuranceClaimStore {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT s.shipment_id, s.customer_id, s.status AS shipment_status, s.updated_at AS shipment_updated_at,
               sh.shipment_horse_id, sh.declared_value_vnd, sh.insurance_package,
-              sh.insurance_policy_version, sh.name AS horse_name,
+              sh.insurance_policy_version, h.name AS horse_name,
               dh.handover_id, dh.handover_datetime
        FROM shipment s
        JOIN shipment_horse sh ON sh.shipment_id = s.shipment_id AND sh.shipment_horse_id = ?
+       JOIN horse h ON h.horse_id = sh.horse_id
        LEFT JOIN delivery_handover dh ON dh.shipment_id = s.shipment_id AND dh.shipment_horse_id = sh.shipment_horse_id
        WHERE s.shipment_id = ?
        LIMIT 1`,
@@ -197,11 +198,12 @@ export class InsuranceClaimStore {
 
   private async findClaimByIdWithConn(conn: PoolConnection | Pool, claimId: number): Promise<InsuranceClaimItem | null> {
     const [rows] = await conn.execute<RowDataPacket[]>(
-      `SELECT c.*, sh.name AS horse_name, u.full_name AS customer_name, u.email AS customer_email,
+      `SELECT c.*, h.name AS horse_name, u.full_name AS customer_name, u.email AS customer_email,
               CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) AS request_code
        FROM insurance_claim c
        JOIN shipment s ON s.shipment_id = c.shipment_id
        JOIN shipment_horse sh ON sh.shipment_horse_id = c.shipment_horse_id
+       JOIN horse h ON h.horse_id = sh.horse_id
        JOIN \`user\` u ON u.user_id = c.customer_id
        WHERE c.claim_id = ?
        LIMIT 1`,
@@ -238,11 +240,12 @@ export class InsuranceClaimStore {
 
   async listClaimsByShipment(shipmentId: number): Promise<InsuranceClaimItem[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT c.*, sh.name AS horse_name, u.full_name AS customer_name, u.email AS customer_email,
+      `SELECT c.*, h.name AS horse_name, u.full_name AS customer_name, u.email AS customer_email,
               CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) AS request_code
        FROM insurance_claim c
        JOIN shipment s ON s.shipment_id = c.shipment_id
        JOIN shipment_horse sh ON sh.shipment_horse_id = c.shipment_horse_id
+       JOIN horse h ON h.horse_id = sh.horse_id
        JOIN \`user\` u ON u.user_id = c.customer_id
        WHERE c.shipment_id = ?
        ORDER BY c.created_at DESC`,
@@ -252,11 +255,12 @@ export class InsuranceClaimStore {
   }
 
   async listAllClaims(status?: string): Promise<InsuranceClaimItem[]> {
-    let sql = `SELECT c.*, sh.name AS horse_name, u.full_name AS customer_name, u.email AS customer_email,
+    let sql = `SELECT c.*, h.name AS horse_name, u.full_name AS customer_name, u.email AS customer_email,
                       CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) AS request_code
                FROM insurance_claim c
                JOIN shipment s ON s.shipment_id = c.shipment_id
                JOIN shipment_horse sh ON sh.shipment_horse_id = c.shipment_horse_id
+               JOIN horse h ON h.horse_id = sh.horse_id
                JOIN \`user\` u ON u.user_id = c.customer_id`;
     const params: any[] = [];
     if (status && status.trim()) {

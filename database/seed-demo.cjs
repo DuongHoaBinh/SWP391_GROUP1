@@ -156,7 +156,7 @@ async function main() {
         ownerId: customerAId,
         name: 'Xích Thố',
         breed: 'Thoroughbred',
-        gender: 'stallion',
+        gender: 'male',
         color: 'Hồng mã (Bay/Chestnut)',
         microchipNo: '9001820001',
         passportNo: 'VN-FEI-2026-001',
@@ -180,7 +180,7 @@ async function main() {
         ownerId: customerAId,
         name: 'Hắc Mã',
         breed: 'Quarter Horse',
-        gender: 'mare',
+        gender: 'female',
         color: 'Hắc mã (Black)',
         microchipNo: '9001820003',
         passportNo: null,
@@ -192,7 +192,7 @@ async function main() {
         ownerId: customerAId,
         name: 'Hoàng Phi (Chuồng riêng)',
         breed: 'Thoroughbred Champion',
-        gender: 'stallion',
+        gender: 'male',
         color: 'Kim mã (Palomino)',
         microchipNo: '9001820004',
         passportNo: 'VN-FEI-2026-004',
@@ -205,7 +205,7 @@ async function main() {
         ownerId: customerBId,
         name: 'Kiếm Phong (Khách B)',
         breed: 'Warmblood',
-        gender: 'stallion',
+        gender: 'male',
         color: 'Nâu sẫm (Dark Bay)',
         microchipNo: '9001820005',
         passportNo: 'VN-FEI-2026-005',
@@ -217,15 +217,15 @@ async function main() {
 
     for (const h of demoHorses) {
       await db.execute(
-        `INSERT INTO horse (owner_id, name, breed, microchip_no, passport_no, requires_private_stall, declared_value, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO horse (owner_id, name, breed, gender, color, microchip_no, passport_no, requires_private_stall, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
+           name = VALUES(name),
            breed = VALUES(breed),
            passport_no = VALUES(passport_no),
            requires_private_stall = VALUES(requires_private_stall),
-           declared_value = VALUES(declared_value),
            status = VALUES(status)`,
-        [h.ownerId, h.name, h.breed, h.microchipNo, h.passportNo, h.requiresPrivateStall, h.declaredValue, h.status],
+        [h.ownerId, h.name, h.breed, h.gender, h.color, h.microchipNo, h.passportNo, h.requiresPrivateStall, h.status],
       );
     }
 
@@ -238,7 +238,7 @@ async function main() {
     const horseHoangPhiId = horseMap.get(`${customerAId}:Hoàng Phi (Chuồng riêng)`);
     const horseKiemPhongId = horseMap.get(`${customerBId}:Kiếm Phong (Khách B)`);
 
-    // 6. Seed Documents (Valid, Expired, Expiring in 10 Days)
+    // 6. Seed Documents (Valid, Expired, Expiring in 10 Days) in transport_document
     console.log('Seeding documents linked to horses...');
     const toISODate = (d) => d.toISOString().split('T')[0];
     const now = new Date();
@@ -251,7 +251,9 @@ async function main() {
       // Xích Thố: 3 valid docs
       {
         horseId: horseXichThoId,
+        uploadedBy: customerAId,
         docType: 'passport',
+        documentTypeCode: 'horse_passport',
         docNumber: 'VN-FEI-2026-001',
         fileUrl: '/uploads/documents/demo_passport_xichtho.pdf',
         issueDate: minusYears(1),
@@ -260,7 +262,9 @@ async function main() {
       },
       {
         horseId: horseXichThoId,
+        uploadedBy: customerAId,
         docType: 'vaccination',
+        documentTypeCode: 'vaccination_influenza',
         docNumber: 'VAC-2026-088',
         fileUrl: '/uploads/documents/demo_vaccine_xichtho.pdf',
         issueDate: minusDays(60),
@@ -269,7 +273,9 @@ async function main() {
       },
       {
         horseId: horseXichThoId,
+        uploadedBy: customerAId,
         docType: 'coggins',
+        documentTypeCode: 'eia_coggins_test',
         docNumber: 'COG-2026-012',
         fileUrl: '/uploads/documents/demo_coggins_xichtho.pdf',
         issueDate: minusDays(90),
@@ -279,7 +285,9 @@ async function main() {
       // Bạch Long: passport valid, vaccine expired 1 month ago
       {
         horseId: horseBachLongId,
+        uploadedBy: customerAId,
         docType: 'passport',
+        documentTypeCode: 'horse_passport',
         docNumber: 'VN-FEI-2026-002',
         fileUrl: '/uploads/documents/demo_passport_bachlong.pdf',
         issueDate: minusYears(2),
@@ -288,7 +296,9 @@ async function main() {
       },
       {
         horseId: horseBachLongId,
+        uploadedBy: customerAId,
         docType: 'vaccination',
+        documentTypeCode: 'vaccination_influenza',
         docNumber: 'VAC-2025-OLD',
         fileUrl: '/uploads/documents/demo_vaccine_bachlong_expired.pdf',
         issueDate: minusYears(1),
@@ -298,7 +308,9 @@ async function main() {
       // Hoàng Phi: passport valid, health cert expiring in 10 days
       {
         horseId: horseHoangPhiId,
+        uploadedBy: customerAId,
         docType: 'passport',
+        documentTypeCode: 'horse_passport',
         docNumber: 'VN-FEI-2026-004',
         fileUrl: '/uploads/documents/demo_passport_hoangphi.pdf',
         issueDate: minusYears(1),
@@ -307,7 +319,9 @@ async function main() {
       },
       {
         horseId: horseHoangPhiId,
+        uploadedBy: customerAId,
         docType: 'health_certificate',
+        documentTypeCode: 'health_certificate',
         docNumber: 'HC-2026-EXPIRING',
         fileUrl: '/uploads/documents/demo_health_hoangphi_expiring.pdf',
         issueDate: minusDays(20),
@@ -317,7 +331,9 @@ async function main() {
       // Kiếm Phong (Customer B)
       {
         horseId: horseKiemPhongId,
+        uploadedBy: customerBId,
         docType: 'passport',
+        documentTypeCode: 'horse_passport',
         docNumber: 'VN-FEI-2026-005',
         fileUrl: '/uploads/documents/demo_passport_kiemphong.pdf',
         issueDate: minusYears(1),
@@ -328,15 +344,24 @@ async function main() {
 
     for (const d of demoDocs) {
       if (!d.horseId) continue;
-      await db.execute(
-        `INSERT INTO horse_document (horse_id, doc_type, doc_number, file_url, issue_date, expiry_date, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           file_url = VALUES(file_url),
-           expiry_date = VALUES(expiry_date),
-           status = VALUES(status)`,
-        [d.horseId, d.docType, d.docNumber, d.fileUrl, d.issueDate, d.expiryDate, d.status],
+      const [existing] = await db.execute(
+        'SELECT document_id FROM transport_document WHERE horse_id = ? AND doc_number = ?',
+        [d.horseId, d.docNumber]
       );
+      if (existing.length > 0) {
+        await db.execute(
+          `UPDATE transport_document
+           SET file_url = ?, issue_date = ?, expiry_date = ?, status = ?, document_type_code = ?
+           WHERE document_id = ?`,
+          [d.fileUrl, d.issueDate, d.expiryDate, d.status, d.documentTypeCode, existing[0].document_id],
+        );
+      } else {
+        await db.execute(
+          `INSERT INTO transport_document (horse_id, uploaded_by, doc_type, document_type_code, doc_number, file_url, issue_date, expiry_date, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [d.horseId, d.uploadedBy, d.docType, d.documentTypeCode, d.docNumber, d.fileUrl, d.issueDate, d.expiryDate, d.status],
+        );
+      }
     }
 
     console.log('✓ Demo data seeded successfully!');
