@@ -588,52 +588,87 @@ function CustomerTrackingContent() {
             {/* Column 2: Progress & Step 11 Vertical Timeline */}
             <div className="lg:col-span-5 flex flex-col gap-6 order-2">
               {/* Light Editorial Route Progress Card */}
-              <div className="bg-[#FAF8F4] border border-[#E5DDD0] rounded-2xl p-5 sm:p-6">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
-                  <span className="text-[11px] font-bold tracking-[0.12em] text-[#A67C2E] uppercase">
-                    {t('tracking.gpsRadar', language === 'en' ? 'JOURNEY PROGRESS' : 'TIẾN ĐỘ HÀNH TRÌNH')}
-                  </span>
-                  <span className="text-xs font-semibold text-[#5F6977]">
-                    {language === 'en' ? 'Progress:' : 'Tiến độ:'} <strong className="text-[#181A17]">{progressPct}%</strong> (
-                    {completedCount}/{totalCount} {language === 'en' ? 'milestones' : 'mốc'})
+              <div className="bg-[#FAF8F4] border border-[#E5DDD0] rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col gap-4">
+                {/* Header row: Title & Percentage */}
+                <div className="flex items-center justify-between gap-2 border-b border-[#EAE3D6] pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#A67C2E]" />
+                    <span className="text-[11px] font-bold tracking-[0.14em] text-[#A67C2E] uppercase">
+                      {t('tracking.gpsRadar', language === 'en' ? 'JOURNEY PROGRESS' : 'TIẾN ĐỘ HÀNH TRÌNH')}
+                    </span>
+                  </div>
+                  <span className="text-xs font-semibold text-[#5F6977] bg-white border border-[#E5DDD0] px-3 py-1 rounded-full shadow-xs">
+                    {language === 'en' ? 'Progress:' : 'Tiến độ:'}{' '}
+                    <strong className="text-[#181A17] font-bold">{progressPct}%</strong>{' '}
+                    <span className="text-[#8C95A3] font-normal">
+                      ({completedCount}/{totalCount} {language === 'en' ? 'milestones' : 'mốc'})
+                    </span>
                   </span>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-6 my-2">
-                  <div className="text-center sm:text-left">
-                    <div className="w-3 h-3 rounded-full bg-[#287653] mb-1.5 ring-4 ring-[#E8F2EB] mx-auto sm:mx-0" />
-                    <div className="font-bold text-sm text-[#181A17]">{shortLocation(trackingDetails?.origin)}</div>
-                    <div className="text-xs text-[#5F6977]">{language === 'en' ? 'Origin' : 'Điểm xuất phát'}</div>
+                {/* Origin and Destination Row */}
+                <div className="grid grid-cols-2 gap-4 items-start pt-1">
+                  {/* Origin */}
+                  <div className="text-left min-w-0">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <div className="w-2.5 h-2.5 rounded-full bg-[#287653] ring-4 ring-[#E8F2EB] shrink-0" />
+                      <span className="text-[11px] font-bold text-[#287653] uppercase tracking-wider">
+                        {language === 'en' ? 'Origin' : 'Điểm xuất phát'}
+                      </span>
+                    </div>
+                    <div className="font-bold text-sm text-[#181A17] truncate leading-tight" title={trackingDetails?.origin || ''}>
+                      {shortLocation(trackingDetails?.origin)}
+                    </div>
+                    <div className="text-[11px] text-[#5F6977] truncate mt-0.5">
+                      {trackingDetails?.origin || ''}
+                    </div>
                   </div>
 
-                  <div className="flex-1 w-full relative px-2 sm:px-4">
-                    <div className="h-2 w-full bg-[#E5DDD0] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#181A17] rounded-full transition-all duration-500"
-                        style={{ width: `${Math.max(8, progressPct)}%` }}
-                      />
+                  {/* Destination */}
+                  <div className="text-right min-w-0">
+                    <div className="flex items-center justify-end gap-1.5 mb-1">
+                      <span className="text-[11px] font-bold text-[#A67C2E] uppercase tracking-wider">
+                        {language === 'en' ? 'Destination' : 'Điểm đến'}
+                      </span>
+                      <div className="w-2.5 h-2.5 rounded-full bg-[#A67C2E] ring-4 ring-[#F5EFE2] shrink-0" />
                     </div>
-                    <div className="flex justify-center mt-3">
-                      <span className="bg-white border border-[#D8CEBE] text-[#181A17] px-3.5 py-1.5 rounded-full text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm">
-                        <MapPin size={13} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
-                        <span>
-                          {language === 'en' ? 'Current milestone:' : 'Vị trí hiện tại:'}{' '}
-                          <strong>{trackingDetails?.currentMilestone || '—'}</strong>
-                        </span>
+                    <div className="font-bold text-sm text-[#181A17] truncate leading-tight" title={trackingDetails?.destination || ''}>
+                      {shortLocation(trackingDetails?.destination)}
+                    </div>
+                    <div className="text-[11px] text-[#5F6977] truncate mt-0.5">
+                      {language === 'en' ? 'ETA: ' : 'Dự kiến: '}
+                      <span className="font-medium text-[#181A17]">
+                        {trackingDetails?.eta
+                          ? (Number.isNaN(Date.parse(trackingDetails.eta))
+                              ? trackingDetails.eta
+                              : new Date(trackingDetails.eta).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN'))
+                          : (language === 'en' ? 'On schedule' : 'Đúng tiến độ')}
                       </span>
                     </div>
                   </div>
+                </div>
 
-                  <div className="text-center sm:text-right">
-                    <div className="w-3 h-3 rounded-full bg-[#A67C2E] mb-1.5 ring-4 ring-[#F5EFE2] mx-auto sm:ml-auto" />
-                    <div className="font-bold text-sm text-[#181A17]">{shortLocation(trackingDetails?.destination)}</div>
-                    <div className="text-xs text-[#5F6977]">
-                      {language === 'en' ? 'Estimated arrival:' : 'Dự kiến đến:'}{' '}
-                      {trackingDetails?.eta
-                        ? (Number.isNaN(Date.parse(trackingDetails.eta))
-                            ? trackingDetails.eta
-                            : new Date(trackingDetails.eta).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN'))
-                        : (language === 'en' ? 'On schedule' : 'Đúng tiến độ')}
+                {/* Full-width Progress Bar */}
+                <div className="w-full pt-1">
+                  <div className="h-2.5 w-full bg-[#E5DDD0] rounded-full overflow-hidden shadow-inner">
+                    <div
+                      className="h-full bg-gradient-to-r from-[#287653] via-[#8C7A5E] to-[#A67C2E] rounded-full transition-all duration-500"
+                      style={{ width: `${Math.max(6, Math.min(100, progressPct))}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Current Milestone / Location Banner (Full width, elegant pill) */}
+                <div className="bg-white border border-[#D8CEBE] rounded-xl p-3 flex items-start gap-2.5 shadow-xs">
+                  <div className="w-7 h-7 rounded-lg bg-[#F5EFE2] flex items-center justify-center shrink-0 text-[#A67C2E] mt-0.5">
+                    <MapPin size={15} aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-bold text-[#8C7A5E] uppercase tracking-wider">
+                      {language === 'en' ? 'Current Waypoint / Location' : 'Vị trí / Mốc hiện tại'}
+                    </div>
+                    <div className="text-xs sm:text-sm font-bold text-[#181A17] leading-relaxed break-words mt-0.5">
+                      {trackingDetails?.currentMilestone || '—'}
                     </div>
                   </div>
                 </div>
