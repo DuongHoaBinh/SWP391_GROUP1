@@ -66,7 +66,7 @@ export function QuoteBreakdown({
     return () => clearInterval(interval);
   }, [quote?.expiresAt]);
 
-  if (isLoading) {
+  if (isLoading && !quote) {
     return (
       <div className="p-6 rounded-2xl border border-[#D8CEBE] bg-[#FDFCFB] flex flex-col items-center justify-center gap-3 text-center animate-pulse">
         <RefreshCw className="w-8 h-8 text-[#A67C2E] animate-spin" />
@@ -99,7 +99,7 @@ export function QuoteBreakdown({
   const grandTotal = isAllocated ? selectedFreightTotal + (quote.insurance?.total || 0) : quote.total;
 
   return (
-    <div className="rounded-2xl border-2 border-[#A67C2E]/40 bg-[#FAF8F4] overflow-hidden shadow-sm">
+    <div className={`rounded-2xl border-2 border-[#A67C2E]/40 bg-[#FAF8F4] overflow-hidden shadow-sm ${isLoading ? 'opacity-75 transition-opacity' : ''}`}>
       {/* Header with timer and status */}
       <div className="px-5 py-3.5 bg-[#F0EBE0] border-b border-[#D8CEBE] flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">

@@ -69,7 +69,7 @@ export function RequirementChecklist({
   submittedLaterKeys = new Set(),
   onToggleSubmitLater,
 }: RequirementChecklistProps) {
-  if (isLoading) {
+  if (isLoading && !requirements) {
     return (
       <div className="p-8 text-center rounded-2xl border border-dashed border-[#E5DDD0] bg-[#FAF8F4] animate-pulse">
         <FileCheck2 size={32} className="mx-auto text-[#A67C2E] mb-2 animate-bounce" />
@@ -85,7 +85,7 @@ export function RequirementChecklist({
     requirements;
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 ${isLoading ? 'opacity-75 transition-opacity' : ''}`}>
       {/* 1. Feasibility Warning Banner */}
       {!isDepartureFeasible && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">

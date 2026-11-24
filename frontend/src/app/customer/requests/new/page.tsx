@@ -283,12 +283,14 @@ function CreateTransportRequestForm() {
     setValue('horseCount', Math.max(1, totalSelectedHorses));
   }, [totalSelectedHorses, setValue]);
 
-  const selectedHorses = horses
-    .filter((h) => (horseQuantities[h.id] || 0) > 0)
-    .map((h) => ({
-      ...h,
-      quantity: horseQuantities[h.id] || 1,
-    }));
+  const selectedHorses = useMemo(() => {
+    return horses
+      .filter((h) => (horseQuantities[h.id] || 0) > 0)
+      .map((h) => ({
+        ...h,
+        quantity: horseQuantities[h.id] || 1,
+      }));
+  }, [horses, horseQuantities]);
 
   const [transportMode, setTransportMode] = useState<'road' | 'air' | 'sea'>('road');
   const [seaMode, setSeaMode] = useState<'ferry' | 'vessel'>('ferry');
@@ -320,6 +322,28 @@ function CreateTransportRequestForm() {
       .filter((id) => !isNaN(id) && id > 0);
   }, [selectedHorses]);
 
+  const lastComplianceKeyRef = useRef<string>('');
+  const complianceParamsKey = useMemo(() => {
+    if (!targetCountry || selectedHorseNumericIds.length === 0 || !formValues.departureDate) {
+      return '';
+    }
+    return [
+      targetCountry,
+      transportMode,
+      selectedHorseNumericIds.slice().sort().join(','),
+      formValues.departureDate,
+      tripType,
+      tripType === 'round_trip' && returnDepartureAt ? returnDepartureAt.slice(0, 10) : '',
+    ].join('|');
+  }, [
+    targetCountry,
+    transportMode,
+    selectedHorseNumericIds,
+    formValues.departureDate,
+    tripType,
+    returnDepartureAt,
+  ]);
+
   const loadComplianceRequirements = useCallback(async () => {
     if (!targetCountry || selectedHorseNumericIds.length === 0 || !formValues.departureDate) {
       setComplianceReqs(null);
@@ -343,8 +367,17 @@ function CreateTransportRequestForm() {
   }, [targetCountry, transportMode, selectedHorseNumericIds, formValues.departureDate, tripType, returnDepartureAt]);
 
   useEffect(() => {
+    if (!complianceParamsKey) {
+      setComplianceReqs(null);
+      lastComplianceKeyRef.current = '';
+      return;
+    }
+    if (lastComplianceKeyRef.current === complianceParamsKey) {
+      return;
+    }
+    lastComplianceKeyRef.current = complianceParamsKey;
     void loadComplianceRequirements();
-  }, [loadComplianceRequirements]);
+  }, [complianceParamsKey, loadComplianceRequirements]);
 
   const fetchQuoteNow = useCallback(async () => {
     if (!formValues.origin || !formValues.destination || !formValues.departureDate || selectedHorses.length === 0) {
@@ -424,12 +457,57 @@ function CreateTransportRequestForm() {
     language,
   ]);
 
+  const lastQuoteKeyRef = useRef<string>('');
+  const quoteParamsKey = useMemo(() => {
+    if (!formValues.origin || !formValues.destination || !formValues.departureDate || selectedHorses.length === 0) {
+      return '';
+    }
+    const horsesKey = selectedHorses.map((h) => `${h.id}:${h.quantity}`).join(',');
+    const insuranceKey = selectedHorses.map((h) => {
+      const ins = insuranceValues[h.id];
+      return `${ins?.declaredValue || 0}:${ins?.insurancePackage || 'basic'}`;
+    }).join(',');
+
+    return [
+      formValues.origin,
+      formValues.destination,
+      formValues.departureDate,
+      pickupTime,
+      transportMode,
+      seaMode,
+      tripType,
+      returnDepartureAt,
+      horsesKey,
+      insuranceKey,
+    ].join('|');
+  }, [
+    formValues.origin,
+    formValues.destination,
+    formValues.departureDate,
+    pickupTime,
+    transportMode,
+    seaMode,
+    tripType,
+    returnDepartureAt,
+    selectedHorses,
+    insuranceValues,
+  ]);
+
   useEffect(() => {
+    if (!quoteParamsKey) {
+      setQuote(null);
+      lastQuoteKeyRef.current = '';
+      return;
+    }
+    if (lastQuoteKeyRef.current === quoteParamsKey) {
+      return;
+    }
     const timer = setTimeout(() => {
+      lastQuoteKeyRef.current = quoteParamsKey;
       void fetchQuoteNow();
     }, 600);
     return () => clearTimeout(timer);
-  }, [fetchQuoteNow]);
+  }, [quoteParamsKey, fetchQuoteNow]);
 
   // Step 9: khung giờ xe tải nặng được vào điểm đón trong ngày đã chọn (HN, HCM có giờ cấm)
   useEffect(() => {
