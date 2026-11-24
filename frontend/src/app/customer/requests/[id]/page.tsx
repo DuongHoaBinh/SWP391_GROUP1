@@ -272,7 +272,15 @@ const fetcher = async (url: string) => {
   };
 };
 
-const PAYABLE_SHIPMENT_STATUSES = ['awaiting_payment', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'];
+const PAYABLE_SHIPMENT_STATUSES = [
+  'awaiting_payment',
+  'planning',
+  'confirmed',
+  'ready_to_depart',
+  'in_transit',
+  'return_pending',
+  'completed',
+];
 
 export default function RequestDetailPage() {
   const params = useParams();
@@ -1898,7 +1906,7 @@ export default function RequestDetailPage() {
             </div>
 
             {/* SePay VietQR Payment Gateway */}
-            {isApproved && (
+            {(isApproved || PAYABLE_SHIPMENT_STATUSES.includes(statusLower)) && (
                 <SepayPayment
                   shipmentId={Number(request.id || request.shipmentId || requestId)}
                   requestCode={request.requestCode}

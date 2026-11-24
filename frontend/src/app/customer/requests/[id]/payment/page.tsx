@@ -17,7 +17,15 @@ interface Order {
   status: string;
 }
 
-const payableStatuses = ['planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'];
+const payableStatuses = [
+  'awaiting_payment',
+  'planning',
+  'confirmed',
+  'ready_to_depart',
+  'in_transit',
+  'return_pending',
+  'completed',
+];
 
 export default function PaymentPage() {
   const params = useParams<{ id: string }>();
@@ -97,7 +105,7 @@ export default function PaymentPage() {
           amount={Number(order.totalCost)}
           checkout
           eligible={
-            payableStatuses.includes(order.status) &&
+            payableStatuses.includes(String(order.status || '').toLowerCase()) &&
             Number.isSafeInteger(Number(order.totalCost)) &&
             Number(order.totalCost) > 0
           }
