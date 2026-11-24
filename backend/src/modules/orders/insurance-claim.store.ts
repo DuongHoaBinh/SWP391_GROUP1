@@ -4,8 +4,12 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
 } from '@nestjs/common';
-import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { createPool, Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { MYSQL_POOL } from '../../common/database/database.module';
 import {
   DEFAULT_PAYOUT_RULES_V2,
   InsurancePackage,
@@ -15,8 +19,33 @@ import {
 import { InsuranceClaimEventItem, InsuranceClaimItem } from './insurance-claim.types';
 
 @Injectable()
-export class InsuranceClaimStore {
-  constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
+export class InsuranceClaimStore implements OnModuleInit, OnModuleDestroy {
+  private pool!: Pool;
+
+  constructor(@Optional() @Inject(MYSQL_POOL) private readonly injectedPool?: Pool) {
+    if (injectedPool) {
+      this.pool = injectedPool;
+    }
+  }
+
+  async onModuleInit(): Promise<void> {
+    if (!this.pool) {
+      this.pool = createPool({
+        host: process.env.DB_HOST ?? 'localhost',
+        port: Number(process.env.DB_PORT ?? 3306),
+        database: process.env.DB_NAME ?? 'horse_transport_system',
+        user: process.env.DB_USER ?? 'root',
+        password: process.env.DB_PASSWORD ?? '',
+        connectionLimit: 10,
+      });
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.pool && !this.injectedPool) {
+      await this.pool.end();
+    }
+  }
 
   private async tx<T>(fn: (conn: PoolConnection) => Promise<T>): Promise<T> {
     const conn = await this.pool.getConnection();
