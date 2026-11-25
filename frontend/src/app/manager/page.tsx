@@ -894,13 +894,6 @@ export default function ManagerDashboardPage() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => openModal('CHANGE', req.id)}
-                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#242722] bg-white hover:bg-[#F0EEE8] border border-[#D8CEBE] cursor-pointer transition-colors whitespace-nowrap"
-                              >
-                                {t('manager.dashboard.askChange', 'Yêu cầu sửa')}
-                              </button>
-                              <button
-                                type="button"
                                 onClick={() => openModal('REJECT', req.id)}
                                 className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#B33E3E] bg-white hover:bg-[#FDF6F6] border border-[#E5B8B8] cursor-pointer transition-colors whitespace-nowrap"
                               >
@@ -1124,41 +1117,6 @@ export default function ManagerDashboardPage() {
                   </>
                 );
               })()}
-
-              {selectedOrder && (
-                <BookingQuoteSummary
-                  input={approveQuotedPrice}
-                  bookingType={selectedOrder.bookingType}
-                  horseCount={
-                    selectedOrder.requestedHorseCount || selectedOrder.horses?.length || 1
-                  }
-                  currency="VND"
-                  insuranceFee={Number(selectedOrder.insuranceFee ?? 0)}
-                />
-              )}
-
-              <div>
-                <label
-                  htmlFor="dashboard-approve-price"
-                  className="text-[13px] font-semibold text-[#242722] block mb-1.5"
-                >
-                  {selectedOrder?.bookingType === 'dedicated_charter'
-                    ? t('manager.dashboard.charterPriceLabel', 'Cước trọn gói (VND)')
-                    : t('manager.dashboard.stallPriceLabel', 'Đơn giá mỗi ô chuồng (VND)')}{' '}
-                  <span className="text-[#B33E3E]">*</span>
-                </label>
-                <input
-                  id="dashboard-approve-price"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={approveQuotedPrice}
-                  onChange={(e) => setApproveQuotedPrice(e.target.value)}
-                  placeholder="VD: 50000000"
-                  className="w-full p-3 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-sm text-[#181A17] outline-none focus:border-[#181A17] focus:ring-2 focus:ring-[#C4B38E]/30"
-                  autoFocus
-                />
-              </div>
 
               <div>
                 <label

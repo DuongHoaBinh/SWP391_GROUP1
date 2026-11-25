@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Plane,
   Truck,
@@ -72,6 +73,7 @@ function normalizeVehicleTypeOption(raw?: string | null): string {
 }
 
 export default function ManagerPlanningPage() {
+  const router = useRouter();
   const { t, language, translateVehicleType, translateStopType, translateCountry } = useLanguage();
   const isEn = language === 'en';
 
@@ -1336,7 +1338,7 @@ export default function ManagerPlanningPage() {
                             return (
                               <button
                                 type="button"
-                                onClick={() => handleOpenFrameworkModal(order)}
+                                onClick={() => router.push(`/manager/dispatch/routes?shipmentId=${order.id}`)}
                                 className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer border ${
                                   hasActiveIncident
                                     ? 'bg-rose-100 hover:bg-rose-200 text-[#B33E3E] border-rose-300 animate-pulse'
@@ -1347,11 +1349,11 @@ export default function ManagerPlanningPage() {
                                 title={
                                   hasActiveIncident
                                     ? isEn
-                                      ? 'Route incident reported - Click to adjust framework'
-                                      : 'Lộ trình gặp sự cố - Bấm để hiệu chỉnh lại định hướng kế hoạch'
+                                      ? 'Route incident reported - Open route planning'
+                                      : 'Lộ trình gặp sự cố - Chuyển sang trang lập lộ trình tuyến'
                                     : isEn
-                                    ? 'Set overall transport plan framework'
-                                    : 'Thiết lập kế hoạch vận chuyển tổng thể'
+                                    ? 'Go to detailed route planning'
+                                    : 'Chuyển sang trang lập lộ trình tuyến chi tiết'
                                 }
                               >
                                 {hasActiveIncident ? (
@@ -1361,9 +1363,9 @@ export default function ManagerPlanningPage() {
                                 )}
                                 {hasActiveIncident
                                   ? t('manager.planning.btnEditFrameworkIncident', 'Điều chỉnh do sự cố')
-                                  : plan?.managerVehicleType
-                                  ? t('manager.planning.btnEditFramework', 'Sửa kế hoạch')
-                                  : t('manager.planning.btnSetupFramework', 'Thiết lập kế hoạch')}
+                                  : isEn
+                                  ? 'Plan Route'
+                                  : 'Lập kế hoạch'}
                               </button>
                             );
                           })()}

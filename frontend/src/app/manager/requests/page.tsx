@@ -1098,21 +1098,6 @@ export default function ManagerRequestsPage() {
                             </button>
                           )}
 
-                          {/* Request Changes (Only for 'requested') */}
-                          {order.status === 'requested' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRequestChangeOrder(order);
-                                setRequestChangeReason('');
-                              }}
-                              title={t('manager.requests.btnRequestChange', 'Yêu cầu chỉnh sửa')}
-                              className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
-                            >
-                              <FileEdit size={13} /> {t('manager.requests.btnRequestChange', 'Sửa')}
-                            </button>
-                          )}
-
                           {/* Reject (Only for 'requested') */}
                           {order.status === 'requested' && (
                             <button
@@ -1441,79 +1426,6 @@ export default function ManagerRequestsPage() {
                         <strong className="text-[#181A17]">{routeInfo.customsCount} {isEn ? 'posts' : 'trạm'}</strong>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Booking Quote & Insurance Summary */}
-                  <BookingQuoteSummary
-                    input={totalCostInput}
-                    bookingType={approveOrder.bookingType}
-                    horseCount={approveOrder.requestedHorseCount || approveOrder.horses?.length || 1}
-                    currency={costCurrency}
-                    insuranceFee={Number(approveOrder.insuranceFee ?? 0)}
-                  />
-
-                  {/* Price Input with USD/VND toggle */}
-                  <div className="p-3.5 bg-[#FAF9F5] border border-[#D8CEBE] rounded-xl flex flex-col gap-2">
-                    <div className="flex flex-wrap justify-between items-center gap-2">
-                      <label htmlFor="requests-approve-price" className="text-xs font-bold text-[#242722]">
-                        {approveOrder.bookingType === 'dedicated_charter'
-                          ? t('manager.requests.charterPriceLabel', 'Cước trọn gói *')
-                          : t('manager.requests.stallPriceLabel', 'Đơn giá mỗi ô chuồng *')}
-                      </label>
-                      <div className="flex gap-1 bg-white p-0.5 rounded-lg border border-[#D8CEBE]">
-                        <button
-                          type="button"
-                          onClick={() => handleCurrencyToggle('USD')}
-                          className={`px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer ${
-                            costCurrency === 'USD' ? 'bg-[#181A17] text-white' : 'text-slate-600'
-                          }`}
-                        >
-                          USD ($)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCurrencyToggle('VND')}
-                          className={`px-2 py-0.5 text-[11px] font-bold rounded cursor-pointer ${
-                            costCurrency === 'VND' ? 'bg-[#287653] text-white' : 'text-slate-600'
-                          }`}
-                        >
-                          VND (₫)
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="relative">
-                      <input
-                        id="requests-approve-price"
-                        type="number"
-                        min={costCurrency === 'USD' ? '0.01' : 1}
-                        step={costCurrency === 'USD' ? 'any' : 1}
-                        required
-                        value={totalCostInput}
-                        onChange={(e) => setTotalCostInput(e.target.value)}
-                        placeholder={costCurrency === 'USD' ? 'VD: 2500' : 'VD: 60000000'}
-                        className="w-full h-11 px-3.5 pr-16 rounded-xl border border-[#D8CEBE] bg-[#FDFCFB] text-slate-900 text-sm font-bold outline-none focus:ring-2 focus:ring-[#C4B38E]/20 focus:border-[#181A17]"
-                      />
-                      <span className="absolute right-3.5 top-3 text-xs font-bold text-slate-500">
-                        {costCurrency === 'USD' ? 'USD ($)' : 'VND (₫)'}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between text-[11px] text-slate-600 mt-1">
-                      <span>{t('manager.requests.fxRateNote', 'Tỷ lệ quy đổi (1 USD ≈ 25.400 VND):')}</span>
-                      <strong className="text-slate-800">
-                        {costCurrency === 'USD'
-                          ? `≈ ${(Math.round((parseFloat(totalCostInput) || 0) * 25400)).toLocaleString('vi-VN')} VND`
-                          : `≈ $${(Math.round(((parseFloat(totalCostInput) || 0) / 25400) * 100) / 100).toLocaleString('vi-VN')} USD`}
-                      </strong>
-                    </div>
-
-                    <p className="text-[11px] text-slate-500 m-0">
-                      {t(
-                        'manager.requests.sepayUnlockHint',
-                        'Báo giá dự kiến được lưu bằng VND, gồm cước cơ bản và bảo hiểm. Hóa đơn và thanh toán SePay chỉ mở sau khi lộ trình chi tiết đã được xác nhận.'
-                      )}
-                    </p>
                   </div>
                 </>
               )}
