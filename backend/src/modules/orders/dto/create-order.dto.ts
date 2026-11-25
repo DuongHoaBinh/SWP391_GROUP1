@@ -46,12 +46,12 @@ export class HorseInfoDto {
 
   @ApiPropertyOptional({
     example: 'male',
-    enum: ['male', 'female', 'gelding'],
-    description: 'Giới tính (male: đực, female: cái, gelding: thiến)',
+    enum: ['male', 'female', 'other'],
+    description: 'Giới tính (male: đực, female: cái, other: khác)',
   })
   @IsOptional()
-  @IsIn(['male', 'female', 'gelding'], { message: 'Giới tính phải là male, female hoặc gelding' })
-  gender?: 'male' | 'female' | 'gelding';
+  @IsIn(['male', 'female', 'other', 'gelding'], { message: 'Giới tính phải là male, female hoặc other' })
+  gender?: 'male' | 'female' | 'other' | 'gelding';
 
   @ApiPropertyOptional({ example: 4, minimum: 0, description: 'Tuổi của con ngựa (năm)' })
   @IsOptional()
@@ -220,12 +220,12 @@ export class CreateOrderDto {
 
   @ApiPropertyOptional({
     example: 'male',
-    enum: ['male', 'female', 'gelding'],
-    description: 'Giới tính con ngựa (male, female, gelding)',
+    enum: ['male', 'female', 'other'],
+    description: 'Giới tính con ngựa (male, female, other)',
   })
   @IsOptional()
-  @IsIn(['male', 'female', 'gelding'])
-  horseGender?: 'male' | 'female' | 'gelding';
+  @IsIn(['male', 'female', 'other', 'gelding'])
+  horseGender?: 'male' | 'female' | 'other' | 'gelding';
 
   @ApiPropertyOptional({ example: 4, minimum: 0, description: 'Tuổi của con ngựa (khi gửi 1 con)' })
   @IsOptional()

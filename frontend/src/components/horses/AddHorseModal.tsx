@@ -68,6 +68,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   const [activeTab, setActiveTab] = useState<'identity' | 'passport'>('identity');
   const [name, setName] = useState('');
   const [breed, setBreed] = useState('Thoroughbred');
+  const [gender, setGender] = useState<'male' | 'female' | 'other'>('male');
   const [age, setAge] = useState<number>(5);
   const [temperament, setTemperament] = useState<HorseTemperament>('normal');
   const [requiresPrivateStall, setRequiresPrivateStall] = useState(false);
@@ -95,6 +96,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
     setActiveTab('identity');
     setName('');
     setBreed('Thoroughbred');
+    setGender('male');
     setAge(5);
     setTemperament('normal');
     setRequiresPrivateStall(false);
@@ -180,6 +182,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         body: JSON.stringify({
           name: trimmedName,
           breed,
+          gender,
           age: Number(age) || 1,
           quantity: 1,
           temperament,
@@ -203,6 +206,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         id: backendHorseId,
         name: trimmedName,
         breed,
+        gender,
         age: Number(age) || 1,
         quantity: 1,
         temperament,
@@ -455,6 +459,32 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-text-muted">
                       <ChevronRight size={14} className="rotate-90" />
                     </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.gender', 'Giới Tính')}
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { value: 'male' as const, label: language === 'en' ? 'Male' : 'Đực' },
+                      { value: 'female' as const, label: language === 'en' ? 'Female' : 'Cái' },
+                      { value: 'other' as const, label: language === 'en' ? 'Other' : 'Khác' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setGender(opt.value)}
+                        className={`px-3 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                          gender === opt.value
+                            ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                            : 'bg-surface text-text-secondary border-border hover:border-[#181A17]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 

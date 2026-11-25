@@ -65,8 +65,8 @@ CREATE TABLE horse (
   owner_id INT NOT NULL,
   name VARCHAR(100) NOT NULL,
   breed VARCHAR(100),
-  -- gender, date_of_birth: ngừng dùng sau review 11/2026 (giữ cột cho dữ liệu cũ)
-  gender ENUM('male','female','gelding'),
+  -- gender: male (Đực), female (Cái), other (Khác)
+  gender ENUM('male','female','other'),
   date_of_birth DATE,
   age INT,
   microchip_no VARCHAR(50) UNIQUE,

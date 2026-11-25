@@ -193,11 +193,12 @@ const HEALTH_STATUS_DATA: Record<string, { en: string; vi: string }> = {
 
 // ─── HORSE GENDER & STATUS ───────────────────────────────────────────────────
 const GENDER_DATA: Record<string, { en: string; vi: string }> = {
-  male: { en: 'Stallion', vi: 'Ngựa đực' },
-  stallion: { en: 'Stallion', vi: 'Ngựa đực' },
-  female: { en: 'Mare', vi: 'Ngựa cái' },
-  mare: { en: 'Mare', vi: 'Ngựa cái' },
-  gelding: { en: 'Gelding', vi: 'Ngựa thiến' },
+  male: { en: 'Male', vi: 'Đực' },
+  stallion: { en: 'Male', vi: 'Đực' },
+  female: { en: 'Female', vi: 'Cái' },
+  mare: { en: 'Female', vi: 'Cái' },
+  other: { en: 'Other', vi: 'Khác' },
+  gelding: { en: 'Other', vi: 'Khác' },
 };
 
 // ─── INCIDENT TYPES & SEVERITIES ─────────────────────────────────────────────
@@ -524,9 +525,9 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const raw = String(gender).trim();
       const lower = raw.toLowerCase();
       if (GENDER_DATA[lower]) return GENDER_DATA[lower][language];
-      if (lower.includes('đực') || lower.includes('stallion')) return GENDER_DATA.male[language];
-      if (lower.includes('cái') || lower.includes('mare')) return GENDER_DATA.female[language];
-      if (lower.includes('thiến') || lower.includes('gelding')) return GENDER_DATA.gelding[language];
+      if (lower.includes('đực') || lower.includes('stallion') || lower === 'male') return GENDER_DATA.male[language];
+      if (lower.includes('cái') || lower.includes('mare') || lower === 'female') return GENDER_DATA.female[language];
+      if (lower.includes('khác') || lower.includes('other') || lower.includes('thiến') || lower.includes('gelding')) return GENDER_DATA.other[language];
       return gender;
     },
     [language]

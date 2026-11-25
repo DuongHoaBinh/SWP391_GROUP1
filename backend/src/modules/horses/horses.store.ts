@@ -1,6 +1,6 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
-import { HorseEntity, HorseStatus, HorseTemperament } from './horses.types';
+import { HorseEntity, HorseGender, HorseStatus, HorseTemperament } from './horses.types';
 import { CreateHorseDto } from './dto/create-horse.dto';
 import { UpdateHorseDto } from './dto/update-horse.dto';
 import { MYSQL_POOL } from '../../common/database/database.module';
@@ -10,6 +10,7 @@ interface HorseRow extends RowDataPacket {
   owner_id: number;
   name: string;
   breed: string | null;
+  gender: string | null;
   age: number | null;
   microchip_no: string | null;
   passport_no: string | null;
@@ -56,7 +57,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findByOwnerId(ownerId: number): Promise<HorseEntity[]> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
        FROM horse
        WHERE owner_id = ? AND (status IS NULL OR status NOT IN ('retired', 'deleted'))
        ORDER BY horse_id DESC`,
@@ -68,7 +69,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findById(horseId: number): Promise<HorseEntity | undefined> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
        FROM horse
        WHERE horse_id = ?
        LIMIT 1`,
@@ -81,12 +82,13 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async create(ownerId: number, dto: CreateHorseDto): Promise<number> {
     const [result] = await this.pool.execute(
-      `INSERT INTO horse (owner_id, name, breed, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO horse (owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         ownerId,
         dto.name,
         dto.breed ?? null,
+        dto.gender ?? null,
         dto.age ?? null,
         dto.microchipNo ?? null,
         dto.passportNo ?? null,
@@ -111,6 +113,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
        SET
          name = COALESCE(?, name),
          breed = COALESCE(?, breed),
+         gender = COALESCE(?, gender),
          age = COALESCE(?, age),
          microchip_no = COALESCE(?, microchip_no),
          passport_no = COALESCE(?, passport_no),
@@ -127,6 +130,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
       [
         dto.name ?? null,
         dto.breed ?? null,
+        dto.gender ?? null,
         dto.age ?? null,
         dto.microchipNo ?? null,
         dto.passportNo ?? null,
@@ -171,11 +175,22 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
   }
 
   private mapHorseRow(row: HorseRow): HorseEntity {
+    const rawGender = row.gender ? String(row.gender).toLowerCase() : null;
+    const normalizedGender: HorseGender | null =
+      rawGender === 'male'
+        ? HorseGender.MALE
+        : rawGender === 'female'
+          ? HorseGender.FEMALE
+          : rawGender === 'other' || rawGender === 'gelding'
+            ? HorseGender.OTHER
+            : null;
+
     return {
       id: row.horse_id,
       ownerId: row.owner_id,
       name: row.name,
       breed: row.breed,
+      gender: normalizedGender,
       age: row.age !== null ? Number(row.age) : null,
       microchipNo: row.microchip_no,
       passportNo: row.passport_no,

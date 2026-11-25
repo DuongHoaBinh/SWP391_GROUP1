@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
-import { HorseStatus, HorseTemperament } from '../horses.types';
+import { HorseGender, HorseStatus, HorseTemperament } from '../horses.types';
 
 export class CreateHorseDto {
   @ApiProperty({ description: 'Tên con ngựa', example: 'Thunder Bolt' })
@@ -12,6 +12,15 @@ export class CreateHorseDto {
   @IsString()
   @IsOptional()
   breed?: string;
+
+  @ApiPropertyOptional({
+    description: 'Giới tính (male: đực, female: cái, other: khác)',
+    enum: HorseGender,
+    example: HorseGender.MALE,
+  })
+  @IsEnum(HorseGender, { message: 'Giới tính phải là male, female hoặc other' })
+  @IsOptional()
+  gender?: HorseGender;
 
   @ApiPropertyOptional({ description: 'Tuổi của ngựa', example: 5 })
   @IsInt()

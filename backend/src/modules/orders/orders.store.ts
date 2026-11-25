@@ -91,7 +91,7 @@ interface HorseRow extends RowDataPacket {
   horse_id: number;
   name: string;
   breed: string | null;
-  gender: 'male' | 'female' | 'gelding' | null;
+  gender: 'male' | 'female' | 'other' | 'gelding' | null;
   age: number | null;
   color?: string | null;
   weight?: string | null;

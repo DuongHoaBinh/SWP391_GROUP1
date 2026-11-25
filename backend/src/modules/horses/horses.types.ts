@@ -1,8 +1,7 @@
-/** @deprecated Ngừng dùng sau review 11/2026 (bỏ giới tính khỏi hồ sơ ngựa). Giữ để đọc dữ liệu cũ. */
 export enum HorseGender {
   MALE = 'male',
   FEMALE = 'female',
-  GELDING = 'gelding',
+  OTHER = 'other',
 }
 
 export enum HorseTemperament {
@@ -23,6 +22,7 @@ export interface HorseEntity {
   ownerId: number;
   name: string;
   breed: string | null;
+  gender: HorseGender | null;
   age: number | null;
   microchipNo: string | null;
   passportNo: string | null;

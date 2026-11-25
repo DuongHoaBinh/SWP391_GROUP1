@@ -65,11 +65,19 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
   onHorseUpdated,
 }) => {
   const { updateHorse, uploadHorseAvatar, refreshHorses } = useCustomerStore();
-  const { t, language, translateBreed, translateStatus } = useLanguage();
+  const { t, language, translateBreed, translateGender, translateStatus } = useLanguage();
+
+  const normalizeGender = (g?: string | null): 'male' | 'female' | 'other' => {
+    const lower = String(g || '').toLowerCase().trim();
+    if (lower === 'female' || lower === 'mare' || lower.includes('cái')) return 'female';
+    if (lower === 'other' || lower === 'gelding' || lower.includes('khác') || lower.includes('thiến')) return 'other';
+    return 'male';
+  };
 
   const [activeTab, setActiveTab] = useState<'identity' | 'passport'>('identity');
   const [name, setName] = useState(horse.name || '');
   const [breed, setBreed] = useState(horse.breed || 'Thoroughbred');
+  const [gender, setGender] = useState<'male' | 'female' | 'other'>(normalizeGender(horse.gender));
   const [age, setAge] = useState(horse.age || 5);
   const [temperament, setTemperament] = useState<HorseTemperament>(horse.temperament || 'normal');
   const [requiresPrivateStall, setRequiresPrivateStall] = useState(Boolean(horse.requiresPrivateStall));
@@ -100,6 +108,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
     if (isOpen && horse) {
       setName(horse.name || '');
       setBreed(horse.breed || 'Thoroughbred');
+      setGender(normalizeGender(horse.gender));
       setAge(horse.age || 5);
       setTemperament(horse.temperament || 'normal');
       setRequiresPrivateStall(Boolean(horse.requiresPrivateStall));
@@ -162,6 +171,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
           body: JSON.stringify({
             name: name.trim(),
             breed,
+            gender,
             age: Number(age) || 4,
             quantity: 1,
             temperament,
@@ -181,6 +191,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
       const updatedFields: Partial<Horse> = {
         name: name.trim(),
         breed,
+        gender,
         age: Number(age) || 4,
         quantity: 1,
         temperament,
@@ -257,6 +268,8 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
               </h2>
               <p className="text-slate-300 text-sm mt-1 flex items-center gap-2 flex-wrap">
                 <span>{translateBreed(breed)}</span>
+                <span className="text-slate-500">•</span>
+                <span>{translateGender(gender)}</span>
                 <span className="text-slate-500">•</span>
                 <span>
                   {age} {t('horses.yearsOld', 'tuổi')}
@@ -463,6 +476,32 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-text-muted">
                       <ChevronRight size={14} className="rotate-90" />
                     </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.gender', 'Giới Tính')}
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { value: 'male' as const, label: language === 'en' ? 'Male' : 'Đực' },
+                      { value: 'female' as const, label: language === 'en' ? 'Female' : 'Cái' },
+                      { value: 'other' as const, label: language === 'en' ? 'Other' : 'Khác' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setGender(opt.value)}
+                        className={`px-3 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                          gender === opt.value
+                            ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                            : 'bg-surface text-text-secondary border-border hover:border-[#181A17]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 

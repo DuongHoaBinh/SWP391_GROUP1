@@ -29,7 +29,7 @@ const getFallbackHorsePhoto = () =>
   'https://images.unsplash.com/photo-1598974357801-cbca100e65d3?auto=format&fit=crop&w=800&q=80';
 
 export default function HorseDetailPage() {
-  const { t, language, translateBreed, translateColor, translateHealthStatus } = useLanguage();
+  const { t, language, translateBreed, translateGender, translateColor, translateHealthStatus } = useLanguage();
   const isEn = language === 'en';
   const params = useParams();
   const router = useRouter();
@@ -126,6 +126,7 @@ export default function HorseDetailPage() {
             code: res.code || res.passportNo || (res.id ? `HOR-2026-${String(res.id).padStart(3, '0')}` : undefined),
             name: res.name,
             breed: res.breed || 'Thoroughbred',
+            gender: res.gender || undefined,
             age: Number(res.age) || 5,
             requiresPrivateStall: Boolean(res.requiresPrivateStall),
             temperament: res.temperament || 'normal',
@@ -336,6 +337,10 @@ export default function HorseDetailPage() {
               </h1>
 
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-xs text-[#5F6977] mt-2 font-medium">
+                <span>
+                  {t('horses.gender', 'Giới tính')}: <strong className="text-[#181A17]">{horse.gender ? translateGender(horse.gender) : '—'}</strong>
+                </span>
+                <span aria-hidden="true">•</span>
                 <span>
                   {t('horses.age', 'Tuổi')}: <strong className="text-[#181A17]">{horse.age} {t('horse.yearsOld', 'tuổi')}</strong>
                 </span>
