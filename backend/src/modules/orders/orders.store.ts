@@ -273,6 +273,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
           legs: qResult.legs,
           return: qResult.return ?? null,
           tripType,
+          customerProposedPrice:
+            dto.customerProposedPrice != null && Number.isFinite(Number(dto.customerProposedPrice)) && Number(dto.customerProposedPrice) > 0
+              ? Math.round(Number(dto.customerProposedPrice))
+              : null,
         };
 
         const distanceKm = qResult.legs?.[0]?.distanceKm != null ? Number(qResult.legs[0].distanceKm) : null;
@@ -1015,6 +1019,10 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       seaMode: row.sea_mode ?? null,
       quoteId: row.quote_id != null ? Number(row.quote_id) : null,
       pricingSnapshot: parseJsonField(row.pricing_snapshot),
+      customerProposedPrice:
+        parseJsonField(row.pricing_snapshot)?.customerProposedPrice != null
+          ? Number(parseJsonField(row.pricing_snapshot).customerProposedPrice)
+          : null,
       distanceKm: row.distance_km != null ? Number(row.distance_km) : null,
       distanceSource: row.distance_source ?? null,
       originLat: row.origin_lat != null ? Number(row.origin_lat) : null,

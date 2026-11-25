@@ -102,6 +102,14 @@ export class CreateOrderDto {
   @IsString()
   optionCode?: string;
 
+  @ApiPropertyOptional({ example: 45000000, minimum: 0, description: 'Giá tiền / ngân sách đề xuất của khách hàng cho chuyến đi (VNĐ)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(999999999999)
+  customerProposedPrice?: number;
+
   @ApiPropertyOptional({ enum: ['road', 'air', 'sea'], description: 'Phương thức vận tải' })
   @IsOptional()
   @IsIn(['road', 'air', 'sea'])

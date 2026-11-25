@@ -72,6 +72,16 @@ export function SnapshotBreakdown({
             {formatVnd(Number(totalCost || 0))}
           </span>
         </div>
+        {pricingSnapshot?.customerProposedPrice != null && Number(pricingSnapshot.customerProposedPrice) > 0 && (
+          <div className="flex justify-between items-baseline pt-2 border-t border-dashed border-[#E5DDD0] text-[#5B6779]">
+            <span className="font-semibold">
+              {isEn ? 'Customer proposed price:' : 'Giá khách hàng đề xuất:'}
+            </span>
+            <span className="font-mono font-bold text-[#181A17]">
+              {formatVnd(Number(pricingSnapshot.customerProposedPrice))}
+            </span>
+          </div>
+        )}
       </div>
 
       {lines.length > 0 && (

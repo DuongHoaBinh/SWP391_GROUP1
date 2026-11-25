@@ -2018,7 +2018,7 @@ function RoutePlanningContent() {
                   onRouteCalculated={(data) => {
                     setSimulatedKm(data.distanceKm);
                     setSimulatedHours(data.durationHours);
-                    setSearchMode(data.mode);
+                    setSearchMode(data.mode === 'air' ? 'air' : 'road');
                   }}
                 />
               </div>

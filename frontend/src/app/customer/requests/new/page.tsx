@@ -172,9 +172,35 @@ function CreateTransportRequestForm() {
   const [routeData, setRouteData] = useState<{
     distanceKm: number;
     durationHours: number;
-    mode: 'air' | 'road';
+    mode: 'air' | 'road' | 'sea';
+    isDomestic?: boolean;
+    estimatedTotalPriceVnd?: number;
     legs?: RouteLegPreview[];
   } | null>(null);
+  const [customerProposedPrice, setCustomerProposedPrice] = useState<string>('');
+
+  const parsedCustomerProposedPrice = useMemo(() => {
+    const digits = customerProposedPrice.replace(/[^\d]/g, '');
+    if (!digits) return undefined;
+    const num = Number(digits);
+    return Number.isFinite(num) && num > 0 ? num : undefined;
+  }, [customerProposedPrice]);
+
+  const handleRouteCalculated = useCallback(
+    (data: {
+      distanceKm: number;
+      durationHours: number;
+      mode: 'air' | 'road' | 'sea';
+      isDomestic: boolean;
+      estimatedTotalPriceVnd: number;
+      legs?: RouteLegPreview[];
+    }) => {
+      setRouteData(data);
+      const detectedType: 'Domestic' | 'International' = data.isDomestic ? 'Domestic' : 'International';
+      setValue('transportType', detectedType, { shouldValidate: true });
+    },
+    [setValue]
+  );
 
   useEffect(() => {
     register('origin');
@@ -740,6 +766,7 @@ function CreateTransportRequestForm() {
         acceptReturnPolicy: tripType === 'round_trip' ? acceptReturnPolicy : undefined,
         quoteId: quote?.quoteId ? Number(quote.quoteId) : undefined,
         optionCode: selectedOptionCode,
+        customerProposedPrice: parsedCustomerProposedPrice,
         specialRequirements: combinedReqs || undefined,
         horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
         // Fallback for single horse if array is not preferred by backend yet
@@ -877,40 +904,44 @@ function CreateTransportRequestForm() {
             </div>
 
             <div className="p-5 sm:p-7 flex flex-col gap-5">
-              {/* Row 1: Title & Type */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-                <div>
-                  <label htmlFor="req-title" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+              {/* Row 1: Title & Auto-detected Route Scope */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label htmlFor="req-title" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: 0 }}>
                     {language === 'en' ? 'Request Title' : 'Tiêu đề yêu cầu'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
                   </label>
-                  <input
-                    id="req-title"
-                    type="text"
-                    aria-invalid={Boolean(errors.title)}
-                    {...register('title')}
-                    placeholder={language === 'en' ? 'Enter request title (e.g. Championship Transport to Singapore)' : 'Nhập tiêu đề yêu cầu (VD: Vận chuyển thi đấu đến Singapore)'}
-                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.title ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
-                  />
-                  {errors.title && (
-                    <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <AlertCircle size={12} aria-hidden="true" /> {errors.title.message}
-                    </span>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor="req-transport-type" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    {language === 'en' ? 'Transportation Type' : 'Hình thức vận chuyển'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
-                  </label>
-                  <select
-                    id="req-transport-type"
-                    {...register('transportType')}
-                    className="w-full px-3.5 py-2.5 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all cursor-pointer"
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                      formValues.transportType === 'Domestic'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-[#FAF8F4] text-[#8C6621] border-[#DFCA9A]'
+                    }`}
                   >
-                    <option value="International" className="text-[#181A17] bg-white">{language === 'en' ? 'International Cross-Border' : 'Vận chuyển quốc tế xuyên biên giới'}</option>
-                    <option value="Domestic" className="text-[#181A17] bg-white">{language === 'en' ? 'Domestic Transit' : 'Vận chuyển nội địa'}</option>
-                  </select>
+                    <span>{formValues.transportType === 'Domestic' ? '🇻🇳' : '🌐'}</span>
+                    <span>
+                      {formValues.transportType === 'Domestic'
+                        ? language === 'en'
+                          ? 'Auto-detected: Domestic Transit'
+                          : 'Tự động nhận diện: Vận chuyển nội địa'
+                        : language === 'en'
+                          ? 'Auto-detected: International Cross-Border'
+                          : 'Tự động nhận diện: Quốc tế xuyên biên giới'}
+                    </span>
+                  </span>
                 </div>
+                <input
+                  id="req-title"
+                  type="text"
+                  aria-invalid={Boolean(errors.title)}
+                  {...register('title')}
+                  placeholder={language === 'en' ? 'Enter request title (e.g. Championship Transport to Singapore)' : 'Nhập tiêu đề yêu cầu (VD: Vận chuyển thi đấu đến Singapore)'}
+                  className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.title ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
+                />
+                {errors.title && (
+                  <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <AlertCircle size={12} aria-hidden="true" /> {errors.title.message}
+                  </span>
+                )}
               </div>
 
               {/* Transport Mode & Sea Mode Selection */}
@@ -1029,7 +1060,7 @@ function CreateTransportRequestForm() {
                     name="origin"
                     icon="origin"
                     value={formValues.origin || ''}
-                    domesticOnly={formValues.transportType === 'Domestic'}
+                    domesticOnly={false}
                     hasError={Boolean(errors.origin)}
                     language={language}
                     placeholder={language === 'en' ? 'Enter pickup address (e.g. Ho Chi Minh City, Vietnam)' : 'Nhập địa chỉ xuất phát (VD: Quận 7, TP. Hồ Chí Minh)'}
@@ -1054,7 +1085,7 @@ function CreateTransportRequestForm() {
                     name="destination"
                     icon="destination"
                     value={formValues.destination || ''}
-                    domesticOnly={formValues.transportType === 'Domestic'}
+                    domesticOnly={false}
                     hasError={Boolean(errors.destination)}
                     language={language}
                     placeholder={language === 'en' ? 'Enter destination address (e.g. Singapore Turf Club)' : 'Nhập địa chỉ đến (VD: Đà Lạt, Singapore, New Delhi...)'}
@@ -1075,18 +1106,110 @@ function CreateTransportRequestForm() {
               <RoutePlanningMap
                 originText={formValues.origin}
                 destinationText={formValues.destination}
-                transportType={formValues.transportType}
+                mode={transportMode}
+                seaMode={seaMode}
+                horseCount={Math.max(1, totalSelectedHorses)}
                 selectedOriginGeo={selectedOriginGeo}
                 selectedDestGeo={selectedDestGeo}
-                onRouteCalculated={setRouteData}
+                onRouteCalculated={handleRouteCalculated}
                 onApplyPreset={(preset) => {
                   setSelectedOriginGeo(null);
                   setSelectedDestGeo(null);
                   setValue('origin', preset.origin, { shouldValidate: true });
                   setValue('destination', preset.destination, { shouldValidate: true });
-                  setValue('transportType', preset.type, { shouldValidate: true });
                 }}
               />
+
+              {/* Customer Proposed Trip Price / Budget */}
+              <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex flex-col gap-2.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label
+                    htmlFor="req-customer-proposed-price"
+                    className="text-xs font-bold text-[#181A17] uppercase tracking-wide"
+                  >
+                    {language === 'en'
+                      ? 'Customer Proposed Trip Price / Budget (VND)'
+                      : 'Giá tiền / Ngân sách đề xuất của khách hàng (VNĐ)'}
+                  </label>
+                  {routeData?.estimatedTotalPriceVnd ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCustomerProposedPrice(
+                          routeData.estimatedTotalPriceVnd!.toLocaleString('vi-VN')
+                        )
+                      }
+                      className="text-[11px] font-bold text-[#8C6621] bg-white border border-[#DFCA9A] hover:bg-[#F5EFE2] px-2.5 py-1 rounded-full transition-colors cursor-pointer"
+                    >
+                      {language === 'en'
+                        ? `Use map estimate (${routeData.estimatedTotalPriceVnd.toLocaleString('vi-VN')} đ)`
+                        : `Dùng giá ước tính từ bản đồ (${routeData.estimatedTotalPriceVnd.toLocaleString('vi-VN')} đ)`}
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="relative">
+                  <input
+                    id="req-customer-proposed-price"
+                    type="text"
+                    inputMode="numeric"
+                    value={customerProposedPrice}
+                    onChange={(e) => {
+                      const rawDigits = e.target.value.replace(/[^\d]/g, '');
+                      if (!rawDigits) {
+                        setCustomerProposedPrice('');
+                        return;
+                      }
+                      const num = Number(rawDigits);
+                      if (Number.isFinite(num) && num <= 999_999_999_999) {
+                        setCustomerProposedPrice(num.toLocaleString('vi-VN'));
+                      }
+                    }}
+                    placeholder={
+                      routeData?.estimatedTotalPriceVnd
+                        ? `${language === 'en' ? 'e.g.' : 'VD:'} ${routeData.estimatedTotalPriceVnd.toLocaleString('vi-VN')}`
+                        : language === 'en'
+                          ? 'Enter your proposed trip price in VND (optional)'
+                          : 'Nhập mức giá mong muốn cho chuyến đi bằng VNĐ (tùy chọn)'
+                    }
+                    className="w-full pl-3.5 pr-16 py-2.5 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-mono font-bold text-sm placeholder:font-sans placeholder:font-normal placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all"
+                  />
+                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#5F6977] pointer-events-none">
+                    VNĐ
+                  </span>
+                </div>
+
+                <p className="m-0 text-[11.5px] text-[#5F6977] leading-relaxed">
+                  {parsedCustomerProposedPrice && routeData?.estimatedTotalPriceVnd ? (
+                    <>
+                      {language === 'en' ? 'Compared to map estimate: ' : 'So với ước tính từ bản đồ: '}
+                      <strong
+                        className={
+                          parsedCustomerProposedPrice >= routeData.estimatedTotalPriceVnd
+                            ? 'text-emerald-700'
+                            : 'text-amber-700'
+                        }
+                      >
+                        {parsedCustomerProposedPrice === routeData.estimatedTotalPriceVnd
+                          ? language === 'en'
+                            ? 'Matches map estimate'
+                            : 'Khớp với giá ước tính từ bản đồ'
+                          : parsedCustomerProposedPrice > routeData.estimatedTotalPriceVnd
+                            ? `+${(parsedCustomerProposedPrice - routeData.estimatedTotalPriceVnd).toLocaleString('vi-VN')} đ`
+                            : `-${(routeData.estimatedTotalPriceVnd - parsedCustomerProposedPrice).toLocaleString('vi-VN')} đ`}
+                      </strong>
+                      {' · '}
+                      {language === 'en'
+                        ? 'Your proposed price will be attached to the order for Logistics Manager review.'
+                        : 'Mức giá đề xuất của bạn sẽ được đính kèm theo đơn để Quản lý vận hành xem xét.'}
+                    </>
+                  ) : language === 'en' ? (
+                    'Optional: Enter your expected budget or proposed fare for this trip. Official billing follows the server-locked quotation.'
+                  ) : (
+                    'Tùy chọn: Nhập mức giá hoặc ngân sách dự kiến bạn mong muốn cho chuyến đi này. Thông tin sẽ hiển thị kèm báo giá cho Quản lý vận hành.'
+                  )}
+                </p>
+              </div>
 
               <p className="m-0 text-xs text-[#5F6977] rounded-xl border border-[#E5DDD0] bg-[#FAF8F4] px-4 py-3">
                 {language === 'en'
@@ -1759,7 +1882,11 @@ function CreateTransportRequestForm() {
                           {t('customer.newRequest.routePrefix', 'Lộ trình:')}{' '}
                           {routeData.mode === 'air'
                             ? t('customer.newRequest.routeAir', 'Đa phương thức: Xe thùng + Hàng không')
-                            : t('customer.newRequest.routeRoad', 'Xe thùng đường bộ')}
+                            : routeData.mode === 'sea'
+                              ? language === 'en'
+                                ? 'Multimodal: Horse Truck + Sea'
+                                : 'Đa phương thức: Xe thùng + Đường thủy'
+                              : t('customer.newRequest.routeRoad', 'Xe thùng đường bộ')}
                         </div>
                         <div className="text-xs text-[#5F6977]">
                           {t('customer.newRequest.distance', 'Quãng đường:')}{' '}
@@ -1768,6 +1895,14 @@ function CreateTransportRequestForm() {
                           <strong className="text-[#181A17]">
                             ~{routeData.durationHours} {t('customer.newRequest.hours', 'giờ')}
                           </strong>
+                          {routeData.estimatedTotalPriceVnd ? (
+                            <>
+                              {' '}• {language === 'en' ? 'Map est. fare:' : 'Ước tính bản đồ:'}{' '}
+                              <strong className="text-[#8C6621] font-mono">
+                                {routeData.estimatedTotalPriceVnd.toLocaleString('vi-VN')} đ
+                              </strong>
+                            </>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -1788,11 +1923,15 @@ function CreateTransportRequestForm() {
                               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold shrink-0 ${
                                 leg.type === 'air'
                                   ? 'bg-[#181A17] text-[#C4B38E]'
-                                  : 'bg-[#F5EFE2] text-[#8C6621] border border-[#DFCA9A]'
+                                  : leg.type === 'sea'
+                                    ? 'bg-[#ECFEFF] text-[#0E7490] border border-[#A5F3FC]'
+                                    : 'bg-[#F5EFE2] text-[#8C6621] border border-[#DFCA9A]'
                               }`}
                             >
                               {leg.type === 'air' ? (
                                 <Plane size={11} aria-hidden="true" />
+                              ) : leg.type === 'sea' ? (
+                                <Ship size={11} aria-hidden="true" />
                               ) : (
                                 <Truck size={11} aria-hidden="true" />
                               )}
@@ -1802,11 +1941,27 @@ function CreateTransportRequestForm() {
                               {leg.fromName} <span className="text-[#A67C2E]">→</span> {leg.toName}
                             </span>
                           </div>
-                          <span className="text-[#5F6977] font-semibold shrink-0">
-                            ~{leg.distanceKm.toLocaleString()} km · ~{leg.durationHours}h
-                          </span>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-[#5F6977] font-semibold">
+                              ~{leg.distanceKm.toLocaleString()} km · ~{leg.durationHours}h
+                            </span>
+                            <span className="font-mono font-bold text-[#8C6621]">
+                              {Number(leg.estimatedPriceVnd || 0).toLocaleString('vi-VN')} đ
+                            </span>
+                          </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {parsedCustomerProposedPrice && (
+                    <div className="pt-2.5 border-t border-[#E5DDD0] flex items-center justify-between gap-2 text-xs">
+                      <span className="font-semibold text-[#5F6977]">
+                        {language === 'en' ? 'Customer proposed trip price:' : 'Giá tiền đề xuất của khách hàng:'}
+                      </span>
+                      <span className="font-mono font-extrabold text-sm text-[#181A17]">
+                        {parsedCustomerProposedPrice.toLocaleString('vi-VN')} đ
+                      </span>
                     </div>
                   )}
                 </div>

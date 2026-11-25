@@ -121,4 +121,5 @@ export interface TransportOrder {
   feasibilityReasonCode?: string | null;
   feasibilityNote?: string | null;
   returnRescheduleFee?: number | null;
+  customerProposedPrice?: number | null;
 }

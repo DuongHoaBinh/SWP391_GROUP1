@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Plane,
   Truck,
+  Ship,
   Navigation,
   Info,
   Clock,
@@ -18,6 +19,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext';
 import {
   buildEquineRoute,
   calculateHaversine,
+  estimateLegPriceVnd,
   geocodeAddress,
   GeocodedLocation,
   normalizeVietnamese,
@@ -103,12 +105,17 @@ export interface RoutePlanningMapProps {
   originText?: string;
   destinationText?: string;
   transportType?: 'International' | 'Domestic';
+  mode?: 'air' | 'road' | 'sea';
+  seaMode?: 'ferry' | 'vessel';
+  horseCount?: number;
   selectedOriginGeo?: GeocodedLocation | null;
   selectedDestGeo?: GeocodedLocation | null;
   onRouteCalculated?: (data: {
     distanceKm: number;
     durationHours: number;
-    mode: 'air' | 'road';
+    mode: 'air' | 'road' | 'sea';
+    isDomestic: boolean;
+    estimatedTotalPriceVnd: number;
     legs?: RouteLegPreview[];
   }) => void;
   onApplyPreset?: (preset: RoutePreset) => void;
@@ -209,6 +216,9 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   originText: originTextProp,
   destinationText = 'Singapore Turf Club, Singapore',
   transportType,
+  mode: controlledMode,
+  seaMode = 'vessel',
+  horseCount = 1,
   selectedOriginGeo,
   selectedDestGeo,
   onRouteCalculated,
@@ -220,7 +230,9 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   const mapInstanceRef = useRef<any>(null);
   const layersGroupRef = useRef<any>(null);
 
-  const [mode, setMode] = useState<'air' | 'road'>('air');
+  const [internalMode, setInternalMode] = useState<'air' | 'road' | 'sea'>('road');
+  const mode = controlledMode ?? internalMode;
+  const setMode = setInternalMode;
   const [mapStyle, setMapStyle] = useState<'streets' | 'satellite'>('streets');
   const [selectedWaypoint, setSelectedWaypoint] = useState<Waypoint | null>(null);
   const [isLegendOpen, setIsLegendOpen] = useState<boolean>(true);
@@ -316,9 +328,10 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
       resolvedOriginGeo?.coords ?? null,
       resolvedDestGeo?.coords ?? null,
       resolvedOriginGeo,
-      resolvedDestGeo
+      resolvedDestGeo,
+      { seaMode, horseCount }
     );
-  }, [originText, destinationText, mode, transportType, resolvedOriginGeo, resolvedDestGeo]);
+  }, [originText, destinationText, mode, transportType, resolvedOriginGeo, resolvedDestGeo, seaMode, horseCount]);
 
   const waypoints = routeResult.waypoints;
   const effectiveMode = routeResult.mode;
@@ -327,36 +340,50 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
 
   const effectiveLegs: RouteLegPreview[] = React.useMemo(() => {
     return routeResult.legs.map((leg) => {
+      if (effectiveMode === 'road' && osrmDistanceKm !== null && leg.type === 'road') {
+        const liveKm = osrmDistanceKm;
+        return {
+          ...leg,
+          distanceKm: liveKm,
+          durationHours: Math.max(1, Math.round((liveKm / 55) * 1.25 * 10) / 10),
+          estimatedPriceVnd: estimateLegPriceVnd('road', liveKm, { horseCount }),
+        };
+      }
       const live = osrmLegMetrics[leg.sequenceNo];
       if (!live || leg.type !== 'road') return leg;
       return {
         ...leg,
         distanceKm: live.distanceKm,
         durationHours: Math.max(0.5, Math.round((live.durationHours + 0.5) * 10) / 10),
+        estimatedPriceVnd: estimateLegPriceVnd('road', live.distanceKm, { horseCount }),
       };
     });
-  }, [routeResult.legs, osrmLegMetrics]);
+  }, [routeResult.legs, effectiveMode, osrmDistanceKm, osrmLegMetrics, horseCount]);
 
   const effectiveTotalDistanceKm = React.useMemo(() => {
-    if (effectiveMode === 'air') {
+    if (effectiveMode === 'air' || effectiveMode === 'sea') {
       return Math.round(effectiveLegs.reduce((sum, leg) => sum + leg.distanceKm, 0));
     }
     return osrmDistanceKm ?? totalDistanceKm;
   }, [effectiveMode, effectiveLegs, osrmDistanceKm, totalDistanceKm]);
 
   const effectiveEstimatedHours = React.useMemo(() => {
-    if (effectiveMode === 'air') {
+    if (effectiveMode === 'air' || effectiveMode === 'sea') {
       return Math.max(2, Math.round(effectiveLegs.reduce((sum, leg) => sum + leg.durationHours, 0) * 10) / 10);
     }
     return estimatedHours;
   }, [effectiveMode, effectiveLegs, estimatedHours]);
+
+  const effectiveEstimatedTotalPriceVnd = React.useMemo(() => {
+    return effectiveLegs.reduce((sum, leg) => sum + (leg.estimatedPriceVnd || 0), 0);
+  }, [effectiveLegs]);
 
   // Reset OSRM overrides and leg focus when route inputs change
   useEffect(() => {
     setOsrmDistanceKm(null);
     setOsrmLegMetrics({});
     setFocusedLegSeq(null);
-  }, [originText, destinationText, mode, transportType, resolvedOriginGeo, resolvedDestGeo]);
+  }, [originText, destinationText, mode, seaMode, transportType, resolvedOriginGeo, resolvedDestGeo]);
 
   useEffect(() => {
     if (onRouteCalculatedRef.current) {
@@ -364,10 +391,19 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         distanceKm: effectiveTotalDistanceKm,
         durationHours: effectiveEstimatedHours,
         mode: effectiveMode,
+        isDomestic: routeResult.isDomestic,
+        estimatedTotalPriceVnd: effectiveEstimatedTotalPriceVnd,
         legs: effectiveLegs,
       });
     }
-  }, [effectiveMode, effectiveTotalDistanceKm, effectiveEstimatedHours, effectiveLegs]);
+  }, [
+    effectiveMode,
+    effectiveTotalDistanceKm,
+    effectiveEstimatedHours,
+    effectiveEstimatedTotalPriceVnd,
+    routeResult.isDomestic,
+    effectiveLegs,
+  ]);
 
   const leafletRef = useRef<any>(null);
   const tileLayerRef = useRef<any>(null);
@@ -525,6 +561,10 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           bgColor = '#A67C2E';
           iconSymbol = '✈️';
           badgeLabel = language === 'en' ? 'AIRPORT' : 'SÂN BAY';
+        } else if (type === 'seaport') {
+          bgColor = '#0E7490';
+          iconSymbol = '⚓';
+          badgeLabel = language === 'en' ? 'SEAPORT' : 'CẢNG BIỂN';
         } else if (type === 'checkpoint') {
           bgColor = '#966516';
           iconSymbol = '🛂';
@@ -580,7 +620,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
       });
 
       // Draw Route Lines with Instant Baseline + Async OSRM Curve Refinement
-      if (effectiveMode === 'air') {
+      if (effectiveMode === 'air' || effectiveMode === 'sea') {
         const roadLegPromises: Array<
           Promise<{
             sequenceNo: number;
@@ -615,25 +655,31 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           } else {
             const p1 = leg.fromCoords;
             const p2 = leg.toCoords;
-            const flightArc: [number, number][] = [];
+            const isSeaLeg = leg.type === 'sea';
+            const arcPoints: [number, number][] = [];
             const steps = 30;
+            const curveFactor = isSeaLeg ? -0.9 : 1.5;
             for (let i = 0; i <= steps; i++) {
               const t = i / steps;
-              const lat = p1[0] + (p2[0] - p1[0]) * t + Math.sin(t * Math.PI) * 1.5;
+              const lat = p1[0] + (p2[0] - p1[0]) * t + Math.sin(t * Math.PI) * curveFactor;
               const lng = p1[1] + (p2[1] - p1[1]) * t;
-              flightArc.push([lat, lng]);
+              arcPoints.push([lat, lng]);
             }
 
-            const flightPolyline = L.polyline(flightArc, {
-              color: '#B49A68',
+            const transitPolyline = L.polyline(arcPoints, {
+              color: isSeaLeg ? '#0E7490' : '#B49A68',
               weight: 3.5,
-              dashArray: '8, 8',
+              dashArray: isSeaLeg ? '6, 8' : '8, 8',
               opacity: 0.95,
             }).addTo(group);
-            flightPolyline.bindTooltip(
-              language === 'en'
-                ? `Leg ${leg.sequenceNo} · Equine Flight: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
-                : `Chặng ${leg.sequenceNo} · Hàng không: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`,
+            transitPolyline.bindTooltip(
+              isSeaLeg
+                ? language === 'en'
+                  ? `Leg ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelEn)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
+                  : `Chặng ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelVi)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
+                : language === 'en'
+                  ? `Leg ${leg.sequenceNo} · Equine Flight: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
+                  : `Chặng ${leg.sequenceNo} · Hàng không: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`,
               { sticky: true }
             );
           }
@@ -828,67 +874,8 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           </div>
         </div>
 
-        {/* Mode Selector */}
+        {/* Map Layer Switcher */}
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-          <div
-            style={{
-              display: 'flex',
-              backgroundColor: '#121411',
-              padding: '3px',
-              borderRadius: '9px',
-              border: '1px solid #2D312C',
-              gap: '2px',
-            }}
-          >
-            <button
-              type="button"
-              aria-pressed={mode === 'air'}
-              onClick={() => setMode('air')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                borderRadius: '7px',
-                fontSize: '12.5px',
-                fontWeight: 600,
-                border: 'none',
-                cursor: 'pointer',
-                backgroundColor: mode === 'air' ? '#B49A68' : 'transparent',
-                color: mode === 'air' ? '#181A17' : '#D8CEBE',
-                boxShadow: mode === 'air' ? '0 1px 3px rgba(0,0,0,0.2)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <Plane size={14} aria-hidden="true" />
-              <span>{t('routes.map.airMode', 'Xe thùng + Hàng không')}</span>
-            </button>
-            <button
-              type="button"
-              aria-pressed={mode === 'road'}
-              onClick={() => setMode('road')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                borderRadius: '7px',
-                fontSize: '12.5px',
-                fontWeight: 600,
-                border: 'none',
-                cursor: 'pointer',
-                backgroundColor: mode === 'road' ? '#A67C2E' : 'transparent',
-                color: mode === 'road' ? '#FFFFFF' : '#D8CEBE',
-                boxShadow: mode === 'road' ? '0 1px 3px rgba(0,0,0,0.2)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <Truck size={14} aria-hidden="true" />
-              <span>{t('routes.map.roadMode', 'Xe thùng đường bộ')}</span>
-            </button>
-          </div>
-
-          {/* Map Layer Switcher */}
           <button
             type="button"
             aria-pressed={mapStyle === 'satellite'}
@@ -1188,12 +1175,13 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           >
             {(() => {
               const airLeg = effectiveMode === 'air' ? effectiveLegs.find((l) => l.type === 'air') : null;
+              const seaLeg = effectiveMode === 'sea' ? effectiveLegs.find((l) => l.type === 'sea') : null;
               const lastLeg = effectiveLegs.length > 0 ? effectiveLegs[effectiveLegs.length - 1] : null;
-              const finalRoadLeg = effectiveMode === 'air' && lastLeg?.type === 'road' ? lastLeg : null;
+              const finalRoadLeg = (effectiveMode === 'air' || effectiveMode === 'sea') && lastLeg?.type === 'road' ? lastLeg : null;
               return (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#181A17' }}>
-                    {language === 'en' ? 'Door-to-Door Route Legs' : 'Lộ trình vận chuyển theo chặng'}
+                    {language === 'en' ? 'Door-to-Door Route Legs & Estimated Cost' : 'Lộ trình & giá cước ước tính theo chặng'}
                   </span>
                   <span
                     style={{
@@ -1209,9 +1197,13 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                       ? language === 'en'
                         ? `${effectiveLegs.length} legs · Multimodal Truck + Air`
                         : `${effectiveLegs.length} chặng · Xe thùng + Hàng không`
-                      : language === 'en'
-                        ? `${effectiveLegs.length} leg · Horse Truck`
-                        : `${effectiveLegs.length} chặng · Xe thùng đường bộ`}
+                      : effectiveMode === 'sea'
+                        ? language === 'en'
+                          ? `${effectiveLegs.length} legs · Multimodal Truck + Sea`
+                          : `${effectiveLegs.length} chặng · Xe thùng + Đường thủy`
+                        : language === 'en'
+                          ? `${effectiveLegs.length} leg · Horse Truck`
+                          : `${effectiveLegs.length} chặng · Xe thùng đường bộ`}
                   </span>
                   {airLeg && (
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#8C6621' }}>
@@ -1222,6 +1214,17 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                         : language === 'en'
                           ? `Direct arrival: ${airLeg.toName}`
                           : `Hạ cánh trực tiếp tại ${airLeg.toName}`}
+                    </span>
+                  )}
+                  {seaLeg && (
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#0E7490' }}>
+                      {finalRoadLeg
+                        ? language === 'en'
+                          ? `Arrival port: ${seaLeg.toName} · final truck ~${finalRoadLeg.distanceKm} km`
+                          : `Cảng đến gần nhất: ${seaLeg.toName} · xe thùng cuối ~${finalRoadLeg.distanceKm} km`
+                        : language === 'en'
+                          ? `Direct port arrival: ${seaLeg.toName}`
+                          : `Cập cảng trực tiếp tại ${seaLeg.toName}`}
                     </span>
                   )}
                 </div>
@@ -1263,6 +1266,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
             {effectiveLegs.map((leg) => {
               const isFocused = focusedLegSeq === leg.sequenceNo;
               const isAir = leg.type === 'air';
+              const isSea = leg.type === 'sea';
               return (
                 <button
                   key={`${leg.sequenceNo}-${leg.type}`}
@@ -1317,12 +1321,22 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                           gap: '4px',
                           padding: '2px 8px',
                           borderRadius: '999px',
-                          backgroundColor: isAir ? '#181A17' : '#FAF8F4',
-                          color: isAir ? '#C4B38E' : '#8C6621',
-                          border: isAir ? '1px solid #2D312C' : '1px solid #DFCA9A',
+                          backgroundColor: isAir ? '#181A17' : isSea ? '#ECFEFF' : '#FAF8F4',
+                          color: isAir ? '#C4B38E' : isSea ? '#0E7490' : '#8C6621',
+                          border: isAir
+                            ? '1px solid #2D312C'
+                            : isSea
+                              ? '1px solid #A5F3FC'
+                              : '1px solid #DFCA9A',
                         }}
                       >
-                        {isAir ? <Plane size={11} aria-hidden="true" /> : <Truck size={11} aria-hidden="true" />}
+                        {isAir ? (
+                          <Plane size={11} aria-hidden="true" />
+                        ) : isSea ? (
+                          <Ship size={11} aria-hidden="true" />
+                        ) : (
+                          <Truck size={11} aria-hidden="true" />
+                        )}
                         <span>{language === 'en' ? leg.vehicleLabelEn : leg.vehicleLabelVi}</span>
                       </span>
                     </div>
@@ -1337,6 +1351,32 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
 
                   <div style={{ fontSize: '11px', color: '#57564E', lineHeight: 1.4 }}>
                     {language === 'en' ? leg.noteEn : leg.noteVi}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: '2px',
+                      paddingTop: '6px',
+                      borderTop: '1px dashed #E5DDD0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      width: '100%',
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', color: '#5F6977', fontWeight: 500 }}>
+                      {language === 'en' ? 'Est. leg fare:' : 'Giá chặng ước tính:'}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '12.5px',
+                        fontWeight: 800,
+                        color: '#8C6621',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      }}
+                    >
+                      {Number(leg.estimatedPriceVnd || 0).toLocaleString('vi-VN')} đ
+                    </span>
                   </div>
                 </button>
               );
@@ -1399,6 +1439,31 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
               {formattedDuration}
             </strong>
           </div>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            backgroundColor: '#FFFFFF',
+            border: '1px solid #D8CEBE',
+            borderRadius: '10px',
+            padding: '6px 12px',
+          }}
+        >
+          <span style={{ fontSize: '12px', color: '#57564E', fontWeight: 600 }}>
+            {language === 'en' ? 'Map Est. Fare:' : 'Tổng cước ước tính từ bản đồ:'}
+          </span>
+          <strong
+            style={{
+              fontSize: '14.5px',
+              color: '#8C6621',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            }}
+          >
+            {effectiveEstimatedTotalPriceVnd.toLocaleString('vi-VN')} đ
+          </strong>
         </div>
       </div>
     </div>
