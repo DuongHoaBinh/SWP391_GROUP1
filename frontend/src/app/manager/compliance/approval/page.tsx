@@ -15,8 +15,6 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronRight,
-  CheckCheck,
-  Loader2,
 } from 'lucide-react';
 import { DocumentReviewModal } from '@/features/documents/components/DocumentReviewModal';
 import { documentsApi } from '@/features/documents/api/documents.api';
@@ -105,6 +103,7 @@ export default function DocumentApprovalPage() {
             createdAt: d.createdAt,
             customerName: d.uploaderName || d.uploaderEmail || '',
             fileUrl: d.fileUrl,
+            expiryDate: d.expiryDate ?? null,
             status: d.status || 'submitted',
           };
         });
@@ -131,58 +130,13 @@ export default function DocumentApprovalPage() {
     fetchRealPending();
   }, [fetchRealPending]);
 
-  const [quickApprovingKey, setQuickApprovingKey] = useState<string | null>(null);
   const [collapsedOrders, setCollapsedOrders] = useState<Record<string, boolean>>({});
 
+  // Mỗi hồ sơ phải được thẩm định qua DocumentReviewModal (checklist 4 tiêu chí + ngày hết hạn thật).
+  // Không có duyệt nhanh/duyệt hàng loạt vì không thể tự điền ngày hết hạn hay tiêu chí kiểm tra.
   const handleReviewSuccess = () => {
     setSelectedDoc(null);
     fetchRealPending();
-  };
-
-  const handleQuickApproveDoc = async (doc: any) => {
-    if (!doc?.numericDocId || quickApprovingKey !== null) return;
-    setQuickApprovingKey(doc.id);
-    try {
-      const defaultExpiry = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      await documentsApi.reviewDocument(doc.numericDocId, {
-        status: 'approved',
-        expiryDate: defaultExpiry,
-      });
-      await fetchRealPending();
-    } catch (err: any) {
-      setLoadError(
-        err?.message || (isEn ? 'Unable to approve document.' : 'Không thể duyệt nhanh hồ sơ.')
-      );
-    } finally {
-      setQuickApprovingKey(null);
-    }
-  };
-
-  const handleApproveOrderAll = async (reqCode: string, docs: any[]) => {
-    const actionable = docs.filter((d) => Number.isFinite(d.numericDocId) && d.numericDocId > 0);
-    if (actionable.length === 0 || quickApprovingKey !== null) return;
-    setQuickApprovingKey(`order:${reqCode}`);
-    const defaultExpiry = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    let failedCount = 0;
-    for (const d of actionable) {
-      try {
-        await documentsApi.reviewDocument(d.numericDocId, {
-          status: 'approved',
-          expiryDate: defaultExpiry,
-        });
-      } catch {
-        failedCount += 1;
-      }
-    }
-    if (failedCount > 0) {
-      setLoadError(
-        isEn
-          ? `${failedCount} document(s) in ${reqCode} failed to approve.`
-          : `Có ${failedCount} hồ sơ thuộc đơn ${reqCode} duyệt thất bại.`
-      );
-    }
-    await fetchRealPending();
-    setQuickApprovingKey(null);
   };
 
   const filteredDocs = pendingDocs.filter((doc) => {
@@ -236,7 +190,7 @@ export default function DocumentApprovalPage() {
             <button
               type="button"
               onClick={fetchRealPending}
-              disabled={loading || quickApprovingKey !== null}
+              disabled={loading}
               className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:bg-[#FAF8F4] text-[#242722] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -419,7 +373,6 @@ export default function DocumentApprovalPage() {
           ) : (
             groupedOrderDocs.map((group) => {
               const isCollapsed = Boolean(collapsedOrders[group.reqCode]);
-              const isApprovingOrder = quickApprovingKey === `order:${group.reqCode}`;
               const horseSummary =
                 group.horses.length === 0
                   ? '—'
@@ -459,33 +412,12 @@ export default function DocumentApprovalPage() {
                         {group.docs.length} {isEn ? 'pending' : 'chờ duyệt'}
                       </span>
                     </button>
-
-                    {group.docs.length > 1 && (
-                      <button
-                        type="button"
-                        disabled={quickApprovingKey !== null}
-                        onClick={() => void handleApproveOrderAll(group.reqCode, group.docs)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#287653] hover:bg-[#1E5C40] disabled:opacity-50 text-white text-xs font-bold cursor-pointer border-0 transition-colors shrink-0"
-                      >
-                        {isApprovingOrder ? (
-                          <Loader2 size={13} className="animate-spin" />
-                        ) : (
-                          <CheckCheck size={13} />
-                        )}
-                        <span>
-                          {isEn
-                            ? `Approve all (${group.docs.length})`
-                            : `Duyệt tất cả (${group.docs.length})`}
-                        </span>
-                      </button>
-                    )}
                   </div>
 
                   {!isCollapsed && (
                     <div className="divide-y divide-[#F0EEE8] border-t border-[#E5DDD0]">
                       {group.docs.map((doc) => {
                         const DocIcon = getDocIcon(doc.type);
-                        const isApprovingThis = quickApprovingKey === doc.id;
                         const dateText = doc.createdAt
                           ? new Date(doc.createdAt).toLocaleDateString(isEn ? 'en-US' : 'vi-VN', {
                               day: '2-digit',
@@ -530,19 +462,6 @@ export default function DocumentApprovalPage() {
                               )}
                               <button
                                 type="button"
-                                disabled={quickApprovingKey !== null}
-                                onClick={() => void handleQuickApproveDoc(doc)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#E8F2EB] hover:bg-[#287653] text-[#287653] hover:text-white border border-[#B7DBC4] disabled:opacity-50 font-bold text-xs rounded-lg transition-colors cursor-pointer"
-                              >
-                                {isApprovingThis ? (
-                                  <Loader2 size={12} className="animate-spin" />
-                                ) : (
-                                  <CheckCircle2 size={12} />
-                                )}
-                                <span>{isEn ? 'Quick approve' : 'Duyệt nhanh'}</span>
-                              </button>
-                              <button
-                                type="button"
                                 onClick={() => {
                                   setSelectedDoc(doc);
                                   setReviewModalOpen(true);
@@ -572,6 +491,7 @@ export default function DocumentApprovalPage() {
           onClose={() => setReviewModalOpen(false)}
           documentId={selectedDoc.id}
           numericDocId={selectedDoc.numericDocId || selectedDoc.backendId}
+          currentExpiryDate={selectedDoc.expiryDate}
           horseName={selectedDoc.horseName}
           docTitle={selectedDoc.type}
           fileUrl={selectedDoc.fileUrl}

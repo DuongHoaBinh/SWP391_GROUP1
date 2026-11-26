@@ -26,7 +26,7 @@ import { DocumentItem } from '@/lib/types';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import toast from 'react-hot-toast';
 
-type DocStatusFilter = 'ALL' | 'APPROVED' | 'SUBMITTED' | 'PENDING' | 'REJECTED';
+type DocStatusFilter = 'ALL' | 'APPROVED' | 'SUBMITTED' | 'PENDING' | 'REJECTED' | 'EXPIRED';
 
 export default function DocumentsPage() {
   const { t, language, translateStatus, translateDocType, translateRejectionReason } = useLanguage();
@@ -97,6 +97,8 @@ export default function DocumentsPage() {
               ? 'APPROVED'
               : d.status === 'rejected'
               ? 'REJECTED'
+              : d.status === 'expired'
+              ? 'EXPIRED'
               : d.status === 'draft' || !d.fileUrl
               ? 'PENDING'
               : 'SUBMITTED') as any,
@@ -164,6 +166,7 @@ export default function DocumentsPage() {
 
   const missingDocsCount = documents.filter((d) => d.status === 'PENDING').length;
   const rejectedDocsCount = documents.filter((d) => d.status === 'REJECTED').length;
+  const expiredDocsCount = documents.filter((d) => d.status === 'EXPIRED').length;
 
   const filteredDocuments = useMemo(() => {
     return documents.filter((doc) => {
@@ -197,6 +200,7 @@ export default function DocumentsPage() {
         submittedCount: number;
         pendingCount: number;
         rejectedCount: number;
+        expiredCount: number;
         totalCount: number;
         needsAction: boolean;
       }
@@ -214,6 +218,7 @@ export default function DocumentsPage() {
           submittedCount: 0,
           pendingCount: 0,
           rejectedCount: 0,
+          expiredCount: 0,
           totalCount: 0,
           needsAction: false,
         };
@@ -229,6 +234,7 @@ export default function DocumentsPage() {
       else if (doc.status === 'SUBMITTED') entry.submittedCount += 1;
       else if (doc.status === 'PENDING') entry.pendingCount += 1;
       else if (doc.status === 'REJECTED') entry.rejectedCount += 1;
+      else if (doc.status === 'EXPIRED') entry.expiredCount += 1;
     }
 
     const extractOrderNum = (code: string) => {
@@ -238,7 +244,7 @@ export default function DocumentsPage() {
 
     const result = Array.from(groupsMap.values()).map((g) => ({
       ...g,
-      needsAction: g.rejectedCount > 0 || g.pendingCount > 0,
+      needsAction: g.rejectedCount > 0 || g.pendingCount > 0 || g.expiredCount > 0,
     }));
 
     result.sort((a, b) => {
@@ -276,6 +282,7 @@ export default function DocumentsPage() {
     SUBMITTED: documents.filter((d) => d.status === 'SUBMITTED').length,
     PENDING: missingDocsCount,
     REJECTED: rejectedDocsCount,
+    EXPIRED: expiredDocsCount,
   };
 
   const filterTabs: { id: DocStatusFilter; label: string }[] = [
@@ -284,6 +291,7 @@ export default function DocumentsPage() {
     { id: 'APPROVED', label: translateStatus('approved') },
     { id: 'PENDING', label: translateStatus('draft') },
     { id: 'REJECTED', label: translateStatus('rejected') },
+    { id: 'EXPIRED', label: translateStatus('expired') },
   ];
 
   return (
@@ -385,7 +393,7 @@ export default function DocumentsPage() {
       )}
 
       {/* Alerts */}
-      {!isLoading && !loadError && (missingDocsCount > 0 || rejectedDocsCount > 0) && (
+      {!isLoading && !loadError && (missingDocsCount > 0 || rejectedDocsCount > 0 || expiredDocsCount > 0) && (
         <div className="bg-[#F8EAEA]/80 border border-[#E5B8B8] p-4 rounded-2xl flex items-start gap-3">
           <AlertTriangle className="text-[#B33E3E] shrink-0 mt-0.5" size={18} aria-hidden="true" />
           <div>
@@ -400,6 +408,13 @@ export default function DocumentsPage() {
                   {language === 'en'
                     ? `• You have ${rejectedDocsCount} rejected document(s) requiring resubmission.`
                     : `• Quý khách có ${rejectedDocsCount} hồ sơ bị từ chối cần nộp lại.`}
+                </p>
+              )}
+              {expiredDocsCount > 0 && (
+                <p className="font-medium m-0">
+                  {language === 'en'
+                    ? `• You have ${expiredDocsCount} expired document(s) that must be replaced with a current certificate.`
+                    : `• Quý khách có ${expiredDocsCount} hồ sơ đã hết hạn cần tải bản còn hiệu lực.`}
                 </p>
               )}
               {missingDocsCount > 0 && (
@@ -523,6 +538,13 @@ export default function DocumentsPage() {
                           : `${group.rejectedCount} bị từ chối`}
                       </span>
                     )}
+                    {group.expiredCount > 0 && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#F8EAEA] text-[#B33E3E] border border-[#E5B8B8]">
+                        {language === 'en'
+                          ? `${group.expiredCount} expired`
+                          : `${group.expiredCount} hết hạn`}
+                      </span>
+                    )}
                     {group.pendingCount > 0 && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A]">
                         {language === 'en'
@@ -572,7 +594,7 @@ export default function DocumentsPage() {
                           <div className="flex items-start gap-2.5 min-w-0 flex-1">
                             <div
                               className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
-                                doc.status === 'REJECTED'
+                                doc.status === 'REJECTED' || doc.status === 'EXPIRED'
                                   ? 'bg-red-100 text-red-600'
                                   : 'bg-[#FAF8F4] text-[#A67C2E]'
                               }`}
@@ -622,6 +644,11 @@ export default function DocumentsPage() {
                                 <XCircle size={13} aria-hidden="true" /> {translateStatus('rejected')}
                               </span>
                             )}
+                            {doc.status === 'EXPIRED' && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#F8EAEA] text-[#B33E3E]">
+                                <AlertTriangle size={13} aria-hidden="true" /> {translateStatus('expired')}
+                              </span>
+                            )}
                             {doc.status === 'PENDING' && (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#F8F0DF] text-[#966516]">
                                 <AlertTriangle size={13} aria-hidden="true" /> {translateStatus('draft')}
@@ -639,7 +666,7 @@ export default function DocumentsPage() {
                               </button>
                             )}
 
-                            {doc.status === 'REJECTED' && (
+                            {(doc.status === 'REJECTED' || doc.status === 'EXPIRED') && (
                               <button
                                 type="button"
                                 onClick={() => handleStartReupload(doc)}

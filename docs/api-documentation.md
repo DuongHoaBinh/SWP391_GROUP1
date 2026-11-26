@@ -508,6 +508,11 @@ Records official submission and approval progress with agricultural, veterinary,
   "notes": "Đã cấp giấy phép nhập khẩu số AVS-2026/099"
 }
 ```
+- **Rules:** Đây là tầng phê duyệt thứ 2, không thay thế bước `PATCH /documents/:id/review`.
+  - `status: "approved"` yêu cầu tài liệu đã `approved` nội bộ; nếu chưa thì trả `409`. Trạng thái tài liệu giữ nguyên.
+  - `status: "rejected"` chuyển tài liệu sang `rejected` và ghi review log.
+  - `status: "pending"` chỉ ghi nhận đã nộp cơ quan.
+- **Errors:** `409` nếu tài liệu đã bị thay thế, đang `rejected`/`expired`, hoặc ghi `approved` cho tài liệu chưa duyệt nội bộ.
 
 ### `POST /documents/order/:orderId/notify-missing` (Transport Specialist / Admin)
 Evaluates compliance for the order and automatically sends a high-priority notification to the customer listing all missing and rejected documents per horse.

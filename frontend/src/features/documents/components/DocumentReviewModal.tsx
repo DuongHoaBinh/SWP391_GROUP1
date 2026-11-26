@@ -44,6 +44,8 @@ export interface DocumentReviewModalProps {
   horseMicrochip?: string | null;
   horsePassport?: string | null;
   horseBreed?: string | null;
+  /** Ngày hết hạn khách đã khai (nếu có) để điền sẵn; không tự sinh ngày giả. */
+  currentExpiryDate?: string | null;
   onSuccess: (id: string, status: 'APPROVED' | 'REJECTED', expiry?: string, reason?: string) => void;
 }
 
@@ -58,6 +60,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   horseMicrochip,
   horsePassport,
   horseBreed,
+  currentExpiryDate,
   onSuccess,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -131,11 +134,12 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
 
   const getDefaultReviewValues = React.useCallback((): ReviewFormData => ({
     status: 'APPROVED',
-    expiryDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    // Người thẩm định phải nhập đúng ngày hết hạn in trên giấy; chỉ điền sẵn ngày khách đã khai.
+    expiryDate: currentExpiryDate ? String(currentExpiryDate).slice(0, 10) : '',
     authorityName: '',
     referenceNumber: '',
     rejectionReason: '',
-  }), []);
+  }), [currentExpiryDate]);
 
   const {
     register,

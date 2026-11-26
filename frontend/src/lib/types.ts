@@ -185,7 +185,7 @@ export interface DocumentItem {
   horseName: string;
   title: string;
   documentType: 'PASSPORT' | 'HEALTH_CERT' | 'EXPORT_PERMIT' | 'IMPORT_PERMIT' | 'CUSTOMS_DECLARATION';
-  status: 'PENDING' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
+  status: 'PENDING' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
   dueDate?: string;
   fileUrl?: string;
   rejectionReason?: string;

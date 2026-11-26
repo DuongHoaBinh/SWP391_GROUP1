@@ -1043,28 +1043,48 @@ export class DocumentsService {
       throw new NotFoundException(`Tài liệu #${documentId} không tồn tại`);
     }
 
-    await this.documentsStore.createAuthorityApproval(
-      documentId,
-      Number(specialist.id),
-      dto,
-    );
-
-    if (dto.status === AuthorityApprovalStatus.APPROVED && doc.status !== DocumentStatus.APPROVED) {
-      await this.documentsStore.updateDocumentReview(
-        documentId,
-        DocumentStatus.APPROVED,
-        `Phê duyệt bởi cơ quan: ${dto.authorityName}. ${dto.notes ?? ''}`.trim(),
-        undefined,
-        dto.referenceNumber,
+    // BR-F2-03: kết quả cơ quan chức năng là tầng thứ 2, ghi nhận RIÊNG và không thay thế bước
+    // thẩm định nội bộ (checklist 4 tiêu chí). Vì vậy:
+    // - bản đã bị thay thế, bị từ chối hoặc hết hạn thì không ghi nhận thêm (khách phải tải bản mới);
+    // - cơ quan "approved" chỉ được ghi khi tài liệu đã được Manager duyệt nội bộ;
+    // - cơ quan "rejected" chuyển tài liệu sang rejected kèm review log và người ghi nhận.
+    if (doc.isArchived) {
+      throw new ConflictException(`Tài liệu #${documentId} đã được thay thế bởi phiên bản mới hơn`);
+    }
+    if (doc.status === DocumentStatus.REJECTED || doc.status === DocumentStatus.EXPIRED) {
+      throw new ConflictException(
+        `Tài liệu đang ở trạng thái '${doc.status}', không thể ghi nhận kết quả cơ quan chức năng; khách hàng phải tải bản mới thay thế`,
       );
-    } else if (dto.status === AuthorityApprovalStatus.REJECTED) {
+    }
+    if (dto.status === AuthorityApprovalStatus.APPROVED && doc.status !== DocumentStatus.APPROVED) {
+      throw new ConflictException(
+        'Tài liệu phải được thẩm định nội bộ (approved) trước khi ghi nhận phê duyệt của cơ quan chức năng',
+      );
+    }
+
+    const reviewerId = Number(specialist.id);
+    await this.documentsStore.createAuthorityApproval(documentId, reviewerId, dto);
+
+    if (dto.status === AuthorityApprovalStatus.REJECTED) {
+      const reason = `Bị từ chối bởi cơ quan: ${dto.authorityName}. ${dto.notes ?? ''}`.trim();
       await this.documentsStore.updateDocumentReview(
         documentId,
         DocumentStatus.REJECTED,
-        `Bị từ chối bởi cơ quan: ${dto.authorityName}. ${dto.notes ?? ''}`.trim(),
+        reason,
         undefined,
         dto.referenceNumber,
+        reviewerId,
       );
+      if (typeof this.documentsStore.createReviewLog === 'function') {
+        await this.documentsStore.createReviewLog({
+          documentId,
+          fromStatus: doc.status,
+          toStatus: DocumentStatus.REJECTED,
+          reviewerId,
+          reason,
+          checkedFieldsJson: null,
+        });
+      }
     }
     await this.checkAndNotifyManagerWhenFlow2Completed(doc.horseId);
 

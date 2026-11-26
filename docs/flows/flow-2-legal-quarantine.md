@@ -21,6 +21,14 @@ Transport Specialist, Customer, Logistics Manager, external authorities
 - A document cannot be marked accepted without type, owner horse, issue/expiry information where applicable, and review history.
 - The trip cannot reach `READY_TO_DEPART` while mandatory documents are missing, rejected, or expired.
 - Customers can upload and replace their own documents; only the Transport Specialist can accept them.
+- Phê duyệt nội bộ chỉ thực hiện qua màn thẩm định có checklist 4 tiêu chí (microchip, hộ chiếu, ngày cấp, hạn dùng) và ngày hết hạn đúng như in trên giấy. Không có duyệt nhanh/duyệt hàng loạt, và hệ thống không tự sinh ngày hết hạn.
+- Kết quả cơ quan chức năng (`POST /documents/:id/authority-approval`) là tầng thứ 2, được ghi riêng và không thay thế bước thẩm định nội bộ:
+  - `approved` chỉ được ghi khi tài liệu đã `approved` nội bộ; nếu chưa thì trả `409`. Ghi nhận này không đổi trạng thái tài liệu.
+  - `rejected` chuyển tài liệu sang `rejected`, lưu người ghi nhận và review log.
+  - `pending` (đã nộp cơ quan) được ghi khi tài liệu còn `submitted` hoặc `approved`.
+  - Tài liệu đã bị thay thế, `rejected` hoặc `expired` không nhận thêm kết quả nào (`409`); khách phải tải bản mới.
+  - Frontend không tự sinh bản ghi cơ quan chức năng; chỉ ghi khi người dùng nhập tên cơ quan.
+- Trang giấy tờ của khách hiển thị riêng trạng thái `expired` (bộ lọc, cảnh báo, nút "Nộp lại tệp").
 
 ### Kho giấy tờ của ngựa (Step 2, review 11/2026)
 

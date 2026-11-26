@@ -254,26 +254,12 @@ export const documentsApi = {
       };
     }
   ): Promise<ApiTransportDocument> => {
-    const reviewed = await apiClient<ApiTransportDocument>(`/documents/${id}/review`, {
+    // Chỉ ghi kết quả thẩm định nội bộ. Kết quả cơ quan chức năng phải ghi riêng qua
+    // recordAuthorityApproval khi thực sự có phản hồi từ cơ quan (không tự sinh).
+    return apiClient<ApiTransportDocument>(`/documents/${id}/review`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
-    if (data.status === 'approved') {
-      try {
-        await apiClient(`/documents/${id}/authority-approval`, {
-          method: 'POST',
-          body: JSON.stringify({
-            authorityName: 'Cục Thú y / Cơ quan Kiểm dịch Cửa khẩu',
-            status: 'approved',
-            referenceNumber: data.docNumber || undefined,
-            notes: data.notes || 'Đã xác nhận phê duyệt kiểm dịch đạt chuẩn',
-          }),
-        });
-      } catch {
-        // Ignore if already recorded
-      }
-    }
-    return reviewed;
   },
 
   // Authority approval

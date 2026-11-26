@@ -63,13 +63,6 @@ export default function SpecialistDashboardPage() {
   const [detectedMime, setDetectedMime] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
-  // Dynamic expiry date - defaults to 1 year from current date
-  const [expiryDate, setExpiryDate] = useState(() => {
-    const d = new Date();
-    d.setFullYear(d.getFullYear() + 1);
-    return d.toISOString().split('T')[0];
-  });
-
   // Rejection modal state
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -254,42 +247,11 @@ export default function SpecialistDashboardPage() {
 
   const isBusy = submittingAction !== null;
 
-  const handleQuickApprove = async (doc: SpecialistPendingDoc) => {
+  // Phê duyệt bắt buộc qua DocumentReviewModal: checklist 4 tiêu chí + ngày hết hạn thật trên giấy.
+  const openApproveReview = (doc: SpecialistPendingDoc) => {
     if (isBusy) return;
-    setSubmittingAction('approve');
-    try {
-      const validUntil =
-        expiryDate && !isNaN(Date.parse(expiryDate))
-          ? expiryDate
-          : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-      const numericId = parseNumericDocId(doc);
-      if (!isNaN(numericId) && numericId > 0) {
-        await documentsApi.reviewDocument(numericId, {
-          status: 'approved',
-          expiryDate: validUntil,
-          notes:
-            auditNote.trim() ||
-            (isEn
-              ? 'Approved as quarantine-compliant through specialist verification desk.'
-              : 'Đã phê duyệt đạt chuẩn hồ sơ kiểm dịch đối ngoại qua cổng thẩm định chuyên viên.'),
-        });
-      }
-
-      reviewDocument(doc.id, 'APPROVED', validUntil);
-      toast.success(
-        isEn
-          ? `Approved dossier: ${doc.type} (${doc.horseName})`
-          : `Đã phê duyệt đạt chuẩn hồ sơ: ${doc.type} (${doc.horseName})`
-      );
-    } catch (err: any) {
-      toast.error(
-        err?.message ||
-          (isEn ? 'Failed to approve document on server.' : 'Lỗi khi phê duyệt hồ sơ lên máy chủ.')
-      );
-    } finally {
-      setSubmittingAction(null);
-    }
+    setModalDoc(doc);
+    setReviewModalOpen(true);
   };
 
   const openRevisionModal = () => {
@@ -844,15 +806,11 @@ export default function SpecialistDashboardPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-[#E5DDD0]">
                   <button
                     type="button"
-                    onClick={() => handleQuickApprove(activeDoc)}
+                    onClick={() => openApproveReview(activeDoc)}
                     disabled={isBusy}
                     className="py-3 px-4 rounded-xl bg-[#287653] hover:bg-[#1E5C40] text-white text-sm font-bold flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border-0"
                   >
-                    {submittingAction === 'approve' ? (
-                      <Loader2 size={18} className="animate-spin" />
-                    ) : (
-                      <CheckCircle2 size={18} />
-                    )}
+                    <CheckCircle2 size={18} />
                     <span>{t('specialist.quickApprove', 'PHÊ DUYỆT ĐẠT CHUẨN')}</span>
                   </button>
 

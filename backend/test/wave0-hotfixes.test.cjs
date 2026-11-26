@@ -249,3 +249,52 @@ test('W0-tracking: unassigned driver gets 403, multimodal arrived keeps road leg
   await tStore.updateShipmentStatus(90, 'completed');
   assert.ok(sqlCalls.some((s) => s.includes('UPDATE horse') && s.includes("SET status = 'active'") && !s.includes("'delivered'")));
 });
+
+test('F2-authority: kết quả cơ quan không thay thế bước thẩm định nội bộ', async () => {
+  const calls = [];
+  const docs = {
+    1: { id: 1, horseId: 4, ownerId: 6, status: 'submitted', isArchived: false, docType: 'export_permit' },
+    2: { id: 2, horseId: 4, ownerId: 6, status: 'rejected', isArchived: false, docType: 'export_permit' },
+    3: { id: 3, horseId: 4, ownerId: 6, status: 'approved', isArchived: true, docType: 'export_permit' },
+    4: { id: 4, horseId: 4, ownerId: 6, status: 'approved', isArchived: false, docType: 'export_permit' },
+  };
+  const service = new DocumentsService(
+    {
+      findDocumentById: async (id) => (docs[id] ? { ...docs[id] } : undefined),
+      createAuthorityApproval: async (...args) => { calls.push(['authority', ...args]); return 1; },
+      updateDocumentReview: async (...args) => calls.push(['updateReview', ...args]),
+      createReviewLog: async (entry) => calls.push(['reviewLog', entry]),
+      findActiveShipmentIdsByHorseId: async () => [],
+    },
+    { createNotification: async () => {}, notifyRole: async () => {} },
+    { changed: async () => {} },
+  );
+  const mgr = { id: '3', role: UserRole.LOGISTICS_MANAGER };
+  const is409 = (e) => e.getStatus?.() === 409;
+
+  // Chưa thẩm định nội bộ → không được ghi cơ quan approved, không đổi trạng thái tài liệu
+  await assert.rejects(service.recordAuthorityApproval(mgr, 1, { authorityName: 'AVS', status: 'approved' }), is409);
+  // Tài liệu đã bị từ chối hoặc đã bị thay thế → không hồi sinh
+  await assert.rejects(service.recordAuthorityApproval(mgr, 2, { authorityName: 'AVS', status: 'approved' }), is409);
+  await assert.rejects(service.recordAuthorityApproval(mgr, 3, { authorityName: 'AVS', status: 'approved' }), is409);
+  assert.equal(calls.length, 0);
+
+  // Đã duyệt nội bộ → ghi nhận cơ quan approved, không cập nhật lại trạng thái tài liệu
+  await service.recordAuthorityApproval(mgr, 4, { authorityName: 'AVS', status: 'approved' });
+  assert.ok(calls.some((c) => c[0] === 'authority' && c[1] === 4));
+  assert.ok(!calls.some((c) => c[0] === 'updateReview'));
+
+  // Ghi "pending" cho tài liệu đang chờ thẩm định vẫn được phép (đã nộp cơ quan)
+  await service.recordAuthorityApproval(mgr, 1, { authorityName: 'AVS', status: 'pending' });
+
+  // Cơ quan từ chối → rejected kèm người ghi nhận và review log
+  await service.recordAuthorityApproval(mgr, 4, { authorityName: 'AVS', status: 'rejected', notes: 'Sai số microchip' });
+  const upd = calls.find((c) => c[0] === 'updateReview');
+  assert.equal(upd[1], 4);
+  assert.equal(upd[2], 'rejected');
+  assert.equal(upd[6], 3);
+  const log = calls.find((c) => c[0] === 'reviewLog');
+  assert.equal(log[1].fromStatus, 'approved');
+  assert.equal(log[1].toStatus, 'rejected');
+  assert.equal(log[1].reviewerId, 3);
+});

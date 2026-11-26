@@ -17,7 +17,6 @@ import {
   RefreshCw,
   Eye,
   FileCheck2,
-  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import {
@@ -58,7 +57,6 @@ export default function ComplianceOrdersPage() {
   // Review Modal State
   const [reviewingDoc, setReviewingDoc] = useState<any>(null);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
-  const [quickApprovingId, setQuickApprovingId] = useState<number | null>(null);
 
   // Flatten all submitted documents across horses
   const allSubmittedDocs = (checklist?.horses || []).flatMap((h) =>
@@ -175,33 +173,6 @@ export default function ComplianceOrdersPage() {
       } catch (e) {
         console.error('Failed to reload orders:', e);
       }
-    }
-  };
-
-  const handleQuickApprove = async (doc: any) => {
-    const numericId = Number(doc?.id);
-    if (!numericId || quickApprovingId !== null) return;
-    setQuickApprovingId(numericId);
-    try {
-      const defaultExpiry = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      await documentsApi.reviewDocument(numericId, {
-        status: 'approved',
-        expiryDate: defaultExpiry,
-      });
-      toast.success(
-        isEn ? `Approved document DOC-${numericId}` : `Đã duyệt nhanh hồ sơ DOC-${numericId}`
-      );
-      if (selectedOrder) {
-        await selectDossier(selectedOrder);
-        const data = await documentsApi.getComplianceOrders();
-        setOrders(data);
-        const updated = data.find((o) => o.orderId === selectedOrder.orderId);
-        if (updated) setSelectedOrder(updated);
-      }
-    } catch (err: any) {
-      toast.error(err?.message || (isEn ? 'Failed to approve document' : 'Không thể duyệt nhanh hồ sơ'));
-    } finally {
-      setQuickApprovingId(null);
     }
   };
 
@@ -725,22 +696,6 @@ export default function ComplianceOrdersPage() {
                                     </button>
                                   )}
 
-                                  {isPending && (
-                                    <button
-                                      type="button"
-                                      disabled={quickApprovingId !== null}
-                                      onClick={() => void handleQuickApprove(doc)}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-[#287653] hover:text-white bg-[#E8F2EB] hover:bg-[#287653] border border-[#B7DBC4] rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                                    >
-                                      {quickApprovingId === Number(doc.id) ? (
-                                        <Loader2 size={12} className="animate-spin" />
-                                      ) : (
-                                        <CheckCircle2 size={12} />
-                                      )}
-                                      <span>{isEn ? 'Quick approve' : 'Duyệt nhanh'}</span>
-                                    </button>
-                                  )}
-
                                   <button
                                     type="button"
                                     onClick={() => handleOpenReview(doc)}
@@ -932,6 +887,7 @@ export default function ComplianceOrdersPage() {
           }}
           documentId={String(reviewingDoc.id)}
           numericDocId={reviewingDoc.id}
+          currentExpiryDate={reviewingDoc.expiryDate}
           horseName={
             reviewingDoc.horseName || selectedOrder?.horseNames || (isEn ? 'Equine' : 'Chiến mã')
           }
