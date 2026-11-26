@@ -435,17 +435,29 @@ export class OrdersService {
     }
 
     if (![UserRole.CUSTOMER, UserRole.ADMIN].includes(user.role)) throw new ForbiddenException('Chỉ khách hàng sở hữu đơn hoặc Admin được hủy yêu cầu.');
-    const changed = await this.ordersStore.cancelShipment(orderId);
+    const wasAwaitingPayment = order.status === ShipmentStatus.AWAITING_PAYMENT;
+    const changed = await this.ordersStore.cancelShipment(orderId, { id: Number(user.id), role: user.role });
     if (!changed) return order;
 
-    const code = order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
+    const code = order.customerRequestCode || order.requestCode || `REQ-${String(orderId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       order.customerId,
       'Đã hủy yêu cầu vận chuyển',
-      `Đơn vận chuyển mã ${code} đã được hủy theo yêu cầu của bạn. Trạng thái các chú ngựa trong đơn đã được mở lại.`,
+      wasAwaitingPayment
+        ? `Đơn vận chuyển mã ${code} đã được hủy trước khi thanh toán. Hóa đơn và mã QR đã bị vô hiệu; quý khách không chuyển khoản cho mã QR cũ. Các chú ngựa trong đơn đã được mở lại.`
+        : `Đơn vận chuyển mã ${code} đã được hủy theo yêu cầu của bạn. Trạng thái các chú ngựa trong đơn đã được mở lại.`,
       'status_update',
       orderId,
     );
+    if (wasAwaitingPayment) {
+      await this.notificationsService.notifyRole(
+        'Logistics Manager',
+        `Khách hàng hủy đơn chờ thanh toán REQ-${String(orderId).padStart(3, '0')}`,
+        `Đơn REQ-${String(orderId).padStart(3, '0')} đã được khách hàng hủy trước khi thanh toán. Xe giữ chỗ và ngựa đã được giải phóng.`,
+        'status_update',
+        orderId,
+      );
+    }
 
     const updated = await this.ordersStore.findShipmentById(orderId);
     return updated!;

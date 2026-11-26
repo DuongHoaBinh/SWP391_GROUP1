@@ -421,6 +421,18 @@ Trả về chính sách vận chuyển khứ hồi hiện hành của hệ thố
 Tính toán và hiển thị trước số tiền hoàn nếu khách hàng hủy chặng về ở thời điểm hiện tại. Trả về chi tiết: số giờ còn lại trước giờ đón, tỷ lệ hoàn cước, số tiền cước hoàn, số tiền bảo hiểm hoàn (100%), tổng tiền hoàn và cờ `requiresDualApproval` (nếu tổng hoàn ≥ 20.000.000 đ).
 - **Errors:** `404 Not Found`, `403 Forbidden` (khách khác chủ), `400 Bad Request` (không phải đơn khứ hồi), `409 Conflict` (chặng về đã bắt đầu hoặc đã kết thúc).
 
+### `PATCH /orders/:id/cancel` (Customer chủ đơn / Admin)
+Khách tự hủy đơn khi chưa thanh toán hoặc chưa được duyệt.
+- **Trạng thái được hủy:** `awaiting_payment` (đơn trả trước), `requested`, `change_requested` (đơn cũ). Gọi lại trên đơn đã `cancelled` không có tác dụng (idempotent).
+- **Logic khi đơn ở `awaiting_payment`:**
+  - Chuyển sang `cancelled` và ghi `shipment_status_history`.
+  - Hủy (`void`) hóa đơn và đóng QR SePay đang `pending`.
+  - Nhả xe giữ chỗ, trả ngựa về `active`, thông báo cho Customer và Manager.
+- **Errors:**
+  - `403`: không phải chủ đơn.
+  - `404`: không tìm thấy đơn.
+  - `409`: trạng thái không cho hủy, hoặc đã có giao dịch SePay `succeeded`/`review`.
+
 ### `POST /orders/:id/return/cancel` (Customer)
 Khách hàng chủ đơn hủy chặng về.
 - **Body:** `{ "reason": "Kế hoạch thi đấu thay đổi" }`

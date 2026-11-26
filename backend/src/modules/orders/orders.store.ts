@@ -944,13 +944,18 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
-  async cancelShipment(shipmentId: number): Promise<boolean> {
+  async cancelShipment(shipmentId: number, actor?: { id: number; role: string }): Promise<boolean> {
     const db = await this.pool.getConnection();
     try {
       await db.beginTransaction();
       const [rows] = await db.execute<RowDataPacket[]>('SELECT status FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
       if (rows[0]?.status === 'cancelled') { await db.commit(); return false; }
-      if (!rows[0] || !['requested', 'change_requested'].includes(rows[0].status)) throw new ConflictException('Chỉ được hủy yêu cầu trước khi phê duyệt.');
+      if (rows[0]?.status === 'awaiting_payment') {
+        await this.cancelUnpaidPrepaidShipment(db, shipmentId, actor);
+        await db.commit();
+        return true;
+      }
+      if (!rows[0] || !['requested', 'change_requested'].includes(rows[0].status)) throw new ConflictException('Chỉ được hủy đơn khi đang chờ thanh toán hoặc trước khi phê duyệt.');
       await db.execute("UPDATE shipment SET status = 'cancelled' WHERE shipment_id = ?", [shipmentId]);
       await db.execute("UPDATE horse h JOIN shipment_horse sh ON sh.horse_id = h.horse_id SET h.status = 'active' WHERE sh.shipment_id = ?", [shipmentId]);
       await releaseShipmentReservations(db, shipmentId, 'customer_cancelled');
@@ -958,6 +963,60 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       return true;
     } catch (error) { await db.rollback(); throw error; }
     finally { db.release(); }
+  }
+
+  /**
+   * Khách tự hủy đơn trả trước khi chưa thanh toán (`awaiting_payment` → `cancelled`).
+   * Dọn dẹp giống SLA sweep hết hạn thanh toán: hủy hóa đơn, đóng QR, nhả ngựa và xe.
+   * Chạy trong transaction đã khóa dòng shipment; webhook SePay cũng khóa dòng này trước,
+   * nên tiền đến sau khi hủy sẽ rơi vào `review` để đối soát/hoàn thủ công.
+   */
+  private async cancelUnpaidPrepaidShipment(
+    db: PoolConnection,
+    shipmentId: number,
+    actor?: { id: number; role: string },
+  ): Promise<void> {
+    const [payRows] = await db.execute<RowDataPacket[]>(
+      "SELECT status FROM shipment_sepay_payment WHERE shipment_id = ? AND status IN ('succeeded', 'review') FOR UPDATE",
+      [shipmentId],
+    );
+    if (payRows.length > 0) {
+      throw new ConflictException(
+        'Hệ thống đã ghi nhận một giao dịch chuyển khoản cho đơn này nên không thể tự hủy. Vui lòng liên hệ bộ phận vận hành để được hỗ trợ.',
+      );
+    }
+
+    await transitionShipment(db, {
+      shipmentId,
+      to: 'cancelled',
+      actorId: actor?.id ?? null,
+      actorRole: actor?.role ?? 'CUSTOMER',
+      reasonCode: 'customer_cancelled',
+      note: 'Khách hàng tự hủy đơn trước khi thanh toán',
+      expectedFrom: ['awaiting_payment'],
+    });
+    await db.execute(
+      `UPDATE shipment
+       SET cancel_reason_code = 'customer_cancelled',
+           cancellation_reason = 'Khách hàng tự hủy đơn trước khi thanh toán'
+       WHERE shipment_id = ?`,
+      [shipmentId],
+    );
+    await db.execute("UPDATE shipment_invoice SET status = 'void' WHERE shipment_id = ? AND status <> 'void'", [shipmentId]);
+    await db.execute("UPDATE shipment_sepay_payment SET status = 'cancelled' WHERE shipment_id = ? AND status = 'pending'", [shipmentId]);
+    await db.execute(
+      `UPDATE horse h
+       SET h.status = 'active'
+       WHERE h.horse_id IN (SELECT sh.horse_id FROM shipment_horse sh WHERE sh.shipment_id = ?)
+         AND NOT EXISTS (
+           SELECT 1 FROM shipment_horse sh2
+           JOIN shipment s2 ON s2.shipment_id = sh2.shipment_id
+           WHERE sh2.horse_id = h.horse_id
+             AND s2.shipment_id <> ?
+             AND s2.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refunded', 'completed')
+         )`,
+      [shipmentId, shipmentId],
+    );
   }
 
   async updateAndResubmitShipment(customerId: number, shipmentId: number, dto: UpdateOrderDto): Promise<boolean> {

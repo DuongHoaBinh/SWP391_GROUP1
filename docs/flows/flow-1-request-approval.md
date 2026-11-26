@@ -44,6 +44,12 @@ Approved order, assigned work items, order status history, and customer notifica
 **Primary UI:** `frontend/src/app/customer`, `frontend/src/app/manager`
 
 - Self-service cancellation is allowed only before approval (`requested` / `change_requested`); retries are idempotent. Approval and cancellation cannot both win concurrently. Approved or invoiced trips require operational handling.
+- **Đơn trả trước chưa thanh toán (`awaiting_payment`):** khách được tự hủy (`PATCH /orders/:id/cancel`).
+  - Trong một transaction, hệ thống chuyển `awaiting_payment` → `cancelled` qua state machine, ghi `shipment_status_history` (`reason_code = customer_cancelled`) và đặt `cancel_reason_code = 'customer_cancelled'`.
+  - Hệ thống `void` hóa đơn, đóng QR SePay `pending` → `cancelled`, nhả xe giữ chỗ và trả ngựa về `active`; Manager nhận thông báo.
+  - Nếu đã có giao dịch SePay `succeeded` hoặc `review`, hệ thống trả `409` và khách phải liên hệ vận hành. Webhook SePay khóa cùng dòng shipment, nên hủy và thanh toán không thể cùng thắng.
+  - Tiền chuyển vào QR cũ sau khi hủy được đưa sang `review` để đối soát và hoàn thủ công.
+  - Từ `paid_pending_review` trở đi, khách không tự hủy được.
 
 
 ## Equine value and insurance

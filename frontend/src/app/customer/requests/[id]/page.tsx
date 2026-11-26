@@ -448,8 +448,9 @@ export default function RequestDetailPage() {
   const hasMissingDocs = isApproved && requirementsSent && totalMissingCount > 0;
   const hasRejectedDocs = isApproved && requirementsSent && totalRejectedCount > 0;
 
-  // Rule: Only allow customer cancellation before approval/planning stages (requested, change_requested)
-  const cancellableStatuses = ['requested', 'change_requested'];
+  // Rule: Khách tự hủy khi đơn trả trước chưa thanh toán (awaiting_payment) hoặc đơn cũ chưa duyệt
+  // (requested, change_requested). Backend kiểm tra lại và chặn nếu đã ghi nhận giao dịch SePay.
+  const cancellableStatuses = ['awaiting_payment', 'requested', 'change_requested'];
   const canCancel = cancellableStatuses.includes(statusLower);
 
   // Check if order has quotation available
@@ -2130,6 +2131,13 @@ export default function RequestDetailPage() {
               </div>
               <div style={{ fontSize: '13px', color: '#7f1d1d', lineHeight: '1.5' }}>
                 {t('requestDetail.confirmCancelPrompt', 'Bạn có chắc chắn muốn hủy đơn vận chuyển {code}? Sau khi hủy, hành trình vận chuyển sẽ bị dừng lại và các chú ngựa liên quan sẽ được mở khóa trạng thái.', { code: request?.requestCode || `#${request?.id}` })}
+                {String(request?.status || '').toLowerCase() === 'awaiting_payment' && (
+                  <div style={{ marginTop: '6px', fontWeight: 600 }}>
+                    {language === 'en'
+                      ? 'The invoice and payment QR code will be voided. Do not transfer money to the old QR code after cancelling.'
+                      : 'Hóa đơn và mã QR thanh toán sẽ bị vô hiệu. Vui lòng không chuyển khoản vào mã QR cũ sau khi hủy.'}
+                  </div>
+                )}
               </div>
             </div>
           </div>

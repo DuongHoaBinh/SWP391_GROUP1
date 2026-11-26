@@ -509,3 +509,61 @@ test('12. Route Confirmation on Prepaid Order: links existing route_id without d
   assert.equal(updatedInvoice.routeId, 42);
   assert.equal(updatedInvoice.invoiceCode, 'INV-2026-000100');
 });
+
+// --- Khách tự hủy đơn trả trước khi chưa thanh toán (awaiting_payment) ---
+{
+  const { OrdersStore: CancelOrdersStore } = require('../dist/modules/orders/orders.store');
+
+  const makeCancelStore = ({ status, paymentStatuses = [] }) => {
+    const sqls = [];
+    let committed = false;
+    let rolledBack = false;
+    const conn = {
+      beginTransaction: async () => {},
+      commit: async () => { committed = true; },
+      rollback: async () => { rolledBack = true; },
+      release: () => {},
+      execute: async (sql, args) => {
+        sqls.push(sql);
+        if (/SELECT status FROM shipment WHERE shipment_id/.test(sql)) return [[{ status }]];
+        if (/FROM shipment_sepay_payment/.test(sql)) return [paymentStatuses.map((s) => ({ status: s }))];
+        return [{ affectedRows: 1 }];
+      },
+      query: async (sql, args) => {
+        sqls.push(sql);
+        if (/SELECT status, payment_flow FROM shipment/.test(sql)) return [[{ status, payment_flow: 'prepaid' }]];
+        return [{ affectedRows: 1 }];
+      },
+    };
+    const store = new CancelOrdersStore();
+    store.pool = { getConnection: async () => conn };
+    return { store, sqls, state: () => ({ committed, rolledBack }) };
+  };
+
+  test('Khách hủy đơn awaiting_payment: chuyển cancelled, ghi lịch sử, hủy hóa đơn, đóng QR, nhả ngựa và xe', async () => {
+    const { store, sqls, state } = makeCancelStore({ status: 'awaiting_payment' });
+    const changed = await store.cancelShipment(42, { id: 6, role: 'CUSTOMER' });
+    assert.equal(changed, true);
+    assert.equal(state().committed, true);
+    assert.ok(sqls.some((s) => /UPDATE shipment SET status = \?/.test(s)), 'chuyển trạng thái qua state machine');
+    assert.ok(sqls.some((s) => /INSERT INTO shipment_status_history/.test(s)), 'ghi lịch sử trạng thái');
+    assert.ok(sqls.some((s) => /UPDATE shipment_invoice SET status = 'void'/.test(s)), 'hủy hóa đơn');
+    assert.ok(sqls.some((s) => /UPDATE shipment_sepay_payment SET status = 'cancelled'/.test(s)), 'đóng QR');
+    assert.ok(sqls.some((s) => /UPDATE horse h/.test(s)), 'nhả ngựa');
+    assert.ok(sqls.some((s) => /UPDATE vehicle_reservation SET status = 'released'/.test(s)), 'nhả xe giữ chỗ');
+  });
+
+  for (const paid of ['succeeded', 'review']) {
+    test(`Khách không tự hủy được khi đã có giao dịch SePay ${paid}`, async () => {
+      const { store, sqls, state } = makeCancelStore({ status: 'awaiting_payment', paymentStatuses: [paid] });
+      await assert.rejects(store.cancelShipment(42, { id: 6, role: 'CUSTOMER' }), (e) => e.getStatus?.() === 409);
+      assert.equal(state().rolledBack, true);
+      assert.ok(!sqls.some((s) => /UPDATE shipment_invoice SET status = 'void'/.test(s)));
+    });
+  }
+
+  test('Không hủy được đơn đã thanh toán chờ duyệt (paid_pending_review)', async () => {
+    const { store } = makeCancelStore({ status: 'paid_pending_review' });
+    await assert.rejects(store.cancelShipment(42, { id: 6, role: 'CUSTOMER' }), (e) => e.getStatus?.() === 409);
+  });
+}

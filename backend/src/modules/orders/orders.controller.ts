@@ -153,7 +153,7 @@ export class OrdersController {
 
   @Patch(':id/cancel')
   @Roles(UserRole.CUSTOMER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Cancel a transport request before approval' })
+  @ApiOperation({ summary: 'Cancel a transport request while awaiting payment (prepaid) or before approval (legacy)' })
   cancelOrder(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseIntPipe) id: number,
