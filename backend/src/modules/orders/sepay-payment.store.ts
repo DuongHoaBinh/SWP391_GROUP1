@@ -4,6 +4,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { PAYABLE_SHIPMENT_STATUSES, SepayConfig, SepayPayment, SepayTransaction } from './sepay-payment.types';
 import { paymentGate } from './payment-gate';
 import { transitionShipment } from './order-state-machine';
+import { STAFF_REVIEWER_ROLE_NAMES_SQL } from './prepaid-policy';
 
 @Injectable()
 export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
@@ -171,7 +172,8 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
           );
           try {
             const [managers] = await db.execute<RowDataPacket[]>(
-              "SELECT user_id FROM `user` WHERE role IN ('LOGISTICS_MANAGER', 'ADMIN')"
+              `SELECT u.user_id FROM \`user\` u JOIN \`role\` r ON r.role_id = u.role_id
+               WHERE r.role_name IN (${STAFF_REVIEWER_ROLE_NAMES_SQL}) AND u.status = 'active'`,
             );
             for (const m of managers) {
               await db.execute(

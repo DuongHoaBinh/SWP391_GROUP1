@@ -2,6 +2,13 @@
  * Step 7 Prepaid & Refund Pure Policies
  */
 
+/**
+ * Tên vai trò (bảng `role.role_name`) nhận thông báo vận hành của luồng trả trước / hoàn tiền.
+ * Bảng `user` chỉ có `role_id`, nên phải JOIN `role` theo tên; giữ cả mã cũ giống notifications.store.
+ * Chuỗi hằng số (không chứa dữ liệu người dùng) để nhúng trực tiếp vào câu SQL.
+ */
+export const STAFF_REVIEWER_ROLE_NAMES_SQL = "'Logistics Manager', 'LOGISTICS_MANAGER', 'Admin', 'ADMIN'";
+
 export function addBusinessDays(startDate: Date, businessDays: number): Date {
   const result = new Date(startDate);
   let added = 0;

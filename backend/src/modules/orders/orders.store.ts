@@ -9,7 +9,7 @@ import { BookingQuote, BookingType, assertNewBookingType, calculateBookingQuote,
 import { parseJsonField } from './pricing.store';
 import { currentReturnPolicy, calculateReturnCancellationRefund } from './return-policy';
 import { CANNOT_FULFIL_REASONS, FeasibilityReviewDto, SubmitRefundFormDto } from './dto/prepaid-flow.dto';
-import { addBusinessDays } from './prepaid-policy';
+import { addBusinessDays, STAFF_REVIEWER_ROLE_NAMES_SQL } from './prepaid-policy';
 import { transitionShipment } from './order-state-machine';
 import { releaseShipmentReservations, reserveVehicles } from '../fleet/vehicle-reservation';
 import { ResultSetHeader } from 'mysql2/promise';
@@ -1424,8 +1424,9 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
       await db.execute(
         `INSERT INTO notification (user_id, shipment_id, title, message, notif_type, is_read)
-         SELECT user_id, ?, 'Khách hàng đã nộp form hoàn tiền', ?, 'status_update', FALSE
-         FROM \`user\` WHERE role IN ('LOGISTICS_MANAGER', 'ADMIN')`,
+         SELECT u.user_id, ?, 'Khách hàng đã nộp form hoàn tiền', ?, 'status_update', FALSE
+         FROM \`user\` u JOIN \`role\` r ON r.role_id = u.role_id
+         WHERE r.role_name IN (${STAFF_REVIEWER_ROLE_NAMES_SQL}) AND u.status = 'active'`,
         [
           orderId,
           `Khách hàng đã nộp thông tin nhận hoàn tiền cho đơn #${orderId} (${totalPaid.toLocaleString('vi-VN')} VND). Hạn xử lý SLA: ${slaDueAt.toLocaleDateString('vi-VN')}.`,
