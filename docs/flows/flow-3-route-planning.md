@@ -172,6 +172,13 @@ Ready to depart ──► [Chuyển giao sang Flow 4: Theo dõi hành trình]
   - Sau khi được phân công (chậm nhất `T - 70h`), Driver/Escort chính phải bấm Confirm/Decline trong **4 giờ làm việc (`08:00–18:00`) hoặc tối đa 12 giờ đồng hồ liên tục** (nhắc ở mốc 50%: 2 giờ làm việc / 6 giờ đồng hồ), hướng tới mục tiêu phát hành hóa đơn chậm nhất `T - 58h`.
   - Quá SLA → hệ thống gửi Escalation lên Coordinator & Manager để chuyển sang **Backup Pool** với **Backup SLA rút gọn = 4 giờ đồng hồ**. Việc thay đổi nhân sự cùng vai trò trên kế hoạch đang `approved` **không làm mất trạng thái `approved`** (không cần quay về `draft` nếu xe và giờ giữ nguyên).
   - **Trần cứng phát hành hóa đơn (`Invoice Hard Cap`): `T - 52h`**. Nhân sự cuối cùng xác nhận trong cùng 1 transaction sẽ chuyển `confirmed`, phát hành duy nhất 1 `shipment_invoice` và mở Gate 1.
+  - **Từ chối sau khi đã xác nhận (`POST /routes/plan/:id/driver-decline`):** Driver/Escort được từ chối khi đơn chưa xuất phát. Xử lý trong một transaction, khóa shipment rồi route:
+    - Ghi phân công `TỪ CHỐI: <lý do>`; chỉ áp dụng cho vai trò `driver`/`escort`.
+    - Nếu route đang `confirmed`/`ready_to_depart` → về `approved` (kế hoạch vẫn đã duyệt, chờ nhân sự xác nhận).
+    - Nếu shipment đang `confirmed`/`ready_to_depart` → về `planning` qua state machine, ghi `shipment_status_history` với `reason_code = staff_declined`.
+    - Manager nhận cảnh báo; khách nhận thông báo chuyến tạm chưa đủ điều kiện xuất phát.
+    - Hóa đơn và thanh toán giữ nguyên. Khi người thay thế xác nhận, đơn quay lại `confirmed` và chỉ gắn lại hóa đơn hiện có, không phát hành hóa đơn mới.
+    - Không cho từ chối khi đơn đã `in_transit`, `return_pending` hoặc đã đóng (`409`); sự cố trên đường xử lý qua Flow 5.
 - **`BR-F3-06` (Fallback khi Không đủ Backup Pool hoặc Quá Trần `T - 52h` — `Target Spec v3.1 (Planned)`):** Nếu trước `T - 62h` không đủ nhân sự thay thế hoặc chạm trần `T - 52h` vẫn chưa xác nhận đủ, hệ thống phát cảnh báo High tới Logistics Manager để chọn: **(a)** điều chuyển nội bộ từ chuyến có lịch xa hơn; **(b)** kích hoạt tài xế/hộ tống hợp đồng ngoài đã thẩm định (`Pre-vetted External Contractor`); hoặc **(c)** dời lịch chuyến (cho phép khách chọn dời ngày miễn phí hoặc `cancelled_operational` hoàn 100%).
 - **`BR-F3-07` (Cửa sổ Thanh toán Động, Gia hạn Trần `T - 24h` & Tự hủy — `Target Spec v3.1 (Planned)`):**
   - Hạn thanh toán neo theo thời điểm xuất hóa đơn thực tế: `payment_due_at = MIN(invoice_issued_at + 24h, departure_at - 30h)` (nhắc trước hạn 6 giờ).

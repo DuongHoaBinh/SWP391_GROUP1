@@ -861,6 +861,19 @@ Customer only, owned shipment. `400` until Flow 3 confirmation and invoice issua
 
 Driver/Escort confirms only their assigned role; Admin can name a `driverUserId`. The plan must already be approved. Last confirmation atomically issues the invoice, sets the plan/shipment to confirmed and notifies the customer. Repeated confirmation does not duplicate invoices or payment notifications. Missing vehicle/flight/schedule/quote is `400`.
 
+### `POST /routes/plan/:shipmentId/driver-decline`
+
+Driver/Escort từ chối vai trò được phân công; Admin có thể chỉ định `driverUserId`.
+- **Body:** `{ "reason": "Ốm đột xuất" }`
+- **Logic khi kế hoạch đã `confirmed`/`ready_to_depart`:**
+  - Route về `approved`; shipment về `planning`, ghi `shipment_status_history` (`staff_declined`).
+  - Hóa đơn và thanh toán giữ nguyên.
+  - Manager nhận cảnh báo; khách nhận thông báo chuyến tạm chưa đủ điều kiện xuất phát.
+  - Khi người thay thế xác nhận, đơn quay lại `confirmed` mà không phát hành hóa đơn mới.
+- **Errors:**
+  - `400`: người gọi không có phân công `driver`/`escort` cho chuyến này.
+  - `409`: đơn đã `in_transit`, `return_pending` hoặc đã đóng; sự cố trên đường xử lý qua Flow 5.
+
 ### `GET /routes/plan/:shipmentId/readiness`
 
 All three prerequisites: confirmed plan with invoice and staff, full legal compliance, verified real SePay payment for the current invoice amount. Customers may inspect only their own orders. Payment webhooks and legal reviews refresh readiness automatically. `POST /routes/shipment/:shipmentId/publish` and the first Flow 4 departure milestone enforce the same gate.

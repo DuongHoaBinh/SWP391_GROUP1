@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
-import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import { createPool, Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { MYSQL_POOL } from '../../common/database/database.module';
 import {
   AirlineEntity,
@@ -30,6 +30,13 @@ import {
   computeLifoStallAssignments,
   CorridorStopInput,
 } from '../../common/road-trip-sequencing';
+import { transitionShipment } from '../orders/order-state-machine';
+
+/** Sau khi xuất phát hoặc khi đơn đã đóng, nhân sự không được từ chối chuyến (sự cố xử lý qua Flow 5). */
+const DECLINE_BLOCKED_SHIPMENT_STATUSES = [
+  'in_transit', 'return_pending', 'completed', 'delivered',
+  'cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded',
+];
 
 interface RouteRow extends RowDataPacket {
   route_id: number;
@@ -1387,20 +1394,69 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     return (result as { affectedRows: number }).affectedRows > 0;
   }
 
+  /**
+   * Tài xế/áp tải từ chối chuyến. Nếu kế hoạch đã `confirmed`/`ready_to_depart` thì không còn đủ nhân sự xác nhận:
+   * route quay về `approved` (kế hoạch vẫn được duyệt, chờ người thay xác nhận) và shipment quay về `planning`
+   * qua state machine (có lịch sử). Khi người thay xác nhận, confirmAndInvoice đưa đơn về `confirmed`
+   * và chỉ gắn lại hóa đơn hiện có, không phát hành hóa đơn mới.
+   * Khóa shipment → route theo đúng thứ tự của confirmAndInvoice/applyDepartureReadiness để tránh deadlock.
+   */
   async declineStaffAssignment(
     shipmentId: number,
     userId: number,
     reason: string,
-  ): Promise<boolean> {
-    const [result] = await this.pool.execute(
-      `UPDATE shipment_assignment
-       SET is_confirmed = FALSE,
-           confirmed_at = NOW(),
-           confirmation_notes = ?
-       WHERE shipment_id = ? AND user_id = ?`,
-      [`TỪ CHỐI: ${reason}`, shipmentId, userId],
-    );
-    return (result as { affectedRows: number }).affectedRows > 0;
+  ): Promise<{ declined: boolean; reverted: boolean; previousStatus: string | null }> {
+    const db = await this.pool.getConnection();
+    try {
+      await db.beginTransaction();
+      const [orders] = await db.execute<RowDataPacket[]>('SELECT status FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
+      const order = orders[0];
+      if (!order) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
+      if (DECLINE_BLOCKED_SHIPMENT_STATUSES.includes(order.status)) {
+        throw new ConflictException(
+          `Không thể từ chối nhận chuyến khi đơn đang ở trạng thái "${order.status}". Nếu chuyến đã xuất phát, vui lòng báo sự cố để Manager xử lý.`,
+        );
+      }
+      const [routes] = await db.execute<RowDataPacket[]>(
+        'SELECT route_id, plan_status FROM route WHERE shipment_id = ? ORDER BY route_id DESC LIMIT 1 FOR UPDATE',
+        [shipmentId],
+      );
+      const route = routes[0];
+
+      const [result] = await db.execute<ResultSetHeader>(
+        `UPDATE shipment_assignment
+         SET is_confirmed = FALSE,
+             confirmed_at = NOW(),
+             confirmation_notes = ?
+         WHERE shipment_id = ? AND user_id = ? AND role_in_shipment IN ('driver', 'escort')`,
+        [`TỪ CHỐI: ${reason}`, shipmentId, userId],
+      );
+      if (result.affectedRows === 0) {
+        await db.rollback();
+        return { declined: false, reverted: false, previousStatus: order.status };
+      }
+
+      let reverted = false;
+      if (route && ['confirmed', 'ready_to_depart'].includes(route.plan_status)) {
+        await db.execute("UPDATE route SET plan_status = 'approved' WHERE route_id = ?", [route.route_id]);
+        reverted = true;
+      }
+      if (['confirmed', 'ready_to_depart'].includes(order.status)) {
+        await transitionShipment(db, {
+          shipmentId,
+          to: 'planning',
+          actorId: userId,
+          actorRole: 'DRIVER_ESCORT',
+          reasonCode: 'staff_declined',
+          note: `Nhân sự từ chối chuyến: ${reason}`.slice(0, 500),
+          expectedFrom: ['confirmed', 'ready_to_depart'],
+        });
+        reverted = true;
+      }
+      await db.commit();
+      return { declined: true, reverted, previousStatus: order.status };
+    } catch (error) { await db.rollback(); throw error; }
+    finally { db.release(); }
   }
 
   async checkAllDriversConfirmed(shipmentId: number): Promise<boolean> {

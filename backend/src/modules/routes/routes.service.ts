@@ -624,12 +624,12 @@ export class RoutesService implements OnModuleInit {
       }
     }
 
-    const success = await this.routesStore.declineStaffAssignment(
+    const result = await this.routesStore.declineStaffAssignment(
       shipmentId,
       targetUserId,
       dto.reason || 'Lý do sức khỏe / việc đột xuất',
     );
-    if (!success) {
+    if (!result.declined) {
       throw new BadRequestException('Bạn không nằm trong danh sách nhân sự được phân công cho chuyến đi này');
     }
 
@@ -637,13 +637,24 @@ export class RoutesService implements OnModuleInit {
 
     const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
 
+    if (result.reverted) {
+      const customerCode = order.customerRequestCode || code;
+      await this.notificationsService.createNotification(
+        order.customerId,
+        `Đơn ${customerCode} đang cập nhật nhân sự vận chuyển`,
+        `Một nhân sự phụ trách chuyến đi ${customerCode} vừa thay đổi. Chuyến đi tạm chưa đủ điều kiện xuất phát cho đến khi nhân sự thay thế xác nhận. Quý khách không cần thanh toán thêm; hóa đơn hiện tại vẫn giữ nguyên.`,
+        'status_update',
+        shipmentId,
+      );
+    }
+
     const managers = await this.fleetStore.findAvailableStaff();
     const logisticsManagers = managers.filter((m) => m.roleName.toLowerCase().includes('manager'));
     for (const lm of logisticsManagers) {
       await this.notificationsService.createNotification(
         lm.id,
         `⚠️ Nhân sự TỪ CHỐI chuyến ${code}`,
-        `Tài xế/Hộ tống phụ trách chuyến đi ${code} đã TỪ CHỐI nhận nhiệm vụ. Lý do: "${dto.reason}". Vui lòng chỉ định nhân sự thay thế.`,
+        `Tài xế/Hộ tống phụ trách chuyến đi ${code} đã TỪ CHỐI nhận nhiệm vụ. Lý do: "${dto.reason}". Vui lòng chỉ định nhân sự thay thế.${result.reverted ? ' Kế hoạch đã chuyển về "đã duyệt – chờ xác nhận nhân sự" và đơn về trạng thái lập kế hoạch cho đến khi người thay thế xác nhận.' : ''}`,
         'incident',
         shipmentId,
       );

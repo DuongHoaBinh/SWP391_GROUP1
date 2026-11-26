@@ -280,3 +280,73 @@ test('DocumentsStore.formatMysqlDateOnly avoids UTC-offset backward shift & stop
   assert.equal(chk.hasExpiredDocuments, true);
   assert.equal(chk.isFullyCompliant, false);
 });
+
+// --- Flow 3: tài xế/áp tải từ chối sau khi kế hoạch đã confirmed ---
+{
+  const makeDeclineStore = ({ shipmentStatus, planStatus, affectedRows = 1 }) => {
+    const sqls = [];
+    const state = { committed: false, rolledBack: false };
+    const conn = {
+      beginTransaction: async () => {},
+      commit: async () => { state.committed = true; },
+      rollback: async () => { state.rolledBack = true; },
+      release: () => {},
+      execute: async (sql, args) => {
+        sqls.push({ sql, args });
+        if (/SELECT status FROM shipment WHERE/.test(sql)) return [[{ status: shipmentStatus }]];
+        if (/FROM route WHERE shipment_id/.test(sql)) return [planStatus ? [{ route_id: 9, plan_status: planStatus }] : []];
+        if (/UPDATE shipment_assignment/.test(sql)) return [{ affectedRows }];
+        return [{ affectedRows: 1 }];
+      },
+      query: async (sql, args) => {
+        sqls.push({ sql, args });
+        if (/SELECT status, payment_flow FROM shipment/.test(sql)) return [[{ status: shipmentStatus, payment_flow: 'prepaid' }]];
+        return [{ affectedRows: 1 }];
+      },
+    };
+    const store = new RoutesStore({}, { getConnection: async () => conn });
+    return { store, sqls, state };
+  };
+
+  for (const [shipmentStatus, planStatus] of [['confirmed', 'confirmed'], ['ready_to_depart', 'ready_to_depart']]) {
+    test(`F3-decline: từ chối khi ${shipmentStatus} → route về approved, đơn về planning có lịch sử`, async () => {
+      const { store, sqls, state } = makeDeclineStore({ shipmentStatus, planStatus });
+      const res = await store.declineStaffAssignment(77, 5, 'Ốm đột xuất');
+      assert.deepEqual(res, { declined: true, reverted: true, previousStatus: shipmentStatus });
+      assert.equal(state.committed, true);
+      assert.ok(sqls.some((s) => /UPDATE route SET plan_status = 'approved'/.test(s.sql)));
+      const toPlanning = sqls.find((s) => /UPDATE shipment SET status = \?/.test(s.sql));
+      assert.equal(toPlanning.args[0], 'planning');
+      const hist = sqls.find((s) => /INSERT INTO shipment_status_history/.test(s.sql));
+      assert.equal(hist.args[2], 'planning');
+      assert.equal(hist.args[5], 'staff_declined');
+      // chỉ cập nhật phân công tài xế/áp tải
+      assert.ok(sqls.some((s) => /UPDATE shipment_assignment[\s\S]*role_in_shipment IN \('driver', 'escort'\)/.test(s.sql)));
+    });
+  }
+
+  test('F3-decline: từ chối khi kế hoạch còn approved/planning → không đổi trạng thái', async () => {
+    const { store, sqls } = makeDeclineStore({ shipmentStatus: 'planning', planStatus: 'approved' });
+    const res = await store.declineStaffAssignment(77, 5, 'Bận');
+    assert.deepEqual(res, { declined: true, reverted: false, previousStatus: 'planning' });
+    assert.ok(!sqls.some((s) => /UPDATE route SET plan_status/.test(s.sql)));
+    assert.ok(!sqls.some((s) => /INSERT INTO shipment_status_history/.test(s.sql)));
+  });
+
+  for (const shipmentStatus of ['in_transit', 'return_pending', 'completed', 'cancelled']) {
+    test(`F3-decline: không cho từ chối khi đơn ${shipmentStatus}`, async () => {
+      const { store, sqls, state } = makeDeclineStore({ shipmentStatus, planStatus: 'in_transit' });
+      await assert.rejects(store.declineStaffAssignment(77, 5, 'x'), (e) => e.getStatus?.() === 409);
+      assert.equal(state.rolledBack, true);
+      assert.ok(!sqls.some((s) => /UPDATE shipment_assignment/.test(s.sql)));
+    });
+  }
+
+  test('F3-decline: người không được phân công tài xế/áp tải → declined=false, không đổi kế hoạch', async () => {
+    const { store, sqls, state } = makeDeclineStore({ shipmentStatus: 'confirmed', planStatus: 'confirmed', affectedRows: 0 });
+    const res = await store.declineStaffAssignment(77, 99, 'x');
+    assert.equal(res.declined, false);
+    assert.equal(state.rolledBack, true);
+    assert.ok(!sqls.some((s) => /UPDATE route SET plan_status/.test(s.sql)));
+  });
+}

@@ -851,8 +851,15 @@ describe('Gate 2 Full 2^3 Combinatorial Matrix & Pre-Departure Downgrades (Isola
 
     const [[sRow]] = await db.execute('SELECT status FROM shipment WHERE shipment_id = ?', [orderId]);
     const [[rRow]] = await db.execute('SELECT plan_status FROM route WHERE shipment_id = ? ORDER BY route_id DESC LIMIT 1', [orderId]);
-    assert.equal(sRow.status, 'confirmed');
-    assert.equal(rRow.plan_status, 'confirmed');
+    // Nhân sự từ chối sau khi đã confirmed/ready_to_depart: kế hoạch về "đã duyệt, chờ nhân sự xác nhận"
+    // và đơn về planning (có lịch sử), không được giữ confirmed khi thiếu tài xế.
+    assert.equal(sRow.status, 'planning');
+    assert.equal(rRow.plan_status, 'approved');
+    const [[hRow]] = await db.execute(
+      "SELECT from_status, to_status, reason_code FROM shipment_status_history WHERE shipment_id = ? AND reason_code = 'staff_declined' ORDER BY history_id DESC LIMIT 1",
+      [orderId],
+    );
+    assert.equal(hRow?.to_status, 'planning');
 
     await assertReadiness(orderId, {
       isPlanConfirmed: false,
