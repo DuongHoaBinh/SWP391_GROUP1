@@ -1163,6 +1163,19 @@ Không có phương án: `200` với `{ "quoteId": null, "options": [], "recomme
 
 ## GPS Tracking, Geofence & Simulation API (Step 10 — Migration 037)
 
+> **Kiểm tra đầu vào (`400 Bad Request`)** cho các API ghi của tracking. Chi tiết DTO ở `backend/src/modules/tracking/dto/tracking-input.dto.ts`:
+> - `POST .../legs/:legId/start|complete` và `POST .../stops/:stopId/status`:
+>   - `action` chỉ nhận `arrived` / `departed` / `customs_cleared`;
+>   - `location.lat/lng` phải là số trong phạm vi hợp lệ, `source` thuộc `gps`/`simulated`/`manual`/`override`;
+>   - `actualTime` theo ISO-8601, không được ở tương lai quá 5 phút.
+> - `POST .../coordinator-override`: `milestoneId` bắt buộc; `action` (nếu có) như trên; nhận thêm `reason`.
+> - `POST .../health-logs`:
+>   - `conditionStatus` thuộc ENUM; thân nhiệt 30–45 °C; nhịp tim 10–250 bpm;
+>   - tối đa 5 ảnh, chỉ nhận ảnh upload qua hệ thống hoặc URL `http(s)`;
+>   - `recordedAt` không được ở tương lai;
+>   - ngựa (`horseId`, hoặc tên khi thiếu `horseId`) phải thuộc chuyến.
+> - `POST .../pings`: tối đa 100 điểm, `source` chỉ `gps`/`simulated`.
+
 Base URL: `http://localhost:5000/api` (Tất cả endpoint yêu cầu `Authorization: Bearer <token>`)
 
 ### 1. `POST /tracking/shipments/:shipmentId/pings`

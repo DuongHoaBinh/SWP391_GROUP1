@@ -4,6 +4,7 @@ const { TrackingService } = require('../dist/modules/tracking/tracking.service')
 const { RoutesService } = require('../dist/modules/routes/routes.service');
 const { buildConsolidatedRoadItinerary } = require('../dist/common/road-trip-sequencing');
 const { UserRole } = require('../dist/modules/auth/auth.types');
+const TEST_GPS = { lat: 10.8, lng: 106.7, accuracyM: 10, source: 'gps' }; // tài xế bắt buộc gửi vị trí khi check-in
 
 const driverUser = { id: '5', role: UserRole.DRIVER_ESCORT, email: 'driver@example.com', specialization: 'driver', fullName: 'Tài xế 1' };
 
@@ -25,7 +26,7 @@ test('domestic single-leg road stop check-in does NOT complete leg 1 or release 
     findTripStatusLogs: async () => [],
   };
   const service = new TrackingService(store, { createNotification: async () => {}, notifyRole: async () => {} }, {});
-  await service.checkInStop(driverUser, 125, 17, { action: 'arrived' });
+  await service.checkInStop(driverUser, 125, 17, { action: 'arrived', location: TEST_GPS });
   assert.equal(legUpdates.length, 0);
   assert.equal(vehicleUpdates.length, 0);
 });
@@ -51,7 +52,7 @@ test('multi-modal flight stop check-in on leg 1 still completes road leg 1', asy
     findTripStatusLogs: async () => [],
   };
   const service = new TrackingService(store, { createNotification: async () => {}, notifyRole: async () => {} }, {});
-  await service.checkInStop(driverUser, 33, 5, { action: 'customs_cleared' });
+  await service.checkInStop(driverUser, 33, 5, { action: 'customs_cleared', location: TEST_GPS });
   assert.equal(legUpdates.length, 1);
   assert.equal(legUpdates[0][0], 7);
   assert.equal(legUpdates[0][1], 'completed');
@@ -108,12 +109,12 @@ test('shared road_trip syncs leg start, stop check-in and leg completion across 
     { getTripPlanReadiness: async () => ({ isReadyToDepart: true, pendingConditions: [] }) },
   );
 
-  await service.checkInLegStart(driverUser, 125, 11, {});
+  await service.checkInLegStart(driverUser, 125, 11, { location: TEST_GPS });
   assert.deepEqual(legUpdates.map(x => [x.legId, x.status]), [[11, 'active'], [12, 'active']]);
   assert.deepEqual(shipmentUpdates, [[125, 'in_transit'], [127, 'in_transit']].map(([id, status]) => ({ id, status })));
 
-  await service.checkInStop(driverUser, 125, 17, { action: 'arrived' });
-  await service.checkInStop(driverUser, 125, 17, { action: 'departed' });
+  await service.checkInStop(driverUser, 125, 17, { action: 'arrived', location: TEST_GPS });
+  await service.checkInStop(driverUser, 125, 17, { action: 'departed', location: TEST_GPS });
   assert.deepEqual(stopUpdates, [
     { stopId: 17, status: 'arrived' },
     { stopId: 21, status: 'arrived' },
@@ -123,7 +124,7 @@ test('shared road_trip syncs leg start, stop check-in and leg completion across 
   assert.equal(primaryLeg.status, 'active');
   assert.equal(siblingLeg.status, 'active');
 
-  await service.checkInLegArrival(driverUser, 125, 11, {});
+  await service.checkInLegArrival(driverUser, 125, 11, { location: TEST_GPS });
   assert.equal(primaryLeg.status, 'completed');
   assert.equal(siblingLeg.status, 'completed');
   assert.ok(shipmentUpdates.some(x => x.id === 125 && x.status === 'completed'));
@@ -159,14 +160,14 @@ test('syncSiblingStopCheckIn matches normalized locations and checkInLegArrival 
   };
 
   const service = new TrackingService(store, { createNotification: async () => {}, notifyRole: async () => {} }, {});
-  await service.checkInStop(driverUser, 125, 17, { action: 'arrived' });
+  await service.checkInStop(driverUser, 125, 17, { action: 'arrived', location: TEST_GPS });
   assert.deepEqual(stopUpdates, [
     { stopId: 17, status: 'arrived' },
     { stopId: 21, status: 'arrived' },
   ]);
 
   await assert.rejects(
-    service.checkInLegArrival(driverUser, 128, 13, {}),
+    service.checkInLegArrival(driverUser, 128, 13, { location: TEST_GPS }),
     /hoàn thành trước đó/,
   );
 });
@@ -334,8 +335,8 @@ test('consolidated road trip enforces customer privacy, full driver milestones, 
   assert.ok(!JSON.stringify(cust127).toLowerCase().includes('chuyến ghép'));
 
   // 3. Partial dropoff at Hoang Mai completes #127 WITHOUT completing #125 or Dong Da milestone
-  await service.checkInStop(driverUser, 125, 103, { action: 'arrived' });
-  const afterDropoff125 = await service.checkInStop(driverUser, 125, 103, { action: 'departed' });
+  await service.checkInStop(driverUser, 125, 103, { action: 'arrived', location: TEST_GPS });
+  const afterDropoff125 = await service.checkInStop(driverUser, 125, 103, { action: 'departed', location: TEST_GPS });
   assert.equal(shipmentsDb[127].status, 'completed');
   assert.equal(shipmentsDb[125].status, 'in_transit');
   assert.equal(vehicleReleases.length, 0);

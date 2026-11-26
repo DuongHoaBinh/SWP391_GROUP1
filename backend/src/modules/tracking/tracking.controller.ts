@@ -32,10 +32,12 @@ import {
   CheckInStopDto,
   CoordinatorOverrideDto,
   CreateHealthLogDto,
+  PositionPingBatchDto,
+} from './dto/tracking-input.dto';
+import {
   HorseHealthLogEntity,
   LiveOverviewItem,
   LiveTrackingDetails,
-  PositionPingBatchDto,
   PositionPingResult,
   TrackingSystemSettings,
   TripTrackingDetails,

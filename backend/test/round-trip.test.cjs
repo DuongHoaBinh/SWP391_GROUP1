@@ -23,6 +23,7 @@ const { QuotesService } = require('../dist/modules/orders/quotes.service');
 const { OrdersService } = require('../dist/modules/orders/orders.service');
 const { RoutesService } = require('../dist/modules/routes/routes.service');
 const { TrackingService } = require('../dist/modules/tracking/tracking.service');
+const TEST_GPS = { lat: 10.8, lng: 106.7, accuracyM: 10, source: 'gps' }; // tài xế bắt buộc gửi vị trí khi check-in
 
 const policy = currentReturnPolicy();
 
@@ -462,12 +463,12 @@ test('8. Chặng đi xong với đơn khứ hồi → return_pending; đơn mộ
 
   // a. Đơn khứ hồi: chặng 1 (outbound) hoàn thành -> return_pending
   const roundTripService = createTrackingService('round_trip');
-  await roundTripService.checkInLegArrival(user, 401, 1, {});
+  await roundTripService.checkInLegArrival(user, 401, 1, { location: TEST_GPS });
   assert.equal(updatedShipmentStatus, 'return_pending');
 
   // b. Đơn một chiều: chặng 1 (final leg) hoàn thành -> completed
   const oneWayService = createTrackingService('one_way');
-  await oneWayService.checkInLegArrival(user, 402, 1, {});
+  await oneWayService.checkInLegArrival(user, 402, 1, { location: TEST_GPS });
   assert.equal(updatedShipmentStatus, 'completed');
 });
 

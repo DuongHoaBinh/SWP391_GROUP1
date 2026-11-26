@@ -58,6 +58,42 @@ import {
   TimelineItemDto,
 } from './tracking.types';
 
+/** Trạng thái đơn cho phép ghi mốc trạm / đến chặng (sau khi đã xuất phát, trước khi đóng chuyến). */
+const ACTIVE_JOURNEY_STATUSES = ['in_transit', 'return_pending'];
+/** Trạng thái đơn cho phép ghi nhật ký sức khỏe hành trình (kiểm tra trước giờ đi tới khi kết thúc). */
+const HEALTH_LOG_ALLOWED_STATUSES = ['ready_to_depart', 'in_transit', 'return_pending'];
+/** Trạm coi là đã xong (khớp tiêu chí của checkInLegArrival; trạm xuất cảnh đa phương thức kết thúc ở customs_cleared). */
+const STOP_DONE_STATUSES = ['departed', 'customs_cleared', 'cleared'];
+
+/** Tài xế/áp tải ngoài hiện trường (không phải Manager/Admin/Coordinator). */
+function isFieldStaff(user: AuthenticatedUser): boolean {
+  const roleStr = String(user.role || '').toUpperCase();
+  const isSupervisor = roleStr.includes('COORDINATOR') || roleStr.includes('MANAGER') || roleStr.includes('ADMIN');
+  return !isSupervisor && (roleStr.includes('DRIVER') || roleStr.includes('ESCORT'));
+}
+
+/** Cho phép lệch đồng hồ thiết bị tối đa 5 phút; mốc/nhật ký ở tương lai xa hơn bị từ chối. */
+const FUTURE_EVENT_TOLERANCE_MS = 5 * 60 * 1000;
+const HEALTH_ATTACHMENT_UPLOAD_PREFIX = '/api/tracking/health-logs/attachments/';
+
+/**
+ * Ảnh nhật ký sức khỏe chỉ được là:
+ * - file đã tải qua POST /tracking/shipments/:id/health-logs/upload (tên file phẳng, không có thư mục); hoặc
+ * - URL ảnh http(s) bên ngoài mà UI tài xế cho phép dán.
+ * Mọi scheme khác (javascript:, data:, file:, đường dẫn tương đối…) bị từ chối vì ảnh được hiển thị cho khách.
+ */
+function assertHealthAttachmentUrl(url: string): void {
+  if (url.startsWith(HEALTH_ATTACHMENT_UPLOAD_PREFIX)) {
+    const fileName = url.slice(HEALTH_ATTACHMENT_UPLOAD_PREFIX.length);
+    if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(fileName) && !fileName.includes('..')) return;
+  } else if (/^https?:\/\/[^\s/$.?#][^\s]*$/i.test(url)) {
+    return;
+  }
+  throw new BadRequestException(
+    'Ảnh đính kèm không hợp lệ. Chỉ chấp nhận ảnh tải lên qua hệ thống hoặc URL ảnh http(s).',
+  );
+}
+
 @Injectable()
 export class TrackingService {
   private readonly logger = new Logger(TrackingService.name);
@@ -92,6 +128,9 @@ export class TrackingService {
     const parsed = new Date(actualTime);
     if (!Number.isFinite(parsed.getTime())) {
       throw new BadRequestException('Thời điểm actualTime không hợp lệ.');
+    }
+    if (parsed.getTime() - Date.now() > FUTURE_EVENT_TOLERANCE_MS) {
+      throw new BadRequestException('Thời điểm check-in (actualTime) không được ở tương lai.');
     }
     const isBackdated = Math.abs(Date.now() - parsed.getTime()) > 30 * 60 * 1000;
     if (isBackdated && (!notes || !notes.trim())) {
@@ -128,6 +167,14 @@ export class TrackingService {
     flagged: boolean;
   }> {
     if (!location) {
+      // Tài xế/áp tải phải gửi vị trí GPS, hoặc check-in thủ công (source = manual) kèm lý do + ảnh.
+      // Chỉ Manager/Admin cập nhật thay từ xa (coordinator-override) mới được bỏ trống; log vẫn bị gắn cờ.
+      if (isFieldStaff(user)) {
+        throw new BadRequestException({
+          code: 'LOCATION_REQUIRED',
+          message: 'Vui lòng bật định vị GPS hoặc check-in thủ công kèm lý do và ảnh bằng chứng.',
+        });
+      }
       return {
         lat: null,
         lng: null,
@@ -1053,6 +1100,14 @@ export class TrackingService {
     // Role check: driver for road, escort for flight, coordinator/manager can override
     this.assertStaffCanUpdateLeg(user, targetLeg);
 
+    // Mốc chỉ đi tiến: chặng đã xuất phát / hoàn thành không được "xuất phát" lại
+    // (trước đây sẽ reset chặng về active và ghi đè actual_departure cũ, làm mất lịch sử).
+    if (targetLeg.actual_departure || (targetLeg.status && targetLeg.status !== 'pending')) {
+      throw new ConflictException(
+        `Chặng #${targetLeg.sequence_no} đã ${targetLeg.status === 'completed' ? 'hoàn thành' : 'xuất phát'}, không thể xuất phát lại. Nếu cần điều chỉnh, vui lòng báo Manager để ghi nhận sửa đổi có lý do.`,
+      );
+    }
+
     if (targetLeg.sequence_no === 1 && shipment.status !== 'in_transit') {
       const readiness = await this.routesService.getTripPlanReadiness(user, shipmentId);
       if (!readiness.isReadyToDepart) {
@@ -1237,6 +1292,7 @@ export class TrackingService {
     const shipment = await this.trackingStore.findShipmentById(shipmentId);
     if (!shipment) throw new NotFoundException('Không tìm thấy chuyến đi');
     await this.assertAssignedForDriverEscort(user, shipmentId);
+    this.assertJourneyActive(shipment.status, 'cập nhật trạm dừng');
 
     const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
     if (!route) throw new NotFoundException('Chưa có lộ trình');
@@ -1281,6 +1337,24 @@ export class TrackingService {
     }
     if (dto.action === 'arrived' && normalizedCurrent !== 'pending') {
       throw new ConflictException(`Trạm dừng "${targetStop.location_name}" đang ở trạng thái "${normalizedCurrent}", không thể quay lại "arrived"`);
+    }
+    // Không nhảy cóc: các trạm đứng trước trong cùng chặng (cùng chiều đi/về) phải đã rời trạm.
+    // Chuyến ghép cũ (road_trip) bỏ qua vì trạm được đồng bộ giữa các đơn anh em.
+    if (dto.action === 'arrived' && !parentLeg?.road_trip_id) {
+      const direction = (targetStop as any).direction || 'outbound';
+      const unfinishedEarlier = stops.filter(
+        (s) =>
+          s.route_stop_id !== targetStop.route_stop_id &&
+          (s.leg_id ?? null) === (targetStop.leg_id ?? null) &&
+          ((s as any).direction || 'outbound') === direction &&
+          Number(s.sequence_no) < Number(targetStop.sequence_no) &&
+          !STOP_DONE_STATUSES.includes(String(s.status)),
+      );
+      if (unfinishedEarlier.length > 0) {
+        throw new ConflictException(
+          `Phải hoàn tất các trạm trước theo đúng thứ tự (${unfinishedEarlier.map((s) => s.location_name).join(', ')}) rồi mới check-in "${targetStop.location_name}".`,
+        );
+      }
     }
     if (dto.action === 'customs_cleared' && normalizedCurrent !== 'arrived') {
       throw new ConflictException('Phải check-in "Đã tới trạm" (arrived) trước khi xác nhận thông quan / kiểm dịch (customs_cleared)');
@@ -1496,6 +1570,7 @@ export class TrackingService {
     if (shipment.status === 'completed' || targetLeg.status === 'completed') {
       throw new ConflictException('Chặng vận chuyển này đã hoàn thành trước đó!');
     }
+    this.assertJourneyActive(shipment.status, 'xác nhận đến chặng');
 
     // Rule: Chặng phải bắt đầu rồi mới được bấm đến
     if (!targetLeg.actual_departure && targetLeg.status === 'pending') {
@@ -1787,9 +1862,10 @@ export class TrackingService {
     if (shipment.status === 'completed') {
       throw new ConflictException('Chuyến đi đã hoàn tất toàn bộ lộ trình, không thể ghi thêm nhật ký sức khỏe!');
     }
-    if (['confirmed', 'approved', 'planning', 'requested', 'change_requested'].includes(shipment.status)) {
+    // Danh sách cho phép (thay cho danh sách chặn cũ vốn bỏ sót đơn đã hủy / hoàn tiền / chờ thanh toán).
+    if (!HEALTH_LOG_ALLOWED_STATUSES.includes(shipment.status)) {
       throw new ConflictException(
-        'Chuyến đi chưa sẵn sàng xuất phát (đang chờ hoàn tất thanh toán / hồ sơ kiểm dịch), chưa thể ghi nhật ký sức khỏe hành trình!',
+        `Chuyến đi đang ở trạng thái "${shipment.status}", chỉ ghi nhật ký sức khỏe hành trình khi chuyến đã sẵn sàng xuất phát hoặc đang vận chuyển.`,
       );
     }
 
@@ -1809,22 +1885,25 @@ export class TrackingService {
       }
     }
 
-    const rawAttachments = Array.isArray(dto.attachments) ? dto.attachments : [];
+    const rawAttachments = (Array.isArray(dto.attachments) ? dto.attachments : []).map((att) => String(att).trim());
     if (rawAttachments.length > 5) {
       throw new BadRequestException('Tối đa 5 ảnh đính kèm cho mỗi bản ghi sức khỏe ngựa.');
     }
     for (const att of rawAttachments) {
-      if (typeof att === 'string' && att.trim().startsWith('data:') && att.length > 4096) {
-        throw new BadRequestException(
-          'Vui lòng tải ảnh qua multipart /tracking/shipments/:id/health-logs/upload thay vì gửi chuỗi Base64 dung lượng lớn.',
-        );
-      }
+      assertHealthAttachmentUrl(att);
     }
 
     const recordedAtDate = dto.recordedAt ? new Date(dto.recordedAt) : new Date();
     if (!Number.isFinite(recordedAtDate.getTime())) {
       throw new BadRequestException('Thời điểm recordedAt không hợp lệ.');
     }
+    if (recordedAtDate.getTime() - Date.now() > FUTURE_EVENT_TOLERANCE_MS) {
+      throw new BadRequestException('Thời điểm ghi nhận sức khỏe (recordedAt) không được ở tương lai.');
+    }
+
+    // Nhật ký sức khỏe phải gắn với đúng một con ngựa thuộc chuyến này (không ghi cho ngựa của đơn khác).
+    const resolvedHorse = await this.resolveShipmentHorse(shipmentId, dto.horseId, dto.horseName);
+    dto = { ...dto, horseId: resolvedHorse.horseId, horseName: resolvedHorse.horseName };
 
     const vitalCfg = await this.getVitalConfig();
     const prevLog =
@@ -2028,6 +2107,46 @@ export class TrackingService {
       staffName,
       displayName: `${actorRoleName} ${staffName}`,
     };
+  }
+
+  /** Mốc trạm / đến chặng chỉ ghi khi chuyến đang chạy (không ghi vào đơn đã hoàn tất, hủy, hoàn tiền…). */
+  private assertJourneyActive(status: string, actionLabel: string): void {
+    if (!ACTIVE_JOURNEY_STATUSES.includes(status)) {
+      throw new ConflictException(
+        `Chuyến đi đang ở trạng thái "${status}", không thể ${actionLabel}. Chỉ chuyến đang vận chuyển mới được cập nhật mốc.`,
+      );
+    }
+  }
+
+  /**
+   * Xác định con ngựa của nhật ký sức khỏe trong danh sách ngựa của chuyến.
+   * Ưu tiên horseId; nếu thiếu thì khớp đúng một ngựa theo tên. Tên lưu lại lấy từ hồ sơ ngựa,
+   * không lấy tên tự do client gửi, để nhật ký/cảnh báo luôn trỏ đúng ngựa.
+   */
+  private async resolveShipmentHorse(
+    shipmentId: number,
+    horseId: number | undefined,
+    horseName: string,
+  ): Promise<{ horseId: number | undefined; horseName: string }> {
+    if (typeof this.trackingStore?.findAssignedHorses !== 'function') {
+      return { horseId, horseName };
+    }
+    const horses = (await this.trackingStore.findAssignedHorses(shipmentId)).map((h: any) => ({
+      id: Number(h.horse_id ?? h.id),
+      name: String(h.name ?? h.horse_name ?? '').trim(),
+    }));
+    let match: { id: number; name: string } | undefined;
+    if (horseId !== undefined && horseId !== null) {
+      match = horses.find((h) => h.id === Number(horseId));
+    } else {
+      const wanted = String(horseName || '').trim().toLowerCase();
+      const byName = horses.filter((h) => h.name.toLowerCase() === wanted);
+      match = byName.length === 1 ? byName[0] : undefined;
+    }
+    if (!match) {
+      throw new BadRequestException('Ngựa được chọn không thuộc chuyến đi này. Vui lòng chọn đúng ngựa trong chuyến.');
+    }
+    return { horseId: match.id, horseName: match.name || horseName };
   }
 
   private assertStaffCanUpdateLeg(user: AuthenticatedUser, leg: any): void {

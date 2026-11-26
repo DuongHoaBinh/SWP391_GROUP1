@@ -19,7 +19,20 @@ Vehicle Driver / Escort, Fleet & Route Coordinator, Logistics Manager, Customer
 - Tracking events are append-only; a correction creates a new event with a reason.
 - Drivers/escorts can update only assigned trips; coordinators can update trips they coordinate.
 - A milestone cannot move backward without an explicitly recorded correction or incident.
+  - **Không xuất phát lại:** chặng đã xuất phát hoặc đã hoàn thành không được "xuất phát" lại (`409`); giờ xuất phát cũ không bị ghi đè.
+  - **Không nhảy cóc:** check-in "đã tới" một trạm yêu cầu mọi trạm đứng trước trong cùng chặng, cùng chiều đi/về, đã xong (`departed` hoặc `customs_cleared`), nếu không trả `409`. Chuyến ghép cũ (`road_trip`) không áp dụng quy tắc này vì trạm được đồng bộ giữa các đơn.
+  - **Đúng trạng thái chuyến:**
+    - Check-in trạm và xác nhận đến chặng chỉ khi đơn `in_transit` / `return_pending`.
+    - Nhật ký sức khỏe chỉ khi đơn `ready_to_depart` / `in_transit` / `return_pending`.
+    - Đơn đã hoàn tất, hủy, hoàn tiền hoặc chưa thanh toán trả `409`.
+- **Bắt buộc có vị trí:** tài xế/áp tải phải gửi GPS, hoặc check-in thủ công (`source = manual`) kèm lý do và ảnh; thiếu thì trả `400 LOCATION_REQUIRED`. Chỉ Manager/Admin cập nhật thay qua `coordinator-override` mới được bỏ trống vị trí, và log khi đó bị gắn cờ `flagged`.
 - Health logs are associated with an individual horse, trip, author, time, and optional attachment.
+- **Kiểm tra dữ liệu đầu vào** (`backend/src/modules/tracking/dto/tracking-input.dto.ts`): lỗi trả `400`, không để xuống DB.
+  - **Check-in mốc:** `action` của trạm chỉ là `arrived` / `departed` / `customs_cleared`. `lat` trong [-90, 90], `lng` trong [-180, 180]. `source` thuộc `gps`/`simulated`/`manual`/`override`. `actualTime` theo ISO-8601 và không được ở tương lai quá 5 phút.
+  - **Nhật ký sức khỏe:** `conditionStatus` thuộc `stable`, `not_eating`, `stressed`, `climate_change`, `other`. Thân nhiệt 30–45 °C, nhịp tim 10–250 bpm, tối đa 5 ảnh. `recordedAt` không được ở tương lai quá 5 phút.
+  - **Ngựa của nhật ký sức khỏe phải thuộc chuyến**: ưu tiên `horseId`, thiếu thì khớp đúng một ngựa theo tên. Tên lưu lại lấy từ hồ sơ ngựa.
+  - **Ảnh nhật ký sức khỏe:** chỉ nhận file tải qua `POST /tracking/shipments/:id/health-logs/upload` hoặc URL ảnh `http(s)` mà UI tài xế cho phép dán; từ chối `javascript:`, `data:`, `file:` và đường dẫn tương đối.
+  - **Ping GPS:** tối đa 100 điểm/đợt, `source` là `gps`/`simulated`. Ping quá cũ hoặc ở tương lai vẫn chỉ bị bỏ qua từng điểm như trước.
 - Customer tracking exposes operational status and approved location information, not private staff notes.
 - For consolidated shared road trips (`shared_stall` with multiple origins/destinations), staff tracking timelines (`DRIVER_ESCORT`, `FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`) display the ordered physical corridor (`farther origin -> closer pickup transfer_hub -> shared corridor transit stops -> closer dropoff transfer_hub -> farther destination`) and `consolidatedRouteSummary`, keeping sibling stops synchronized on the same `road_trip`.
 - When departing a dropoff `transfer_hub` milestone on a consolidated shared trip, only the sibling shipment(s) whose destination matches that hub are transitioned to completed (`completed`), while remaining shipments continue `in_transit` and the assigned vehicle stays `in_use` until the final destination completes.

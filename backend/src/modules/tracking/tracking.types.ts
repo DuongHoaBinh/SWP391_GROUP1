@@ -55,7 +55,7 @@ export interface CheckInStopDto {
 
 export interface CoordinatorOverrideDto {
   milestoneId: string;
-  action: string;
+  action?: string;
   actualTime?: string;
   notes?: string;
 }
@@ -82,7 +82,8 @@ export interface PositionPingItem {
   speedKmh?: number | null;
   headingDeg?: number | null;
   source: 'gps' | 'simulated';
-  recordedAt: string;
+  /** Thiếu = ping thời gian thực, server dùng thời điểm nhận. */
+  recordedAt?: string;
 }
 
 export interface PositionPingBatchDto {

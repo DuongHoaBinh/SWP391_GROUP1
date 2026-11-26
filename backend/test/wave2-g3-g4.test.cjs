@@ -18,6 +18,7 @@ const {
 } = require('../dist/modules/tracking/vitals-policy');
 const { TrackingService } = require('../dist/modules/tracking/tracking.service');
 const { UserRole } = require('../dist/modules/auth/auth.types');
+const TEST_GPS = { lat: 10.8, lng: 106.7, accuracyM: 10, source: 'gps' }; // tài xế bắt buộc gửi vị trí khi check-in
 
 test('AC-F1-05: calculateOperationalRefund matches DEC-04 matrix (vet_unfit_certified, disbursement deduction, company_fault absorption, >=20M dual-approval)', () => {
   const depAt = new Date(Date.now() + 12 * 3600 * 1000); // T-12h
@@ -292,13 +293,14 @@ test('BR-F4-05 & DEC-07: backdated >30m check-in requires notes (400), succeeds 
 
   // >30m without notes -> 400 BadRequest
   await assert.rejects(
-    svc.checkInStop(driverUser, 505, 71, { action: 'arrived', actualTime: oldTs }),
+    svc.checkInStop(driverUser, 505, 71, { action: 'arrived', location: TEST_GPS, actualTime: oldTs }),
     (err) => err.getStatus?.() === 400,
   );
 
   // Assigned driver cross check-in at foreign stop + notes passes (DEC-07 & BR-F4-05)
   await svc.checkInStop(driverUser, 505, 71, {
     action: 'arrived',
+    location: TEST_GPS,
     actualTime: oldTs,
     notes: 'Mất sóng 4G tại cửa khẩu, nhập bù sau khi có tín hiệu',
   });

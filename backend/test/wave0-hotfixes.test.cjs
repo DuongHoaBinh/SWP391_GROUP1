@@ -7,6 +7,7 @@ const { RoutesService } = require('../dist/modules/routes/routes.service');
 const { TrackingService } = require('../dist/modules/tracking/tracking.service');
 const { TrackingStore } = require('../dist/modules/tracking/tracking.store');
 const { UserRole } = require('../dist/modules/auth/auth.types');
+const TEST_GPS = { lat: 10.8, lng: 106.7, accuracyM: 10, source: 'gps' }; // tài xế bắt buộc gửi vị trí khi check-in
 
 test('W0-orders: DRIVER_ESCORT getAllOrders filters by assigned staff and getOrderById blocks unassigned', async () => {
   let calledAssigned = false;
@@ -220,7 +221,7 @@ test('W0-tracking: unassigned driver gets 403, multimodal arrived keeps road leg
   );
 
   // Assigned driver #5 sees ISO-8601 ETA & multimodal arrived does NOT complete road leg 1
-  const details = await service.checkInStop({ id: '5', role: UserRole.DRIVER_ESCORT, email: 'driver@example.com' }, 90, 71, { action: 'arrived' });
+  const details = await service.checkInStop({ id: '5', role: UserRole.DRIVER_ESCORT, email: 'driver@example.com' }, 90, 71, { action: 'arrived', location: TEST_GPS });
   assert.equal(details.eta, '2099-05-01T12:00:00.000Z');
   assert.equal(legUpdates.length, 0);
 
@@ -229,7 +230,7 @@ test('W0-tracking: unassigned driver gets 403, multimodal arrived keeps road leg
     { route_stop_id: 71, route_id: 19, leg_id: 31, sequence_no: 1, stop_type: 'border_check', location_name: 'Mộc Bài', country: 'Vietnam', status: 'arrived' },
   ];
   await assert.rejects(
-    service.checkInStop({ id: '5', role: UserRole.DRIVER_ESCORT, email: 'driver@example.com' }, 90, 71, { action: 'departed' }),
+    service.checkInStop({ id: '5', role: UserRole.DRIVER_ESCORT, email: 'driver@example.com' }, 90, 71, { action: 'departed', location: TEST_GPS }),
     (e) => e.getStatus?.() === 422,
   );
 
@@ -238,7 +239,7 @@ test('W0-tracking: unassigned driver gets 403, multimodal arrived keeps road leg
     { route_stop_id: 71, route_id: 19, leg_id: 31, sequence_no: 1, stop_type: 'rest', location_name: 'Trạm nghỉ', country: 'Vietnam', status: 'pending' },
   ];
   await assert.rejects(
-    service.checkInStop({ id: '5', role: UserRole.DRIVER_ESCORT, email: 'driver@example.com' }, 90, 71, { action: 'departed' }),
+    service.checkInStop({ id: '5', role: UserRole.DRIVER_ESCORT, email: 'driver@example.com' }, 90, 71, { action: 'departed', location: TEST_GPS }),
     (e) => e.getStatus?.() === 409,
   );
 
