@@ -27,9 +27,10 @@ import { InsuranceClaimStore } from './insurance-claim.store';
 import { AuthModule } from '../auth/auth.module';
 import { AllocationModule } from '../fleet/allocation.module';
 import { QuoteAllocationService } from './quote-allocation.service';
+import { RouteNetworkModule } from '../routes/route-network.module';
 
 @Module({
-  imports: [NotificationsModule, DocumentsModule, DistanceModule, AuthModule, AllocationModule],
+  imports: [NotificationsModule, DocumentsModule, DistanceModule, AuthModule, AllocationModule, RouteNetworkModule],
   controllers: [
     OrdersOpsController,
     OrdersController,

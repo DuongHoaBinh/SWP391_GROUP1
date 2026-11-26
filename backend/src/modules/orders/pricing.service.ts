@@ -3,12 +3,15 @@ import {
   BadRequestException,
   UnprocessableEntityException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { PricingStore, TariffRecord } from './pricing.store';
 import { CreateTariffDto, PreviewPricingDto } from './dto/pricing.dto';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { DistanceService } from '../routes/distance.service';
 import { haversineKm, GeoPoint } from '../routes/geo-policy';
+import { RouteNetworkService, RouteNetworkUnavailableError, toHttpError } from '../routes/route-network.service';
+import { PlannedLeg, PlannedRoute } from '../routes/route-network.types';
 import { computeRequiredStallSlots } from '../fleet/capacity-policy';
 import {
   validateTariffParams,
@@ -42,13 +45,18 @@ export interface RouteContext {
     sea?: SeaTariff & { version?: number };
     partnerRoad?: RoadTariff & { version?: number };
   };
+  /** Tuyến chi tiết từ mạng lưới vận tải (chặng, trạm nghỉ, cửa khẩu) — cùng nguồn với bản đồ. Không có geometry. */
+  routePlan?: RoutePlanSummary | null;
 }
+
+export type RoutePlanSummary = Omit<PlannedRoute, 'legs'> & { legs: Array<Omit<PlannedLeg, 'geometry'>> };
 
 @Injectable()
 export class PricingService {
   constructor(
     private readonly pricingStore: PricingStore,
     private readonly distanceService: DistanceService,
+    @Optional() private readonly routeNetwork?: RouteNetworkService,
   ) {}
 
   async getActiveTariffs(region = 'VN'): Promise<Record<'road' | 'air' | 'sea', TariffRecord | null>> {
@@ -148,6 +156,7 @@ export class PricingService {
       legs: QuoteLeg[];
       requiredStallSlots: number;
       vehicles: VehicleOptionInput[];
+      routePlan?: RoutePlanSummary | null;
     }
   > {
     const ctx = await this.buildRouteContext(dto);
@@ -159,6 +168,7 @@ export class PricingService {
       legs: ctx.legs,
       requiredStallSlots: ctx.requiredStallSlots,
       vehicles: vehicleRes.vehicles,
+      routePlan: ctx.routePlan ?? null,
     };
   }
 
@@ -199,6 +209,21 @@ export class PricingService {
         requiresPrivateStall: Boolean(h.requiresPrivateStall),
       })),
     );
+
+    if (mode === 'air' && !airTariff) throw new NotFoundException('Chưa có bảng giá đường hàng không');
+    if (mode === 'sea' && !seaTariff) throw new NotFoundException('Chưa có bảng giá đường thủy');
+    if (mode === 'sea' && !seaMode) {
+      throw new BadRequestException('Vui lòng chọn hình thức đường thủy (ferry hoặc vessel)');
+    }
+
+    // 2b. Mạng lưới vận tải (migration 040): cùng bộ lập tuyến với bản đồ. Chưa có dữ liệu → dùng logic cũ bên dưới.
+    const tariffsBundle = {
+      road: { ...roadTariff, version: activeTariffs.road?.version || 1 },
+      air: airTariff ? { ...airTariff, version: activeTariffs.air?.version || 1 } : undefined,
+      sea: seaTariff ? { ...seaTariff, version: activeTariffs.sea?.version || 1 } : undefined,
+    };
+    const networkCtx = await this.buildRouteContextFromNetwork(dto, requiredStallSlots, tariffsBundle);
+    if (networkCtx) return networkCtx;
 
     const legs: Array<{
       key: string;
@@ -448,6 +473,123 @@ export class PricingService {
         road: { ...roadTariff, version: activeTariffs.road?.version || 1 },
         air: airTariff ? { ...airTariff, version: activeTariffs.air?.version || 1 } : undefined,
         sea: seaTariff ? { ...seaTariff, version: activeTariffs.sea?.version || 1 } : undefined,
+      },
+    };
+  }
+
+  /**
+   * Dựng RouteContext từ tuyến của mạng lưới vận tải. Các chặng bộ được gộp thành to_hub / main / from_hub
+   * để giữ nguyên công thức cước; số cửa khẩu và số lượt phà lấy từ tuyến thật.
+   * Trả null khi mạng lưới chưa sẵn sàng (chưa chạy migration 040) để dùng logic cũ.
+   */
+  private async buildRouteContextFromNetwork(
+    dto: PreviewPricingDto,
+    requiredStallSlots: number,
+    tariffs: RouteContext['tariffs'],
+  ): Promise<RouteContext | null> {
+    if (!this.routeNetwork) return null;
+    const { mode, seaMode, sample } = dto;
+    const origin = sample.origin;
+    const destination = sample.destination;
+    const speed = tariffs.road.averageSpeedKmh || 50;
+
+    let plan: PlannedRoute;
+    try {
+      plan = await this.routeNetwork.plan(
+        {
+          mode,
+          seaMode,
+          origin: { lat: origin.lat, lng: origin.lng, label: origin.address, country: origin.country },
+          destination: { lat: destination.lat, lng: destination.lng, label: destination.address, country: destination.country },
+          roadSpeedKmh: speed,
+        },
+        { refineRoad: true },
+      );
+    } catch (err) {
+      if (err instanceof RouteNetworkUnavailableError) return null;
+      throw toHttpError(err);
+    }
+
+    const legs = plan.legs;
+    const firstMain = legs.findIndex((l) => l.type !== 'road');
+    const lastMain = legs.length - 1 - [...legs].reverse().findIndex((l) => l.type !== 'road');
+    const groupRoad = (list: PlannedLeg[]) => {
+      const km = list.reduce((s, l) => s + l.distanceKm, 0);
+      // Giờ lái thuần + thông quan cửa khẩu; giờ nghỉ do estimateJourney (journey.rules) cộng thêm khi báo giá
+      const clearance = list.reduce((s, l) => s + Math.max(0, l.durationHours - l.distanceKm / speed - l.stops.length), 0);
+      return {
+        km: Number(km.toFixed(1)),
+        hours: Number((km / speed + clearance).toFixed(2)),
+        borders: list.reduce((s, l) => s + l.borderCrossingCount, 0),
+      };
+    };
+    const source = 'network';
+    const quoteLegs: QuoteLeg[] = [];
+    const horses = sample.horses.map((h, i) => ({
+      horseId: i + 1,
+      quantity: h.quantity || 1,
+      requiresPrivateStall: Boolean(h.requiresPrivateStall),
+    }));
+    let freightBase: Omit<FreightInput, 'vehicles'>;
+    let arrivalHub: GeoPoint | null = null;
+    const warnings: string[] = [];
+
+    if (plan.mode === 'road' || firstMain < 0) {
+      const road = groupRoad(legs);
+      quoteLegs.push({ key: 'main', from: origin.address, to: destination.address, distanceKm: road.km, durationHours: road.hours, source });
+      freightBase = { mode: 'road', horses, roadLegs: [{ key: 'main', distanceKm: road.km, borderCrossings: road.borders }] };
+      if (mode !== 'road') warnings.push('MODE_FALLBACK_ROAD');
+    } else {
+      const before = groupRoad(legs.slice(0, firstMain));
+      const between = groupRoad(legs.slice(firstMain, lastMain + 1).filter((l) => l.type === 'road'));
+      const after = groupRoad(legs.slice(lastMain + 1));
+      const mainLegs = legs.slice(firstMain, lastMain + 1).filter((l) => l.type !== 'road');
+      const firstHub = mainLegs[0];
+      const lastHub = mainLegs[mainLegs.length - 1];
+      const mainKm = mainLegs.reduce((s, l) => s + l.distanceKm, 0);
+      const mainHours = mainLegs.reduce((s, l) => s + l.durationHours, 0);
+
+      quoteLegs.push({ key: 'to_hub', from: origin.address, to: firstHub.fromName, distanceKm: before.km, durationHours: before.hours, source });
+      quoteLegs.push({
+        key: plan.mode === 'air' ? 'flight' : 'sea',
+        from: firstHub.fromName,
+        to: lastHub.toName,
+        distanceKm: mainKm,
+        durationHours: Number(mainHours.toFixed(2)),
+        source: 'network',
+      });
+      if (between.km > 0) {
+        quoteLegs.push({ key: 'main', from: firstHub.toName, to: lastHub.fromName, distanceKm: between.km, durationHours: between.hours, source });
+      }
+      quoteLegs.push({ key: 'from_hub', from: lastHub.toName, to: destination.address, distanceKm: after.km, durationHours: after.hours, source });
+
+      const roadLegs: FreightInput['roadLegs'] = [
+        { key: 'to_hub', distanceKm: before.km, borderCrossings: before.borders },
+        ...(between.km > 0 ? [{ key: 'main' as const, distanceKm: between.km, borderCrossings: between.borders }] : []),
+        { key: 'from_hub', distanceKm: after.km, borderCrossings: after.borders },
+      ];
+      if (plan.mode === 'air') {
+        freightBase = { mode: 'air', horses, roadLegs, airKm: mainKm };
+        arrivalHub = { lat: lastHub.toCoords[0], lng: lastHub.toCoords[1] };
+      } else if (plan.seaMode === 'ferry') {
+        freightBase = { mode: 'sea', seaMode: 'ferry', horses, roadLegs, ferryCrossings: plan.totals.ferryCrossings };
+      } else {
+        freightBase = { mode: 'sea', seaMode: 'vessel', horses, roadLegs, seaKm: mainKm };
+        arrivalHub = { lat: lastHub.toCoords[0], lng: lastHub.toCoords[1] };
+      }
+    }
+
+    const { legs: plannedLegs, ...planRest } = plan;
+    return {
+      legs: quoteLegs,
+      requiredStallSlots,
+      freightBase,
+      arrivalHub,
+      tariffs,
+      routePlan: {
+        ...planRest,
+        legs: plannedLegs.map(({ geometry: _geometry, ...rest }) => rest),
+        warnings: [...plan.warnings, ...warnings.map((code) => ({ code, vi: 'Tính cước theo đường bộ do hai đầu dùng chung sân bay/cảng.', en: 'Priced as road: both ends share the same airport/port.' }))],
       },
     };
   }

@@ -12,6 +12,7 @@ import { UserRole } from '../auth/auth.types';
 import { PricingService } from './pricing.service';
 import { DocumentsService } from '../documents/documents.service';
 import { haversineKm } from '../routes/geo-policy';
+import { isInServiceArea, SERVICE_AREA } from '../routes/route-network.geo';
 import { calculateInsurance, totalInsuranceFee } from './insurance-policy';
 import { currentReturnPolicy } from './return-policy';
 import { AllocationQuoteResult, QuoteAllocationService } from './quote-allocation.service';
@@ -54,7 +55,7 @@ export class QuotesService {
         departDate: dto.departureDate,
         destinationLocation: dto.destination.address,
         originLocation: dto.origin.address,
-        transportMode: dto.seaMode ? 'sea' : 'road',
+        transportMode: dto.transportMode,
         horseIds: dto.horses?.map((h) => h.horseId).filter((id): id is number => typeof id === 'number' && id > 0),
       });
     }
@@ -157,6 +158,7 @@ export class QuotesService {
           seaMode: dto.seaMode ?? null,
           tripType: dto.tripType ?? 'one_way',
           legs: allocation.context.legs,
+          routePlan: allocation.context.routePlan ?? null,
           requiredStallSlots: allocation.context.requiredStallSlots,
           requestedPickupAt: pickupAt.toISOString(),
           options: [],
@@ -175,6 +177,7 @@ export class QuotesService {
       ? {
           ...recommendedAlloc.freight,
           legs: allocation.context.legs,
+          routePlan: allocation.context.routePlan ?? null,
           requiredStallSlots: allocation.context.requiredStallSlots,
           vehicles: recommendedAlloc.vehicles.map((v) => ({
             classCode: v.classCode,
@@ -277,6 +280,7 @@ export class QuotesService {
       tripType: dto.tripType ?? 'one_way',
       returnDepartureAt: isRoundTrip ? dto.returnDepartureAt : null,
       legs: preview.legs,
+      routePlan: preview.routePlan ?? null,
       requiredStallSlots: preview.requiredStallSlots,
       outbound: {
         legs: preview.legs,
@@ -418,10 +422,11 @@ export class QuotesService {
       throw new BadRequestException(`${label}: kinh độ phải nằm trong khoảng [-180, 180]`);
     }
 
-    // Ràng buộc khu vực phục vụ: Đông Nam Á + Hồng Kông (lat: [-11, 29], lng: [92, 141])
-    if (lat < -11 || lat > 29 || lng < 92 || lng > 141) {
+    // Ràng buộc khu vực phục vụ: Đông Nam Á + Trung Quốc (gồm Hồng Kông, Ma Cao) — xem route-network.geo
+    if (!isInServiceArea(lat, lng)) {
+      const a = SERVICE_AREA;
       throw new BadRequestException(
-        `${label} nằm ngoài khu vực phục vụ của EquiTransit (Đông Nam Á & Hồng Kông: vĩ độ [-11, 29], kinh độ [92, 141])`,
+        `${label} nằm ngoài khu vực phục vụ của EquiTransit (Đông Nam Á & Trung Quốc: vĩ độ [${a.minLat}, ${a.maxLat}], kinh độ [${a.minLng}, ${a.maxLng}])`,
       );
     }
   }

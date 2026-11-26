@@ -890,7 +890,7 @@ export default function ManagerDashboardPage() {
                                 onClick={() => openModal('APPROVE', req.id)}
                                 className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-[#287653] hover:bg-[#1f5e42] border-0 cursor-pointer transition-colors whitespace-nowrap shadow-xs"
                               >
-                                {t('manager.requests.approve', 'Duyệt & Báo giá')}
+                                {t('manager.requests.approve', 'Phê duyệt')}
                               </button>
                               <button
                                 type="button"

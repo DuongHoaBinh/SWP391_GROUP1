@@ -4,6 +4,8 @@
  * Compliant with IATA Live Animals Regulations (LAR) and ASEAN Veterinary Transit.
  */
 
+import { resolveAseanChinaSeaCorridor } from './asean-china-network';
+
 export interface KnownLocation {
   id: string;
   name: string;
@@ -36,6 +38,7 @@ export interface RouteLegPreview {
   toName: string;
   fromCoords: [number, number];
   toCoords: [number, number];
+  pathCoords?: [number, number][];
   distanceKm: number;
   durationHours: number;
   estimatedPriceVnd: number;
@@ -2303,29 +2306,40 @@ export function buildEquineRoute(
   let durationHours = 0;
 
   if (mode === 'sea') {
-    const originPort = getNearestSeaportForCoords(origin.coords, origin.country, {
-      internationalOnly: !isDomestic,
-    });
-    const destPort = getNearestSeaportForCoords(destination.coords, destination.country, {
-      internationalOnly: !isDomestic,
-    });
-    const isSamePort =
-      calculateHaversine(originPort.coords, destPort.coords) < 5 ||
-      normalizeVietnamese(originPort.name) === normalizeVietnamese(destPort.name);
+    const seaPath = resolveAseanChinaSeaCorridor(
+      origin.coords,
+      origin.country,
+      destination.coords,
+      destination.country,
+      seaMode,
+      isDomestic
+    );
 
-    if (isSamePort) {
+    if (!seaPath) {
       mode = 'road';
       airFallbackNotice = {
         vi: 'Điểm xuất phát và điểm đến dùng chung một cảng biển gần nhất, hệ thống tự chuyển sang xe thùng chuyên dụng đi thẳng.',
         en: 'Origin and destination share the same nearest seaport; automatically switched to direct horse transport truck.',
       };
     } else {
+      const originPort = seaPath.fromPort;
+      const destPort = seaPath.toPort;
+      const effectiveSeaMode = seaPath.effectiveSeaMode;
+
+      if (seaPath.fellBackFromFerryToVessel) {
+        airFallbackNotice = {
+          vi: `Tuyến biển ${originPort.name} → ${destPort.name} (${seaPath.distanceKm.toLocaleString('vi-VN')} km, ~${seaPath.durationHours}h) vượt phạm vi phà ngắn (≤ 12h), hệ thống tự động chuyển sang Tàu biển chuyên dụng (Vessel).`,
+          en: `Maritime route ${originPort.nameEn} → ${destPort.nameEn} (${seaPath.distanceKm.toLocaleString('en-US')} km, ~${seaPath.durationHours}h) exceeds short ferry range (≤ 12h); automatically switched to Dedicated Equine Vessel.`,
+        };
+      }
+
       let seq = 1;
       const originPortDistRaw = calculateHaversine(origin.coords, originPort.coords);
-      const originAtPort = originPortDistRaw < 5;
+      const originAtPort = originPortDistRaw < 1.5;
       const destPortDistRaw = calculateHaversine(destPort.coords, destination.coords);
-      const destAtPort = destPortDistRaw < 5;
+      const destAtPort = destPortDistRaw < 1.5;
 
+      // Chặng 1: Xe thùng chuyên dụng từ điểm xuất phát ra cảng đi
       if (!originAtPort) {
         waypoints.push({
           name: origin.name,
@@ -2334,17 +2348,17 @@ export function buildEquineRoute(
           label: 'Điểm xuất phát',
           country: origin.country,
           details: isDomestic
-            ? 'Kiểm tra tình trạng thể lực, đối chiếu vi mạch Microchip và sổ tiêm chủng Cục Thú Y.'
-            : 'Kiểm tra hồ sơ FEI Passport, vi mạch microchip và giấy xuất cảnh Cục Thú Y cấp.',
+            ? 'Kiểm tra thể lực, đối chiếu vi mạch Microchip và xếp ngựa lên xe thùng điều hòa ra cảng đi.'
+            : 'Kiểm tra hồ sơ FEI Passport, vi mạch Microchip và giấy xuất cảnh Cục Thú Y trước khi đưa ra cảng.',
         });
 
         const leg1Dist = Math.max(8, Math.round(originPortDistRaw * 1.3));
-        const leg1Dur = Math.max(0.5, Math.round((leg1Dist / 50 + 0.5) * 10) / 10);
+        const leg1Dur = Math.max(0.5, Math.round((leg1Dist / 45 + 0.5) * 10) / 10);
         legs.push({
           sequenceNo: seq++,
           type: 'road',
-          vehicleLabelVi: 'Xe thùng chuyên dụng',
-          vehicleLabelEn: 'Equine Transport Truck',
+          vehicleLabelVi: 'Xe thùng chuyên dụng (Đón → Cảng đi)',
+          vehicleLabelEn: 'Equine Truck (Pickup → Departure Port)',
           fromName: origin.name,
           toName: originPort.name,
           fromCoords: origin.coords,
@@ -2352,11 +2366,12 @@ export function buildEquineRoute(
           distanceKm: leg1Dist,
           durationHours: leg1Dur,
           estimatedPriceVnd: estimateLegPriceVnd('road', leg1Dist, { horseCount }),
-          noteVi: 'Xe thùng đón ngựa tại điểm xuất phát và trung chuyển ra cảng biển đi.',
-          noteEn: 'Specialized horse truck picks up at origin and transfers to departure seaport.',
+          noteVi: `Xe thùng điều hòa đón ngựa tại ${origin.name} và trung chuyển đến ${originPort.name} để làm thủ tục xuất cảng.`,
+          noteEn: `Climate-controlled horse truck collects at ${origin.name} and transfers to ${originPort.nameEn} for port departure.`,
         });
       }
 
+      // Cảng biển xuất phát
       waypoints.push({
         name: originPort.name,
         type: originAtPort ? 'origin' : 'seaport',
@@ -2364,56 +2379,71 @@ export function buildEquineRoute(
         label: isDomestic ? 'Cảng đi & Kiểm dịch thú y' : 'Cảng biển xuất cảnh & Hải quan',
         country: originPort.country,
         details:
-          seaMode === 'ferry'
-            ? 'Xe thùng chuyên dụng lên phà, bác sĩ thú y kiểm tra thông gió và nước uống cho ngựa.'
-            : 'Làm thủ tục hải quan cảng biển, đưa ngựa vào ô chuồng cố định trên tàu chuyên dụng.',
+          effectiveSeaMode === 'ferry'
+            ? `Xe thùng chuyên dụng lên phà Ro-Ro tại ${originPort.name}, bác sĩ thú y kiểm tra thông gió và nước uống.`
+            : `Làm thủ tục hải quan & kiểm dịch tại ${originPort.name}, xếp ngựa vào ô chuồng cố định trên tàu biển chuyên dụng.`,
       });
 
-      const seaRawKm = calculateHaversine(originPort.coords, destPort.coords);
-      const seaDist = Math.max(40, Math.round(seaRawKm * 1.25));
-      const seaSpeed = seaMode === 'ferry' ? 35 : 25;
-      const seaDur = Math.max(2, Math.round((seaDist / seaSpeed + (isDomestic ? 1 : 3)) * 10) / 10);
+      // Các cảng trung chuyển dọc hải trình (nếu có)
+      for (const transitPort of seaPath.transitPorts) {
+        waypoints.push({
+          name: transitPort.name,
+          type: 'seaport',
+          coords: transitPort.coords,
+          label: 'Cảng trung chuyển hải trình',
+          country: transitPort.country,
+          details: `Cảng trung chuyển kỹ thuật & kiểm tra thú y định kỳ dọc hải trình (${transitPort.name}).`,
+        });
+      }
+
+      // Chặng 2: Hải trình đường thủy (Phà Ro-Ro / Tàu biển chuyên dụng) đi hoàn toàn trên mặt biển
       legs.push({
         sequenceNo: seq++,
         type: 'sea',
-        vehicleLabelVi: seaMode === 'ferry' ? 'Phà chở xe chuyên dụng' : 'Tàu biển chuyên dụng',
-        vehicleLabelEn: seaMode === 'ferry' ? 'Equine Ro-Ro Ferry' : 'Dedicated Equine Vessel',
+        vehicleLabelVi:
+          effectiveSeaMode === 'ferry' ? 'Phà Ro-Ro chở xe chuyên dụng' : 'Tàu biển chuyên dụng (Vessel)',
+        vehicleLabelEn:
+          effectiveSeaMode === 'ferry' ? 'Equine Ro-Ro Ferry' : 'Dedicated Equine Vessel',
         fromName: originPort.name,
         toName: destPort.name,
         fromCoords: originPort.coords,
         toCoords: destPort.coords,
-        distanceKm: seaDist,
-        durationHours: seaDur,
-        estimatedPriceVnd: estimateLegPriceVnd('sea', seaDist, { seaMode, horseCount }),
-        noteVi:
-          seaMode === 'ferry'
-            ? 'Vận chuyển bằng phà chở nguyên xe chuyên dụng có hệ thống điều hòa.'
-            : 'Hải trình vận chuyển bằng tàu biển chuyên dụng có bác sĩ thú y theo dõi định kỳ.',
-        noteEn:
-          seaMode === 'ferry'
-            ? 'Truck-on-ferry maritime crossing with climate-controlled equine trailer.'
-            : 'Dedicated maritime vessel voyage with continuous veterinary supervision.',
+        pathCoords: seaPath.pathCoords,
+        distanceKm: seaPath.distanceKm,
+        durationHours: seaPath.durationHours,
+        estimatedPriceVnd: estimateLegPriceVnd('sea', seaPath.distanceKm, {
+          seaMode: effectiveSeaMode,
+          horseCount,
+        }),
+        noteVi: `${seaPath.corridorNotesVi}.`,
+        noteEn: `${seaPath.corridorNotesEn}.`,
       });
 
+      // Cảng biển nhập cảnh / cảng đến
       waypoints.push({
         name: destPort.name,
         type: destAtPort ? 'destination' : 'seaport',
         coords: destPort.coords,
-        label: isDomestic ? 'Cảng đến & Kiểm tra sức khỏe' : 'Cảng biển nhập cảnh & Kiểm dịch',
+        label: isDomestic ? 'Cảng đến & Kiểm tra thú y' : 'Cảng biển nhập cảnh & Kiểm dịch',
         country: destPort.country,
         details: isDomestic
-          ? 'Kiểm tra sức khỏe lâm sàng và bàn giao xe trung chuyển chặng cuối.'
-          : 'Cơ quan Thú y & Hải quan cảng đến đối soát chứng từ và thông quan nhập cảnh.',
+          ? `Kiểm tra lâm sàng tại ${destPort.name} và bàn giao cho xe thùng chuyên dụng chặng cuối.`
+          : `Cơ quan Thú y & Hải quan tại ${destPort.name} đối soát chứng từ kiểm dịch và thông quan nhập cảnh.`,
       });
 
+      // Chặng 3: Xe thùng chuyên dụng đối tác từ cảng đến về điểm giao cuối
       if (!destAtPort) {
         const leg3Dist = Math.max(8, Math.round(destPortDistRaw * 1.3));
-        const leg3Dur = Math.max(0.5, Math.round((leg3Dist / 50 + 0.5) * 10) / 10);
+        const leg3Dur = Math.max(0.5, Math.round((leg3Dist / 45 + 0.5) * 10) / 10);
         legs.push({
           sequenceNo: seq++,
           type: 'road',
-          vehicleLabelVi: 'Xe thùng chuyên dụng',
-          vehicleLabelEn: 'Equine Transport Truck',
+          vehicleLabelVi: isDomestic
+            ? 'Xe thùng chuyên dụng (Cảng đến → Điểm giao)'
+            : 'Xe thùng đối tác nước đến (Cảng → Điểm giao)',
+          vehicleLabelEn: isDomestic
+            ? 'Equine Truck (Arrival Port → Destination)'
+            : 'Partner Equine Truck (Arrival Port → Destination)',
           fromName: destPort.name,
           toName: destination.name,
           fromCoords: destPort.coords,
@@ -2421,8 +2451,8 @@ export function buildEquineRoute(
           distanceKm: leg3Dist,
           durationHours: leg3Dur,
           estimatedPriceVnd: estimateLegPriceVnd('road', leg3Dist, { horseCount }),
-          noteVi: 'Xe thùng tiếp nhận ngựa sau thông quan cảng biển và đưa về đúng điểm đến.',
-          noteEn: 'Specialized horse truck collects after seaport clearance and delivers to destination.',
+          noteVi: `Xe thùng chuyên dụng tiếp nhận ngựa sau thông quan tại ${destPort.name} và đưa về đúng ${destination.name}.`,
+          noteEn: `Partner horse truck collects after clearance at ${destPort.nameEn} and delivers to ${destination.name}.`,
         });
 
         waypoints.push({
@@ -2737,6 +2767,120 @@ export function buildEquineRoute(
 
         distanceKm = Math.max(350, Math.round(directDistanceKm * 1.35));
         durationHours = Math.max(8, Math.round(distanceKm / 50 + 2.5));
+      } else if (destination.country === 'Trung Quốc' || destination.country === 'Hồng Kông') {
+        // 2b. Tuyến đường bộ Việt Nam ↔ Trung Quốc / Hồng Kông
+        const isYunnanCorridor = destination.coords[1] < 105.5;
+        if (isYunnanCorridor) {
+          waypoints.push({
+            name: 'Cửa khẩu Quốc tế Lào Cai – Hà Khẩu',
+            type: 'checkpoint',
+            coords: [22.5086, 103.9636],
+            label: 'Cửa khẩu biên giới Việt Nam – Trung Quốc (Lào Cai)',
+            country: 'Việt Nam',
+            details: 'Hành lang Côn Minh – Lào Cai – Hà Nội. Kiểm dịch động vật sống & hải quan xuất nhập cảnh.',
+          });
+          waypoints.push({
+            name: 'Trạm thú y Côn Minh (Vân Nam)',
+            type: 'rest',
+            coords: [25.0, 102.72],
+            label: 'Trạm nghỉ & kiểm tra sức khỏe Vân Nam',
+            country: 'Trung Quốc',
+            details: 'Bác sĩ thú y kiểm tra thân nhiệt, bổ sung điện giải và nghỉ ngơi.',
+          });
+        } else {
+          waypoints.push({
+            name: 'Cửa khẩu Quốc tế Hữu Nghị – Hữu Nghị Quan (Bằng Tường)',
+            type: 'checkpoint',
+            coords: [21.9833, 106.7167],
+            label: 'Cửa khẩu biên giới Việt Nam – Trung Quốc (Lạng Sơn)',
+            country: 'Việt Nam',
+            details: 'Cao tốc Hà Nội – Lạng Sơn – Nam Ninh. Thông quan & kiểm dịch động vật sống (5h).',
+          });
+          waypoints.push({
+            name: 'Trạm thú y Nam Ninh (Quảng Tây)',
+            type: 'rest',
+            coords: [22.82, 108.32],
+            label: 'Trạm nghỉ & kiểm tra thú y Quảng Tây',
+            country: 'Trung Quốc',
+            details: 'Kiểm tra sức khỏe định kỳ, cấp nước và thay đệm chuồng xe.',
+          });
+          if (destination.coords[1] > 111.5) {
+            waypoints.push({
+              name: 'Trung tâm phi dịch bệnh ngựa Tòng Hóa (Conghua EDFZ, Quảng Châu)',
+              type: 'rest',
+              coords: [23.55, 113.55],
+              label: 'Trạm kiểm dịch & nghỉ dưỡng ngựa Quảng Châu',
+              country: 'Trung Quốc',
+              details: 'Vùng an toàn sinh học ngựa đua đạt chuẩn quốc tế tại Quảng Châu.',
+            });
+          }
+          if (destination.country === 'Hồng Kông') {
+            waypoints.push({
+              name: 'Cửa khẩu Vịnh Thâm Quyến (Shenzhen Bay Port)',
+              type: 'checkpoint',
+              coords: [22.5042, 113.9469],
+              label: 'Cửa khẩu an toàn sinh học Trung Quốc – Hồng Kông',
+              country: 'Hồng Kông',
+              details: 'Hành lang chuyên biệt vận chuyển ngựa đua vào trường đua Sha Tin (Hồng Kông).',
+            });
+          } else if (destination.coords[0] > 29) {
+            waypoints.push({
+              name: 'Trạm thú y Vũ Hán / Thượng Hải',
+              type: 'rest',
+              coords: destination.coords[1] > 118 ? [31.2, 121.4] : [30.6, 114.3],
+              label: 'Trạm nghỉ & kiểm dịch chặng Bắc – Nam Trung Quốc',
+              country: 'Trung Quốc',
+              details: 'Nghỉ bắt buộc sau 8h lái, kiểm tra tim mạch và thân nhiệt ngựa.',
+            });
+          }
+        }
+
+        waypoints.push({
+          name: destination.name,
+          type: 'destination',
+          coords: destination.coords,
+          label: 'Điểm đến',
+          country: destination.country,
+          details: 'Hoàn tất bàn giao ngựa đúng địa chỉ tiếp nhận và theo dõi cách ly.',
+        });
+
+        distanceKm = Math.max(400, Math.round(directDistanceKm * 1.35));
+        durationHours = Math.max(10, Math.round((distanceKm / 55) * 1.35 + 4));
+      } else if (destination.country === 'Myanmar') {
+        waypoints.push({
+          name: 'Cửa khẩu Quốc tế Mộc Bài – Bavet',
+          type: 'checkpoint',
+          coords: [11.0743, 106.1821],
+          label: 'Cửa khẩu Việt Nam – Campuchia',
+          country: 'Việt Nam',
+          details: 'Hải quan xuất cảnh Việt Nam & kiểm dịch động vật sống.',
+        });
+        waypoints.push({
+          name: 'Cửa khẩu Quốc tế Poipet – Aranyaprathet',
+          type: 'checkpoint',
+          coords: [13.6558, 102.5516],
+          label: 'Cửa khẩu quá cảnh Campuchia – Thái Lan',
+          country: 'Thái Lan',
+          details: 'Thông quan quá cảnh ASEAN Transit.',
+        });
+        waypoints.push({
+          name: 'Cửa khẩu Mae Sot – Myawaddy (Cầu Hữu Nghị 2)',
+          type: 'checkpoint',
+          coords: [16.7028, 98.5167],
+          label: 'Cửa khẩu Thái Lan – Myanmar',
+          country: 'Myanmar',
+          details: 'Hành lang Kinh tế Đông – Tây (EWEC) phía Tây vào Myanmar.',
+        });
+        waypoints.push({
+          name: destination.name,
+          type: 'destination',
+          coords: destination.coords,
+          label: 'Điểm đến',
+          country: destination.country,
+          details: 'Hoàn tất bàn giao ngựa tại điểm đích Myanmar.',
+        });
+        distanceKm = Math.max(1200, Math.round(directDistanceKm * 1.4));
+        durationHours = Math.max(24, Math.round((distanceKm / 50) * 1.35 + 6));
       } else {
         // 3. Tuyến quá cảnh ASEAN đi Thái Lan, Malaysia, Singapore bằng đường bộ
         waypoints.push({
@@ -2786,6 +2930,17 @@ export function buildEquineRoute(
             country: 'Malaysia',
             details: 'Kiểm tra giấy phép DVS Malaysia, kiểm dịch thú y biên giới.',
           });
+
+          if (destination.country === 'Singapore') {
+            waypoints.push({
+              name: 'Cửa khẩu Tuas (Cầu Second Link)',
+              type: 'checkpoint',
+              coords: [1.3484, 103.6367],
+              label: 'Cửa khẩu Malaysia – Singapore (Động vật sống)',
+              country: 'Singapore',
+              details: 'Tuyến ưu tiên cho xe chở ngựa, có khu giữ ngựa & kiểm dịch NParks/AVS Singapore.',
+            });
+          }
         }
 
         waypoints.push({

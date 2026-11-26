@@ -599,15 +599,6 @@ export default function ManagerRequestDetailPage() {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => handleOpenModal('CHANGE')}
-                className="text-[#966516] border-[#DFCA9A] hover:bg-[#F8F0DF] text-xs font-bold"
-              >
-                {t('manager.dashboard.askChange', 'Yêu cầu sửa')}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
                 onClick={() => handleOpenModal('REJECT')}
                 className="text-[#B33E3E] border-[#E5B8B8] hover:bg-[#F8EAEA] text-xs font-bold"
               >
@@ -621,7 +612,7 @@ export default function ManagerRequestDetailPage() {
                 className="bg-[#287653] hover:bg-[#1f5e42] text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
               >
                 <Check size={15} />
-                <span>{t('manager.requests.btnApprove', 'Phê duyệt & Báo giá')}</span>
+                <span>{t('manager.requests.btnApprove', 'Phê duyệt')}</span>
               </Button>
             </>
           )}
@@ -1146,7 +1137,7 @@ export default function ManagerRequestDetailPage() {
               ? `${t('manager.requests.reject', 'Từ chối')} ${requestCode}`
               : activeModal === 'CHANGE'
               ? `${t('manager.dashboard.askChange', 'Yêu cầu chỉnh sửa')} ${requestCode}`
-              : `${t('manager.requests.btnApprove', 'Phê duyệt báo giá')} ${requestCode}`
+              : `${t('manager.requests.btnApprove', 'Phê duyệt')} ${requestCode}`
           }
           maxWidth={activeModal === 'APPROVE' ? 'max-w-xl' : 'max-w-lg'}
         >

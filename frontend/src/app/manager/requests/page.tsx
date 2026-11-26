@@ -1091,10 +1091,10 @@ export default function ManagerRequestsPage() {
                             <button
                               type="button"
                               onClick={() => openApproveModal(order)}
-                              title={t('manager.requests.btnApprove', 'Phê duyệt & Định giá')}
+                              title={t('manager.requests.btnApprove', 'Phê duyệt')}
                               className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
                             >
-                              <CheckCircle size={13} /> {t('manager.requests.btnApprove', 'Duyệt')}
+                              <CheckCircle size={13} /> {t('manager.requests.btnApprove', 'Phê duyệt')}
                             </button>
                           )}
 
@@ -1341,7 +1341,7 @@ export default function ManagerRequestsPage() {
         isOpen={!!approveOrder}
         onClose={() => { if (!actionLoading) setApproveOrder(null); }}
         closeDisabled={actionLoading}
-        title={t('manager.requests.modalApproveTitle', `Phê Duyệt & Báo Giá Đơn #${approveOrder?.id}`, { id: approveOrder?.id || '' })}
+        title={t('manager.requests.modalApproveTitle', `Phê Duyệt Đơn #${approveOrder?.id}`, { id: approveOrder?.id || '' })}
         subtitle={`${approveOrder?.originLocation} → ${approveOrder?.destinationLocation}`}
         maxWidth="max-w-xl"
       >

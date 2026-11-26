@@ -62,6 +62,8 @@ export interface FreightInput {
   nightPickup?: boolean;
   /** Step 9: chạy rỗng từ trạm đối tác đến sân bay/cảng đến (chặng from_hub). Mặc định 0. */
   fromHubDeadheadKm?: number;
+  /** Số lượt qua phà RoRo trên tuyến (mạng lưới vận tải, migration 040). Mặc định 1. */
+  ferryCrossings?: number;
 }
 
 export interface FreightLine {
@@ -494,15 +496,20 @@ export function calculateFreight(
         Boolean(input.nightPickup),
       );
 
-      const ticketCost = Math.round(seaTariff.ferry.ticketPerVehicle * input.vehicles.length);
+      const crossings = Math.max(1, Math.round(Number(input.ferryCrossings) || 1));
+      const ticketQty = input.vehicles.length * crossings;
+      const ticketCost = Math.round(seaTariff.ferry.ticketPerVehicle * ticketQty);
       lines.push({
         code: 'sea_ferry_tickets',
-        label: `Vé phà RoRo chuyên chở xe tải ngựa (${input.vehicles.length} xe)`,
-        quantity: input.vehicles.length,
+        label:
+          crossings > 1
+            ? `Vé phà RoRo chuyên chở xe tải ngựa (${input.vehicles.length} xe × ${crossings} lượt phà)`
+            : `Vé phà RoRo chuyên chở xe tải ngựa (${input.vehicles.length} xe)`,
+        quantity: ticketQty,
         unit: 'xe',
         unitPrice: seaTariff.ferry.ticketPerVehicle,
         amount: ticketCost,
-        meta: { seaMode: 'ferry', vehicleCount: input.vehicles.length },
+        meta: { seaMode: 'ferry', vehicleCount: input.vehicles.length, ferryCrossings: crossings },
       });
     } else if (input.seaMode === 'vessel') {
       // Vessel: tàu chở gia súc, ngựa đi ô chuồng

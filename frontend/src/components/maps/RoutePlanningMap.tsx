@@ -88,6 +88,30 @@ export const ROUTE_PRESETS: RoutePreset[] = [
     type: 'International',
   },
   {
+    id: 'vn-cn-guangzhou',
+    name: 'Hà Nội ➔ Quảng Châu (Tòng Hóa, TQ)',
+    nameEn: 'Hanoi ➔ Guangzhou (Conghua, China)',
+    flag: '🇨🇳',
+    origin: 'Trang trại Ngựa Thể thao Sóc Sơn, Hà Nội',
+    originEn: 'Soc Son Equestrian Center, Hanoi',
+    destination: 'Conghua Racecourse, Guangzhou, China',
+    destinationEn: 'Conghua Racecourse, Guangzhou, China',
+    suggestedMode: 'road',
+    type: 'International',
+  },
+  {
+    id: 'vn-hk',
+    name: 'TP.HCM ➔ Hồng Kông (Sha Tin)',
+    nameEn: 'HCMC ➔ Hong Kong (Sha Tin)',
+    flag: '🇭🇰',
+    origin: 'Trang trại Củ Chi, TP.HCM',
+    originEn: 'Cu Chi Horse Farm, HCMC',
+    destination: 'Sha Tin Racecourse, Hong Kong',
+    destinationEn: 'Sha Tin Racecourse, Hong Kong',
+    suggestedMode: 'air',
+    type: 'International',
+  },
+  {
     id: 'vn-domestic',
     name: 'TP.HCM ➔ Hà Nội (Nội địa)',
     nameEn: 'HCMC ➔ Hanoi (Domestic)',
@@ -575,6 +599,8 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           badgeLabel = language === 'en' ? 'VET STOP' : 'TRẠM NGHỈ';
         }
 
+        const anchorY = type === 'seaport' ? 2 : 34;
+
         return L.divIcon({
           className: 'custom-map-marker',
           html: `
@@ -587,7 +613,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           </div>
         `,
           iconSize: [90, 36],
-          iconAnchor: [45, 34],
+          iconAnchor: [45, anchorY],
         });
       };
 
@@ -597,6 +623,8 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         const zIndex =
           wp.type === 'origin' || wp.type === 'destination'
             ? 2000
+            : wp.type === 'seaport' || wp.type === 'airport'
+            ? 1750
             : wp.type === 'checkpoint'
             ? 1500
             : 1000;
@@ -656,27 +684,34 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
             const p1 = leg.fromCoords;
             const p2 = leg.toCoords;
             const isSeaLeg = leg.type === 'sea';
-            const arcPoints: [number, number][] = [];
-            const steps = 30;
-            const curveFactor = isSeaLeg ? -0.9 : 1.5;
-            for (let i = 0; i <= steps; i++) {
-              const t = i / steps;
-              const lat = p1[0] + (p2[0] - p1[0]) * t + Math.sin(t * Math.PI) * curveFactor;
-              const lng = p1[1] + (p2[1] - p1[1]) * t;
-              arcPoints.push([lat, lng]);
+            let linePoints: [number, number][];
+
+            if (isSeaLeg && leg.pathCoords && leg.pathCoords.length >= 2) {
+              linePoints = leg.pathCoords;
+              linePoints.forEach((pt) => bounds.extend(pt));
+            } else {
+              linePoints = [];
+              const steps = 30;
+              const curveFactor = isSeaLeg ? -0.9 : 1.5;
+              for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                const lat = p1[0] + (p2[0] - p1[0]) * t + Math.sin(t * Math.PI) * curveFactor;
+                const lng = p1[1] + (p2[1] - p1[1]) * t;
+                linePoints.push([lat, lng]);
+              }
             }
 
-            const transitPolyline = L.polyline(arcPoints, {
+            const transitPolyline = L.polyline(linePoints, {
               color: isSeaLeg ? '#0E7490' : '#B49A68',
-              weight: 3.5,
-              dashArray: isSeaLeg ? '6, 8' : '8, 8',
+              weight: isSeaLeg ? 4 : 3.5,
+              dashArray: isSeaLeg ? '7, 7' : '8, 8',
               opacity: 0.95,
             }).addTo(group);
             transitPolyline.bindTooltip(
               isSeaLeg
                 ? language === 'en'
-                  ? `Leg ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelEn)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
-                  : `Chặng ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelVi)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
+                  ? `Leg ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelEn)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)} (${leg.distanceKm.toLocaleString()} km)`
+                  : `Chặng ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelVi)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)} (${leg.distanceKm.toLocaleString()} km)`
                 : language === 'en'
                   ? `Leg ${leg.sequenceNo} · Equine Flight: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
                   : `Chặng ${leg.sequenceNo} · Hàng không: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`,
@@ -1059,6 +1094,12 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                 <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#966516', flexShrink: 0 }} />
                 <span>{t('routes.map.legendCustoms', 'Cửa khẩu / Sân bay kiểm dịch')}</span>
               </div>
+              {effectiveMode === 'sea' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#0E7490', flexShrink: 0 }} />
+                  <span>{language === 'en' ? 'Seaport / Maritime Quarantine' : 'Cảng biển xuất / nhập cảnh'}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#181A17', flexShrink: 0 }} />
                 <span>{t('routes.map.legendVet', 'Trạm nghỉ & Bác sĩ thú y (Vet Stop)')}</span>
@@ -1075,6 +1116,14 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ width: '16px', height: '0px', borderTop: '2.5px dashed #B49A68', flexShrink: 0 }} />
                   <span style={{ fontWeight: 600 }}>{t('routes.map.flightCorridor', 'Hành lang bay quốc tế')}</span>
+                </div>
+              )}
+              {effectiveMode === 'sea' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '16px', height: '0px', borderTop: '2.5px dashed #0E7490', flexShrink: 0 }} />
+                  <span style={{ fontWeight: 600 }}>
+                    {language === 'en' ? 'Offshore Sea Corridor (Vessel / Ferry)' : 'Hải trình đường thủy (Tàu biển / Phà)'}
+                  </span>
                 </div>
               )}
             </>
@@ -1218,13 +1267,9 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                   )}
                   {seaLeg && (
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#0E7490' }}>
-                      {finalRoadLeg
-                        ? language === 'en'
-                          ? `Arrival port: ${seaLeg.toName} · final truck ~${finalRoadLeg.distanceKm} km`
-                          : `Cảng đến gần nhất: ${seaLeg.toName} · xe thùng cuối ~${finalRoadLeg.distanceKm} km`
-                        : language === 'en'
-                          ? `Direct port arrival: ${seaLeg.toName}`
-                          : `Cập cảng trực tiếp tại ${seaLeg.toName}`}
+                      {language === 'en'
+                        ? `Ports: ${seaLeg.fromName} ⚓ ${seaLeg.toName}${finalRoadLeg ? ` · final truck ~${finalRoadLeg.distanceKm} km` : ''}`
+                        : `Cảng đi: ${seaLeg.fromName} ⚓ Cảng đến: ${seaLeg.toName}${finalRoadLeg ? ` · xe thùng cuối ~${finalRoadLeg.distanceKm} km` : ''}`}
                     </span>
                   )}
                 </div>

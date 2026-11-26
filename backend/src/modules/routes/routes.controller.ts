@@ -2,10 +2,13 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  Optional,
   Param,
   ParseIntPipe,
   Patch,
   Post,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -26,18 +29,52 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
+import { RouteNetworkService, toHttpError } from './route-network.service';
+import { PlanNetworkRouteDto } from './dto/plan-network-route.dto';
 
 @ApiTags('Routes')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('routes')
 export class RoutesController {
-  constructor(private readonly routesService: RoutesService) {}
+  constructor(
+    private readonly routesService: RoutesService,
+    @Optional() private readonly routeNetwork?: RouteNetworkService,
+  ) {}
 
   @Get('master-data')
   @ApiOperation({ summary: 'Lấy dữ liệu danh mục nền cho Flow 3 (Hãng hàng không, Sân bay, Trạm dừng mẫu)' })
   getMasterData() {
     return this.routesService.getMasterData();
+  }
+
+  @Get('network')
+  @ApiOperation({
+    summary: 'Mạng lưới vận tải ĐNA + Trung Quốc: cảng, tuyến biển (kèm hình học), sân bay, cửa khẩu, trạm nghỉ',
+  })
+  async getTransportNetwork() {
+    if (!this.routeNetwork) throw new ServiceUnavailableException('Mạng lưới vận tải chưa được cấu hình');
+    try {
+      return await this.routeNetwork.getNetwork();
+    } catch (err) {
+      throw toHttpError(err);
+    }
+  }
+
+  @Post('network/plan')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Lập tuyến đa phương thức (bản đồ + báo giá dùng chung). 422 kèm code và suggestions khi phương thức đã chọn không đi được',
+  })
+  planNetworkRoute(@Body() dto: PlanNetworkRouteDto) {
+    if (!this.routeNetwork) throw new ServiceUnavailableException('Mạng lưới vận tải chưa được cấu hình');
+    return this.routeNetwork.planOrThrowHttp({
+      mode: dto.mode,
+      seaMode: dto.seaMode,
+      origin: dto.origin,
+      destination: dto.destination,
+    });
   }
 
   @Get('shipment/:shipmentId')
