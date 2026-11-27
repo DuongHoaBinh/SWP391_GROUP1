@@ -77,7 +77,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const [quotedRows] = await this.pool.execute<any[]>(
       `SELECT COUNT(*) AS total_active,
               SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_trips,
-              COALESCE(SUM(COALESCE(transport_cost, total_cost)), 0) AS quoted_transport_revenue,
+              COALESCE(SUM(COALESCE(transport_cost, GREATEST(0, total_cost - COALESCE(insurance_fee, 0)))), 0) AS quoted_transport_revenue,
               COALESCE(SUM(insurance_fee), 0) AS quoted_insurance_revenue,
               COALESCE(SUM(total_cost), 0) AS quoted_active_revenue
        FROM shipment
@@ -211,7 +211,20 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
                   AND da.status = 'rejected'
               ) AS has_authority_rejection
        FROM transport_document d
-       WHERE COALESCE(d.is_archived, 0) = 0`,
+       WHERE COALESCE(d.is_archived, 0) = 0
+         AND d.status IN ('approved', 'rejected', 'expired')
+         AND (
+           NOT EXISTS (
+             SELECT 1 FROM shipment_horse sh
+             WHERE sh.horse_id = d.horse_id
+           )
+           OR EXISTS (
+             SELECT 1 FROM shipment_horse sh
+             JOIN shipment s ON s.shipment_id = sh.shipment_id
+             WHERE sh.horse_id = d.horse_id
+               AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refunded')
+           )
+         )`,
     );
     const quarantineTotalEvaluated = docRows.length;
     const quarantineFirstPassCount = docRows.filter(

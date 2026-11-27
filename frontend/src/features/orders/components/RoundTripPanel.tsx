@@ -248,13 +248,17 @@ export function RoundTripPanel({ order, userRole, onRefresh }: RoundTripPanelPro
           </div>
         )}
 
-        {/* Agreed Policy Snapshot Notice */}
-        <div className="p-3.5 rounded-xl border border-[#E5DDD0] bg-[#F5EFE2]/60 text-xs text-[#5F6977] leading-relaxed">
-          <strong>{isEn ? 'Agreed Policy Terms: ' : 'Chính sách đã cam kết: '}</strong>
-          {isEn
-            ? 'Return leg receives 10% freight & insurance discount. Cancellation refund tiers: ≥ 168h before departure = 80%; 72h-168h = 50%; < 72h = 0%. Reschedule ≥ 168h is free; < 168h incurs 10% fee. Company cancellation refunds 100%.'
-            : 'Chặng về được giảm 10% cước và 10% bảo hiểm. Hủy chặng về: trước ≥ 168h hoàn 80%, 72h-168h hoàn 50%, < 72h hoàn 0%. Đổi ngày trước ≥ 168h miễn phí, < 168h thu phí 10% cước chặng về. Công ty hủy hoàn 100%.'}
-        </div>
+        {/* Agreed Policy Snapshot Notice (collapsed by default) */}
+        <details className="text-xs text-[#5F6977]">
+          <summary className="cursor-pointer font-semibold text-[#8C6621] hover:underline select-none">
+            {isEn ? 'View agreed return policy terms' : 'Xem chính sách khứ hồi đã cam kết'}
+          </summary>
+          <p className="mt-2 p-3 rounded-xl border border-[#E5DDD0] bg-[#F5EFE2]/60 leading-relaxed m-0">
+            {isEn
+              ? '-10% return freight & insurance. Cancel ≥168h: 80% refund · 72–168h: 50% · <72h: 0%. Reschedule ≥168h free, <168h: 10% fee. Company cancel: 100% refund.'
+              : 'Giảm 10% cước & bảo hiểm chặng về. Hủy ≥168h hoàn 80%, 72–168h hoàn 50%, <72h hoàn 0%. Đổi ngày ≥168h miễn phí, <168h phí 10%. Công ty hủy hoàn 100%.'}
+          </p>
+        </details>
 
         {/* Action Buttons */}
         {returnStatus === 'scheduled' && (

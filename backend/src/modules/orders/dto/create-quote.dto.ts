@@ -87,10 +87,10 @@ export class CreateQuoteDto {
   @IsIn(['road', 'air', 'sea'], { message: 'Phương thức vận tải phải là road, air hoặc sea' })
   transportMode: 'road' | 'air' | 'sea';
 
-  @ApiPropertyOptional({ enum: ['ferry', 'vessel'], description: 'Hình thức đường thủy (bắt buộc nếu mode = sea)' })
+  @ApiPropertyOptional({ enum: ['vessel'], description: 'Hình thức đường thủy (tàu biển chuyên dụng)' })
   @IsOptional()
-  @IsIn(['ferry', 'vessel'])
-  seaMode?: 'ferry' | 'vessel';
+  @IsIn(['vessel'])
+  seaMode?: 'vessel';
 
   @ApiPropertyOptional({ enum: ['one_way', 'round_trip'], default: 'one_way', description: 'Loại chuyến đi' })
   @IsOptional()

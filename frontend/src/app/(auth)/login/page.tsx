@@ -142,7 +142,7 @@ function LoginFormContent() {
             marginBottom: '16px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }} className="lg:hidden">
+          <div className="flex lg:hidden items-center gap-2.5">
             <div
               style={{
                 width: '36px',
@@ -161,9 +161,6 @@ function LoginFormContent() {
             </div>
             <div>
               <div style={{ fontSize: '17px', fontWeight: 800, color: '#F7F7F4', lineHeight: 1.1 }}>EquiTransit</div>
-              <div style={{ fontSize: '9px', fontWeight: 700, color: '#B49A68', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                EQUINE LOGISTICS
-              </div>
             </div>
           </div>
           <div className="hidden lg:block" />
@@ -183,26 +180,6 @@ function LoginFormContent() {
             boxShadow: '0 18px 40px rgba(0, 0, 0, 0.28)',
           }}
         >
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '3px 10px',
-              borderRadius: '9999px',
-              backgroundColor: 'rgba(180, 154, 104, 0.14)',
-              border: '1px solid rgba(180, 154, 104, 0.35)',
-              color: '#B49A68',
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              marginBottom: '12px',
-            }}
-          >
-            {t('auth.portalAccess', 'Cổng Điều Hành & Khách Hàng')}
-          </div>
-
           <h1
             style={{
               fontSize: '28px',
@@ -210,20 +187,11 @@ function LoginFormContent() {
               color: '#F7F7F4',
               letterSpacing: '-0.02em',
               lineHeight: 1.2,
-              marginBottom: '6px',
+              marginBottom: '26px',
             }}
           >
             {t('auth.welcomeBack', 'Chào mừng trở lại')}
           </h1>
-          <p
-            style={{
-              fontSize: '13.5px',
-              color: '#CBD5E1',
-              marginBottom: '26px',
-            }}
-          >
-            {t('auth.loginSubtitle', 'Đăng nhập để quản lý và theo dõi hành trình ngựa đua.')}
-          </p>
 
           {displayedError && (
             <div
@@ -269,7 +237,7 @@ function LoginFormContent() {
             </div>
           )}
 
-          <form suppressHydrationWarning onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <form suppressHydrationWarning method="post" action="#" onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
             <div>
               <label
                 htmlFor="login-email"
@@ -516,20 +484,14 @@ function LoginFormContent() {
             width: '100%',
             maxWidth: '430px',
             display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
+            justifyContent: 'center',
             alignItems: 'center',
-            gap: '8px',
             fontSize: '12px',
             color: '#94A3B8',
             marginTop: '24px',
           }}
         >
           <div>© 2026 EquiTransit Logistics Ltd.</div>
-          <div style={{ display: 'flex', gap: '16px' }}>
-            <span>{t('auth.privacy', 'Bảo mật')}</span>
-            <span>{t('auth.terms', 'Điều khoản')}</span>
-          </div>
         </div>
       </div>
     </div>

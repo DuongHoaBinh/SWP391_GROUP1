@@ -128,15 +128,29 @@ export class TrackingService {
     flagged: boolean;
   }> {
     if (!location) {
+      const actorRoleUpper = String(user.role || '').toUpperCase();
+      if (targetCoords && (actorRoleUpper.includes('DRIVER') || actorRoleUpper.includes('ESCORT'))) {
+        if (!manualReason || manualReason.trim().length < 10) {
+          throw new BadRequestException(
+            'Tài xế/Hộ tống check-in không có tọa độ GPS bắt buộc phải nhập lý do giải trình rõ ràng (tối thiểu 10 ký tự).',
+          );
+        }
+        if (!evidenceUrl || !evidenceUrl.trim()) {
+          throw new BadRequestException(
+            'Tài xế/Hộ tống check-in không có tọa độ GPS bắt buộc phải đính kèm ảnh bằng chứng thực địa.',
+          );
+        }
+        assertSafeExternalOrUploadUrl(evidenceUrl);
+      }
       return {
         lat: null,
         lng: null,
         accuracyM: null,
-        locationSource: null,
+        locationSource: manualReason ? 'manual' : null,
         distanceToStopM: null,
-        geofencePassed: null,
-        manualReason: null,
-        evidenceUrl: null,
+        geofencePassed: false,
+        manualReason: manualReason?.trim() ?? null,
+        evidenceUrl: evidenceUrl?.trim() ?? null,
         flagged: true,
       };
     }
@@ -255,6 +269,75 @@ export class TrackingService {
       throw new BadRequestException('Ngưỡng nhịp tim không hợp lệ: phải thỏa hrAmberLowMin < hrGreenMin <= hrGreenMax < hrAmberHighMax.');
     }
     return this.trackingStore.updateVitalConfig(next, Number(user.id));
+  }
+
+  async handleUploadedEvidencePhotos(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    files: Express.Multer.File[],
+  ): Promise<{ files: string[] }> {
+    const cleanupFiles = () => {
+      for (const f of files || []) {
+        if (f?.path && fs.existsSync(f.path)) {
+          try {
+            fs.unlinkSync(f.path);
+          } catch {}
+        }
+      }
+    };
+
+    const shipment = await this.trackingStore.findShipmentById(shipmentId);
+    if (!shipment) {
+      cleanupFiles();
+      throw new NotFoundException('Không tìm thấy chuyến đi');
+    }
+    try {
+      await this.assertAssignedForDriverEscort(user, shipmentId);
+    } catch (err) {
+      cleanupFiles();
+      throw err;
+    }
+    if (!files || files.length === 0) {
+      throw new BadRequestException('Vui lòng chọn ít nhất 1 tệp ảnh hợp lệ (JPG, PNG, WEBP).');
+    }
+    if (files.length > 5) {
+      cleanupFiles();
+      throw new BadRequestException('Tối đa 5 ảnh cho mỗi lần tải lên.');
+    }
+    try {
+      for (const file of files) {
+        verifyUploadedFileMagicBytes(file, 'image');
+      }
+    } catch (err) {
+      cleanupFiles();
+      throw err;
+    }
+    return {
+      files: files.map((f) => `/api/tracking/evidence/attachments/${basename(f.filename)}`),
+    };
+  }
+
+  async getAuthorizedEvidencePhotoPath(
+    user: AuthenticatedUser,
+    filename: string,
+  ): Promise<{ absolutePath: string; fileName: string }> {
+    const safeName = basename(filename);
+    if (!safeName || !/^[a-zA-Z0-9._-]+$/.test(safeName)) {
+      throw new BadRequestException('Tên tệp ảnh không hợp lệ.');
+    }
+    const allowed = await this.trackingStore.isEvidencePhotoAccessibleToUser(
+      safeName,
+      Number(user.id),
+      String(user.role),
+    );
+    if (!allowed) {
+      throw new ForbiddenException('Bạn không có quyền truy cập ảnh minh chứng của chuyến đi này.');
+    }
+    const absolutePath = join(process.cwd(), 'uploads', 'tracking-evidence', safeName);
+    if (!fs.existsSync(absolutePath)) {
+      throw new NotFoundException('Không tìm thấy tệp ảnh trên máy chủ lưu trữ.');
+    }
+    return { absolutePath, fileName: safeName };
   }
 
   async handleUploadedHealthPhotos(
@@ -429,14 +512,12 @@ export class TrackingService {
     const escortStaff = assignedStaff.find((s) => s.role_in_shipment === 'escort');
     const assignedVehicle = effectiveLegs.find((l) => l.vehicle_plate)?.vehicle_plate || 'Xe thùng chuyên dụng';
 
-    const finalRequestCode = isCustomer && shipment.customer_request_code
-      ? shipment.customer_request_code
-      : (shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`);
+    const finalRequestCode = `REQ-${String(shipmentId).padStart(3, '0')}`;
 
     return {
       shipmentId,
       requestCode: finalRequestCode,
-      customerRequestCode: shipment.customer_request_code,
+      customerRequestCode: finalRequestCode,
       requestTitle: shipment.request_title || shipment.route_name || `${shipment.origin_location?.split(',')[0]} → ${shipment.destination_location?.split(',')[0]}`,
       customerName: shipment.customer_name || shipment.contact_name,
       origin: shipment.origin_location,
@@ -448,8 +529,12 @@ export class TrackingService {
       eta: effectiveLegs[effectiveLegs.length - 1]?.planned_arrival ? new Date(effectiveLegs[effectiveLegs.length - 1].planned_arrival).toISOString() : null,
       totalDistanceKm: route?.total_distance_km ? Number(route.total_distance_km) : null,
       assignedVehicle,
-      assignedDriver: driverStaff ? `${driverStaff.full_name} (${driverStaff.phone || '0912 345 678'})` : null,
-      assignedEscort: escortStaff ? `${escortStaff.full_name} (${escortStaff.phone || '0987 654 321'})` : null,
+      assignedDriver: driverStaff
+        ? (!isCustomer && driverStaff.phone ? `${driverStaff.full_name} (${driverStaff.phone})` : driverStaff.full_name)
+        : null,
+      assignedEscort: escortStaff
+        ? (!isCustomer && escortStaff.phone ? `${escortStaff.full_name} (${escortStaff.phone})` : escortStaff.full_name)
+        : null,
       assignedHorses: assignedHorses.map((h) => ({
         id: h.horse_id,
         shipmentHorseId: h.shipment_horse_id ? Number(h.shipment_horse_id) : undefined,
@@ -630,6 +715,7 @@ export class TrackingService {
     // --- MỐC 1: Xe xuất phát tại trang trại khách hàng ---
     const isM1Done =
       legRoad1.actual_departure !== null ||
+      legRoad1.status === 'active' ||
       legRoad1.status === 'departed' ||
       legRoad1.status === 'in_transit' ||
       legRoad1.status === 'completed';
@@ -676,10 +762,14 @@ export class TrackingService {
 
     const m2Actions: string[] = [];
     if (m2Status === 'CURRENT') {
-      if (!stopExport || stopExport.status === 'pending') {
-        m2Actions.push('arrive_stop', 'clear_customs');
+      if (!stopExport) {
+        m2Actions.push('arrive_leg');
+      } else if (stopExport.status === 'pending') {
+        m2Actions.push('arrive_stop');
+      } else if (stopExport.status === 'arrived') {
+        m2Actions.push('clear_customs');
       } else {
-        m2Actions.push('clear_customs', 'depart_stop');
+        m2Actions.push('depart_stop');
       }
     }
 
@@ -709,6 +799,7 @@ export class TrackingService {
     // --- MỐC 3: Ngựa bắt đầu xuất phát từ sân bay (Cất cánh) ---
     const isM3Done =
       legFlight.actual_departure !== null ||
+      legFlight.status === 'active' ||
       legFlight.status === 'departed' ||
       legFlight.status === 'in_transit' ||
       legFlight.status === 'completed';
@@ -783,10 +874,14 @@ export class TrackingService {
 
     const m5Actions: string[] = [];
     if (m5Status === 'CURRENT') {
-      if (!stopImport || stopImport.status === 'pending') {
-        m5Actions.push('arrive_stop', 'clear_customs');
+      if (!stopImport) {
+        m5Actions.push('start_leg');
+      } else if (stopImport.status === 'pending') {
+        m5Actions.push('arrive_stop');
+      } else if (stopImport.status === 'arrived') {
+        m5Actions.push('clear_customs');
       } else {
-        m5Actions.push('clear_customs', 'depart_stop');
+        m5Actions.push('depart_stop');
       }
     }
 
@@ -845,6 +940,37 @@ export class TrackingService {
     return items;
   }
 
+  /**
+   * Deterministic mapping of stops to a leg when route_stop.leg_id may be null.
+   * Shared by buildStandardTimeline, getShipmentTimeline, checkInStop, and checkInLegArrival
+   * so milestone progression and vertical timeline stay 100% synchronized.
+   */
+  private getStopsForLeg(
+    leg: any,
+    legIndex: number,
+    legsSubset: any[],
+    stopsSubset: any[],
+    classifiedStops?: ReturnType<TrackingService['classifyMultimodalStops']> | null,
+  ): any[] {
+    const matched = stopsSubset.filter((s) => {
+      if (s.leg_id) return Number(s.leg_id) === Number(leg.leg_id);
+      if (legsSubset.length === 1) return true;
+      if (classifiedStops) {
+        if (classifiedStops.legRoad1 && Number(leg.leg_id) === Number(classifiedStops.legRoad1.leg_id)) {
+          return classifiedStops.stopExport?.route_stop_id === s.route_stop_id;
+        }
+        if (classifiedStops.legRoadLast && Number(leg.leg_id) === Number(classifiedStops.legRoadLast.leg_id)) {
+          return classifiedStops.stopImport?.route_stop_id === s.route_stop_id;
+        }
+        return false;
+      }
+      return Number(s.sequence_no) === 1
+        ? legIndex === 0
+        : legIndex === legsSubset.length - 1;
+    });
+    return matched.sort((a, b) => (a.sequence_no || 0) - (b.sequence_no || 0));
+  }
+
   // Luồng tiêu chuẩn cho các tuyến đường bộ nội địa
   private buildStandardTimeline(
     legs: any[],
@@ -857,12 +983,7 @@ export class TrackingService {
 
     for (let i = 0; i < legs.length; i++) {
       const leg = legs[i];
-      const legStops = stops.filter((s) => {
-        if (s.leg_id) return s.leg_id === leg.leg_id;
-        if (legs.length === 1) return true;
-        return s.sequence_no === 1 ? leg.sequence_no === 1 : leg.sequence_no === legs.length;
-      });
-      legStops.sort((a, b) => (a.sequence_no || 0) - (b.sequence_no || 0));
+      const legStops = this.getStopsForLeg(leg, i, legs, stops);
 
       const isConsolidatedLeg = Boolean(leg.road_trip_id && consolidationContext?.itinerary);
       const itinerary = isConsolidatedLeg ? consolidationContext!.itinerary : undefined;
@@ -870,7 +991,9 @@ export class TrackingService {
       const endGroup = itinerary?.orderedDestinations[itinerary.orderedDestinations.length - 1];
       const endCodes = endGroup?.requestCodes.map((c) => `#${c}`).join(', ');
 
-      const isLegDeparted = leg.actual_departure !== null || leg.status === 'departed' || leg.status === 'in_transit' || leg.status === 'completed';
+      const isLegDeparted =
+        leg.actual_departure !== null ||
+        ['active', 'departed', 'in_transit', 'completed'].includes(leg.status);
       let legStartStatus: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
       if (isLegDeparted) {
         legStartStatus = 'COMPLETED';
@@ -893,7 +1016,7 @@ export class TrackingService {
         actualTime: leg.actual_departure ? new Date(leg.actual_departure).toISOString() : null,
         isCustomsBorder: false,
         legType: leg.leg_type || 'road',
-        responsibleRole: leg.leg_type === 'flight' ? 'escort' : 'driver',
+        responsibleRole: leg.leg_type === 'flight' || leg.leg_type === 'sea' ? 'escort' : 'driver',
         notes: null,
         updatedBy: null,
         allowedActions: legStartStatus === 'CURRENT' ? ['start_leg'] : [],
@@ -901,12 +1024,15 @@ export class TrackingService {
 
       for (const stop of legStops) {
         const isCustoms = stop.stop_type === 'quarantine' || stop.stop_type === 'border_check';
-        const isStopDone = stop.status === 'departed' || (isCustoms && stop.status === 'customs_cleared');
+        const isQuarantine = stop.stop_type === 'quarantine';
+        const isStopDone =
+          stop.status === 'departed' ||
+          (!isQuarantine && isCustoms && (stop.status === 'customs_cleared' || stop.status === 'cleared'));
 
         let stopStatus: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
         if (isStopDone) {
           stopStatus = 'COMPLETED';
-        } else if (stop.status === 'arrived') {
+        } else if (stop.status === 'arrived' || (isQuarantine && (stop.status === 'customs_cleared' || stop.status === 'cleared'))) {
           stopStatus = 'CURRENT';
           foundFirstIncomplete = true;
         } else if (!foundFirstIncomplete && isLegDeparted) {
@@ -919,9 +1045,12 @@ export class TrackingService {
           if (stop.status === 'pending') {
             stopActions.push('arrive_stop');
           } else if (stop.status === 'arrived') {
-            if (isCustoms) stopActions.push('clear_customs');
-            stopActions.push('depart_stop');
-          } else if (stop.status === 'customs_cleared') {
+            if (isCustoms) {
+              stopActions.push('clear_customs');
+            } else {
+              stopActions.push('depart_stop');
+            }
+          } else if (stop.status === 'customs_cleared' || stop.status === 'cleared') {
             stopActions.push('depart_stop');
           }
         }
@@ -939,7 +1068,7 @@ export class TrackingService {
           actualTime: stop.actual_departure ? new Date(stop.actual_departure).toISOString() : (stop.actual_arrival ? new Date(stop.actual_arrival).toISOString() : null),
           isCustomsBorder: isCustoms,
           legType: leg.leg_type || 'road',
-          responsibleRole: leg.leg_type === 'flight' ? 'escort' : 'driver',
+          responsibleRole: leg.leg_type === 'flight' || leg.leg_type === 'sea' ? 'escort' : 'driver',
           notes: stop.notes || null,
           updatedBy: stop.updated_by_name || null,
           allowedActions: stopActions,
@@ -958,10 +1087,15 @@ export class TrackingService {
         );
       const isLegArrived =
         (leg.actual_arrival !== null || leg.status === 'completed') && !hasPendingFinalDestSibling;
+      const allLegStopsCompleted = legStops.every((s) =>
+        s.stop_type === 'quarantine'
+          ? s.status === 'departed'
+          : s.status === 'departed' || s.status === 'customs_cleared' || s.status === 'cleared',
+      );
       let legEndStatus: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
       if (isLegArrived) {
         legEndStatus = 'COMPLETED';
-      } else if (!foundFirstIncomplete && isLegDeparted && legStops.every((s) => s.status === 'departed' || s.status === 'customs_cleared')) {
+      } else if (!foundFirstIncomplete && isLegDeparted && allLegStopsCompleted) {
         legEndStatus = 'CURRENT';
         foundFirstIncomplete = true;
       }
@@ -980,7 +1114,7 @@ export class TrackingService {
         actualTime: leg.actual_arrival ? new Date(leg.actual_arrival).toISOString() : null,
         isCustomsBorder: false,
         legType: leg.leg_type || 'road',
-        responsibleRole: leg.leg_type === 'flight' ? 'escort' : 'driver',
+        responsibleRole: leg.leg_type === 'flight' || leg.leg_type === 'sea' ? 'escort' : 'driver',
         notes: null,
         updatedBy: null,
         allowedActions: legEndStatus === 'CURRENT' ? ['arrive_leg'] : [],
@@ -1254,6 +1388,11 @@ export class TrackingService {
 
     const parentLeg =
       legs.find((l) => l.leg_id === targetStop.leg_id) ||
+      legs.find((l, idx) =>
+        this.getStopsForLeg(l, idx, legs, stops, classifiedStops).some(
+          (s) => Number(s.route_stop_id) === Number(targetStop.route_stop_id),
+        ),
+      ) ||
       (isMultiModalFlight && isImportStop
         ? classifiedStops!.legRoadLast
         : isMultiModalFlight
@@ -1506,22 +1645,19 @@ export class TrackingService {
     const stops = await this.trackingStore.findStopsByRouteId(route.route_id);
     const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
     const classifiedStops = isMultiModalFlight ? this.classifyMultimodalStops(legs, stops) : null;
-    const legStops = stops.filter((s) => {
-      if (s.leg_id) return s.leg_id === Number(legId);
-      if (legs.length === 1) return true;
-      if (classifiedStops) {
-        if (classifiedStops.legRoad1 && Number(legId) === Number(classifiedStops.legRoad1.leg_id)) {
-          return classifiedStops.stopExport?.route_stop_id === s.route_stop_id;
-        }
-        if (classifiedStops.legRoadLast && Number(legId) === Number(classifiedStops.legRoadLast.leg_id)) {
-          return classifiedStops.stopImport?.route_stop_id === s.route_stop_id;
-        }
-        return false;
-      }
-      const firstRoadLeg = legs.find((l) => l.leg_type !== 'flight') || legs[0];
-      return firstRoadLeg.leg_id === Number(legId);
-    });
-    const unfinishedStops = legStops.filter((s) => !['departed', 'customs_cleared', 'cleared'].includes(s.status));
+    const targetLegIdx = legs.findIndex((l) => Number(l.leg_id) === Number(legId));
+    const legStops = this.getStopsForLeg(
+      targetLeg,
+      targetLegIdx >= 0 ? targetLegIdx : 0,
+      legs,
+      stops,
+      classifiedStops,
+    );
+    const unfinishedStops = legStops.filter((s) =>
+      s.stop_type === 'quarantine'
+        ? s.status !== 'departed'
+        : !['departed', 'customs_cleared', 'cleared'].includes(s.status),
+    );
     if (unfinishedStops.length > 0) {
       throw new ConflictException(
         `Còn ${unfinishedStops.length} trạm dừng chưa hoàn tất rời trạm (${unfinishedStops.map((s) => s.location_name).join(', ')})!`,
@@ -1796,6 +1932,7 @@ export class TrackingService {
     // Luôn khóa cứng nhật ký sức khỏe theo mốc hiện tại đang diễn ra, không cho phép ghi nhận cho mốc quá khứ
     const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
     let finalLegName = dto.legName;
+    let resolvedRouteStopId: number | null = dto.routeStopId ?? null;
     if (route?.route_id) {
       const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
       const stops = await this.trackingStore.findStopsByRouteId(route.route_id);
@@ -1806,6 +1943,15 @@ export class TrackingService {
       const activeM = milestones.find((m) => m.status === 'CURRENT');
       if (activeM) {
         finalLegName = `#${activeM.seq} - ${activeM.title}`;
+        if (!resolvedRouteStopId && activeM.stopId) {
+          resolvedRouteStopId = Number(activeM.stopId);
+        }
+      }
+      if (!resolvedRouteStopId && stops.length > 0) {
+        const activeStop = stops.find((s) => s.status === 'arrived' || s.status === 'customs_cleared');
+        if (activeStop?.route_stop_id) {
+          resolvedRouteStopId = Number(activeStop.route_stop_id);
+        }
       }
     }
 
@@ -1836,6 +1982,7 @@ export class TrackingService {
         conditionStatus: dto.conditionStatus,
         temperatureC: dto.temperatureC,
         heartRateBpm: dto.heartRateBpm,
+        respiratoryRateBpm: dto.respiratoryRate ?? null,
         recordedAt: recordedAtDate,
       },
       prevLog,
@@ -1854,7 +2001,7 @@ export class TrackingService {
       temperatureC: dto.temperatureC,
       heartRateBpm: dto.heartRateBpm,
       respiratoryRateBpm: dto.respiratoryRate ?? null,
-      routeStopId: dto.routeStopId ?? null,
+      routeStopId: resolvedRouteStopId,
       lat: dto.location?.lat != null ? Number(dto.location.lat) : null,
       lng: dto.location?.lng != null ? Number(dto.location.lng) : null,
       locationSource: dto.location?.source ?? null,
@@ -1872,7 +2019,10 @@ export class TrackingService {
           : [];
       const reqCode = shipment.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`;
       
-      const customerVitalsDetail = await this.trackingStore.getSetting('tracking.customer_vitals_detail');
+      const customerVitalsDetail =
+        typeof this.trackingStore?.getSetting === 'function'
+          ? await this.trackingStore.getSetting('tracking.customer_vitals_detail')
+          : true;
       const showDetailToCustomer = customerVitalsDetail !== false && customerVitalsDetail !== 'false';
 
       const customerRedMsg = showDetailToCustomer
@@ -1942,6 +2092,8 @@ export class TrackingService {
         conditionStatus: dto.conditionStatus,
         temperatureC: dto.temperatureC ?? null,
         heartRateBpm: dto.heartRateBpm ?? null,
+        respiratoryRateBpm: dto.respiratoryRate ?? null,
+        routeStopId: resolvedRouteStopId,
         alertTier: evaluation.alertTier,
         alertReason: evaluation.alertReason,
         notes: dto.notes ?? null,
@@ -1962,7 +2114,14 @@ export class TrackingService {
     if (shipment.status === 'completed') {
       return;
     }
-    if (shipment.status !== 'in_transit') {
+    if (shipment.status === 'return_pending') {
+      const retStatus = String(shipment.return_status || '').toLowerCase();
+      if (!['completed', 'cancelled', 'no_show'].includes(retStatus)) {
+        throw new ConflictException(
+          'Không thể hoàn tất đơn khi chặng về chưa hoàn thành hoặc chưa bị hủy',
+        );
+      }
+    } else if (shipment.status !== 'in_transit') {
       throw new ConflictException(
         `Chỉ chuyến đi đang ở trạng thái "in_transit" mới có thể đánh dấu hoàn thành. Trạng thái hiện tại: "${shipment.status}"`,
       );
@@ -2044,7 +2203,7 @@ export class TrackingService {
       throw new ForbiddenException('Tài khoản của bạn không có quyền cập nhật mốc hành trình chuyến đi.');
     }
 
-    if (leg.leg_type === 'road' || leg.leg_type === 'flight') {
+    if (leg.leg_type === 'road' || leg.leg_type === 'flight' || leg.leg_type === 'sea') {
       const isDriverOrEscort =
         user.specialization === 'driver' ||
         user.specialization === 'escort' ||
@@ -2062,10 +2221,19 @@ export class TrackingService {
     user: AuthenticatedUser,
     horseId: number,
   ): Promise<any[]> {
-    if (String(user.role).toUpperCase() === 'CUSTOMER') {
+    const roleUpper = String(user.role || '').toUpperCase();
+    if (roleUpper === 'CUSTOMER') {
       const isOwner = await this.trackingStore.isHorseOwnedByUser(horseId, Number(user.id));
       if (!isOwner) {
         throw new ForbiddenException('Bạn chỉ có thể xem lịch sử y tế của ngựa thuộc tài khoản của mình');
+      }
+    } else if (roleUpper === 'DRIVER_ESCORT') {
+      const isAssigned =
+        typeof this.trackingStore.isHorseAssignedToDriver === 'function'
+          ? await this.trackingStore.isHorseAssignedToDriver(horseId, Number(user.id))
+          : false;
+      if (!isAssigned) {
+        throw new ForbiddenException('Bạn chỉ có thể xem lịch sử sức khỏe của ngựa thuộc chuyến đi được phân công cho mình');
       }
     }
     return this.trackingStore.findHorseHealthLogsByHorseId(horseId);
@@ -2591,9 +2759,14 @@ export class TrackingService {
       throw new ForbiddenException('Bạn không có quyền truy cập dữ liệu chuyến đi này.');
     }
 
+    await this.assertAssignedForDriverEscort(user, shipmentId);
+
     const route = await this.trackingStore.findRouteByShipmentId(shipmentId);
     const legs = route ? await this.trackingStore.findLegsByRouteId(route.route_id) : [];
-    const stops = route ? await this.trackingStore.findStopsByRouteId(route.route_id) : [];
+    const rawStops = route ? await this.trackingStore.findStopsByRouteId(route.route_id) : [];
+    const stops = isCustomer
+      ? rawStops.filter((s) => s.stop_type !== 'transfer_hub').map((s, idx) => ({ ...s, sequence_no: idx + 1 }))
+      : rawStops;
 
     const latestPing = await this.trackingStore.findLatestPing(shipmentId);
     let vehiclePosition: LiveVehiclePosition | null = null;
@@ -2651,24 +2824,62 @@ export class TrackingService {
       actualDeparture: s.actual_departure ? new Date(s.actual_departure).toISOString() : null,
     }));
 
-    const liveLegs: LiveTrackingLeg[] = legs.map((l) => ({
-      legId: l.leg_id,
-      sequenceNo: l.sequence_no,
-      direction: ((l as any).direction || 'outbound') as 'outbound' | 'return',
-      type: l.leg_type === 'flight' ? 'flight' : 'road',
-      legType: l.leg_type,
-      originLocation: l.origin_location,
-      destinationLocation: l.destination_location,
-      status: l.status,
-      polyline: [],
-      actualDeparture: l.actual_departure ? new Date(l.actual_departure).toISOString() : null,
-      actualArrival: l.actual_arrival ? new Date(l.actual_arrival).toISOString() : null,
-      polylineJson: l.polyline_json || null,
-    }));
+    const liveLegs: LiveTrackingLeg[] = legs.map((l) => {
+      const rawPolyline = l.route_polyline || l.polyline_json || null;
+      let parsedPolyline: Array<[number, number]> = [];
+      if (typeof rawPolyline === 'string' && rawPolyline.trim()) {
+        try {
+          const parsed = JSON.parse(rawPolyline);
+          if (Array.isArray(parsed)) {
+            parsedPolyline = parsed
+              .map((pt): [number, number] | null => {
+                if (Array.isArray(pt) && pt.length >= 2) {
+                  const lat = Number(pt[0]);
+                  const lng = Number(pt[1]);
+                  return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+                }
+                if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
+                  const lat = Number((pt as { lat: unknown }).lat);
+                  const lng = Number((pt as { lng: unknown }).lng);
+                  return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+                }
+                return null;
+              })
+              .filter((pt): pt is [number, number] => pt !== null);
+          }
+        } catch {}
+      }
+      const normalizedType: 'road' | 'flight' | 'sea' =
+        l.leg_type === 'flight' ? 'flight' : l.leg_type === 'sea' ? 'sea' : 'road';
+      return {
+        legId: l.leg_id,
+        sequenceNo: l.sequence_no,
+        direction: ((l as any).direction || 'outbound') as 'outbound' | 'return',
+        type: normalizedType,
+        legType: l.leg_type,
+        originLocation: l.origin_location,
+        destinationLocation: l.destination_location,
+        status: l.status,
+        polyline: parsedPolyline,
+        actualDeparture: l.actual_departure ? new Date(l.actual_departure).toISOString() : null,
+        actualArrival: l.actual_arrival ? new Date(l.actual_arrival).toISOString() : null,
+        polylineJson: rawPolyline,
+      };
+    });
 
-    const completedStops = stops.filter((s) => s.status === 'departed' || s.status === 'completed').length;
+    const completedStopsScore = stops.reduce((sum, s) => {
+      if (s.status === 'departed' || s.status === 'completed') return sum + 1;
+      if (s.status === 'customs_cleared' || s.status === 'cleared') return sum + 0.75;
+      if (s.status === 'arrived') return sum + 0.5;
+      return sum;
+    }, 0);
     const totalStops = stops.length;
-    const progressPct = totalStops > 0 ? Math.round((completedStops / totalStops) * 100) : 0;
+    const progressPct =
+      shipment.status === 'completed'
+        ? 100
+        : totalStops > 0
+          ? Math.min(99, Math.round((completedStopsScore / totalStops) * 100))
+          : 0;
 
     const activeLeg = legs.find((l) => l.status === 'active' || l.status === 'in_transit');
     const activeStop = stops.find((s) => s.status === 'arrived' || s.status === 'customs_cleared');
@@ -2718,6 +2929,13 @@ export class TrackingService {
       }
     }
 
+    const simSetting =
+      typeof this.trackingStore?.getSetting === 'function'
+        ? await this.trackingStore.getSetting('tracking.simulation_enabled')
+        : null;
+    const simulationEnabled =
+      simSetting === true || simSetting === 'true' || process.env.TRACKING_SIMULATION_ENABLED === 'true';
+
     const isSimulated = vehiclePosition?.source === 'simulated';
     const etaStr = shipment.estimated_delivery_at ? new Date(shipment.estimated_delivery_at).toISOString() : null;
 
@@ -2727,6 +2945,7 @@ export class TrackingService {
       status: shipment.status,
       simulation: isSimulated,
       isSimulated,
+      simulationEnabled,
       vehicle: vehiclePosition,
       vehiclePosition,
       path,
@@ -2805,12 +3024,19 @@ export class TrackingService {
       const lastPingTime = latestPing?.recorded_at ? new Date(latestPing.recorded_at).getTime() : null;
       const lastPingAgoSeconds = lastPingTime ? Math.round((Date.now() - lastPingTime) / 1000) : null;
 
+      const driverName = s.driver_name || null;
+      const vehiclePlate = s.vehicle_plate || null;
+      const horsesCount = Number(s.horses_count || horses.length || s.requested_horse_count || 0);
+
       result.push({
         shipmentId,
-        requestCode: s.request_code,
+        requestCode: s.request_code || `REQ-${String(shipmentId).padStart(3, '0')}`,
         customerName: s.contact_name || 'Khách hàng',
-        driverName: null,
-        vehiclePlate: null,
+        driverName,
+        assignedDriver: driverName,
+        vehiclePlate,
+        assignedVehicle: vehiclePlate,
+        horsesCount,
         originLocation: s.origin_location,
         destinationLocation: s.destination_location,
         status: s.status,
@@ -2827,6 +3053,7 @@ export class TrackingService {
             }
           : null,
         alertTier: highestAlertTier,
+        latestAlertTier: highestAlertTier,
         alertCount,
         isSimulated: latestPing?.source === 'simulated',
         lastPingAgoSeconds,
@@ -2932,9 +3159,10 @@ export class TrackingService {
     const rawStatusLogs = await this.trackingStore.findTripStatusLogs(shipmentId);
     const healthLogs = await this.trackingStore.findHorseHealthLogs(shipmentId);
     const assignedStaff = await this.trackingStore.findAssignedStaff(shipmentId);
-    let customerVitalsDetail = false;
+    let customerVitalsDetail = true;
     if (typeof this.trackingStore?.getSetting === 'function') {
-      customerVitalsDetail = Boolean(await this.trackingStore.getSetting('tracking.customer_vitals_detail'));
+      const vitalsRaw = await this.trackingStore.getSetting('tracking.customer_vitals_detail');
+      customerVitalsDetail = vitalsRaw !== false && vitalsRaw !== 'false';
     }
 
     // Build timeline items
@@ -2943,7 +3171,23 @@ export class TrackingService {
     const tripType = shipment.trip_type === 'round_trip' ? 'round_trip' : 'one_way';
 
     // ── 1. PRE-TRIP GROUP ──
-    const isPaid = !['awaiting_payment', 'requested', 'draft'].includes(status);
+    const isCancelledOrRejected = ['rejected', 'cancelled', 'cancelled_operational'].includes(status);
+    const isPaid =
+      Boolean(shipment.paid_at || shipment.payment_received_at) ||
+      [
+        'paid_pending_review',
+        'approved',
+        'planning',
+        'confirmed',
+        'ready_to_depart',
+        'in_transit',
+        'return_pending',
+        'arrived',
+        'completed',
+        'delivered',
+        'refund_requested',
+        'refunded',
+      ].includes(status);
     const paymentActualAt = shipment.paid_at || shipment.payment_received_at || (isPaid ? shipment.created_at : null);
     items.push({
       id: 'pre_payment',
@@ -2951,23 +3195,44 @@ export class TrackingService {
       kind: 'payment',
       title: 'Thanh toán cước vận chuyển',
       subtitle: isPaid ? 'Đã hoàn tất thanh toán VietQR' : 'Chờ khách hàng thanh toán',
-      status: isPaid ? 'done' : status === 'awaiting_payment' ? 'current' : 'upcoming',
+      status: isPaid ? 'done' : status === 'awaiting_payment' ? 'current' : isCancelledOrRejected ? 'failed' : 'upcoming',
       plannedAt: shipment.created_at ? new Date(shipment.created_at).toISOString() : null,
       actualAt: paymentActualAt ? new Date(paymentActualAt).toISOString() : null,
     });
 
-    const isApproved = !['awaiting_payment', 'paid_pending_review', 'rejected', 'refund_requested', 'refunded'].includes(status);
+    const isApproved = [
+      'approved',
+      'planning',
+      'confirmed',
+      'ready_to_depart',
+      'in_transit',
+      'return_pending',
+      'arrived',
+      'completed',
+      'delivered',
+    ].includes(status);
+    const approvalActualAt = shipment.feasibility_reviewed_at || shipment.feasibility_decided_at || (isApproved ? shipment.approved_at : null);
     items.push({
       id: 'pre_approval',
       group: 'pre_trip',
       kind: 'approval',
       title: 'Phê duyệt khả thi & kế hoạch',
-      subtitle: isApproved ? 'Logistics Manager đã phê duyệt' : 'Đang thẩm định khả thi tuyến & xe',
-      status: isApproved ? 'done' : status === 'paid_pending_review' ? 'current' : 'upcoming',
-      actualAt: shipment.feasibility_reviewed_at || (isApproved ? shipment.approved_at : null),
+      subtitle: isApproved
+        ? 'Logistics Manager đã phê duyệt'
+        : isCancelledOrRejected
+        ? 'Đơn đã bị từ chối hoặc hủy'
+        : 'Đang thẩm định khả thi tuyến & xe',
+      status: isApproved
+        ? 'done'
+        : ['paid_pending_review', 'requested', 'under_review', 'change_requested'].includes(status)
+        ? 'current'
+        : isCancelledOrRejected
+        ? 'failed'
+        : 'upcoming',
+      actualAt: approvalActualAt ? new Date(approvalActualAt).toISOString() : null,
     });
 
-    const isDocsCompliant = ['ready_to_depart', 'in_transit', 'return_pending', 'completed'].includes(status);
+    const isDocsCompliant = ['ready_to_depart', 'in_transit', 'return_pending', 'arrived', 'completed', 'delivered'].includes(status);
     items.push({
       id: 'pre_documents',
       group: 'pre_trip',
@@ -2977,7 +3242,7 @@ export class TrackingService {
       status: isDocsCompliant ? 'done' : ['approved', 'planning', 'confirmed'].includes(status) ? 'current' : 'upcoming',
     });
 
-    const isDispatched = ['ready_to_depart', 'in_transit', 'return_pending', 'completed'].includes(status);
+    const isDispatched = ['ready_to_depart', 'in_transit', 'return_pending', 'arrived', 'completed', 'delivered'].includes(status);
     const driverStaff = assignedStaff.find((s) => s.role_in_shipment === 'driver');
     items.push({
       id: 'pre_dispatch',
@@ -2985,7 +3250,7 @@ export class TrackingService {
       kind: 'depot',
       title: 'Điều phối xe & tài xế sẵn sàng',
       subtitle: isDispatched
-        ? (isCustomer ? 'Phương tiện chuyên dụng đã sẵn sàng' : `Xe đã bàn giao cho tài xế ${driverStaff?.full_name || ''}`)
+        ? (isCustomer ? 'Phương tiện chuyên dụng đã sẵn sàng' : `Xe đã bàn giao cho tài xế ${driverStaff?.full_name || ''}`.trim())
         : 'Đang xếp lịch phương tiện & nhân sự',
       status: isDispatched ? 'done' : status === 'confirmed' ? 'current' : 'upcoming',
     });
@@ -3007,145 +3272,359 @@ export class TrackingService {
       return 'other';
     };
 
-    const processLegsAndStops = (legsSubset: any[], stopsSubset: any[], group: 'outbound' | 'return') => {
-      const firstLeg = legsSubset[0];
-      if (firstLeg) {
-        const isLegDeparted = ['departed', 'in_transit', 'completed', 'arrived'].includes(firstLeg.status) ||
-          ['in_transit', 'return_pending', 'completed'].includes(status);
-        const legStartLog = rawStatusLogs.find(
-          (l) => l.milestoneType === 'leg_departure' && Number(l.legId) === Number(firstLeg.leg_id),
+    const isLegDepartedHelper = (leg: any) =>
+      Boolean(leg.actual_departure) ||
+      ['active', 'departed', 'in_transit', 'completed', 'arrived'].includes(String(leg.status || '').toLowerCase());
+
+    const isLegCompletedHelper = (leg: any) =>
+      Boolean(leg.actual_arrival) || String(leg.status || '').toLowerCase() === 'completed';
+
+    const outboundAllCompleted =
+      outboundLegs.length === 0 ||
+      status === 'return_pending' ||
+      status === 'completed' ||
+      outboundLegs.every((l) => isLegCompletedHelper(l));
+
+    let foundOperationalCurrent = false;
+
+    const processLegsAndStops = (
+      legsSubset: any[],
+      stopsSubset: any[],
+      group: 'outbound' | 'return',
+      canGroupStart: boolean,
+    ) => {
+      const assignedStopIds = new Set<number>();
+      const isGroupMultimodalFlight =
+        legsSubset.some((l) => l.leg_type === 'flight') && legsSubset.length >= 2;
+      const classifiedGroupStops = isGroupMultimodalFlight
+        ? this.classifyMultimodalStops(legsSubset, stopsSubset)
+        : null;
+
+      for (let legIdx = 0; legIdx < legsSubset.length; legIdx++) {
+        const leg = legsSubset[legIdx];
+        const isFirstLegOfGroup = legIdx === 0;
+        const isLastLegOfGroup = legIdx === legsSubset.length - 1;
+        const prevLegDone =
+          legIdx === 0
+            ? canGroupStart
+            : isLegCompletedHelper(legsSubset[legIdx - 1]);
+
+        const isLegDeparted =
+          isLegDepartedHelper(leg) ||
+          (status === 'completed' && group === 'outbound') ||
+          (status === 'completed' && group === 'return' && String(shipment.return_status || '').toLowerCase() !== 'no_show' && !Boolean(shipment.return_no_show));
+
+        const isMultimodalImportRoadLeg = Boolean(
+          classifiedGroupStops?.stopImport &&
+            classifiedGroupStops?.legRoadLast &&
+            Number(leg.leg_id) === Number(classifiedGroupStops.legRoadLast.leg_id),
         );
-        const plannedTime = firstLeg.planned_departure ? new Date(firstLeg.planned_departure).toISOString() : null;
-        const actualTime = firstLeg.actual_departure
-          ? new Date(firstLeg.actual_departure).toISOString()
+        const isMultimodalExportRoadLeg = Boolean(
+          classifiedGroupStops?.stopExport &&
+            classifiedGroupStops?.legRoad1 &&
+            Number(leg.leg_id) === Number(classifiedGroupStops.legRoad1.leg_id),
+        );
+
+        const legStartLog = rawStatusLogs.find(
+          (l) => l.milestoneType === 'leg_departure' && Number(l.legId) === Number(leg.leg_id),
+        );
+        const startPlanned = leg.planned_departure ? new Date(leg.planned_departure).toISOString() : null;
+        const startActual = leg.actual_departure
+          ? new Date(leg.actual_departure).toISOString()
           : (legStartLog ? new Date(legStartLog.createdAt).toISOString() : null);
 
-        let delayMins: number | null = null;
-        if (plannedTime && actualTime) {
-          delayMins = Math.round((new Date(actualTime).getTime() - new Date(plannedTime).getTime()) / 60000);
+        let startDelayMins: number | null = null;
+        if (startPlanned && startActual) {
+          startDelayMins = Math.round((new Date(startActual).getTime() - new Date(startPlanned).getTime()) / 60000);
         }
 
-        const isCurrent = group === 'outbound'
-          ? (status === 'ready_to_depart' || (status === 'in_transit' && firstLeg.status === 'pending'))
-          : (status === 'return_pending' || (status === 'in_transit' && firstLeg.status === 'pending'));
+        const isStartCurrent =
+          !isMultimodalImportRoadLeg &&
+          !isLegDeparted &&
+          !foundOperationalCurrent &&
+          prevLegDone &&
+          (group === 'outbound'
+            ? ['ready_to_depart', 'in_transit'].includes(status)
+            : ['return_pending', 'in_transit'].includes(status));
 
-        items.push({
-          id: `${group}_pickup`,
-          group,
-          kind: group === 'return' ? 'return_start' : 'pickup',
-          title: group === 'return' ? `Khởi hành chặng về: ${firstLeg.origin_location}` : `Đón ngựa tại: ${firstLeg.origin_location}`,
-          subtitle: firstLeg.origin_location,
-          status: isLegDeparted && !isCurrent ? 'done' : isCurrent ? 'current' : 'upcoming',
-          plannedAt: plannedTime,
-          actualAt: actualTime,
-          delayMinutes: delayMins,
-          locationSource: (legStartLog?.locationSource as any) || (firstLeg.checkin_source as any) || 'gps',
-          flagged: Boolean(legStartLog?.flagged),
-          actorLabel: isCustomer ? undefined : legStartLog?.updatedByName || driverStaff?.full_name,
-        });
-      }
+        if (isStartCurrent) foundOperationalCurrent = true;
+        const startStatus: 'done' | 'current' | 'upcoming' = isLegDeparted
+          ? 'done'
+          : isStartCurrent
+          ? 'current'
+          : 'upcoming';
 
-      for (const stop of stopsSubset) {
-        if (isCustomer && stop.stop_type === 'transfer_hub') continue;
+        const startPhotos = legStartLog?.evidenceUrl
+          ? [{ url: legStartLog.evidenceUrl, alt: leg.origin_location || 'Check-in evidence' }]
+          : undefined;
 
-        const stopLog = rawStatusLogs.find(
-          (l) => Number(l.routeStopId) === Number(stop.route_stop_id),
-        );
-        const isStopDeparted = stop.status === 'departed' || stop.status === 'completed' || status === 'completed';
-        const isStopArrived = stop.status === 'arrived' || stop.status === 'customs_cleared';
-        const isStopCurrent = isStopArrived && !isStopDeparted;
-
-        const stopPlanned = stop.planned_arrival ? new Date(stop.planned_arrival).toISOString() : null;
-        const stopActual = stop.actual_arrival
-          ? new Date(stop.actual_arrival).toISOString()
-          : (stopLog ? new Date(stopLog.createdAt).toISOString() : null);
-
-        let delayMins: number | null = null;
-        if (stopPlanned && stopActual) {
-          delayMins = Math.round((new Date(stopActual).getTime() - new Date(stopPlanned).getTime()) / 60000);
+        if (!isMultimodalImportRoadLeg) {
+          items.push({
+            id: isFirstLegOfGroup ? `${group}_pickup` : `${group}_leg_${leg.leg_id}_start`,
+            milestoneId: `leg-${leg.leg_id}-start`,
+            legId: Number(leg.leg_id),
+            group,
+            kind: isFirstLegOfGroup
+              ? (group === 'return' ? 'return_start' : 'pickup')
+              : leg.leg_type === 'flight'
+              ? 'airport'
+              : leg.leg_type === 'sea'
+              ? 'seaport'
+              : 'pickup',
+            title: isFirstLegOfGroup
+              ? (group === 'return'
+                  ? `Khởi hành chặng về: ${leg.origin_location}`
+                  : `Đón ngựa tại: ${leg.origin_location}`)
+              : `Xuất phát chặng ${leg.sequence_no}: ${leg.origin_location}`,
+            subtitle: leg.origin_location,
+            status: startStatus,
+            plannedAt: startPlanned,
+            actualAt: startStatus === 'upcoming' ? null : startActual,
+            delayMinutes: startStatus === 'upcoming' ? null : startDelayMins,
+            locationSource:
+              startStatus === 'upcoming'
+                ? undefined
+                : ((legStartLog?.locationSource as any) || (leg.checkin_source as any) || (startActual ? 'gps' : undefined)),
+            flagged: startStatus === 'upcoming' ? false : Boolean(legStartLog?.flagged),
+            photos: startStatus === 'upcoming' ? undefined : startPhotos,
+            actorLabel:
+              isCustomer || startStatus === 'upcoming'
+                ? undefined
+                : (legStartLog?.updatedByName || (startStatus === 'done' ? driverStaff?.full_name : undefined)),
+            note: startStatus === 'upcoming' ? undefined : (legStartLog?.notes || undefined),
+          });
         }
 
-        const stopHealthLogs = healthLogs.filter((h) => Number(h.routeStopId ?? (h as any).route_stop_id) === Number(stop.route_stop_id));
-        const vitalsList = stopHealthLogs.map((h) => {
-          const temp = h.temperatureC ?? (h as any).temperature_c;
-          const hr = h.heartRateBpm ?? (h as any).heart_rate_bpm;
-          const cond = h.conditionStatus ?? (h as any).condition_status;
-          const hName = h.horseName ?? (h as any).horse_name;
-          const tier = h.alertTier ?? (h as any).alert_tier;
-          const showRaw = !isCustomer || customerVitalsDetail === true;
-          const vitalsText = showRaw && temp && hr
-            ? `${temp}°C, ${hr} bpm`
-            : (cond === 'stable' ? 'Ổn định' : 'Cần chú ý');
-          return {
-            horseName: hName,
-            tier: (tier || (cond === 'stable' ? 'green' : 'amber_observational')) as any,
-            text: vitalsText,
-          };
+        // Stops belonging to this leg (matching buildStandardTimeline / multimodal classifier)
+        const legStops = this.getStopsForLeg(
+          leg,
+          legIdx,
+          legsSubset,
+          stopsSubset,
+          classifiedGroupStops,
+        ).filter((s) => {
+          const sid = Number(s.route_stop_id || 0);
+          return !(sid && assignedStopIds.has(sid));
         });
 
-        items.push({
-          id: `${group}_stop_${stop.route_stop_id || stop.sequence_no}`,
-          group,
-          kind: mapStopKind(stop.stop_type, stop.leg_type),
-          title: stop.location_name || `Trạm dừng #${stop.sequence_no}`,
-          subtitle: stop.address || stop.city || stop.country,
-          status: isStopDeparted ? 'done' : isStopCurrent ? 'current' : 'upcoming',
-          plannedAt: stopPlanned,
-          actualAt: stopActual,
-          delayMinutes: delayMins,
-          locationSource: (stop.checkin_source as any) || (stopLog?.locationSource as any) || 'gps',
-          flagged: Boolean(stopLog?.flagged),
-          vitals: vitalsList.length > 0 ? vitalsList : undefined,
-          actorLabel: isCustomer ? undefined : stopLog?.updatedByName || driverStaff?.full_name,
-          note: stop.notes || stopLog?.notes,
-        });
-      }
+        let allStopsForLegDone = true;
+        for (const stop of legStops) {
+          if (stop.route_stop_id) assignedStopIds.add(Number(stop.route_stop_id));
+          const isCustoms = stop.stop_type === 'quarantine' || stop.stop_type === 'border_check';
+          const isQuarantine = stop.stop_type === 'quarantine';
+          const stopStatusRaw = String(stop.status || 'pending').toLowerCase();
+          const isMultimodalImportStop = Boolean(
+            classifiedGroupStops?.stopImport &&
+              Number(stop.route_stop_id) === Number(classifiedGroupStops.stopImport.route_stop_id),
+          );
+          const isMultimodalExportStop = Boolean(
+            classifiedGroupStops?.stopExport &&
+              Number(stop.route_stop_id) === Number(classifiedGroupStops.stopExport.route_stop_id),
+          );
+          const isStopDone =
+            stopStatusRaw === 'departed' ||
+            stopStatusRaw === 'completed' ||
+            ((!isQuarantine || isMultimodalExportStop || isMultimodalImportStop) &&
+              isCustoms &&
+              (stopStatusRaw === 'customs_cleared' || stopStatusRaw === 'cleared')) ||
+            (isMultimodalExportStop && isLegCompletedHelper(leg)) ||
+            (isMultimodalImportStop && isLegDepartedHelper(leg)) ||
+            (group === 'outbound' && (status === 'return_pending' || status === 'completed')) ||
+            (group === 'return' && status === 'completed' && !Boolean(shipment.return_no_show) && String(shipment.return_status || '').toLowerCase() !== 'no_show');
 
-      const lastLeg = legsSubset[legsSubset.length - 1];
-      if (lastLeg) {
-        const isDelivered = lastLeg.status === 'completed' || status === 'completed';
+          if (!isStopDone) {
+            allStopsForLegDone = false;
+          }
+
+          if (isCustomer && stop.stop_type === 'transfer_hub') continue;
+
+          const stopLogsForStop = rawStatusLogs.filter(
+            (l) => Number(l.routeStopId) === Number(stop.route_stop_id),
+          );
+          const stopLog = stopLogsForStop[stopLogsForStop.length - 1];
+          const isStopInProgress =
+            stopStatusRaw === 'arrived' ||
+            (isQuarantine && !isMultimodalExportStop && !isMultimodalImportStop && (stopStatusRaw === 'customs_cleared' || stopStatusRaw === 'cleared'));
+          const flightDoneForImport =
+            isMultimodalImportStop &&
+            Boolean(classifiedGroupStops?.legFlight && isLegCompletedHelper(classifiedGroupStops.legFlight));
+          const isStopCurrent =
+            !isStopDone &&
+            (isStopInProgress || (!foundOperationalCurrent && (isLegDeparted || flightDoneForImport)));
+
+          if (isStopCurrent) foundOperationalCurrent = true;
+          const stopTimelineStatus: 'done' | 'current' | 'upcoming' = isStopDone
+            ? 'done'
+            : isStopCurrent
+            ? 'current'
+            : 'upcoming';
+
+          const stopPlanned = stop.planned_arrival ? new Date(stop.planned_arrival).toISOString() : null;
+          const stopActual = stop.actual_departure
+            ? new Date(stop.actual_departure).toISOString()
+            : stop.actual_arrival
+            ? new Date(stop.actual_arrival).toISOString()
+            : (stopLog ? new Date(stopLog.createdAt).toISOString() : null);
+
+          let delayMins: number | null = null;
+          if (stopPlanned && stopActual) {
+            delayMins = Math.round((new Date(stopActual).getTime() - new Date(stopPlanned).getTime()) / 60000);
+          }
+
+          const stopHealthLogs = healthLogs.filter(
+            (h) => Number(h.routeStopId ?? (h as any).route_stop_id) === Number(stop.route_stop_id),
+          );
+          const vitalsList = stopHealthLogs.map((h) => {
+            const temp = h.temperatureC ?? (h as any).temperature_c;
+            const hr = h.heartRateBpm ?? (h as any).heart_rate_bpm;
+            const cond = h.conditionStatus ?? (h as any).condition_status;
+            const hName = h.horseName ?? (h as any).horse_name;
+            const tier = h.alertTier ?? (h as any).alert_tier;
+            const showRaw = !isCustomer || customerVitalsDetail === true;
+            const vitalsText = showRaw && temp && hr
+              ? `${temp}°C, ${hr} bpm`
+              : (cond === 'stable' ? 'Ổn định' : 'Cần chú ý');
+            return {
+              horseName: hName,
+              tier: (tier || (cond === 'stable' ? 'green' : 'amber_observational')) as any,
+              text: vitalsText,
+            };
+          });
+
+          const stopPhotos = stopLogsForStop
+            .filter((l) => Boolean(l.evidenceUrl))
+            .map((l, idx) => ({
+              url: l.evidenceUrl as string,
+              alt: `${stop.location_name || 'Stop'} #${idx + 1}`,
+            }));
+
+          const stopProgressPct =
+            stopTimelineStatus === 'current'
+              ? (stopStatusRaw === 'customs_cleared' || stopStatusRaw === 'cleared'
+                  ? 75
+                  : stopStatusRaw === 'arrived'
+                  ? 50
+                  : undefined)
+              : undefined;
+
+          items.push({
+            id: `${group}_stop_${stop.route_stop_id || stop.sequence_no}`,
+            milestoneId: stop.route_stop_id ? `stop-${stop.route_stop_id}` : null,
+            legId: Number(leg.leg_id),
+            stopId: stop.route_stop_id ? Number(stop.route_stop_id) : null,
+            group,
+            kind: mapStopKind(stop.stop_type, leg.leg_type),
+            title: stop.location_name || `Trạm dừng #${stop.sequence_no}`,
+            subtitle: stop.address || stop.city || stop.country,
+            status: stopTimelineStatus,
+            plannedAt: stopPlanned,
+            actualAt: stopTimelineStatus === 'upcoming' ? null : stopActual,
+            delayMinutes: stopTimelineStatus === 'upcoming' ? null : delayMins,
+            progressPercent: stopProgressPct,
+            locationSource:
+              stopTimelineStatus === 'upcoming'
+                ? undefined
+                : ((stopLog?.locationSource as any) || (stop.checkin_source as any) || (stopActual ? 'gps' : undefined)),
+            flagged: stopTimelineStatus === 'upcoming' ? false : Boolean(stopLog?.flagged),
+            vitals: vitalsList.length > 0 ? vitalsList : undefined,
+            photos: stopTimelineStatus === 'upcoming' || stopPhotos.length === 0 ? undefined : stopPhotos,
+            actorLabel:
+              isCustomer || stopTimelineStatus === 'upcoming'
+                ? undefined
+                : (stopLog?.updatedByName || stop.updated_by_name || (stopTimelineStatus === 'done' ? driverStaff?.full_name : undefined)),
+            note: stopTimelineStatus === 'upcoming' ? undefined : (stop.notes || stopLog?.notes || undefined),
+          });
+        }
+
+        if (isMultimodalExportRoadLeg) {
+          continue;
+        }
+
+        // Leg End item
+        const isLegDelivered =
+          isLegCompletedHelper(leg) ||
+          (group === 'outbound' && (status === 'return_pending' || status === 'completed')) ||
+          (group === 'return' && status === 'completed' && !Boolean(shipment.return_no_show) && String(shipment.return_status || '').toLowerCase() !== 'no_show');
         const legEndLog = rawStatusLogs.find(
-          (l) => l.milestoneType === 'leg_arrival' && Number(l.legId) === Number(lastLeg.leg_id),
+          (l) => l.milestoneType === 'leg_arrival' && Number(l.legId) === Number(leg.leg_id),
         );
-        const plannedTime = lastLeg.planned_arrival ? new Date(lastLeg.planned_arrival).toISOString() : null;
-        const actualTime = lastLeg.actual_arrival
-          ? new Date(lastLeg.actual_arrival).toISOString()
+        const endPlanned = leg.planned_arrival ? new Date(leg.planned_arrival).toISOString() : null;
+        const endActual = leg.actual_arrival
+          ? new Date(leg.actual_arrival).toISOString()
           : (legEndLog ? new Date(legEndLog.createdAt).toISOString() : null);
 
-        let delayMins: number | null = null;
-        if (plannedTime && actualTime) {
-          delayMins = Math.round((new Date(actualTime).getTime() - new Date(plannedTime).getTime()) / 60000);
+        let endDelayMins: number | null = null;
+        if (endPlanned && endActual) {
+          endDelayMins = Math.round((new Date(endActual).getTime() - new Date(endPlanned).getTime()) / 60000);
         }
 
-        const isCurrent = lastLeg.status === 'arrived' || (lastLeg.status === 'departed' && status === 'in_transit');
+        const isLegEndCurrent =
+          !isLegDelivered &&
+          !foundOperationalCurrent &&
+          (isLegDeparted || (isMultimodalImportRoadLeg && allStopsForLegDone)) &&
+          allStopsForLegDone;
+        if (isLegEndCurrent) foundOperationalCurrent = true;
+
+        const endStatus: 'done' | 'current' | 'upcoming' = isLegDelivered
+          ? 'done'
+          : isLegEndCurrent
+          ? 'current'
+          : 'upcoming';
+
+        const endPhotos = legEndLog?.evidenceUrl
+          ? [{ url: legEndLog.evidenceUrl, alt: leg.destination_location || 'Arrival evidence' }]
+          : undefined;
 
         items.push({
-          id: `${group}_delivery`,
+          id: isLastLegOfGroup ? `${group}_delivery` : `${group}_leg_${leg.leg_id}_end`,
+          milestoneId: `leg-${leg.leg_id}-end`,
+          legId: Number(leg.leg_id),
           group,
-          kind: 'delivery',
-          title: group === 'return' ? `Cập bến về đích: ${lastLeg.destination_location}` : `Bàn giao tại đích: ${lastLeg.destination_location}`,
-          subtitle: lastLeg.destination_location,
-          status: isDelivered ? 'done' : isCurrent ? 'current' : 'upcoming',
-          plannedAt: plannedTime,
-          actualAt: actualTime,
-          delayMinutes: delayMins,
-          locationSource: (legEndLog?.locationSource as any) || (lastLeg.checkin_source as any) || 'gps',
-          flagged: Boolean(legEndLog?.flagged),
-          actorLabel: isCustomer ? undefined : legEndLog?.updatedByName || driverStaff?.full_name,
+          kind: isLastLegOfGroup
+            ? 'delivery'
+            : leg.leg_type === 'flight'
+            ? 'airport'
+            : leg.leg_type === 'sea'
+            ? 'seaport'
+            : 'delivery',
+          title: isLastLegOfGroup
+            ? (group === 'return'
+                ? `Cập bến về đích: ${leg.destination_location}`
+                : `Bàn giao tại đích: ${leg.destination_location}`)
+            : `Đến điểm cuối chặng ${leg.sequence_no}: ${leg.destination_location}`,
+          subtitle: leg.destination_location,
+          status: endStatus,
+          plannedAt: endPlanned,
+          actualAt: endStatus === 'upcoming' ? null : endActual,
+          delayMinutes: endStatus === 'upcoming' ? null : endDelayMins,
+          locationSource:
+            endStatus === 'upcoming'
+              ? undefined
+              : ((legEndLog?.locationSource as any) || (leg.checkin_source as any) || (endActual ? 'gps' : undefined)),
+          flagged: endStatus === 'upcoming' ? false : Boolean(legEndLog?.flagged),
+          photos: endStatus === 'upcoming' ? undefined : endPhotos,
+          actorLabel:
+            isCustomer || endStatus === 'upcoming'
+              ? undefined
+              : (legEndLog?.updatedByName || (endStatus === 'done' ? driverStaff?.full_name : undefined)),
+          note: endStatus === 'upcoming' ? undefined : (legEndLog?.notes || undefined),
         });
       }
     };
 
     if (outboundLegs.length > 0) {
-      processLegsAndStops(outboundLegs, outboundStops, 'outbound');
+      processLegsAndStops(outboundLegs, outboundStops, 'outbound', true);
     }
     if (tripType === 'round_trip' && returnLegs.length > 0) {
-      processLegsAndStops(returnLegs, returnStops, 'return');
+      processLegsAndStops(returnLegs, returnStops, 'return', outboundAllCompleted);
     }
 
     // ── 3. POST-TRIP GROUP ──
     const isCompleted = status === 'completed';
-    const isNoShow = shipment.return_no_show === true || status === 'no_show';
+    const isNoShow =
+      Boolean(shipment.return_no_show) ||
+      status === 'no_show' ||
+      String(shipment.return_status || '').toLowerCase() === 'no_show';
     const isRefunded = status === 'refunded';
 
     if (isNoShow) {
@@ -3154,9 +3633,13 @@ export class TrackingService {
         group: 'post_trip',
         kind: 'no_show',
         title: 'Khách không giao ngựa chặng về (No-Show)',
-        subtitle: 'Tài xế đã chờ đủ 120 phút theo chính sách',
+        subtitle: `Tài xế đã chờ đủ ${shipment.return_wait_minutes ?? 120} phút theo chính sách`,
         status: 'failed',
-        actualAt: shipment.return_cancelled_at || new Date().toISOString(),
+        actualAt: shipment.return_cancelled_at
+          ? new Date(shipment.return_cancelled_at).toISOString()
+          : shipment.actual_arrival_date
+          ? new Date(shipment.actual_arrival_date).toISOString()
+          : new Date().toISOString(),
       });
     } else if (isRefunded) {
       items.push({
@@ -3166,7 +3649,7 @@ export class TrackingService {
         title: 'Đã hoàn tiền đơn hàng',
         subtitle: 'Hoàn tiền 100% qua chuyển khoản ngân hàng',
         status: 'failed',
-        actualAt: shipment.refunded_at || new Date().toISOString(),
+        actualAt: shipment.refunded_at ? new Date(shipment.refunded_at).toISOString() : new Date().toISOString(),
       });
     } else {
       items.push({
@@ -3174,7 +3657,7 @@ export class TrackingService {
         group: 'post_trip',
         kind: 'handover',
         title: 'Biên bản bàn giao & kiểm tra thể trạng',
-        subtitle: isCompleted ? 'Đã ký nhận bàn giao ngựa an toàn' : 'Biên bản giao nhận Flow 6',
+        subtitle: isCompleted ? 'Đã ký nhận bàn giao ngựa an toàn' : 'Biên bản giao nhận tại điểm đến',
         status: isCompleted ? 'done' : 'upcoming',
       });
       items.push({
@@ -3189,11 +3672,6 @@ export class TrackingService {
 
     const doneItems = items.filter((it) => it.status === 'done').length;
     const progressPercent = items.length > 0 ? Math.round((doneItems / items.length) * 100) : 0;
-
-    const currentItem = items.find((it) => it.status === 'current');
-    if (currentItem) {
-      currentItem.progressPercent = 50;
-    }
 
     const finalRequestCode = isCustomer && shipment.customer_request_code
       ? shipment.customer_request_code

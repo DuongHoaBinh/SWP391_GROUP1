@@ -50,7 +50,7 @@ export function formatHorseColor(color?: string | null): string {
  * Helper to get user-friendly medical status display text
  */
 export function formatHorseMedicalStatus(status?: string | null): string {
-  if (!status) return 'Healthy (Khỏe mạnh)';
+  if (!status || !status.trim()) return 'Chưa xác minh thú y';
   const found = HORSE_MEDICAL_STATUSES.find(
     (s) => s.value.toLowerCase() === status.trim().toLowerCase()
   );

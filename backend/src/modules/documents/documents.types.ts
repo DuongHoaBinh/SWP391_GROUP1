@@ -147,7 +147,7 @@ export interface OrderComplianceChecklist {
   tierBWindowEnd?: string | null;
   inTransitComplianceAlert?: boolean;
   isInternational?: boolean;
-  transportMode?: 'road' | 'air' | null;
+  transportMode?: 'road' | 'air' | 'sea' | null;
   matchedBorderGates?: string[];
   horses: HorseComplianceItem[];
 }

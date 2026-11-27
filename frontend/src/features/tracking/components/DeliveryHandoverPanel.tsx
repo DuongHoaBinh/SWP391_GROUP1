@@ -29,6 +29,8 @@ interface Props {
   shipmentId: number;
   shipmentStatus: string;
   assignedHorses?: HorseOption[];
+  canSubmitHandover?: boolean;
+  waitingMessage?: string;
 }
 
 export function DeliveryHandoverPanel({
@@ -36,6 +38,8 @@ export function DeliveryHandoverPanel({
   shipmentId,
   shipmentStatus,
   assignedHorses = [],
+  canSubmitHandover,
+  waitingMessage,
 }: Props) {
   const { language } = useLanguage();
   const isEn = language === 'en';
@@ -85,7 +89,28 @@ export function DeliveryHandoverPanel({
   }, [loadHandovers]);
 
   const statusLower = String(shipmentStatus || '').toLowerCase();
-  const isDeliveryEligible = statusLower === 'in_transit' || statusLower === 'completed';
+  const isDeliveryEligible =
+    statusLower === 'in_transit' ||
+    statusLower === 'return_pending' ||
+    statusLower === 'completed';
+
+  const canCreateHandover =
+    role === 'driver' &&
+    isDeliveryEligible &&
+    (canSubmitHandover !== undefined ? canSubmitHandover : true);
+
+  const conditionLabel = (val: string) => {
+    if (val === 'healthy') return isEn ? 'Healthy' : 'Khỏe mạnh';
+    if (val === 'minor_issue') return isEn ? 'Minor Issue' : 'Lưu ý nhỏ';
+    if (val === 'needs_attention') return isEn ? 'Needs Attention' : 'Cần theo dõi thú y';
+    return val;
+  };
+
+  const handoverStatusLabel = (st: string) => {
+    if (st === 'confirmed') return isEn ? 'Confirmed' : 'Đã nghiệm thu';
+    if (st === 'disputed') return isEn ? 'Disputed' : 'Đang tranh chấp';
+    return isEn ? 'Pending signature' : 'Chờ khách ký nhận';
+  };
 
   if (role !== 'driver' && !loading && handovers.length === 0 && !isDeliveryEligible) {
     return null;
@@ -212,7 +237,7 @@ export function DeliveryHandoverPanel({
     }
   };
 
-  if (role === 'driver' && !isDeliveryEligible && handovers.length === 0) {
+  if (role === 'driver' && !isDeliveryEligible && handovers.length === 0 && canSubmitHandover === undefined) {
     return null;
   }
 
@@ -237,8 +262,18 @@ export function DeliveryHandoverPanel({
         </button>
       </div>
 
+      {role === 'driver' && !canCreateHandover && remainingHorses.length > 0 && (
+        <div className="px-3.5 py-2.5 rounded-xl border border-[#DFCA9A] bg-[#FAF5EB] text-xs text-[#7D5310] flex items-center gap-2">
+          <AlertTriangle size={14} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+          <span>
+            {waitingMessage ||
+              (isEn ? 'Handover opens upon arrival at destination.' : 'Mở lập biên bản khi xe tới điểm giao đích.')}
+          </span>
+        </div>
+      )}
+
       {/* Driver Form for un-submitted horses */}
-      {role === 'driver' && isDeliveryEligible && remainingHorses.length > 0 && (
+      {canCreateHandover && remainingHorses.length > 0 && (
         <form onSubmit={handleDriverSubmit} className="p-4 rounded-xl border border-[#E8E2D8] bg-[#FAF9F5] flex flex-col gap-3 text-xs">
           <strong className="text-[#181A17]">
             {isEn ? 'Create Individual Horse Handover Record' : 'Lập biên bản bàn giao cho ngựa đến đích'}
@@ -247,7 +282,7 @@ export function DeliveryHandoverPanel({
             <select
               value={selectedShipmentHorseId || String(remainingHorses[0]?.shipmentHorseId || '')}
               onChange={(e) => setSelectedShipmentHorseId(e.target.value)}
-              className="h-10 px-3 rounded-xl border border-[#D8CEBE] bg-white font-semibold"
+              className="h-11 px-3 rounded-xl border border-[#D8CEBE] bg-white font-semibold"
             >
               {remainingHorses.map((h) => (
                 <option key={h.shipmentHorseId} value={h.shipmentHorseId}>
@@ -261,7 +296,7 @@ export function DeliveryHandoverPanel({
               placeholder={isEn ? 'Receiver full name *' : 'Họ tên người nhận bàn giao *'}
               value={receivedByName}
               onChange={(e) => setReceivedByName(e.target.value)}
-              className="h-10 px-3 rounded-xl border border-[#D8CEBE] bg-white"
+              className="h-11 px-3 rounded-xl border border-[#D8CEBE] bg-white"
             />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -270,16 +305,16 @@ export function DeliveryHandoverPanel({
               placeholder={isEn ? 'Handover location' : 'Địa điểm bàn giao thực tế'}
               value={handoverLocation}
               onChange={(e) => setHandoverLocation(e.target.value)}
-              className="h-10 px-3 rounded-xl border border-[#D8CEBE] bg-white"
+              className="h-11 px-3 rounded-xl border border-[#D8CEBE] bg-white"
             />
             <select
               value={condition}
               onChange={(e) => setCondition(e.target.value as any)}
-              className="h-10 px-3 rounded-xl border border-[#D8CEBE] bg-white"
+              className="h-11 px-3 rounded-xl border border-[#D8CEBE] bg-white font-semibold"
             >
-              <option value="healthy">{isEn ? 'Healthy' : 'Khỏe mạnh (healthy)'}</option>
-              <option value="minor_issue">{isEn ? 'Minor Issue' : 'Lưu ý nhỏ (minor_issue)'}</option>
-              <option value="needs_attention">{isEn ? 'Needs Attention' : 'Cần theo dõi (needs_attention)'}</option>
+              <option value="healthy">{conditionLabel('healthy')}</option>
+              <option value="minor_issue">{conditionLabel('minor_issue')}</option>
+              <option value="needs_attention">{conditionLabel('needs_attention')}</option>
             </select>
           </div>
           <div className="flex flex-wrap gap-4">
@@ -336,7 +371,7 @@ export function DeliveryHandoverPanel({
                   </span>
                 </div>
                 <span
-                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase ${
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                     h.status === 'confirmed'
                       ? 'bg-[#E8F2EB] text-[#287653]'
                       : h.status === 'disputed'
@@ -344,16 +379,20 @@ export function DeliveryHandoverPanel({
                       : 'bg-[#F8F0DF] text-[#966516]'
                   }`}
                 >
-                  {h.status}
+                  {handoverStatusLabel(h.status)}
                 </span>
               </div>
 
               <div className="text-[#5C6658] flex flex-wrap gap-x-4 gap-y-1">
                 <span>{isEn ? 'Receiver:' : 'Người nhận:'} <strong className="text-[#181A17]">{h.receivedByName}</strong></span>
-                <span>{isEn ? 'Condition:' : 'Tình trạng:'} <strong className="text-[#181A17]">{h.horseConditionAtHandover}</strong></span>
+                <span>{isEn ? 'Condition:' : 'Tình trạng:'} <strong className="text-[#181A17]">{conditionLabel(h.horseConditionAtHandover)}</strong></span>
                 <span>
                   {isEn ? 'Identity & Docs:' : 'Định danh & Hồ sơ:'}{' '}
-                  <strong>{h.identityVerified && h.documentsHandedOver ? 'OK' : 'Check'}</strong>
+                  <strong>
+                    {h.identityVerified && h.documentsHandedOver
+                      ? isEn ? 'Verified' : 'Đủ & Khớp'
+                      : isEn ? 'Needs check' : 'Cần đối chiếu'}
+                  </strong>
                 </span>
                 <span>
                   {isEn ? 'Max Insurance Cover:' : 'Hạn mức BH:'}{' '}
@@ -370,7 +409,7 @@ export function DeliveryHandoverPanel({
                 <div className="p-2.5 rounded-lg bg-[#E8F2EB] text-[#287653] font-semibold flex items-center gap-1.5">
                   <ShieldCheck size={14} aria-hidden="true" />
                   <span>
-                    {h.resolutionNotes} (Bồi thường: {h.compensationAmount.toLocaleString('vi-VN')} VND)
+                    {h.resolutionNotes} ({isEn ? 'Compensation:' : 'Bồi thường:'} {h.compensationAmount.toLocaleString('vi-VN')} VND)
                   </span>
                 </div>
               )}

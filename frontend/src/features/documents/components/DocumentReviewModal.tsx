@@ -572,11 +572,11 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
               <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#EFEAE0] text-[11.5px]">
                 <div>
                   <span className="text-[#747D88] block">{language === 'en' ? 'Microchip:' : 'Mã Microchip:'}</span>
-                  <span className="font-mono font-bold text-[#181A17]">{horseMicrochip || '985141002345678'}</span>
+                  <span className="font-mono font-bold text-[#181A17]">{horseMicrochip || '—'}</span>
                 </div>
                 <div>
                   <span className="text-[#747D88] block">{language === 'en' ? 'Passport:' : 'Hộ chiếu:'}</span>
-                  <span className="font-mono font-bold text-[#181A17]">{horsePassport || 'VN-PASS-2025-01'}</span>
+                  <span className="font-mono font-bold text-[#181A17]">{horsePassport || '—'}</span>
                 </div>
                 {horseBreed && (
                   <div className="col-span-2">

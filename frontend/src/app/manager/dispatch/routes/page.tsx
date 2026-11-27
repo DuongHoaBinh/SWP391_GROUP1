@@ -55,7 +55,7 @@ const RoutePlanningMap = dynamic(
 );
 
 interface PlanningOrder {
-  transportMode?: 'road' | 'air' | null;
+  transportMode?: 'road' | 'air' | 'sea' | null;
   bookingType: BookingType;
   id: number;
   requestCode: string;
@@ -153,7 +153,7 @@ function RoutePlanningContent() {
   // Tab 2 Simulation & Custom Route State
   const [searchOrigin, setSearchOrigin] = useState<string>('Trang trại Củ Chi, TP.HCM');
   const [searchDestination, setSearchDestination] = useState<string>('Singapore Turf Club, Kranji, Singapore');
-  const [searchMode, setSearchMode] = useState<'air' | 'road'>('air');
+  const [searchMode, setSearchMode] = useState<'air' | 'road' | 'sea'>('air');
   const [transportTypeChoice, setTransportTypeChoice] = useState<'auto' | 'Domestic' | 'International'>('auto');
   const [simulatedKm, setSimulatedKm] = useState<number>(1450);
   const [simulatedHours, setSimulatedHours] = useState<number>(6);
@@ -174,7 +174,9 @@ function RoutePlanningContent() {
     if (fromCurrentSearch) {
       const origClean = (searchOrigin || '').split(',')[0].trim();
       const destClean = (searchDestination || '').split(',')[0].trim();
-      setSaveTemplateName(language === 'en' ? `Corridor: ${origClean} ➔ ${destClean} (${searchMode === 'air' ? 'Air' : 'Road'})` : `Hành lang: ${origClean} ➔ ${destClean} (${searchMode === 'air' ? 'Hàng không' : 'Đường bộ'})`);
+      const modeLabelEn = searchMode === 'air' ? 'Air' : searchMode === 'sea' ? 'Sea' : 'Road';
+      const modeLabelVi = searchMode === 'air' ? 'Hàng không' : searchMode === 'sea' ? 'Đường thủy' : 'Đường bộ';
+      setSaveTemplateName(language === 'en' ? `Corridor: ${origClean} ➔ ${destClean} (${modeLabelEn})` : `Hành lang: ${origClean} ➔ ${destClean} (${modeLabelVi})`);
       setSaveTemplateOrigin(searchOrigin);
       setSaveTemplateDestination(searchDestination);
       setSaveTemplateDistance(simulatedKm || 1000);
@@ -746,21 +748,42 @@ function RoutePlanningContent() {
 
     const effectiveOrigin = selectedPlanningOrder?.origin || template.origin;
     const effectiveDest = selectedPlanningOrder?.destination || template.destination;
-    const geoCheck = buildEquineRoute(
-      effectiveOrigin,
-      effectiveDest,
-      selectedPlanningOrder?.transportMode === 'road' ? 'road' : 'air'
-    );
+    const orderMode = selectedPlanningOrder?.transportMode;
+    const preferredTemplateMode: 'road' | 'air' | 'sea' =
+      orderMode === 'sea' ? 'sea' : orderMode === 'road' ? 'road' : 'air';
+    const geoCheck = buildEquineRoute(effectiveOrigin, effectiveDest, preferredTemplateMode);
     const normName = normalizeVietnamese(template.name);
+    const isSea =
+      (orderMode === 'sea' || normName.includes('duong thuy') || normName.includes('tau bien') || normName.includes('sea')) &&
+      geoCheck.mode === 'sea' &&
+      geoCheck.legs.some((l) => l.type === 'sea');
     const isFlight =
-      selectedPlanningOrder?.transportMode === 'air' ||
-      (selectedPlanningOrder?.transportMode !== 'road' &&
-        (normName.includes('hang khong') ||
-          normName.includes('air') ||
-          normName.includes('bay') ||
-          geoCheck.mode === 'air'));
+      !isSea &&
+      (orderMode === 'air' ||
+        (orderMode !== 'road' &&
+          orderMode !== 'sea' &&
+          (normName.includes('hang khong') ||
+            normName.includes('air') ||
+            normName.includes('bay') ||
+            geoCheck.mode === 'air')));
 
-    if (!isFlight) {
+    if (isSea) {
+      const defaultVehicle = pickDefaultRoadVehicle(selectedPlanningOrder);
+      const seaBuiltLegs: RouteLegItem[] = geoCheck.legs.map((l, idx) => ({
+        sequenceNo: idx + 1,
+        legType: l.type === 'sea' ? 'sea' : 'road',
+        originLocation: l.fromName,
+        destinationLocation: l.toName,
+        distanceKm: l.distanceKm,
+        durationHours: l.durationHours,
+        ...(l.type === 'road' && idx === 0
+          ? { vehiclePlate: defaultVehicle.vehiclePlate, vehicleId: defaultVehicle.vehicleId }
+          : {}),
+      }));
+      const scheduled = applyDefaultScheduleToLegs(seaBuiltLegs, selectedPlanningOrder);
+      setLegs(scheduled);
+      setPlanTotalDistanceKm(sumLegsDistanceKm(scheduled, geoCheck.distanceKm || template.distanceKm));
+    } else if (!isFlight) {
       const defaultVehicle = pickDefaultRoadVehicle(selectedPlanningOrder);
       const singleRoadLeg: RouteLegItem = {
         sequenceNo: 1,
@@ -803,10 +826,10 @@ function RoutePlanningContent() {
     toast.success(language === 'en' ? `Synced route "${template.name}"! You can edit vehicle plate and details below.` : `Đã đồng bộ tuyến "${template.name}"! Bạn có thể chỉnh sửa biển số xe và mọi thông tin bên dưới.`);
   };
 
-  // Tự động gợi ý tuyến đường, chặng bay và chặng đường bộ từ Điểm đón, Điểm đến & Phương thức vận chuyển
+  // Tự động gợi ý tuyến đường, chặng bay, chặng biển và chặng đường bộ từ Điểm đón, Điểm đến & Phương thức vận chuyển
   const applySmartRouteSuggestion = (
     order: PlanningOrder,
-    modeOverride?: 'road' | 'air',
+    modeOverride?: 'road' | 'air' | 'sea',
     showToast = false
   ) => {
     const hasManagerAirConfig = Boolean(
@@ -817,24 +840,57 @@ function RoutePlanningContent() {
       order.routeDetail?.managerDepartureAirportCode ||
       order.routeDetail?.managerArrivalAirportCode
     );
-    const preferredMode: 'road' | 'air' =
+    const preferredMode: 'road' | 'air' | 'sea' =
       modeOverride ??
-      (hasManagerAirConfig || order.transportMode === 'air'
-        ? 'air'
-        : order.transportMode === 'road'
-          ? 'road'
-          : 'air');
+      (order.transportMode === 'sea'
+        ? 'sea'
+        : hasManagerAirConfig || order.transportMode === 'air'
+          ? 'air'
+          : order.transportMode === 'road'
+            ? 'road'
+            : 'air');
 
     const geoPreview = buildEquineRoute(order.origin, order.destination, preferredMode);
+    const shouldUseSea = preferredMode === 'sea' && geoPreview.mode === 'sea' && geoPreview.legs.some((l) => l.type === 'sea');
     const shouldUseAir =
-      modeOverride !== undefined
+      !shouldUseSea &&
+      (modeOverride !== undefined
         ? modeOverride === 'air'
         : hasManagerAirConfig ||
           order.transportMode === 'air' ||
-          (order.transportMode !== 'road' && (geoPreview.mode === 'air' || !geoPreview.isDomestic));
+          (order.transportMode !== 'road' && order.transportMode !== 'sea' && (geoPreview.mode === 'air' || !geoPreview.isDomestic)));
 
     const originShort = (order.origin || '').split(',')[0].trim() || 'Điểm đón';
     const destShort = (order.destination || '').split(',')[0].trim() || 'Điểm đến';
+
+    if (shouldUseSea) {
+      const defaultVehicle = pickDefaultRoadVehicle(order);
+      const seaBuiltLegs: RouteLegItem[] = geoPreview.legs.map((l, idx) => ({
+        sequenceNo: idx + 1,
+        legType: l.type === 'sea' ? 'sea' : 'road',
+        originLocation: l.fromName,
+        destinationLocation: l.toName,
+        distanceKm: l.distanceKm,
+        durationHours: l.durationHours,
+        ...(l.type === 'road' && idx === 0
+          ? { vehiclePlate: defaultVehicle.vehiclePlate, vehicleId: defaultVehicle.vehicleId }
+          : {}),
+      }));
+      const scheduled = applyDefaultScheduleToLegs(seaBuiltLegs, order);
+      const totalKm = sumLegsDistanceKm(scheduled, geoPreview.distanceKm || 1200);
+      setPlanRouteName(`Hành lang Đường thủy: ${originShort} → ${destShort}`);
+      setLegs(scheduled);
+      setPlanTotalDistanceKm(totalKm);
+      setStops([]);
+      if (showToast) {
+        toast.success(
+          language === 'en'
+            ? `Suggested multimodal sea + road route (${scheduled.length} legs • ${totalKm} km)`
+            : `Đã tự động gợi ý lộ trình Đa phương thức Đường thủy + Đường bộ (${scheduled.length} chặng • ${totalKm} km)`
+        );
+      }
+      return;
+    }
 
     if (!shouldUseAir) {
       const defaultVehicle = pickDefaultRoadVehicle(order);
@@ -904,7 +960,7 @@ function RoutePlanningContent() {
       const geoRoute = buildEquineRoute(
         order.origin,
         order.destination,
-        order.transportMode === 'road' ? 'road' : 'air'
+        order.transportMode === 'road' ? 'road' : order.transportMode === 'sea' ? 'sea' : 'air'
       );
       const flightPreview = geoRoute.legs.find((l) => l.type === 'air');
 
@@ -1768,12 +1824,12 @@ function RoutePlanningContent() {
                             <span>
                               {t('coordinator.routes.requiredVehicle', 'Loại xe yêu cầu:')} <strong className="text-[#181A17]">{route?.managerVehicleType ? translateVehicleType(route.managerVehicleType) : translateVehicleType('truck')}</strong>
                             </span>
-                            {order.transportMode !== 'road' && route?.managerAirlineName && (
+                            {order.transportMode === 'air' && route?.managerAirlineName && (
                               <span>
                                 {t('coordinator.routes.airline', 'Hãng bay:')} <strong className="text-[#181A17]">{route.managerAirlineName}</strong>
                               </span>
                             )}
-                            {order.transportMode !== 'road' && route?.managerDepartureAirportCode && route?.managerArrivalAirportCode && (
+                            {order.transportMode === 'air' && route?.managerDepartureAirportCode && route?.managerArrivalAirportCode && (
                               <span>
                                 {t('coordinator.routes.airportPair', 'Sân bay:')} <strong className="text-[#181A17]">{route.managerDepartureAirportCode} → {route.managerArrivalAirportCode}</strong>
                               </span>
@@ -1793,8 +1849,8 @@ function RoutePlanningContent() {
                       ) : (
                         <p className="text-[11px] text-amber-900 font-medium m-0 mt-0.5">
                           {language === 'en'
-                            ? '⏳ Quote approved — Awaiting Manager Strategic Framework (Step 1a) or Coordinator can pre-draft the detailed route.'
-                            : '⏳ Đơn đã duyệt báo giá — Đang chờ Manager thiết lập khung định hướng (Bước 1a) hoặc Điều phối viên có thể dựng sẵn lộ trình chi tiết.'}
+                            ? '⏳ Order approved — Ready for Operations Manager to configure detailed route legs and vehicle dispatch.'
+                            : '⏳ Đơn đã duyệt — Sẵn sàng để Quản lý vận hành thiết lập chi tiết chặng lộ trình và điều phối phương tiện.'}
                         </p>
                       )}
                     </div>
@@ -1825,7 +1881,7 @@ function RoutePlanningContent() {
                         {order.origin} → {order.destination}
                       </p>
                       <p className="text-slate-500 m-0 mt-1">
-                        {t('coordinator.routes.routeNameLabel', 'Tên tuyến:')} <strong>{route?.routeName || t('coordinator.routes.unnamed', 'Chưa đặt tên')}</strong> • {t('coordinator.routes.distanceLabel', 'Cự ly:')} <strong>{route?.totalDistanceKm || 850} km</strong>
+                        {t('coordinator.routes.routeNameLabel', 'Tên tuyến:')} <strong>{route?.routeName || t('coordinator.routes.unnamed', 'Chưa đặt tên')}</strong> • {t('coordinator.routes.distanceLabel', 'Cự ly:')} <strong>{route?.totalDistanceKm ? `${route.totalDistanceKm} km` : '—'}</strong>
                       </p>
                     </div>
 
@@ -1841,13 +1897,21 @@ function RoutePlanningContent() {
                               className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
                                 leg.legType === 'flight'
                                   ? 'bg-[#FAF8F4] text-[#181A17] border-[#EAE5DA]'
-                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : (leg.legType as string) === 'sea'
+                                    ? 'bg-cyan-50 text-cyan-800 border-cyan-200'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               }`}
                             >
-                              {leg.legType === 'flight' ? '✈️ Bay: ' : '🚚 Xe: '}
+                              {leg.legType === 'flight'
+                                ? (language === 'en' ? '✈️ Flight: ' : '✈️ Bay: ')
+                                : (leg.legType as string) === 'sea'
+                                  ? (language === 'en' ? '🚢 Sea: ' : '🚢 Tàu: ')
+                                  : (language === 'en' ? '🚚 Truck: ' : '🚚 Xe: ')}
                               {leg.legType === 'flight'
                                 ? `${leg.flightNumber || 'Flight'} (${leg.departureAirportCode || 'SGN'} → ${leg.arrivalAirportCode || 'SIN'})`
-                                : `${leg.vehiclePlate || (language === 'en' ? 'Truck' : 'Xe tải')}`}
+                                : (leg.legType as string) === 'sea'
+                                  ? `${leg.originLocation || ''} → ${leg.destinationLocation || ''}`
+                                  : `${leg.vehiclePlate || (language === 'en' ? 'Truck' : 'Xe tải')}`}
                             </span>
                           ))}
                         </div>
@@ -2018,7 +2082,7 @@ function RoutePlanningContent() {
                   onRouteCalculated={(data) => {
                     setSimulatedKm(data.distanceKm);
                     setSimulatedHours(data.durationHours);
-                    setSearchMode(data.mode === 'air' ? 'air' : 'road');
+                    setSearchMode(data.mode);
                   }}
                 />
               </div>
@@ -2212,7 +2276,9 @@ function RoutePlanningContent() {
                   ? ` · ${
                       selectedPlanningOrder.transportMode === 'road'
                         ? t('manager.requests.modeRoad', language === 'en' ? 'Road Transit' : 'Đường bộ')
-                        : t('manager.requests.modeAir', language === 'en' ? 'Air Cargo' : 'Hàng không')
+                        : selectedPlanningOrder.transportMode === 'sea'
+                          ? t('manager.requests.modeSea', language === 'en' ? 'Sea Freight' : 'Đường thủy')
+                          : t('manager.requests.modeAir', language === 'en' ? 'Air Cargo' : 'Hàng không')
                     }`
                   : ''}
               </p>
@@ -2296,7 +2362,7 @@ function RoutePlanningContent() {
                       : translateVehicleType('truck')}
                   </strong>
                 </div>
-                {selectedPlanningOrder.transportMode !== 'road' && selectedPlanningOrder.routeDetail?.managerAirlineName && (
+                {selectedPlanningOrder.transportMode === 'air' && selectedPlanningOrder.routeDetail?.managerAirlineName && (
                   <div>
                     <span className="text-slate-500 block text-[10px] uppercase font-bold">{t('coordinator.routes.airline', 'Hãng hàng không:')}</span>
                     <strong className="text-[#181A17]">
@@ -2304,7 +2370,7 @@ function RoutePlanningContent() {
                     </strong>
                   </div>
                 )}
-                {selectedPlanningOrder.transportMode !== 'road' &&
+                {selectedPlanningOrder.transportMode === 'air' &&
                   selectedPlanningOrder.routeDetail?.managerDepartureAirportCode &&
                   selectedPlanningOrder.routeDetail?.managerArrivalAirportCode && (
                   <div>
@@ -3306,7 +3372,7 @@ function RoutePlanningContent() {
                       className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-5 py-2 shadow-sm text-xs flex items-center gap-1.5"
                     >
                       <Send size={14} />
-                      <span>{isSubmittingPlan ? t('coordinator.routes.submittingApproval', 'Đang gửi duyệt...') : t('coordinator.routes.saveRerouteSubmitBtn', 'Lưu Lộ Trình Mới & Gửi Manager Duyệt')}</span>
+                      <span>{isSubmittingPlan ? t('coordinator.routes.submittingApproval', 'Đang lưu...') : (language === 'en' ? 'Save & Confirm Revised Route' : 'Lưu & Xác Nhận Lộ Trình Mới')}</span>
                     </Button>
                   </div>
                 </div>
@@ -3340,7 +3406,7 @@ function RoutePlanningContent() {
                     className="bg-[#181A17] hover:bg-[#242722] text-white font-bold px-5 py-2 shadow-sm text-xs whitespace-nowrap flex items-center gap-1.5"
                   >
                     <Send size={14} />
-                    <span>{isSubmittingPlan ? t('coordinator.routes.submittingApproval', 'Đang gửi duyệt...') : t('coordinator.routes.submitForApprovalBtn', 'Gửi Duyệt Cho Manager')}</span>
+                    <span>{isSubmittingPlan ? t('coordinator.routes.submittingApproval', 'Đang xác nhận...') : (language === 'en' ? 'Save & Confirm Plan' : 'Lưu & Xác Nhận Kế Hoạch')}</span>
                   </Button>
                 </div>
               </div>

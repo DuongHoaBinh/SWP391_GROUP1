@@ -36,6 +36,26 @@ export default function RestrictionZoneMap({ zones, selectedId, onSelect, classN
   const leafletRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
   const [ready, setReady] = useState(false);
+  const [focusCity, setFocusCity] = useState<'ALL' | 'HN' | 'HCM'>('ALL');
+
+  const focusPreset = (city: 'ALL' | 'HN' | 'HCM') => {
+    setFocusCity(city);
+    const map = mapRef.current;
+    if (!map) return;
+    if (city === 'HN') {
+      map.setView([21.0285, 105.8542], 11);
+      return;
+    }
+    if (city === 'HCM') {
+      map.setView([10.7769, 106.7009], 11);
+      return;
+    }
+    const pts: [number, number][] = zones
+      .filter((z) => Number.isFinite(z.centerLat) && Number.isFinite(z.centerLng))
+      .map((z) => [z.centerLat, z.centerLng]);
+    if (pts.length > 1) map.fitBounds(pts, { padding: [36, 36], maxZoom: 9 });
+    else if (pts.length === 1) map.setView(pts[0], 11);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -104,11 +124,38 @@ export default function RestrictionZoneMap({ zones, selectedId, onSelect, classN
   }, [ready, zones, selectedId, onSelect]);
 
   return (
-    <div
-      ref={containerRef}
-      role="region"
-      aria-label="Bản đồ vùng cấm xe tải"
-      className={className ?? 'w-full h-[340px] rounded-2xl border border-[#E5DDD0] overflow-hidden'}
-    />
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-[#5C6658]">
+          Phóng nhanh khu vực đô thị:
+        </span>
+        <div className="inline-flex items-center gap-1 bg-[#FAF8F4] border border-[#D8CEBE] rounded-lg p-0.5">
+          {[
+            { key: 'ALL' as const, label: 'Toàn quốc' },
+            { key: 'HCM' as const, label: 'TP.HCM' },
+            { key: 'HN' as const, label: 'Hà Nội' },
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => focusPreset(item.key)}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer border-0 whitespace-nowrap ${
+                focusCity === item.key
+                  ? 'bg-[#181A17] text-[#FAF8F4]'
+                  : 'bg-transparent text-[#5C6658] hover:text-[#181A17]'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div
+        ref={containerRef}
+        role="region"
+        aria-label="Bản đồ vùng cấm xe tải"
+        className={className ?? 'w-full h-[340px] rounded-2xl border border-[#E5DDD0] overflow-hidden'}
+      />
+    </div>
   );
 }

@@ -4,6 +4,12 @@
  * Compliant with IATA Live Animals Regulations (LAR) and ASEAN Veterinary Transit.
  */
 
+import {
+  computeMaritimeRoute,
+  isLandlockedCountry,
+  MAX_SEAPORT_ROAD_KM,
+} from './maritime-routing';
+
 export interface KnownLocation {
   id: string;
   name: string;
@@ -36,6 +42,8 @@ export interface RouteLegPreview {
   toName: string;
   fromCoords: [number, number];
   toCoords: [number, number];
+  pathCoords?: [number, number][];
+  crossesAntimeridian?: boolean;
   distanceKm: number;
   durationHours: number;
   estimatedPriceVnd: number;
@@ -55,6 +63,7 @@ export interface RouteCalculationResult {
   waypoints: Waypoint[];
   legs: RouteLegPreview[];
   airFallbackNotice?: { vi: string; en: string } | null;
+  seaUnavailableNotice?: { vi: string; en: string } | null;
   summaryNote: string;
 }
 
@@ -67,22 +76,69 @@ export interface KnownSeaport {
 }
 
 export const KNOWN_SEAPORTS: KnownSeaport[] = [
+  // Việt Nam
   { code: 'VN-CLI', name: 'Cảng Cát Lái (TP.HCM)', country: 'Việt Nam', coords: [10.7617, 106.7894], international: true },
+  { code: 'VN-VUT', name: 'Cảng Cái Mép - Thị Vải (Vũng Tàu)', country: 'Việt Nam', coords: [10.5256, 107.0185], international: true },
   { code: 'VN-HPH', name: 'Cảng Hải Phòng (Lạch Huyện)', country: 'Việt Nam', coords: [20.8449, 106.8891], international: true },
   { code: 'VN-DAD', name: 'Cảng Tiên Sa (Đà Nẵng)', country: 'Việt Nam', coords: [16.1219, 108.2194], international: true },
+  { code: 'VN-NHA', name: 'Cảng Nha Trang (Khánh Hòa)', country: 'Việt Nam', coords: [12.2036, 109.2175], international: true },
   { code: 'VN-RGI', name: 'Cảng Rạch Giá (Kiên Giang)', country: 'Việt Nam', coords: [10.0125, 105.0809], international: false },
   { code: 'VN-PQC', name: 'Cảng Bãi Vòng (Phú Quốc)', country: 'Việt Nam', coords: [10.1557, 104.0402], international: false },
-  { code: 'VN-VUT', name: 'Cảng Cái Mép - Thị Vải (Vũng Tàu)', country: 'Việt Nam', coords: [10.5256, 107.0185], international: true },
-  { code: 'VN-NHA', name: 'Cảng Nha Trang (Khánh Hòa)', country: 'Việt Nam', coords: [12.2036, 109.2175], international: true },
+
+  // Đông Nam Á
   { code: 'SG-PSA', name: 'Cảng Pasir Panjang (Singapore)', country: 'Singapore', coords: [1.2737, 103.7909], international: true },
   { code: 'TH-LCB', name: 'Cảng Laem Chabang (Thái Lan)', country: 'Thái Lan', coords: [13.0827, 100.883], international: true },
   { code: 'MY-PKG', name: 'Cảng Port Klang (Malaysia)', country: 'Malaysia', coords: [2.9999, 101.3928], international: true },
+  { code: 'MY-PEN', name: 'Cảng Penang (Malaysia)', country: 'Malaysia', coords: [5.4141, 100.345], international: true },
   { code: 'KH-KOS', name: 'Cảng Sihanoukville (Campuchia)', country: 'Campuchia', coords: [10.6462, 103.5015], international: true },
+  { code: 'ID-JKT', name: 'Cảng Tanjung Priok (Jakarta, Indonesia)', country: 'Indonesia', coords: [-6.1045, 106.8805], international: true },
+  { code: 'ID-SUB', name: 'Cảng Tanjung Perak (Surabaya, Indonesia)', country: 'Indonesia', coords: [-7.2008, 112.733], international: true },
+  { code: 'ID-BDJ', name: 'Cảng Trisakti (Banjarmasin, Indonesia)', country: 'Indonesia', coords: [-3.332, 114.558], international: true },
+  { code: 'ID-BPN', name: 'Cảng Semayang (Balikpapan, Indonesia)', country: 'Indonesia', coords: [-1.274, 116.805], international: true },
+  { code: 'PH-MNL', name: 'Cảng Manila (Philippines)', country: 'Philippines', coords: [14.585, 120.961], international: true },
+
+  // Đông Á
   { code: 'HK-HKG', name: 'Cảng Kwai Tsing (Hồng Kông)', country: 'Hồng Kông', coords: [22.3456, 114.1228], international: true },
+  { code: 'TW-KHH', name: 'Cảng Cao Hùng / Kaohsiung (Đài Loan)', country: 'Đài Loan', coords: [22.565, 120.285], international: true },
+  { code: 'CN-SHA', name: 'Cảng Dương Sơn / Thượng Hải (Trung Quốc)', country: 'Trung Quốc', coords: [30.626, 122.065], international: true },
+  { code: 'CN-GZH', name: 'Cảng Nam Sa / Quảng Châu (Trung Quốc)', country: 'Trung Quốc', coords: [22.665, 113.665], international: true },
+  { code: 'CN-TSN', name: 'Cảng Thiên Tân / Bắc Kinh (Trung Quốc)', country: 'Trung Quốc', coords: [38.985, 117.785], international: true },
   { code: 'JP-TYO', name: 'Cảng Yokohama / Tokyo (Nhật Bản)', country: 'Nhật Bản', coords: [35.4437, 139.6503], international: true },
+  { code: 'JP-OSA', name: 'Cảng Osaka / Kobe (Nhật Bản)', country: 'Nhật Bản', coords: [34.65, 135.425], international: true },
   { code: 'KR-PUS', name: 'Cảng Busan (Hàn Quốc)', country: 'Hàn Quốc', coords: [35.1028, 129.0403], international: true },
-  { code: 'AU-SYD', name: 'Cảng Port Botany (Sydney, Úc)', country: 'Úc', coords: [-33.9708, 151.2165], international: true },
+  { code: 'KR-INC', name: 'Cảng Incheon (Seoul, Hàn Quốc)', country: 'Hàn Quốc', coords: [37.45, 126.605], international: true },
+
+  // Nam Á
+  { code: 'IN-NSA', name: 'Cảng Nhava Sheva / JNPT (Mumbai, Ấn Độ)', country: 'Ấn Độ', coords: [18.95, 72.95], international: true },
+  { code: 'IN-MAA', name: 'Cảng Chennai (Ấn Độ)', country: 'Ấn Độ', coords: [13.085, 80.295], international: true },
+
+  // Trung Đông
   { code: 'AE-DXB', name: 'Cảng Jebel Ali (Dubai, UAE)', country: 'UAE', coords: [25.0112, 55.0612], international: true },
+  { code: 'QA-DOH', name: 'Cảng Hamad (Doha, Qatar)', country: 'Qatar', coords: [25.025, 51.62], international: true },
+  { code: 'SA-DMM', name: 'Cảng King Abdulaziz (Dammam, Ả Rập Xê Út)', country: 'Ả Rập Xê Út', coords: [26.44, 50.15], international: true },
+  { code: 'SA-JED', name: 'Cảng Jeddah Islamic Port (Ả Rập Xê Út)', country: 'Ả Rập Xê Út', coords: [21.4858, 39.17], international: true },
+
+  // Châu Đại Dương
+  { code: 'AU-SYD', name: 'Cảng Port Botany (Sydney, Úc)', country: 'Úc', coords: [-33.9708, 151.2165], international: true },
+  { code: 'AU-MEL', name: 'Cảng Port of Melbourne (Melbourne, Úc)', country: 'Úc', coords: [-37.835, 144.915], international: true },
+  { code: 'AU-BNE', name: 'Cảng Port of Brisbane (Brisbane, Úc)', country: 'Úc', coords: [-27.385, 153.175], international: true },
+  { code: 'AU-FRE', name: 'Cảng Fremantle (Perth, Úc)', country: 'Úc', coords: [-32.055, 115.74], international: true },
+  { code: 'NZ-AKL', name: 'Cảng Ports of Auckland (New Zealand)', country: 'New Zealand', coords: [-36.843, 174.777], international: true },
+
+  // Châu Âu
+  { code: 'BE-ANR', name: 'Cảng Antwerp (Bỉ)', country: 'Bỉ', coords: [51.265, 4.35], international: true },
+  { code: 'NL-RTM', name: 'Cảng Rotterdam (Hà Lan)', country: 'Hà Lan', coords: [51.95, 4.135], international: true },
+  { code: 'FR-LEH', name: 'Cảng Le Havre (Pháp)', country: 'Pháp', coords: [49.475, 0.115], international: true },
+  { code: 'GB-FXT', name: 'Cảng Felixstowe (Vương quốc Anh)', country: 'Vương quốc Anh', coords: [51.955, 1.32], international: true },
+  { code: 'DE-HAM', name: 'Cảng Hamburg (Đức)', country: 'Đức', coords: [53.525, 9.935], international: true },
+  { code: 'ES-BCN', name: 'Cảng Barcelona (Tây Ban Nha)', country: 'Tây Ban Nha', coords: [41.345, 2.165], international: true },
+  { code: 'IT-GOA', name: 'Cảng Genoa (Ý)', country: 'Ý', coords: [44.405, 8.915], international: true },
+
+  // Bắc Mỹ
+  { code: 'US-LAX', name: 'Cảng Los Angeles / Long Beach (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [33.74, -118.27], international: true },
+  { code: 'US-NYC', name: 'Cảng New York / New Jersey (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [40.67, -74.14], international: true },
+  { code: 'US-SAV', name: 'Cảng Savannah (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [32.13, -81.15], international: true },
+  { code: 'US-MIA', name: 'Cảng PortMiami (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [25.775, -80.17], international: true },
 ];
 
 export function getNearestSeaportForCoords(
@@ -91,24 +147,38 @@ export function getNearestSeaportForCoords(
   options?: { internationalOnly?: boolean }
 ): KnownSeaport {
   const intlOnly = Boolean(options?.internationalOnly);
-  const sameCountryPool = KNOWN_SEAPORTS.filter(
-    (p) => p.country === country && (!intlOnly || p.international)
+  const normalizedCountry = normalizeCountryName(country);
+  const allCandidates = KNOWN_SEAPORTS.filter((p) => !intlOnly || p.international);
+  const sameCountryPool = allCandidates.filter(
+    (p) => normalizeCountryName(p.country) === normalizedCountry
   );
-  const pool =
-    sameCountryPool.length > 0
-      ? sameCountryPool
-      : KNOWN_SEAPORTS.filter((p) => !intlOnly || p.international);
 
-  let best = pool[0] || KNOWN_SEAPORTS[0];
-  let bestDist = Infinity;
-  for (const port of pool) {
-    const d = calculateHaversine(coords, port.coords);
-    if (d < bestDist) {
-      bestDist = d;
-      best = port;
+  const findClosest = (pool: KnownSeaport[]) => {
+    let best = pool[0] || KNOWN_SEAPORTS[0];
+    let bestDist = Infinity;
+    for (const port of pool) {
+      const d = calculateHaversine(coords, port.coords);
+      if (d < bestDist) {
+        bestDist = d;
+        best = port;
+      }
     }
+    return { port: best, distKm: bestDist };
+  };
+
+  if (sameCountryPool.length > 0) {
+    const sameCountryBest = findClosest(sameCountryPool);
+    // Prefer a same-country seaport whenever it is within port-transfer range;
+    // otherwise fall back to the nearest international port (e.g., cross-border European ports like Nice -> Genoa)
+    // so frontend port selection aligns with backend PricingService.
+    if (sameCountryBest.distKm <= MAX_SEAPORT_ROAD_KM) {
+      return sameCountryBest.port;
+    }
+    const globalBest = findClosest(allCandidates);
+    return globalBest.distKm <= MAX_SEAPORT_ROAD_KM ? globalBest.port : sameCountryBest.port;
   }
-  return best;
+
+  return findClosest(allCandidates).port;
 }
 
 /**
@@ -117,7 +187,7 @@ export function getNearestSeaportForCoords(
 export function estimateLegPriceVnd(
   legType: 'road' | 'air' | 'sea',
   distanceKm: number,
-  options?: { seaMode?: 'ferry' | 'vessel'; horseCount?: number; includeOpeningFee?: boolean }
+  options?: { seaMode?: 'vessel'; horseCount?: number; includeOpeningFee?: boolean }
 ): number {
   const km = Math.max(0, Number(distanceKm) || 0);
   const horses = Math.max(1, Number(options?.horseCount) || 1);
@@ -152,13 +222,7 @@ export function estimateLegPriceVnd(
     return roundTo1000((baseFeePerHorse + km * pricePerKmPerHorse + airportHandlingPerHorse) * horses);
   }
 
-  // Sea leg
-  if (options?.seaMode === 'ferry') {
-    const ferryTicket = 3_000_000;
-    const ferryKmSurcharge = km * 12_000;
-    return roundTo1000(ferryTicket + ferryKmSurcharge);
-  }
-
+  // Sea leg (vessel)
   const vesselBasePerHorse = 15_000_000;
   const vesselKmPerHorse = 8_000;
   return roundTo1000((vesselBasePerHorse + km * vesselKmPerHorse) * horses);
@@ -2227,7 +2291,7 @@ export function buildEquineRoute(
   customDestCoords?: [number, number] | null,
   customOriginGeo?: GeocodedLocation | null,
   customDestGeo?: GeocodedLocation | null,
-  options?: { seaMode?: 'ferry' | 'vessel'; horseCount?: number }
+  options?: { seaMode?: 'vessel'; horseCount?: number }
 ): RouteCalculationResult {
   const isForcedDomestic = explicitTransportType === 'Domestic';
   const seaMode = options?.seaMode ?? 'vessel';
@@ -2299,6 +2363,7 @@ export function buildEquineRoute(
   const legs: RouteLegPreview[] = [];
   let mode: 'air' | 'road' | 'sea' = preferredMode;
   let airFallbackNotice: { vi: string; en: string } | null = null;
+  let seaUnavailableNotice: { vi: string; en: string } | null = null;
   let distanceKm = 0;
   let durationHours = 0;
 
@@ -2309,136 +2374,209 @@ export function buildEquineRoute(
     const destPort = getNearestSeaportForCoords(destination.coords, destination.country, {
       internationalOnly: !isDomestic,
     });
-    const isSamePort =
-      calculateHaversine(originPort.coords, destPort.coords) < 5 ||
-      normalizeVietnamese(originPort.name) === normalizeVietnamese(destPort.name);
+    const originPortDistRaw = calculateHaversine(origin.coords, originPort.coords);
+    const destPortDistRaw = calculateHaversine(destination.coords, destPort.coords);
+    const originLandlocked = isLandlockedCountry(origin.country);
+    const destLandlocked = isLandlockedCountry(destination.country);
+    const originTooFar = originPortDistRaw > MAX_SEAPORT_ROAD_KM;
+    const destTooFar = destPortDistRaw > MAX_SEAPORT_ROAD_KM;
 
-    if (isSamePort) {
-      mode = 'road';
-      airFallbackNotice = {
-        vi: 'Điểm xuất phát và điểm đến dùng chung một cảng biển gần nhất, hệ thống tự chuyển sang xe thùng chuyên dụng đi thẳng.',
-        en: 'Origin and destination share the same nearest seaport; automatically switched to direct horse transport truck.',
-      };
-    } else {
-      let seq = 1;
-      const originPortDistRaw = calculateHaversine(origin.coords, originPort.coords);
-      const originAtPort = originPortDistRaw < 5;
-      const destPortDistRaw = calculateHaversine(destPort.coords, destination.coords);
-      const destAtPort = destPortDistRaw < 5;
-
-      if (!originAtPort) {
-        waypoints.push({
+    if (originLandlocked || destLandlocked || originTooFar || destTooFar) {
+      // Do NOT draw an impossible trans-oceanic truck leg or invalid sea route
+      waypoints.push(
+        {
           name: origin.name,
           type: 'origin',
           coords: origin.coords,
           label: 'Điểm xuất phát',
           country: origin.country,
-          details: isDomestic
-            ? 'Kiểm tra tình trạng thể lực, đối chiếu vi mạch Microchip và sổ tiêm chủng Cục Thú Y.'
-            : 'Kiểm tra hồ sơ FEI Passport, vi mạch microchip và giấy xuất cảnh Cục Thú Y cấp.',
-        });
-
-        const leg1Dist = Math.max(8, Math.round(originPortDistRaw * 1.3));
-        const leg1Dur = Math.max(0.5, Math.round((leg1Dist / 50 + 0.5) * 10) / 10);
-        legs.push({
-          sequenceNo: seq++,
-          type: 'road',
-          vehicleLabelVi: 'Xe thùng chuyên dụng',
-          vehicleLabelEn: 'Equine Transport Truck',
-          fromName: origin.name,
-          toName: originPort.name,
-          fromCoords: origin.coords,
-          toCoords: originPort.coords,
-          distanceKm: leg1Dist,
-          durationHours: leg1Dur,
-          estimatedPriceVnd: estimateLegPriceVnd('road', leg1Dist, { horseCount }),
-          noteVi: 'Xe thùng đón ngựa tại điểm xuất phát và trung chuyển ra cảng biển đi.',
-          noteEn: 'Specialized horse truck picks up at origin and transfers to departure seaport.',
-        });
-      }
-
-      waypoints.push({
-        name: originPort.name,
-        type: originAtPort ? 'origin' : 'seaport',
-        coords: originPort.coords,
-        label: isDomestic ? 'Cảng đi & Kiểm dịch thú y' : 'Cảng biển xuất cảnh & Hải quan',
-        country: originPort.country,
-        details:
-          seaMode === 'ferry'
-            ? 'Xe thùng chuyên dụng lên phà, bác sĩ thú y kiểm tra thông gió và nước uống cho ngựa.'
-            : 'Làm thủ tục hải quan cảng biển, đưa ngựa vào ô chuồng cố định trên tàu chuyên dụng.',
-      });
-
-      const seaRawKm = calculateHaversine(originPort.coords, destPort.coords);
-      const seaDist = Math.max(40, Math.round(seaRawKm * 1.25));
-      const seaSpeed = seaMode === 'ferry' ? 35 : 25;
-      const seaDur = Math.max(2, Math.round((seaDist / seaSpeed + (isDomestic ? 1 : 3)) * 10) / 10);
-      legs.push({
-        sequenceNo: seq++,
-        type: 'sea',
-        vehicleLabelVi: seaMode === 'ferry' ? 'Phà chở xe chuyên dụng' : 'Tàu biển chuyên dụng',
-        vehicleLabelEn: seaMode === 'ferry' ? 'Equine Ro-Ro Ferry' : 'Dedicated Equine Vessel',
-        fromName: originPort.name,
-        toName: destPort.name,
-        fromCoords: originPort.coords,
-        toCoords: destPort.coords,
-        distanceKm: seaDist,
-        durationHours: seaDur,
-        estimatedPriceVnd: estimateLegPriceVnd('sea', seaDist, { seaMode, horseCount }),
-        noteVi:
-          seaMode === 'ferry'
-            ? 'Vận chuyển bằng phà chở nguyên xe chuyên dụng có hệ thống điều hòa.'
-            : 'Hải trình vận chuyển bằng tàu biển chuyên dụng có bác sĩ thú y theo dõi định kỳ.',
-        noteEn:
-          seaMode === 'ferry'
-            ? 'Truck-on-ferry maritime crossing with climate-controlled equine trailer.'
-            : 'Dedicated maritime vessel voyage with continuous veterinary supervision.',
-      });
-
-      waypoints.push({
-        name: destPort.name,
-        type: destAtPort ? 'destination' : 'seaport',
-        coords: destPort.coords,
-        label: isDomestic ? 'Cảng đến & Kiểm tra sức khỏe' : 'Cảng biển nhập cảnh & Kiểm dịch',
-        country: destPort.country,
-        details: isDomestic
-          ? 'Kiểm tra sức khỏe lâm sàng và bàn giao xe trung chuyển chặng cuối.'
-          : 'Cơ quan Thú y & Hải quan cảng đến đối soát chứng từ và thông quan nhập cảnh.',
-      });
-
-      if (!destAtPort) {
-        const leg3Dist = Math.max(8, Math.round(destPortDistRaw * 1.3));
-        const leg3Dur = Math.max(0.5, Math.round((leg3Dist / 50 + 0.5) * 10) / 10);
-        legs.push({
-          sequenceNo: seq++,
-          type: 'road',
-          vehicleLabelVi: 'Xe thùng chuyên dụng',
-          vehicleLabelEn: 'Equine Transport Truck',
-          fromName: destPort.name,
-          toName: destination.name,
-          fromCoords: destPort.coords,
-          toCoords: destination.coords,
-          distanceKm: leg3Dist,
-          durationHours: leg3Dur,
-          estimatedPriceVnd: estimateLegPriceVnd('road', leg3Dist, { horseCount }),
-          noteVi: 'Xe thùng tiếp nhận ngựa sau thông quan cảng biển và đưa về đúng điểm đến.',
-          noteEn: 'Specialized horse truck collects after seaport clearance and delivers to destination.',
-        });
-
-        waypoints.push({
+          details: 'Điểm đón ngựa dự kiến.',
+        },
+        {
           name: destination.name,
           type: 'destination',
           coords: destination.coords,
           label: 'Điểm đến',
           country: destination.country,
-          details: isDomestic
-            ? 'Bàn giao ngựa đúng địa điểm khách yêu cầu, kiểm tra sức khỏe khi đến nơi.'
-            : 'Bàn giao ngựa tại đúng địa chỉ tiếp nhận và hoàn tất quy trình cách ly theo dõi.',
-        });
-      }
+          details: 'Điểm giao ngựa dự kiến.',
+        }
+      );
 
-      distanceKm = legs.reduce((sum, leg) => sum + leg.distanceKm, 0);
-      durationHours = Math.max(3, Math.round(legs.reduce((sum, leg) => sum + leg.durationHours, 0) * 10) / 10);
+      if (originLandlocked || destLandlocked) {
+        const landlockedName = destLandlocked ? destination.name : origin.name;
+        const landlockedCountry = destLandlocked ? destination.country : origin.country;
+        seaUnavailableNotice = {
+          vi: `Không khả dụng tuyến đường thủy: "${landlockedName}" (${landlockedCountry}) không giáp biển. Vui lòng chuyển sang Hàng không hoặc Đường bộ.`,
+          en: `Sea freight is unavailable: "${landlockedName}" (${landlockedCountry}) is landlocked. Please switch to Air Cargo or Road transport.`,
+        };
+      } else {
+        const farPlace = destTooFar ? destination.name : origin.name;
+        const farPort = destTooFar ? destPort.name : originPort.name;
+        const farKm = Math.round(destTooFar ? destPortDistRaw : originPortDistRaw);
+        seaUnavailableNotice = {
+          vi: `Không khả dụng tuyến đường thủy: "${farPlace}" cách cảng biển gần nhất (${farPort}) khoảng ${farKm.toLocaleString('vi-VN')} km (vượt giới hạn ≤ ${MAX_SEAPORT_ROAD_KM} km đường bộ ra/vào cảng). Vui lòng chuyển sang Hàng không hoặc Đường bộ.`,
+          en: `Sea freight is unavailable: "${farPlace}" is ~${farKm.toLocaleString('en-US')} km from the nearest seaport (${farPort}), exceeding the ≤ ${MAX_SEAPORT_ROAD_KM} km port-transfer limit. Please switch to Air Cargo or Road transport.`,
+        };
+      }
+    } else {
+      const isSamePort =
+        calculateHaversine(originPort.coords, destPort.coords) < 5 ||
+        normalizeVietnamese(originPort.name) === normalizeVietnamese(destPort.name);
+
+      if (isSamePort) {
+        mode = 'road';
+        airFallbackNotice = {
+          vi: 'Điểm xuất phát và điểm đến dùng chung một cảng biển gần nhất, hệ thống tự chuyển sang xe thùng chuyên dụng đi thẳng.',
+          en: 'Origin and destination share the same nearest seaport; automatically switched to direct horse transport truck.',
+        };
+      } else {
+        let seq = 1;
+        const originAtPort = originPortDistRaw < 5;
+        const destAtPort = destPortDistRaw < 5;
+
+        if (!originAtPort) {
+          waypoints.push({
+            name: origin.name,
+            type: 'origin',
+            coords: origin.coords,
+            label: 'Điểm xuất phát',
+            country: origin.country,
+            details: isDomestic
+              ? 'Kiểm tra tình trạng thể lực, đối chiếu vi mạch Microchip và sổ tiêm chủng Cục Thú Y.'
+              : 'Kiểm tra hồ sơ FEI Passport, vi mạch microchip và giấy xuất cảnh Cục Thú Y cấp.',
+          });
+
+          const leg1Dist = Math.max(8, Math.round(originPortDistRaw * 1.3));
+          const leg1Dur = Math.max(0.5, Math.round((leg1Dist / 50 + 0.5) * 10) / 10);
+          legs.push({
+            sequenceNo: seq++,
+            type: 'road',
+            vehicleLabelVi: 'Xe thùng chuyên dụng',
+            vehicleLabelEn: 'Equine Transport Truck',
+            fromName: origin.name,
+            toName: originPort.name,
+            fromCoords: origin.coords,
+            toCoords: originPort.coords,
+            distanceKm: leg1Dist,
+            durationHours: leg1Dur,
+            estimatedPriceVnd: estimateLegPriceVnd('road', leg1Dist, { horseCount }),
+            noteVi: 'Xe thùng đón ngựa tại điểm xuất phát và trung chuyển ra cảng biển đi.',
+            noteEn: 'Specialized horse truck picks up at origin and transfers to departure seaport.',
+          });
+        }
+
+        waypoints.push({
+          name: originPort.name,
+          type: originAtPort ? 'origin' : 'seaport',
+          coords: originPort.coords,
+          label: isDomestic ? 'Cảng đi & Kiểm dịch thú y' : 'Cảng biển xuất cảnh & Hải quan',
+          country: originPort.country,
+          details: 'Làm thủ tục hải quan cảng biển, đưa ngựa vào ô chuồng cố định trên tàu chuyên dụng.',
+        });
+
+        const maritime = computeMaritimeRoute(
+          originPort.code,
+          destPort.code,
+          originPort.coords,
+          destPort.coords
+        );
+        const seaDist = Math.max(40, maritime.distanceKm);
+        const seaSpeed = 25;
+        const seaVoyageOnlyHours = seaDist / seaSpeed;
+        const MAX_EQUINE_SEA_HOURS = 168; // 7 days max for live racehorse welfare
+
+        if (seaVoyageOnlyHours > MAX_EQUINE_SEA_HOURS) {
+          const seaDays = (seaVoyageOnlyHours / 24).toFixed(1);
+          waypoints.length = 0;
+          legs.length = 0;
+          waypoints.push(
+            {
+              name: origin.name,
+              type: 'origin',
+              coords: origin.coords,
+              label: 'Điểm xuất phát',
+              country: origin.country,
+              details: 'Điểm đón ngựa dự kiến.',
+            },
+            {
+              name: destination.name,
+              type: 'destination',
+              coords: destination.coords,
+              label: 'Điểm đến',
+              country: destination.country,
+              details: 'Điểm giao ngựa dự kiến.',
+            }
+          );
+          seaUnavailableNotice = {
+            vi: `Không khả dụng tuyến đường thủy cho ngựa sống: hải trình ${originPort.name} → ${destPort.name} dự kiến ~${seaDays} ngày (${Math.round(seaVoyageOnlyHours)} giờ), vượt giới hạn an toàn thú y tối đa 7 ngày (168 giờ) do nguy cơ say sóng & sốt vận chuyển. Vui lòng chuyển sang Hàng không.`,
+            en: `Sea freight is unavailable for live racehorses: the voyage ${originPort.name} → ${destPort.name} takes ~${seaDays} days (${Math.round(seaVoyageOnlyHours)}h), exceeding the 7-day (168h) equine veterinary safety cap. Please switch to Air Cargo.`,
+          };
+        } else {
+        const seaDur = Math.max(2, Math.round((seaVoyageOnlyHours + (isDomestic ? 2.5 : 4.5)) * 10) / 10);
+        legs.push({
+          sequenceNo: seq++,
+          type: 'sea',
+          vehicleLabelVi: 'Tàu biển chuyên dụng',
+          vehicleLabelEn: 'Dedicated Equine Vessel',
+          fromName: originPort.name,
+          toName: destPort.name,
+          fromCoords: originPort.coords,
+          toCoords: destPort.coords,
+          pathCoords: maritime.pathCoords,
+          crossesAntimeridian: maritime.crossesAntimeridian,
+          distanceKm: seaDist,
+          durationHours: seaDur,
+          estimatedPriceVnd: estimateLegPriceVnd('sea', seaDist, { seaMode, horseCount }),
+          noteVi: 'Hải trình vận chuyển bằng tàu biển chuyên dụng có bác sĩ thú y theo dõi định kỳ.',
+          noteEn: 'Dedicated maritime vessel voyage with continuous veterinary supervision.',
+        });
+
+        waypoints.push({
+          name: destPort.name,
+          type: destAtPort ? 'destination' : 'seaport',
+          coords: destPort.coords,
+          label: isDomestic ? 'Cảng đến & Kiểm tra sức khỏe' : 'Cảng biển nhập cảnh & Kiểm dịch',
+          country: destPort.country,
+          details: isDomestic
+            ? 'Kiểm tra sức khỏe lâm sàng và bàn giao xe trung chuyển chặng cuối.'
+            : 'Cơ quan Thú y & Hải quan cảng đến đối soát chứng từ và thông quan nhập cảnh.',
+        });
+
+        if (!destAtPort) {
+          const leg3Dist = Math.max(8, Math.round(destPortDistRaw * 1.3));
+          const leg3Dur = Math.max(0.5, Math.round((leg3Dist / 50 + 0.5) * 10) / 10);
+          legs.push({
+            sequenceNo: seq++,
+            type: 'road',
+            vehicleLabelVi: 'Xe thùng chuyên dụng',
+            vehicleLabelEn: 'Equine Transport Truck',
+            fromName: destPort.name,
+            toName: destination.name,
+            fromCoords: destPort.coords,
+            toCoords: destination.coords,
+            distanceKm: leg3Dist,
+            durationHours: leg3Dur,
+            estimatedPriceVnd: estimateLegPriceVnd('road', leg3Dist, { horseCount }),
+            noteVi: 'Xe thùng tiếp nhận ngựa sau thông quan cảng biển và đưa về đúng điểm đến.',
+            noteEn: 'Specialized horse truck collects after seaport clearance and delivers to destination.',
+          });
+
+          waypoints.push({
+            name: destination.name,
+            type: 'destination',
+            coords: destination.coords,
+            label: 'Điểm đến',
+            country: destination.country,
+            details: isDomestic
+              ? 'Bàn giao ngựa đúng địa điểm khách yêu cầu, kiểm tra sức khỏe khi đến nơi.'
+              : 'Bàn giao ngựa tại đúng địa chỉ tiếp nhận và hoàn tất quy trình cách ly theo dõi.',
+          });
+        }
+
+        distanceKm = legs.reduce((sum, leg) => sum + leg.distanceKm, 0);
+        durationHours = Math.max(3, Math.round(legs.reduce((sum, leg) => sum + leg.durationHours, 0) * 10) / 10);
+        }
+      }
     }
   }
 
@@ -2508,7 +2646,7 @@ export function buildEquineRoute(
       });
 
       const flightDist = Math.max(150, Math.round(calculateHaversine(originAirport.coords, destAirport.coords)));
-      const flightDur = Math.max(1.5, Math.round((flightDist / 720 + (isDomestic ? 1.5 : 2.5)) * 10) / 10);
+      const flightDur = Math.max(3.5, Math.round((flightDist / 720 + (isDomestic ? 3.5 : 6.5)) * 10) / 10);
       legs.push({
         sequenceNo: seq++,
         type: 'air',
@@ -2659,6 +2797,45 @@ export function buildEquineRoute(
       distanceKm = Math.max(80, Math.round(directDistanceKm * 1.35));
       durationHours = Math.max(3, Math.round((distanceKm / 55) * 1.35));
     } else {
+      // Check if origin and destination are separated by ocean/sea (island or trans-oceanic country)
+      const normOrigin = `${origin.country} ${origin.name}`.toLowerCase();
+      const normDest = `${destination.country} ${destination.name}`.toLowerCase();
+      const OVERSEAS_OR_ISLAND_KEYWORDS = [
+        'nhật bản', 'japan', 'tokyo', 'osaka',
+        'úc', 'australia', 'sydney', 'melbourne', 'new zealand', 'auckland',
+        'mỹ', 'hoa kỳ', 'usa', 'united states', 'canada', 'los angeles', 'new york', 'kentucky', 'miami',
+        'vương quốc anh', 'united kingdom', 'england', 'london', 'ireland', 'dublin', 'iceland',
+        'đài loan', 'taiwan', 'philippines', 'manila', 'indonesia', 'jakarta', 'sri lanka',
+      ];
+      const isOverseasRoad =
+        OVERSEAS_OR_ISLAND_KEYWORDS.some((kw) => normDest.includes(kw)) !==
+          OVERSEAS_OR_ISLAND_KEYWORDS.some((kw) => normOrigin.includes(kw)) ||
+        (normDest.includes('phú quốc') !== normOrigin.includes('phú quốc'));
+
+      if (isOverseasRoad) {
+        waypoints.push(
+          {
+            name: origin.name,
+            type: 'origin',
+            coords: origin.coords,
+            label: 'Điểm xuất phát',
+            country: origin.country,
+            details: 'Điểm đón ngựa dự kiến.',
+          },
+          {
+            name: destination.name,
+            type: 'destination',
+            coords: destination.coords,
+            label: 'Điểm đến',
+            country: destination.country,
+            details: 'Điểm giao ngựa dự kiến.',
+          }
+        );
+        seaUnavailableNotice = {
+          vi: `Không có tuyến đường bộ nối liền giữa "${origin.name}" và "${destination.name}" (cách biển/đại dương). Vui lòng chuyển sang phương thức Hàng không hoặc Đường thủy.`,
+          en: `No overland road connection exists between "${origin.name}" and "${destination.name}" (separated by ocean/sea). Please switch to Air Cargo or Sea transport.`,
+        };
+      } else {
       // International Overland Road Route
       waypoints.push({
         name: origin.name,
@@ -2800,8 +2977,10 @@ export function buildEquineRoute(
         distanceKm = Math.max(900, Math.round(directDistanceKm * 1.45));
         durationHours = Math.max(18, Math.round((distanceKm / 55) * 1.35));
       }
+      }
     }
 
+    if (!seaUnavailableNotice) {
     const stopCount = Math.max(0, waypoints.length - 2);
     legs.push({
       sequenceNo: 1,
@@ -2824,6 +3003,7 @@ export function buildEquineRoute(
           ? `Overland horse truck corridor with ${stopCount} mandatory stop(s).`
           : 'Direct point-to-point specialized horse truck transit.',
     });
+    }
   }
 
   const customsCount = waypoints.filter(
@@ -2838,10 +3018,8 @@ export function buildEquineRoute(
         : 'Hàng không'
       : mode === 'sea'
         ? legs.some((l) => l.type === 'road')
-          ? `Đa phương thức: Xe thùng + ${seaMode === 'ferry' ? 'Phà' : 'Tàu biển'}`
-          : seaMode === 'ferry'
-            ? 'Đường thủy (Phà)'
-            : 'Đường thủy (Tàu biển)'
+          ? 'Đa phương thức: Xe thùng + Tàu biển'
+          : 'Đường thủy (Tàu biển)'
         : 'Đường bộ (Xe thùng)';
   const summaryNote = `${isDomestic ? 'Nội địa' : 'Xuyên biên giới'}: ${origin.name} ➔ ${destination.name} (${modeLabelVi})`;
 
@@ -2857,6 +3035,7 @@ export function buildEquineRoute(
     waypoints,
     legs,
     airFallbackNotice,
+    seaUnavailableNotice,
     summaryNote,
   };
 }

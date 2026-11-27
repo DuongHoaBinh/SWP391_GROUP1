@@ -9,7 +9,7 @@ import {
   FolderClosed,
   Navigation,
   Bell,
-  BarChart3,
+  Plus,
   Settings,
   LogOut,
   X,
@@ -138,17 +138,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
 
   const navItems: NavItem[] = [
     {
-      label: t('nav.dashboard', 'Tổng quan'),
+      label: isEn ? 'Overview' : 'Tổng quan',
       href: '/customer',
       icon: <LayoutDashboard size={18} aria-hidden="true" />,
     },
     {
-      label: t('nav.requests', 'Yêu cầu vận chuyển'),
+      label: isEn ? 'Transport Orders' : 'Đơn vận chuyển',
       href: '/customer/requests',
       icon: <Truck size={18} aria-hidden="true" />,
     },
     {
-      label: t('nav.horses', 'Quản lý ngựa đua'),
+      label: isEn ? 'Racehorse Stable' : 'Quản lý ngựa đua',
       href: '/customer/horses',
       icon: (
         <svg
@@ -170,30 +170,38 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
       ),
     },
     {
-      label: t('nav.documents', 'Hồ sơ & Giấy tờ'),
+      label: isEn ? 'Documents & Quarantine' : 'Hồ sơ & Kiểm dịch',
       href: '/customer/documents',
       icon: <FolderClosed size={18} aria-hidden="true" />,
     },
     {
-      label: t('nav.tracking', 'Theo dõi hành trình'),
+      label: isEn ? 'Live Tracking' : 'Theo dõi hành trình',
       href: '/customer/tracking',
       icon: <Navigation size={18} aria-hidden="true" />,
-    },
-    {
-      label: t('common.notifications', 'Thông báo'),
-      href: '/customer/notifications',
-      icon: <Bell size={18} aria-hidden="true" />,
-      badge: unreadNotifs > 0 ? unreadNotifs : undefined,
     },
   ];
 
   const managementItems: NavItem[] = [
     {
-      label: t('common.settings', 'Cài đặt tài khoản'),
+      label: t('common.notifications', isEn ? 'Notifications' : 'Thông báo'),
+      href: '/customer/notifications',
+      icon: <Bell size={18} aria-hidden="true" />,
+      badge: unreadNotifs > 0 ? unreadNotifs : undefined,
+    },
+    {
+      label: t('common.settings', isEn ? 'Account Settings' : 'Cài đặt'),
       href: '/customer/settings',
       icon: <Settings size={18} aria-hidden="true" />,
     },
   ];
+
+  const isNavItemActive = (href: string) => {
+    if (href === '/customer') return pathname === '/customer';
+    if (href === '/customer/requests') {
+      return Boolean(pathname?.startsWith('/customer/requests') || pathname?.startsWith('/customer/reports'));
+    }
+    return Boolean(pathname?.startsWith(href));
+  };
 
   const handleConfirmLogout = () => {
     setShowLogoutModal(false);
@@ -264,10 +272,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
         {(mobile || isExpanded) && (
           <div style={{ whiteSpace: 'nowrap', overflow: 'hidden' }}>
             <div style={{ fontSize: '15px', fontWeight: 800, color: '#F7F7F4', lineHeight: 1.1 }}>
-              EquiTransit <span style={{ color: '#B49A68', fontSize: '11px', fontWeight: 700 }}>CLIENT</span>
-            </div>
-            <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 500, letterSpacing: '0.01em', marginTop: '2px' }}>
-              {t('common.appTagline', 'Vận tải ngựa đua xuyên quốc gia')}
+              EquiTransit
             </div>
           </div>
         )}
@@ -338,14 +343,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
           >
             {renderBrandHeader(true)}
 
-            <div style={{ flex: 1, padding: '20px 14px', display: 'flex', flexDirection: 'column', gap: '24px', overflowY: 'auto' }}>
+            <div style={{ flex: 1, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto' }}>
+              <Link
+                href="/customer/requests/new"
+                onClick={onClose}
+                className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#B49A68] hover:bg-[#C6AD7B] text-[#181A17] text-[13.5px] font-extrabold shadow-sm transition-colors no-underline"
+              >
+                <Plus size={16} strokeWidth={2.75} aria-hidden="true" />
+                <span>{isEn ? 'New Transport Order' : 'Tạo đơn mới'}</span>
+              </Link>
+
               <div>
                 <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.08em', color: '#B49A68', textTransform: 'uppercase', padding: '0 10px', marginBottom: '8px' }}>
                   {t('nav.navigation', 'Điều Hướng')}
                 </div>
                 <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {navItems.map((item) => {
-                    const isActive = item.href === '/customer' ? pathname === '/customer' : pathname?.startsWith(item.href);
+                    const isActive = isNavItemActive(item.href);
                     return (
                       <Link
                         key={item.href}
@@ -375,7 +389,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
 
               <div>
                 <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.08em', color: '#B49A68', textTransform: 'uppercase', padding: '0 10px', marginBottom: '8px' }}>
-                  {t('nav.management', 'Quản Lý')}
+                  {isEn ? 'Account' : 'Tài Khoản'}
                 </div>
                 <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {managementItems.map((item) => {
@@ -386,14 +400,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
                         href={item.href}
                         onClick={onClose}
                         aria-current={isActive ? 'page' : undefined}
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[13.5px] transition-colors no-underline border-l-[3px] ${
+                        className={`flex items-center justify-between px-3 py-2.5 rounded-[10px] text-[13.5px] transition-colors no-underline border-l-[3px] ${
                           isActive
                             ? 'font-bold text-[#F7F7F4] bg-[#B49A68]/20 border-[#B49A68]'
                             : 'font-medium text-slate-300 border-transparent hover:bg-[#242722] hover:text-[#F7F7F4]'
                         }`}
                       >
-                        <span className={isActive ? 'text-[#B49A68]' : 'text-slate-400'}>{item.icon}</span>
-                        <span className="truncate">{item.label}</span>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className={isActive ? 'text-[#B49A68]' : 'text-slate-400'}>{item.icon}</span>
+                          <span className="truncate">{item.label}</span>
+                        </div>
+                        {item.badge !== undefined && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-[#B33E3E] text-white shrink-0">
+                            {item.badge}
+                          </span>
+                        )}
                       </Link>
                     );
                   })}
@@ -442,16 +463,43 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
           className="no-scrollbar"
           style={{
             flex: 1,
-            padding: !isExpanded ? '16px 8px' : '20px 14px',
+            padding: !isExpanded ? '16px 8px' : '16px 14px',
             display: 'flex',
             flexDirection: 'column',
-            gap: !isExpanded ? '14px' : '22px',
+            gap: !isExpanded ? '14px' : '18px',
             overflowY: isExpanded ? 'auto' : 'visible',
             overflowX: isExpanded ? 'hidden' : 'visible',
             scrollbarWidth: 'none',
             msOverflowStyle: 'none',
           }}
         >
+          {/* Fixed Primary CTA: + Tạo đơn mới */}
+          {!isExpanded ? (
+            <Link
+              href="/customer/requests/new"
+              aria-label={isEn ? 'New Transport Order' : 'Tạo đơn mới'}
+              className="relative group flex items-center justify-center py-0.5 no-underline"
+            >
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-[#B49A68] text-[#181A17] hover:bg-[#C6AD7B] shadow-md transition-all">
+                <Plus size={19} strokeWidth={2.75} aria-hidden="true" />
+              </div>
+              <div
+                aria-hidden="true"
+                className="absolute left-full ml-3 px-3 py-1.5 rounded-xl bg-[#181A17] text-[#F7F7F4] text-xs font-bold whitespace-nowrap shadow-xl border border-[#2C2F2A] pointer-events-none opacity-0 group-hover:opacity-100 transition-all duration-150 z-50"
+              >
+                {isEn ? '+ New Order' : '+ Tạo đơn mới'}
+              </div>
+            </Link>
+          ) : (
+            <Link
+              href="/customer/requests/new"
+              className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#B49A68] hover:bg-[#C6AD7B] text-[#181A17] text-[13.5px] font-extrabold shadow-sm transition-colors whitespace-nowrap no-underline"
+            >
+              <Plus size={16} strokeWidth={2.75} aria-hidden="true" />
+              <span>{isEn ? 'New Transport Order' : 'Tạo đơn mới'}</span>
+            </Link>
+          )}
+
           {/* Section: NAVIGATION */}
           <div>
             {isExpanded ? (
@@ -475,10 +523,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
 
             <nav style={{ display: 'flex', flexDirection: 'column', gap: !isExpanded ? '6px' : '3px' }}>
               {navItems.map((item) => {
-                const isActive =
-                  item.href === '/customer'
-                    ? pathname === '/customer'
-                    : pathname?.startsWith(item.href);
+                const isActive = isNavItemActive(item.href);
 
                 if (!isExpanded) {
                   return (
@@ -545,7 +590,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
             </nav>
           </div>
 
-          {/* Section: MANAGEMENT */}
+          {/* Section: ACCOUNT (Notifications + Settings grouped like Manager) */}
           <div>
             {isExpanded ? (
               <div
@@ -560,7 +605,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
                   whiteSpace: 'nowrap',
                 }}
               >
-                {t('nav.management', 'Quản Lý')}
+                {isEn ? 'Account' : 'Tài Khoản'}
               </div>
             ) : (
               <div className="w-8 h-[1px] bg-[#2C2F2A] mx-auto my-2" />
@@ -589,11 +634,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
                         {item.icon}
                       </div>
 
+                      {item.badge !== undefined && (
+                        <span aria-hidden="true" className="absolute top-1.5 right-3 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-[#181A17] animate-pulse" />
+                      )}
+
                       <div
                         aria-hidden="true"
-                        className="absolute left-full ml-3 px-3 py-1.5 rounded-xl bg-[#181A17] text-[#F7F7F4] text-xs font-bold whitespace-nowrap shadow-xl border border-[#2C2F2A] pointer-events-none opacity-0 group-hover:opacity-100 transition-all duration-150 z-50 -translate-x-1.5 group-hover:translate-x-0"
+                        className="absolute left-full ml-3 px-3 py-1.5 rounded-xl bg-[#181A17] text-[#F7F7F4] text-xs font-bold whitespace-nowrap shadow-xl border border-[#2C2F2A] pointer-events-none opacity-0 group-hover:opacity-100 transition-all duration-150 z-50 flex items-center gap-2 -translate-x-1.5 group-hover:translate-x-0"
                       >
                         <span>{item.label}</span>
+                        {item.badge !== undefined && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#B33E3E] text-white">
+                            {item.badge}
+                          </span>
+                        )}
                       </div>
                     </Link>
                   );
@@ -604,14 +658,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, onClose })
                     key={item.href}
                     href={item.href}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[13.5px] whitespace-nowrap transition-all duration-150 no-underline border-l-[3px] ${
+                    className={`flex items-center justify-between px-3 py-2.5 rounded-[10px] text-[13.5px] whitespace-nowrap transition-all duration-150 no-underline border-l-[3px] ${
                       isActive
                         ? 'font-bold text-[#F7F7F4] bg-[#B49A68]/20 border-[#B49A68]'
                         : 'font-medium text-slate-300 border-transparent hover:bg-[#242722] hover:text-[#F7F7F4]'
                     }`}
                   >
-                    <span className={isActive ? 'text-[#B49A68]' : 'text-slate-400'}>{item.icon}</span>
-                    <span>{item.label}</span>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className={isActive ? 'text-[#B49A68]' : 'text-slate-400'}>{item.icon}</span>
+                      <span>{item.label}</span>
+                    </div>
+                    {item.badge !== undefined && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-[#B33E3E] text-white">
+                        {item.badge}
+                      </span>
+                    )}
                   </Link>
                 );
               })}

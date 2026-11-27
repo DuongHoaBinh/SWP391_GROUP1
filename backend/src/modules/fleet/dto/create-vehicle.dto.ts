@@ -35,7 +35,7 @@ export class CreateVehicleDto {
   plateOrCode!: string;
 
   @ApiPropertyOptional({
-    description: 'Sức chứa (số ngựa). Bỏ qua nếu loại phương tiện có sức chứa cố định; bắt buộc với ferry_slot hoặc khi không gửi loại',
+    description: 'Sức chứa (số ngựa). Bỏ qua nếu loại phương tiện có sức chứa cố định; bắt buộc khi không có sức chứa cố định hoặc không gửi loại',
     example: 4,
     minimum: 1,
   })

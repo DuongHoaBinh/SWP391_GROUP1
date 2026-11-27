@@ -1,6 +1,7 @@
 'use client';
 import { insuranceNames, vnd, type InsuredHorse } from '../insurance-policy';
 import { bookingName, type BookingType } from '../booking-policy';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 export interface Invoice {
   id: number;
@@ -11,58 +12,126 @@ export interface Invoice {
   currency: 'VND';
   issuedAt: string;
   snapshot: {
-    bookingType?: BookingType; stallUnitPrice?: number | null;
-    transportCost?: number; insuranceFee?: number; horses?: InsuredHorse[];
-    requestCode: string; contactName: string | null; contactEmail: string;
-    origin: string; destination: string; horseCount: number; routeName: string | null;
-    legs: Array<{ sequence_no: number; origin_location: string; destination_location: string; planned_departure: string; planned_arrival: string; vehicle_id: number | null; flight_number: string | null }>;
+    bookingType?: BookingType;
+    stallUnitPrice?: number | null;
+    transportCost?: number;
+    insuranceFee?: number;
+    horses?: InsuredHorse[];
+    requestCode?: string;
+    contactName?: string | null;
+    contactEmail?: string;
+    origin?: string;
+    destination?: string;
+    horseCount?: number;
+    routeName?: string | null;
+    customer?: { name?: string; email?: string };
+    route?: { origin?: string; destination?: string };
+    legs?: Array<{
+      sequence_no: number;
+      origin_location: string;
+      destination_location: string;
+      planned_departure: string;
+      planned_arrival: string;
+      vehicle_id: number | null;
+      flight_number: string | null;
+    }>;
   };
 }
 
-function printInvoice(invoice: Invoice) {
+function printInvoice(invoice: Invoice, isEn: boolean) {
   const popup = window.open('', '_blank', 'width=900,height=700');
   if (!popup) return;
   const doc = popup.document;
-  doc.documentElement.lang = 'vi';
-  doc.title = `Hóa đơn ${invoice.code}`;
+  doc.documentElement.lang = isEn ? 'en' : 'vi';
+  doc.title = `${isEn ? 'Invoice' : 'Hóa đơn'} ${invoice.code}`;
   const style = doc.createElement('style');
-  style.textContent = 'body{font:15px Arial,sans-serif;color:#181A17;max-width:800px;margin:40px auto;padding:24px}h1{font-size:26px;color:#181A17}p{line-height:1.6}table{width:100%;border-collapse:collapse;margin:24px 0}td,th{text-align:left;border:1px solid #D8CEBE;padding:12px}th{background:#FAF8F4}button{padding:12px;cursor:pointer}@media print{button{display:none}body{margin:0}}';
+  style.textContent =
+    'body{font:15px Arial,sans-serif;color:#181A17;max-width:800px;margin:40px auto;padding:24px}h1{font-size:26px;color:#181A17}p{line-height:1.6}table{width:100%;border-collapse:collapse;margin:24px 0}td,th{text-align:left;border:1px solid #D8CEBE;padding:12px}th{background:#FAF8F4}button{padding:12px;cursor:pointer}@media print{button{display:none}body{margin:0}}';
   doc.head.append(style);
-  const add = (tag: string, text: string) => { const el = doc.createElement(tag); el.textContent = text; doc.body.append(el); return el; };
-  add('h1', `HÓA ĐƠN VẬN CHUYỂN ${invoice.code}`);
-  add('p', `Mã yêu cầu: ${invoice.snapshot.requestCode} · Ngày phát hành: ${new Date(invoice.issuedAt).toLocaleString('vi-VN')}`);
-  add('p', `Khách hàng: ${invoice.snapshot.contactName || invoice.snapshot.contactEmail}`);
-  add('p', `${invoice.snapshot.origin} → ${invoice.snapshot.destination} · ${invoice.snapshot.horseCount} ngựa`);
-  add('p', `Lộ trình đã xác nhận: ${invoice.snapshot.routeName || invoice.routeId}`);
-  add('p', `Hình thức: ${bookingName(invoice.snapshot.bookingType)}`);
-  if (invoice.snapshot.bookingType === 'shared_stall' && invoice.snapshot.stallUnitPrice != null) {
-    add('p', `Cước cơ bản: ${vnd(invoice.snapshot.stallUnitPrice)} / ô × ${invoice.snapshot.horseCount} ngựa = ${vnd(invoice.snapshot.stallUnitPrice * invoice.snapshot.horseCount)}`);
+  const add = (tag: string, text: string) => {
+    const el = doc.createElement(tag);
+    el.textContent = text;
+    doc.body.append(el);
+    return el;
+  };
+  const snap = invoice.snapshot || {};
+  const customerLabel = snap.contactName || snap.customer?.name || snap.contactEmail || snap.customer?.email || '—';
+  const originLabel = snap.origin || snap.route?.origin || '—';
+  const destLabel = snap.destination || snap.route?.destination || '—';
+  const horseCount = snap.horseCount ?? snap.horses?.length ?? 1;
+
+  add('h1', `${isEn ? 'TRANSPORT INVOICE' : 'HÓA ĐƠN VẬN CHUYỂN'} ${invoice.code}`);
+  add(
+    'p',
+    `${isEn ? 'Order' : 'Mã yêu cầu'}: ${snap.requestCode || `REQ-${invoice.shipmentId}`} · ${isEn ? 'Issued' : 'Ngày phát hành'}: ${new Date(invoice.issuedAt).toLocaleString(isEn ? 'en-US' : 'vi-VN')}`,
+  );
+  add('p', `${isEn ? 'Customer' : 'Khách hàng'}: ${customerLabel}`);
+  add('p', `${originLabel} → ${destLabel} · ${horseCount} ${isEn ? 'horse(s)' : 'ngựa'}`);
+  if (snap.routeName || invoice.routeId) {
+    add('p', `${isEn ? 'Route' : 'Lộ trình'}: ${snap.routeName || invoice.routeId}`);
   }
-  const table = doc.createElement('table');
-  [
-    ['Chặng', 'Lộ trình', 'Giờ đi', 'Giờ đến'],
-    ...invoice.snapshot.legs.map(leg => [String(leg.sequence_no), `${leg.origin_location} → ${leg.destination_location}`, new Date(leg.planned_departure).toLocaleString('vi-VN'), new Date(leg.planned_arrival).toLocaleString('vi-VN')]),
-  ].forEach((values, index) => {
-    const row = doc.createElement('tr');
-    for (const value of values) { const cell = doc.createElement(index ? 'td' : 'th'); cell.textContent = value; row.append(cell); }
-    table.append(row);
-  });
-  doc.body.append(table);
-  for (const horse of invoice.snapshot.horses ?? []) {
-    add('p', `${horse.name}: ${horse.quantity ?? 1} ngựa; giá trị ${(horse.declaredValue ?? 0).toLocaleString('vi-VN')} ${horse.declaredCurrency ?? 'VND'}/ngựa; gói ${insuranceNames[horse.insurancePackage ?? 'basic']}; phí ${vnd((horse.insuranceFee ?? 0) * (horse.quantity ?? 1))}; bồi thường tối đa ${vnd(horse.maxCompensation ?? 50000000)}/ngựa${horse.emergencyVetCovered ? ' + chi phí cấp cứu thú y trên đường' : ''}.`);
+  add('p', `${isEn ? 'Booking type' : 'Hình thức'}: ${bookingName(snap.bookingType)}`);
+
+  if (Array.isArray(snap.legs) && snap.legs.length > 0) {
+    const table = doc.createElement('table');
+    [
+      isEn ? ['Leg', 'Route', 'Departure', 'Arrival'] : ['Chặng', 'Lộ trình', 'Giờ đi', 'Giờ đến'],
+      ...snap.legs.map((leg) => [
+        String(leg.sequence_no),
+        `${leg.origin_location} → ${leg.destination_location}`,
+        new Date(leg.planned_departure).toLocaleString(isEn ? 'en-US' : 'vi-VN'),
+        new Date(leg.planned_arrival).toLocaleString(isEn ? 'en-US' : 'vi-VN'),
+      ]),
+    ].forEach((values, index) => {
+      const row = doc.createElement('tr');
+      for (const value of values) {
+        const cell = doc.createElement(index ? 'td' : 'th');
+        cell.textContent = value;
+        row.append(cell);
+      }
+      table.append(row);
+    });
+    doc.body.append(table);
   }
-  add('p', `Cước cơ bản: ${vnd(invoice.snapshot.transportCost ?? invoice.amount)} · Phí bảo hiểm: ${vnd(invoice.snapshot.insuranceFee ?? 0)}`);
-  add('h2', `Tổng tiền: ${invoice.amount.toLocaleString('vi-VN')} VND`);
-  add('p', 'Hóa đơn cước vận chuyển phát hành theo lộ trình đã xác nhận. Trạng thái nhận tiền được cập nhật riêng sau khi ngân hàng xác nhận.');
-  const button = add('button', 'In / lưu PDF');
+
+  for (const horse of snap.horses ?? []) {
+    add(
+      'p',
+      `${horse.name}: ${horse.quantity ?? 1} ${isEn ? 'horse(s)' : 'ngựa'}; ${isEn ? 'declared value' : 'giá trị'} ${(horse.declaredValue ?? 0).toLocaleString('vi-VN')} ${horse.declaredCurrency ?? 'VND'}; ${isEn ? 'plan' : 'gói'} ${insuranceNames[horse.insurancePackage ?? 'basic']}; ${isEn ? 'premium' : 'phí'} ${vnd((horse.insuranceFee ?? 0) * (horse.quantity ?? 1))}.`,
+    );
+  }
+  add(
+    'p',
+    `${isEn ? 'Base Freight' : 'Cước cơ bản'}: ${vnd(snap.transportCost ?? invoice.amount)} · ${isEn ? 'Insurance' : 'Phí bảo hiểm'}: ${vnd(snap.insuranceFee ?? 0)}`,
+  );
+  add('h2', `${isEn ? 'Total' : 'Tổng tiền'}: ${invoice.amount.toLocaleString('vi-VN')} VND`);
+  const button = add('button', isEn ? 'Print / Save PDF' : 'In / lưu PDF');
   button.onclick = () => popup.print();
   popup.focus();
   popup.print();
 }
 
 export function InvoiceSummary({ invoice }: { invoice: Invoice }) {
-  return <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E8E2D8] pb-4">
-    <div><p className="font-semibold text-[#181A17]">Hóa đơn chính thức {invoice.code}</p><p className="mt-1 text-sm text-[#5B6779]">Phát hành {new Date(invoice.issuedAt).toLocaleString('vi-VN')} · {invoice.amount.toLocaleString('vi-VN')} VND</p></div>
-    <button type="button" onClick={() => printInvoice(invoice)} className="min-h-11 rounded-lg border border-[#D8CEBE] bg-white px-4 text-sm font-semibold text-[#A67C2E] hover:bg-[#FAF8F4] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C4B38E]">In / lưu hóa đơn PDF</button>
-  </div>;
+  const { language } = useLanguage();
+  const isEn = language === 'en';
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E8E2D8] pb-4">
+      <div>
+        <p className="font-semibold text-[#181A17] m-0">
+          {isEn ? `Official Invoice ${invoice.code}` : `Hóa đơn chính thức ${invoice.code}`}
+        </p>
+        <p className="mt-1 mb-0 text-sm text-[#5B6779]">
+          {isEn ? 'Issued' : 'Phát hành'} {new Date(invoice.issuedAt).toLocaleString(isEn ? 'en-US' : 'vi-VN')} ·{' '}
+          <strong className="text-[#181A17] whitespace-nowrap">{invoice.amount.toLocaleString('vi-VN')} VND</strong>
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => printInvoice(invoice, isEn)}
+        className="min-h-10 rounded-xl border border-[#D8CEBE] bg-white px-4 text-xs sm:text-sm font-semibold text-[#A67C2E] hover:bg-[#FAF8F4] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C4B38E]"
+      >
+        {isEn ? 'Print / Save PDF Invoice' : 'In / lưu hóa đơn PDF'}
+      </button>
+    </div>
+  );
 }

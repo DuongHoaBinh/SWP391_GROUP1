@@ -36,19 +36,21 @@ function getBreadcrumbTitle(
   t: (key: string, fb?: string) => string,
   isEn: boolean
 ): string {
-  if (!pathname || pathname === '/customer' || pathname === '/customer/') return t('nav.dashboard', 'Tổng quan');
-  if (pathname.startsWith('/customer/requests/new')) return t('customer.newRequest', isEn ? 'New Transport Request' : 'Đặt chuyến mới');
-  if (pathname.includes('/payment')) return t('payment.title', isEn ? 'Freight Payment' : 'Thanh toán cước vận chuyển');
-  if (pathname.startsWith('/customer/requests/')) return t('nav.requestDetail', isEn ? 'Transport Order Details' : 'Chi tiết vận đơn');
-  if (pathname.startsWith('/customer/requests')) return t('nav.requests', isEn ? 'Transport Requests' : 'Yêu cầu vận chuyển');
-  if (pathname.startsWith('/customer/horses/')) return t('horses.horseProfile', isEn ? 'Racehorse Profile' : 'Hồ sơ chiến mã');
-  if (pathname.startsWith('/customer/horses')) return t('nav.horses', isEn ? 'My Racehorses' : 'Quản lý đàn ngựa');
-  if (pathname.startsWith('/customer/tracking')) return t('nav.tracking', isEn ? 'Live Tracking' : 'Theo dõi hành trình');
-  if (pathname.startsWith('/customer/documents')) return t('nav.documents', isEn ? 'Quarantine Documents' : 'Hồ sơ kiểm dịch');
-  if (pathname.startsWith('/customer/reports')) return t('nav.reports', isEn ? 'Reports & Analytics' : 'Báo cáo chi phí');
-  if (pathname.startsWith('/customer/notifications')) return t('common.notifications', isEn ? 'Notifications' : 'Tất cả thông báo');
-  if (pathname.startsWith('/customer/settings')) return t('common.settings', isEn ? 'Account Settings' : 'Cài đặt tài khoản');
-  return t('nav.dashboard', isEn ? 'Dashboard' : 'Tổng quan');
+  if (!pathname || pathname === '/customer' || pathname === '/customer/') return isEn ? 'Overview' : 'Tổng quan';
+  if (pathname.startsWith('/customer/requests/new')) return isEn ? 'New Transport Order' : 'Tạo đơn mới';
+  if (pathname.includes('/invoice')) return isEn ? 'Electronic Invoice' : 'Hóa đơn điện tử';
+  if (pathname.includes('/refund')) return isEn ? 'Refund Request' : 'Yêu cầu hoàn tiền';
+  if (pathname.includes('/payment')) return isEn ? 'Freight Payment' : 'Thanh toán cước';
+  if (pathname.startsWith('/customer/requests/')) return isEn ? 'Order Details' : 'Chi tiết đơn vận chuyển';
+  if (pathname.startsWith('/customer/requests')) return isEn ? 'Transport Orders' : 'Đơn vận chuyển';
+  if (pathname.startsWith('/customer/reports')) return isEn ? 'Reports & Statements' : 'Báo cáo & Sao kê';
+  if (pathname.startsWith('/customer/horses/')) return isEn ? 'Racehorse Profile' : 'Hồ sơ ngựa đua';
+  if (pathname.startsWith('/customer/horses')) return isEn ? 'Racehorse Stable' : 'Quản lý ngựa đua';
+  if (pathname.startsWith('/customer/tracking')) return isEn ? 'Live Tracking' : 'Theo dõi hành trình';
+  if (pathname.startsWith('/customer/documents')) return isEn ? 'Documents & Quarantine' : 'Hồ sơ & Kiểm dịch';
+  if (pathname.startsWith('/customer/notifications')) return t('common.notifications', isEn ? 'Notifications' : 'Thông báo');
+  if (pathname.startsWith('/customer/settings')) return t('common.settings', isEn ? 'Account Settings' : 'Cài đặt');
+  return isEn ? 'Overview' : 'Tổng quan';
 }
 
 interface HeaderProps {
@@ -159,6 +161,24 @@ export const Header: React.FC<HeaderProps> = ({ title, onMenuClick }) => {
     }
   };
 
+  const handleNotificationClick = async (item: NotificationItem) => {
+    if (!item.isRead) {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === item.id ? { ...n, isRead: true } : n)),
+      );
+      try {
+        await apiClient(`/notifications/${item.id}/read`, { method: 'PATCH' });
+        window.dispatchEvent(new CustomEvent('notifications-updated'));
+      } catch {
+        // ignore
+      }
+    }
+    setShowNotifications(false);
+    if (item.actionUrl) {
+      router.push(item.actionUrl);
+    }
+  };
+
   const handleLogoutClick = () => {
     setShowUserMenu(false);
     setShowLogoutModal(true);
@@ -171,51 +191,51 @@ export const Header: React.FC<HeaderProps> = ({ title, onMenuClick }) => {
 
   return (
     <header
-      className="liquid-glass-header h-[60px] px-4 sm:px-6 flex items-center justify-between gap-3 sticky top-0 z-30"
+      className="liquid-glass-header h-[60px] px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-3 sticky top-0 z-30"
     >
       {/* Title / Breadcrumb */}
-      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+      <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
         {onMenuClick && (
           <button
             type="button"
             onClick={onMenuClick}
-            className="md:hidden flex items-center justify-center w-10 h-10 rounded-xl border border-border text-text-secondary hover:bg-surface-muted transition-colors shrink-0 cursor-pointer"
+            className="md:hidden flex items-center justify-center w-9 h-9 rounded-xl border border-border text-text-secondary hover:bg-surface-muted transition-colors shrink-0 cursor-pointer"
             aria-label={t('nav.openMenu', isEn ? 'Open navigation menu' : 'Mở thanh điều hướng')}
           >
             <Menu size={18} aria-hidden="true" />
           </button>
         )}
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <Link
             href="/customer"
-            className="text-xs font-semibold text-text-muted hover:text-primary transition-colors hidden sm:inline shrink-0"
+            className="text-xs font-semibold text-text-muted hover:text-primary transition-colors hidden md:inline shrink-0"
           >
-            {t('role.customer', 'Cổng Khách Hàng')}
+            {t('role.customer', isEn ? 'Customer Portal' : 'Cổng Khách Hàng')}
           </Link>
-          <span className="text-xs text-border hidden sm:inline" aria-hidden="true">/</span>
-          <p className="text-sm sm:text-[15px] font-bold text-text-primary m-0 truncate tracking-tight">
+          <span className="text-xs text-border hidden md:inline" aria-hidden="true">/</span>
+          <p className="text-[13.5px] sm:text-[15px] font-bold text-text-primary m-0 truncate tracking-tight">
             {displayTitle}
           </p>
         </div>
       </div>
 
       {/* Right Controls */}
-      <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
         {/* Mobile Quick Search Icon */}
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('open-command-palette'))}
-          className="sm:hidden flex items-center justify-center w-9 h-9 rounded-xl bg-surface-muted/70 border border-border text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+          className="sm:hidden flex items-center justify-center w-8 h-8 rounded-lg bg-surface-muted/70 border border-border text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
           aria-label={t('palette.search', isEn ? 'Quick search' : 'Tìm kiếm nhanh')}
         >
-          <Search size={16} aria-hidden="true" />
+          <Search size={15} aria-hidden="true" />
         </button>
 
         {/* Desktop Command Palette Trigger */}
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('open-command-palette'))}
-          className="hidden sm:flex items-center bg-surface-muted/70 hover:bg-surface border border-border hover:border-primary/50 rounded-xl px-3 py-1.5 w-[180px] md:w-[220px] xl:w-[270px] shadow-sm transition-all duration-150 cursor-pointer text-left group"
+          className="hidden sm:flex items-center bg-surface-muted/70 hover:bg-surface border border-border hover:border-primary/50 rounded-xl px-3 py-1.5 w-[170px] md:w-[210px] xl:w-[250px] shadow-sm transition-all duration-150 cursor-pointer text-left group"
           title="Ctrl+K / ⌘K"
         >
           <Search size={14} aria-hidden="true" className="text-text-muted group-hover:text-primary transition-colors mr-2 shrink-0" />
@@ -225,8 +245,10 @@ export const Header: React.FC<HeaderProps> = ({ title, onMenuClick }) => {
           <kbd className="kbd-badge shrink-0 ml-1" aria-hidden="true">⌘K</kbd>
         </button>
 
-        {/* Language Switcher */}
-        <LanguageSwitcher />
+        {/* Language Switcher (hide on narrow mobile to preserve header title space; still available in Settings/tablet+) */}
+        <div className="hidden sm:block">
+          <LanguageSwitcher />
+        </div>
 
         {/* Notifications Dropdown */}
         <div className="relative" ref={notificationsRef}>
@@ -238,7 +260,7 @@ export const Header: React.FC<HeaderProps> = ({ title, onMenuClick }) => {
               setShowNotifications(!showNotifications);
               setShowUserMenu(false);
             }}
-            className={`w-9 h-9 rounded-xl flex items-center justify-center border transition-colors cursor-pointer relative ${
+            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center border transition-colors cursor-pointer relative ${
               showNotifications
                 ? 'bg-surface-muted border-border text-text-primary'
                 : 'bg-surface border-transparent hover:bg-surface-muted hover:border-border text-text-secondary'
@@ -249,14 +271,14 @@ export const Header: React.FC<HeaderProps> = ({ title, onMenuClick }) => {
                 : t('common.notifications', 'Thông báo')
             }
           >
-            <Bell size={18} aria-hidden="true" />
+            <Bell size={17} aria-hidden="true" />
             {unreadCount > 0 && (
               <span
                 aria-hidden="true"
                 style={{
                   position: 'absolute',
-                  top: '6px',
-                  right: '6px',
+                  top: '5px',
+                  right: '5px',
                   width: '8px',
                   height: '8px',
                   borderRadius: '50%',
@@ -317,15 +339,10 @@ export const Header: React.FC<HeaderProps> = ({ title, onMenuClick }) => {
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => {
-                          if (item.actionUrl) {
-                            setShowNotifications(false);
-                            router.push(item.actionUrl);
-                          }
-                        }}
-                        className={`w-full text-left px-4 py-3 border-b border-[#E8E2D8] transition-colors flex items-start gap-2.5 ${
+                        onClick={() => void handleNotificationClick(item)}
+                        className={`w-full text-left px-4 py-3 border-b border-[#E8E2D8] transition-colors flex items-start gap-2.5 cursor-pointer ${
                           item.isRead ? 'bg-white hover:bg-[#F0EEE8]/60' : 'bg-[#F4F1E9] hover:bg-[#EFE9DC]'
-                        } ${item.actionUrl ? 'cursor-pointer' : 'cursor-default'}`}
+                        }`}
                       >
                         <span
                           aria-hidden="true"
@@ -395,7 +412,7 @@ export const Header: React.FC<HeaderProps> = ({ title, onMenuClick }) => {
               setShowUserMenu(!showUserMenu);
               setShowNotifications(false);
             }}
-            className={`flex items-center gap-2 py-1 pl-1 pr-2 rounded-xl border transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 sm:gap-2 py-1 pl-1 pr-1 sm:pr-2 rounded-xl border transition-all cursor-pointer ${
               showUserMenu ? 'bg-surface-muted border-border' : 'border-transparent hover:bg-surface-muted'
             }`}
           >
@@ -426,7 +443,7 @@ export const Header: React.FC<HeaderProps> = ({ title, onMenuClick }) => {
                 {translateRole(currentUser.role)}
               </p>
             </div>
-            <ChevronDown size={14} className="text-text-muted" aria-hidden="true" />
+            <ChevronDown size={14} className="hidden sm:block text-text-muted" aria-hidden="true" />
           </button>
 
           {showUserMenu && (
@@ -453,6 +470,13 @@ export const Header: React.FC<HeaderProps> = ({ title, onMenuClick }) => {
                 <p className="text-[11px] text-text-muted m-0 mt-0.5 truncate">
                   {currentUser.email}
                 </p>
+              </div>
+
+              <div className="sm:hidden px-3 py-2 border-b border-[#E8E2D8] flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-text-muted">
+                  {isEn ? 'Language' : 'Ngôn ngữ'}
+                </span>
+                <LanguageSwitcher />
               </div>
 
               <div className="py-1">

@@ -32,6 +32,9 @@ export interface TimelinePhoto {
 
 export interface TimelineItem {
   id: string;
+  milestoneId?: string | null;
+  legId?: number | null;
+  stopId?: number | null;
   group: 'pre_trip' | 'outbound' | 'return' | 'post_trip';
   kind: TimelineKind;
   title: string;                 // Vietnamese or translated
@@ -54,6 +57,7 @@ export interface VerticalTimelineProps {
   viewer: 'customer' | 'manager' | 'driver';
   compact?: boolean;             // Compact mode: hide photos, simpler layout
   showGroups?: boolean;          // Default true
+  collapsePreTripWhenDone?: boolean; // Collapse completed pre_trip accordion by default
   emptyText?: string;
   renderCurrentActions?: (item: TimelineItem) => React.ReactNode;
   onItemClick?: (item: TimelineItem) => void;
@@ -63,7 +67,12 @@ export interface VerticalTimelineProps {
 export interface ShipmentTimelineResponse {
   shipmentId: number;
   requestCode: string;
-  isRoundTrip: boolean;
+  status?: string;
+  tripType?: 'one_way' | 'round_trip';
+  returnStatus?: string;
+  progressPercent?: number;
+  etaFinalAt?: string | null;
+  isRoundTrip?: boolean;
   currentMilestoneId?: string | null;
   items: TimelineItem[];
 }

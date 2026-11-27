@@ -616,19 +616,14 @@ export default function RegulationsPage() {
         </div>
       </div>
 
-      {/* Regulatory Demo Disclaimer Banner */}
-      <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-3 shadow-xs">
-        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-        <div className="space-y-0.5">
-          <p className="font-bold text-sm text-amber-950">
-            {language === 'en' ? 'Notice on Regulatory & Quarantine Data' : 'Lưu ý về dữ liệu quy chế & kiểm dịch'}
-          </p>
-          <p className="text-amber-800 leading-relaxed m-0">
-            {language === 'en'
-              ? 'Pre-populated regulatory and quarantine requirements are demo simulation data. Enterprises must verify against official Veterinary and Customs authorities before operational deployment.'
-              : 'Dữ liệu pháp lý/kiểm dịch được nạp sẵn là dữ liệu demo mô phỏng. Doanh nghiệp cần đối chiếu với cơ quan Thú y / Hải quan sở tại trước khi áp dụng vào vận hành thực tế.'}
-          </p>
-        </div>
+      {/* Compact Demo Tag */}
+      <div className="flex items-center gap-2 text-[11px] text-amber-900">
+        <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-300 font-bold">Demo</span>
+        <span className="text-[#5F6977]">
+          {language === 'en'
+            ? 'Simulated regulatory baseline — verify with official authorities before deployment.'
+            : 'Dữ liệu quy chế demo mô phỏng — cần đối chiếu cơ quan Thú y / Hải quan khi vận hành thật.'}
+        </span>
       </div>
 
       {/* Main Container Card */}

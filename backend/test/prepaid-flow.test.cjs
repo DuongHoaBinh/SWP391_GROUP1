@@ -18,6 +18,9 @@ const {
 const {
   addBusinessDays,
   numberToVietnameseWords,
+  DEFAULT_PREPAID_PAYMENT_WINDOW_MINUTES,
+  getPrepaidPaymentWindowMinutes,
+  computePrepaidPaymentDueAt,
 } = require('../dist/modules/orders/prepaid-policy');
 
 const {
@@ -508,4 +511,53 @@ test('12. Route Confirmation on Prepaid Order: links existing route_id without d
 
   assert.equal(updatedInvoice.routeId, 42);
   assert.equal(updatedInvoice.invoiceCode, 'INV-2026-000100');
+});
+
+// 13. Prepaid 12-hour payment deadline policy & auto-cancel sweep
+test('13. Prepaid 12-hour payment deadline defaults to 720m and SLA monitor counts prepaid auto-cancellations', async () => {
+  assert.equal(DEFAULT_PREPAID_PAYMENT_WINDOW_MINUTES, 720);
+  assert.equal(getPrepaidPaymentWindowMinutes(undefined), 720);
+  assert.equal(getPrepaidPaymentWindowMinutes('invalid'), 720);
+  assert.equal(getPrepaidPaymentWindowMinutes('0'), 720);
+  assert.equal(getPrepaidPaymentWindowMinutes('360'), 360);
+
+  const base = new Date('2026-11-26T00:00:00.000Z');
+  const due = computePrepaidPaymentDueAt(base, 720);
+  assert.equal(due.toISOString(), '2026-11-26T12:00:00.000Z');
+
+  // Verify SlaMonitorService notifies customer with 12-hour message and increments autoCancelled count
+  const { SlaMonitorService } = require('../dist/modules/orders/sla-monitor.service');
+  const sentNotifs = [];
+  const prevEnv = process.env.ORDER_PAYMENT_WINDOW_MINUTES;
+  delete process.env.ORDER_PAYMENT_WINDOW_MINUTES;
+  try {
+    const monitor = new SlaMonitorService(
+      {
+        async runSlaSweepQueries() {
+          return {
+            primaryReminders: [],
+            primaryBreaches: [],
+            hardCapShipmentIds: [],
+            paymentReminders: [],
+            overdueMarked: [],
+            expiredGraceShipmentIds: [],
+            prepaidAutoCancelled: [{ shipmentId: 42, customerId: 10 }],
+            prepaidReviewAlerts: [],
+          };
+        },
+      },
+      {
+        async createNotification(userId, title, message, type, shipmentId) {
+          sentNotifs.push({ userId, title, message, type, shipmentId });
+        },
+        async notifyRole() {},
+      },
+    );
+    const res = await monitor.runSweep();
+    assert.equal(res.autoCancelledOverdueShipments, 1);
+    assert.equal(sentNotifs.length, 1);
+    assert.match(sentNotifs[0].message, /12 giờ/);
+  } finally {
+    if (prevEnv !== undefined) process.env.ORDER_PAYMENT_WINDOW_MINUTES = prevEnv;
+  }
 });

@@ -47,7 +47,6 @@ const AIR_TARIFF_V1 = {
 };
 
 const SEA_TARIFF_V1 = {
-  ferry: { ticketPerVehicle: 3000000 },
   vessel: { baseFeePerHorse: 15000000, pricePerKmPerHorse: 8000 },
   roundingUnit: 1000,
   version: 1,
@@ -141,25 +140,23 @@ test('3. Ví dụ 2 C3 hàng không: 2 ngựa thường bay 1.090 km = 184.500.0
   assert.equal(resAirPrivate.total, 228125000);
 });
 
-// Test 4: Đường thủy ferry và vessel
-test('4. Sea ferry: tổng km bộ liên tục + vé phà; Sea vessel: ô chuồng + cảnh báo SEA_VESSEL_HEALTH_RISK', () => {
-  // Ferry: 1 xe, chặng ra cảng 50 km, từ cảng 70 km (tổng 120 km)
-  const inputFerry = {
-    mode: 'sea',
-    seaMode: 'ferry',
-    horses: [{ horseId: 1, quantity: 1, requiresPrivateStall: false }],
-    vehicles: [{ classCode: 'truck_2', priceCoefficient: 1.0, capacity: 2, deadheadKm: 0 }],
-    roadLegs: [
-      { key: 'to_hub', distanceKm: 50, borderCrossings: 0 },
-      { key: 'from_hub', distanceKm: 70, borderCrossings: 0 },
-    ],
-  };
-
-  const resFerry = calculateFreight(inputFerry, { road: ROAD_TARIFF_V1, sea: SEA_TARIFF_V1 });
-  // 120 km bộ: opening (2M) + distance (100*45k + 20*35k = 5.2M) + care (500k) = 7.7M
-  // Vé phà: 3M
-  // Tổng: 10.7M
-  assert.equal(resFerry.total, 10700000);
+// Test 4: Đường thủy vessel và từ chối ferry
+test('4. Sea vessel: ô chuồng + cảnh báo SEA_VESSEL_HEALTH_RISK; Sea ferry bị từ chối BadRequestException', () => {
+  const { BadRequestException } = require('@nestjs/common');
+  assert.throws(
+    () =>
+      calculateFreight(
+        {
+          mode: 'sea',
+          seaMode: 'ferry',
+          horses: [{ horseId: 1, quantity: 1, requiresPrivateStall: false }],
+          vehicles: [{ classCode: 'truck_2', priceCoefficient: 1.0, capacity: 2, deadheadKm: 0 }],
+          roadLegs: [{ key: 'main', distanceKm: 120, borderCrossings: 0 }],
+        },
+        { road: ROAD_TARIFF_V1, sea: SEA_TARIFF_V1 },
+      ),
+    BadRequestException,
+  );
 
   // Vessel: 1 ngựa, seaKm = 1000 km
   const inputVessel = {
@@ -240,60 +237,86 @@ test('7. haversineKm: khoảng cách HCM - Hà Nội xấp xỉ 1.137 km (±5 km
   assert.ok(Math.abs(dist - 1137) <= 10, `Khoảng cách tính được: ${dist} km`);
 });
 
-// Test 8: DistanceService với fetch giả và cache
-test('8. DistanceService: ORS thành công -> source ors; lỗi -> source estimated; cache hoạt động', async () => {
-  const service = new DistanceService();
+// Test 8: DistanceService với fetch giả (ORS -> OSRM -> fallback estimated) và cache
+test('8. DistanceService: không có ORS key -> gọi OSRM; có ORS key -> gọi ORS; lỗi -> estimated; cache hoạt động', async () => {
   const from = { lat: 10.734, lng: 106.7216 };
   const to = { lat: 11.9404, lng: 108.4583 };
-
-  // 8a. Không có ORS_API_KEY -> source = estimated, không gọi fetch
-  delete process.env.ORS_API_KEY;
-  const resNoKey = await service.getRoadDistance(from, to);
-  assert.equal(resNoKey.source, 'estimated');
-  assert.ok(resNoKey.distanceKm > 0);
-
-  // 8b. Có API key và fetch giả thành công
-  process.env.ORS_API_KEY = 'test-fake-key';
-  let fetchCallCount = 0;
   const originalFetch = global.fetch;
 
-  global.fetch = async (url, options) => {
-    fetchCallCount++;
-    return {
-      ok: true,
-      json: async () => ({
-        routes: [
-          {
-            summary: {
-              distance: 300400, // 300.4 km
-              duration: 23760, // 6.6 hours
-            },
-          },
-        ],
-      }),
-    };
-  };
-
   try {
+    // 8a. Không có ORS_API_KEY -> tự động gọi OSRM lấy đường bộ thực tế + cache
+    delete process.env.ORS_API_KEY;
+    let osrmCallCount = 0;
+    global.fetch = async (url) => {
+      assert.ok(String(url).includes('/route/v1/driving/'));
+      osrmCallCount++;
+      return {
+        ok: true,
+        json: async () => ({
+          code: 'Ok',
+          routes: [
+            {
+              distance: 308500, // 308.5 km
+              duration: 14400, // 4.0h xe con -> chặn dưới theo xe chở ngựa 50 km/h = 6.17h
+            },
+          ],
+        }),
+      };
+    };
+
+    const osrmService = new DistanceService();
+    const resOsrm = await osrmService.getRoadDistance(from, to, 50);
+    assert.equal(resOsrm.source, 'osrm');
+    assert.equal(resOsrm.distanceKm, 308.5);
+    assert.equal(resOsrm.durationHours, 6.17);
+    assert.equal(osrmCallCount, 1);
+
+    // Gọi lại đảo chiều -> ăn cache
+    const resOsrmCached = await osrmService.getRoadDistance(to, from, 50);
+    assert.equal(resOsrmCached.source, 'osrm');
+    assert.equal(resOsrmCached.distanceKm, 308.5);
+    assert.equal(osrmCallCount, 1);
+
+    // 8b. Có ORS_API_KEY và fetch giả thành công -> ưu tiên ORS + cache
+    process.env.ORS_API_KEY = 'test-fake-key';
+    let orsCallCount = 0;
+    global.fetch = async (url) => {
+      assert.ok(String(url).includes('/v2/directions/driving-hgv'));
+      orsCallCount++;
+      return {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              summary: {
+                distance: 300400, // 300.4 km
+                duration: 23760, // 6.6 hours
+              },
+            },
+          ],
+        }),
+      };
+    };
+
     const freshService = new DistanceService();
     const resOrs = await freshService.getRoadDistance(from, to);
     assert.equal(resOrs.source, 'ors');
     assert.equal(resOrs.distanceKm, 300.4);
-    assert.equal(fetchCallCount, 1);
+    assert.equal(orsCallCount, 1);
 
-    // 8c. Gọi lần 2 cùng cặp tọa độ (đảo chiều to -> from): dùng cache, fetch không được gọi thêm
     const resCached = await freshService.getRoadDistance(to, from);
     assert.equal(resCached.source, 'ors');
     assert.equal(resCached.distanceKm, 300.4);
-    assert.equal(fetchCallCount, 1);
+    assert.equal(orsCallCount, 1);
 
-    // 8d. Lỗi fetch -> fallback về estimated
+    // 8c. Cả ORS và OSRM đều lỗi -> fallback về estimated
     global.fetch = async () => {
       throw new Error('Network failure');
     };
     const failService = new DistanceService();
     const resFallback = await failService.getRoadDistance({ lat: 10.0, lng: 105.0 }, { lat: 11.0, lng: 106.0 });
     assert.equal(resFallback.source, 'estimated');
+    assert.ok(resFallback.distanceKm > 0);
   } finally {
     global.fetch = originalFetch;
     delete process.env.ORS_API_KEY;
@@ -452,4 +475,162 @@ test('11. Tạo version bảng giá mới không làm đổi giá trị quote đ
   const parsedResult = JSON.parse(storedQuote.result_json);
   assert.equal(parsedResult.total, 18750000);
   assert.equal(parsedResult.tariffVersions.road, 1);
+});
+
+// Test 12: Regional sea quoting (<= 7 days / 168h), equine welfare > 7-day cap, landlocked & >400km enforcement
+test('12. Sea quoting: regional <= 7d succeeds; > 7d (Vietnam -> Dubai) throws 422; landlocked & >400km throw 422', async () => {
+  const { UnprocessableEntityException } = require('@nestjs/common');
+
+  const fakePricingStore = {
+    getActiveTariffs: async () => ({
+      road: { params: ROAD_TARIFF_V1, version: 1 },
+      sea: { params: SEA_TARIFF_V1, version: 1 },
+    }),
+    getRoadVehicleClasses: async () => [
+      { code: 'truck_1', nameVi: 'Xe 1 chỗ', horseCapacity: 1, priceCoefficient: 1.0 },
+      { code: 'truck_2', nameVi: 'Xe 2 chỗ', horseCapacity: 2, priceCoefficient: 1.0 },
+    ],
+    getActiveOwnDepots: async () => [
+      { id: 1, code: 'VN-HCM-TD', name: 'Trạm Thủ Đức', lat: 10.8494, lng: 106.7537 },
+    ],
+    getActiveSeaRoutes: async () => [
+      {
+        seaRouteId: 1,
+        fromPortId: 1,
+        fromPortCode: 'VN-CLI',
+        fromPortName: 'Cảng Cát Lái (TP.HCM)',
+        fromLat: 10.7617,
+        fromLng: 106.7894,
+        toPortId: 2,
+        toPortCode: 'AE-DXB',
+        toPortName: 'Cảng Jebel Ali (Dubai, UAE)',
+        toLat: 25.0112,
+        toLng: 55.0612,
+        distanceKm: 7703,
+        typicalHours: 311.1,
+      },
+      {
+        seaRouteId: 2,
+        fromPortId: 1,
+        fromPortCode: 'VN-CLI',
+        fromPortName: 'Cảng Cát Lái (TP.HCM)',
+        fromLat: 10.7617,
+        fromLng: 106.7894,
+        toPortId: 3,
+        toPortCode: 'SG-PSA',
+        toPortName: 'Cảng Pasir Panjang (Singapore)',
+        toLat: 1.2737,
+        toLng: 103.7909,
+        distanceKm: 1175,
+        typicalHours: 50,
+      },
+      {
+        seaRouteId: 3,
+        fromPortId: 1,
+        fromPortCode: 'VN-CLI',
+        fromPortName: 'Cảng Cát Lái (TP.HCM)',
+        fromLat: 10.7617,
+        fromLng: 106.7894,
+        toPortId: 4,
+        toPortCode: 'HK-HKG',
+        toPortName: 'Cảng Kwai Tsing (Hồng Kông)',
+        toLat: 22.3456,
+        toLng: 114.1228,
+        distanceKm: 1750,
+        typicalHours: 72,
+      },
+    ],
+  };
+
+  const fakeDistanceService = {
+    getRoadDistance: async () => ({ distanceKm: 25, durationHours: 0.5, source: 'estimated' }),
+  };
+
+  const pricingService = new PricingService(fakePricingStore, fakeDistanceService);
+  const fakeQuotesStore = {
+    findHorseById: async () => ({
+      horseId: 1,
+      ownerId: 10,
+      name: 'Thunder',
+      status: 'active',
+      requiresPrivateStall: false,
+      quantity: 1,
+    }),
+    createQuote: async () => 777,
+  };
+  const quotesService = new QuotesService(fakeQuotesStore, pricingService);
+  const user = { id: '10', email: 'customer@example.com', role: 'CUSTOMER' };
+
+  // 12a. Regional short-haul Vietnam -> Singapore (50h <= 168h) must quote cleanly
+  const sgQuote = await quotesService.createQuote(user, {
+    origin: { address: 'Củ Chi, TP.HCM', lat: 11.0067, lng: 106.5136, country: 'Vietnam' },
+    destination: { address: 'Singapore Turf Club', lat: 1.4228, lng: 103.7618, country: 'Singapore' },
+    departureDate: '2026-12-10',
+    transportMode: 'sea',
+    seaMode: 'vessel',
+    tripType: 'one_way',
+    horses: [{ horseId: 1 }],
+  });
+  assert.equal(sgQuote.quoteId, 777);
+  const seaLeg = sgQuote.legs.find((l) => l.key === 'sea');
+  assert.ok(seaLeg);
+  assert.equal(seaLeg.distanceKm, 1175);
+
+  // 12a-2. Long-haul Vietnam -> Dubai (311h > 168h / 7 days) must be rejected for equine welfare
+  await assert.rejects(
+    () =>
+      quotesService.createQuote(user, {
+        origin: { address: 'Củ Chi, TP.HCM', lat: 11.0067, lng: 106.5136, country: 'Vietnam' },
+        destination: { address: 'Meydan Racecourse, Dubai', lat: 25.156, lng: 55.302, country: 'UAE' },
+        departureDate: '2026-12-10',
+        transportMode: 'sea',
+        seaMode: 'vessel',
+        tripType: 'one_way',
+        horses: [{ horseId: 1 }],
+      }),
+    UnprocessableEntityException,
+  );
+
+  // 12b. Connected-graph fallback: Singapore -> Hong Kong (connected via VN-CLI, 122h <= 168h)
+  const sgHk = await pricingService.buildRouteContext({
+    mode: 'sea',
+    seaMode: 'vessel',
+    sample: {
+      origin: { address: 'Singapore Turf Club', lat: 1.4228, lng: 103.7618, country: 'Singapore' },
+      destination: { address: 'Sha Tin Racecourse, Hong Kong', lat: 22.3999, lng: 114.205, country: 'Hong Kong' },
+      horses: [{ quantity: 1, requiresPrivateStall: false }],
+    },
+  });
+  const connectedSea = sgHk.legs.find((l) => l.key === 'sea');
+  assert.ok(connectedSea && connectedSea.distanceKm === 2925);
+
+  // 12c. Landlocked country (Switzerland / Laos) -> 422 UnprocessableEntityException
+  await assert.rejects(
+    () =>
+      pricingService.buildRouteContext({
+        mode: 'sea',
+        seaMode: 'vessel',
+        sample: {
+          origin: { address: 'Củ Chi, TP.HCM', lat: 11.0067, lng: 106.5136, country: 'Vietnam' },
+          destination: { address: 'Zurich, Switzerland', lat: 47.3769, lng: 8.5417, country: 'Switzerland' },
+          horses: [{ quantity: 1, requiresPrivateStall: false }],
+        },
+      }),
+    UnprocessableEntityException,
+  );
+
+  // 12d. Inland > 400 km from any active seaport (New Delhi) -> 422 UnprocessableEntityException
+  await assert.rejects(
+    () =>
+      pricingService.buildRouteContext({
+        mode: 'sea',
+        seaMode: 'vessel',
+        sample: {
+          origin: { address: 'Củ Chi, TP.HCM', lat: 11.0067, lng: 106.7894, country: 'Vietnam' },
+          destination: { address: 'New Delhi, India', lat: 28.6139, lng: 77.209, country: 'India' },
+          horses: [{ quantity: 1, requiresPrivateStall: false }],
+        },
+      }),
+    UnprocessableEntityException,
+  );
 });

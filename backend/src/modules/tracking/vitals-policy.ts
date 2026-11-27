@@ -75,10 +75,31 @@ export function classifyHeartRate(heartRateBpm: number | null | undefined, cfg: 
   return 'amber';
 }
 
+/**
+ * Closed mathematical partition for equine respiratory rate (breaths/min):
+ * - Green: [8, 20]
+ * - Red  : < 6 OR > 30
+ * - Amber: [6, 8) U (20, 30]
+ */
+export function classifyRespiratoryRate(rrBpm: number | null | undefined): VitalBand {
+  if (rrBpm === null || rrBpm === undefined || !Number.isFinite(Number(rrBpm))) {
+    return 'green';
+  }
+  const rr = Number(rrBpm);
+  if (rr < 6 || rr > 30) {
+    return 'red';
+  }
+  if (rr >= 8 && rr <= 20) {
+    return 'green';
+  }
+  return 'amber';
+}
+
 export interface HealthEvaluationInput {
   conditionStatus: string;
   temperatureC?: number | null;
   heartRateBpm?: number | null;
+  respiratoryRateBpm?: number | null;
   recordedAt?: Date | string | null;
 }
 
@@ -94,12 +115,14 @@ export function evaluateEquineHealthAlert(
 ): { alertTier: HealthAlertTier; alertReason: string | null } {
   const tempBand = classifyTemperature(current.temperatureC, cfg);
   const hrBand = classifyHeartRate(current.heartRateBpm, cfg);
+  const rrBand = classifyRespiratoryRate(current.respiratoryRateBpm);
   const cond = String(current.conditionStatus || 'stable').toLowerCase();
 
-  if (tempBand === 'red' || hrBand === 'red') {
+  if (tempBand === 'red' || hrBand === 'red' || rrBand === 'red') {
     const reasons: string[] = [];
     if (tempBand === 'red') reasons.push(`thân nhiệt ngưỡng ĐỎ (${current.temperatureC}°C)`);
     if (hrBand === 'red') reasons.push(`nhịp tim ngưỡng ĐỎ (${current.heartRateBpm} bpm)`);
+    if (rrBand === 'red') reasons.push(`nhịp thở ngưỡng ĐỎ (${current.respiratoryRateBpm} lần/phút)`);
     return {
       alertTier: 'red',
       alertReason: `Cảnh báo ĐỎ tức thì: ${reasons.join(', ')}`,
@@ -108,12 +131,13 @@ export function evaluateEquineHealthAlert(
 
   const escalatableSet = new Set(cfg.escalatableConditions.map((c) => c.toLowerCase()));
   const observationalSet = new Set(cfg.observationalConditions.map((c) => c.toLowerCase()));
-  const isEscalatable = tempBand === 'amber' || hrBand === 'amber' || escalatableSet.has(cond);
+  const isEscalatable = tempBand === 'amber' || hrBand === 'amber' || rrBand === 'amber' || escalatableSet.has(cond);
 
   if (isEscalatable) {
     const reasons: string[] = [];
     if (tempBand === 'amber') reasons.push(`thân nhiệt Vàng (${current.temperatureC}°C)`);
     if (hrBand === 'amber') reasons.push(`nhịp tim Vàng (${current.heartRateBpm} bpm)`);
+    if (rrBand === 'amber') reasons.push(`nhịp thở Vàng (${current.respiratoryRateBpm} lần/phút)`);
     if (escalatableSet.has(cond)) reasons.push(`trạng thái "${cond}"`);
 
     if (prevLogForSameHorse && prevLogForSameHorse.alertTier === 'amber_escalatable') {

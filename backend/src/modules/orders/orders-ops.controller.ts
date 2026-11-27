@@ -71,6 +71,7 @@ export class OrdersOpsController {
   }
 
   @Get('disbursements/:disbursementId/receipt')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem / tải biên lai phí cơ quan ứng trước (authenticated stream)' })
   async streamDisbursementReceipt(
     @CurrentUser() user: AuthenticatedUser,
@@ -87,6 +88,7 @@ export class OrdersOpsController {
   }
 
   @Get('refunds/:refundId/receipt')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem / tải ủy nhiệm chi hoàn tiền thủ công (authenticated stream)' })
   async streamRefundReceipt(
     @CurrentUser() user: AuthenticatedUser,
@@ -155,6 +157,7 @@ export class OrdersOpsController {
   }
 
   @Get(':id/disbursements')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem danh sách lệ phí cơ quan nhà nước ứng trước nộp hộ (Reimbursable Disbursement)' })
   getDisbursements(
     @CurrentUser() user: AuthenticatedUser,
@@ -194,6 +197,7 @@ export class OrdersOpsController {
   }
 
   @Get(':id/refunds')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem lịch sử hoàn tiền / bảo lưu 30 ngày theo đơn hàng' })
   getOrderRefunds(
     @CurrentUser() user: AuthenticatedUser,
@@ -203,7 +207,7 @@ export class OrdersOpsController {
   }
 
   @Post(':id/upgrade-charter')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.CUSTOMER)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Nâng cấp từ shared_stall sang dedicated_charter tại D-3 (Nhánh A void/reissue hoặc Nhánh B supplemental_invoice)' })
   upgradeCharter(
     @CurrentUser() user: AuthenticatedUser,
@@ -214,7 +218,7 @@ export class OrdersOpsController {
   }
 
   @Post(':id/reschedule-shared')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.CUSTOMER)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Dời sang chuyến ghép kế tiếp miễn phí tại mốc D-3 fallback' })
   rescheduleShared(
     @CurrentUser() user: AuthenticatedUser,

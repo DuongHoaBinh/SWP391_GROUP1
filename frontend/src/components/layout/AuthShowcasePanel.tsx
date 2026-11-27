@@ -91,18 +91,6 @@ export function AuthShowcasePanel() {
           >
             EquiTransit
           </div>
-          <div
-            style={{
-              fontSize: '9.5px',
-              fontWeight: 700,
-              letterSpacing: '0.18em',
-              color: '#B49A68',
-              textTransform: 'uppercase',
-              marginTop: '3px',
-            }}
-          >
-            {isEn ? 'International Equine Logistics' : 'Quản Trị Vận Tải Quốc Tế'}
-          </div>
         </div>
       </div>
 
@@ -114,7 +102,7 @@ export function AuthShowcasePanel() {
           display: 'flex',
           flexDirection: 'column',
           gap: '28px',
-          margin: '28px 0',
+          margin: 'auto 0',
           maxWidth: '500px',
         }}
       >
@@ -147,48 +135,16 @@ export function AuthShowcasePanel() {
           <p
             style={{
               fontSize: '15px',
-              fontWeight: 400,
-              color: '#94A3B8',
-              lineHeight: 1.55,
-              letterSpacing: '-0.01em',
+              fontWeight: 500,
+              color: '#C4B38E',
+              lineHeight: 1.5,
+              letterSpacing: '0.01em',
             }}
           >
             {isEn
-              ? 'Unified operational workspace for transport booking, quarantine clearance, route dispatch, and live transit supervision.'
-              : 'Không gian điều hành thống nhất cho đặt chuyến, kiểm duyệt hồ sơ pháp lý, lập tuyến và giám sát hành trình.'}
+              ? 'Booking · Quarantine · Live GPS'
+              : 'Đặt chuyến · Kiểm dịch · Giám sát GPS'}
           </p>
-        </div>
-      </div>
-
-      {/* BOTTOM ROLE COVERAGE BAR */}
-      <div
-        style={{
-          position: 'relative',
-          zIndex: 10,
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          paddingTop: '20px',
-          borderTop: '1px solid #2C2F2A',
-        }}
-      >
-        <div style={{ fontSize: '12px', color: '#94A3B8', fontWeight: 500 }}>
-          {isEn
-            ? 'Owners · Managers · Specialists · Coordinators · Drivers'
-            : 'Chủ ngựa · Quản lý · Chuyên viên · Điều phối · Tài xế'}
-        </div>
-        <div
-          style={{
-            fontSize: '11px',
-            fontWeight: 700,
-            letterSpacing: '0.1em',
-            textTransform: 'uppercase',
-            color: '#B49A68',
-          }}
-        >
-          EquiTransit Portal
         </div>
       </div>
     </div>

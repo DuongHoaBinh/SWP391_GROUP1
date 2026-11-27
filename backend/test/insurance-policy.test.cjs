@@ -5,7 +5,7 @@ const { calculateInsurance, totalInsuranceFee, insurancePolicy } = require('../d
 test('basic is free with the transport cap; standard and premium use declared value', () => {
   assert.deepEqual([calculateInsurance({}).insuranceFee, calculateInsurance({}).maxCompensation], [0, 50000000]);
   const standard = calculateInsurance({ declaredValue: 100000000, insurancePackage: 'standard' });
-  assert.equal(standard.insuranceFee, 1500000); assert.equal(standard.maxCompensation, 80000000); assert.equal(standard.emergencyVetCovered, false);
+  assert.equal(standard.insuranceFee, 1500000); assert.equal(standard.maxCompensation, 80000000); assert.equal(standard.emergencyVetCovered, true);
   const premium = calculateInsurance({ declaredValue: 100000000, insurancePackage: 'premium' });
   assert.equal(premium.insuranceFee, 3000000); assert.equal(premium.maxCompensation, 100000000); assert.equal(premium.emergencyVetCovered, true);
 });

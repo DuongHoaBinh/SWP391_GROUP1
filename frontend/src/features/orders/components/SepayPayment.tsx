@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { CheckCircle2, Copy, QrCode, RefreshCw, ShieldCheck } from 'lucide-react';
@@ -8,6 +8,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { apiClient } from '@/lib/api-client';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { InvoiceSummary, type Invoice } from './InvoiceSummary';
+import { PaymentCountdownBadge } from './PaymentCountdownBadge';
 
 interface Payment {
   id: number;
@@ -39,16 +40,38 @@ interface PaymentState {
 }
 const buttonStyle = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C4B38E] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
-export function SepayPayment({ shipmentId, requestCode, amount, checkout = false, eligible = true }: { shipmentId: number; requestCode: string; amount: number; checkout?: boolean; eligible?: boolean }) {
+export function SepayPayment({
+  shipmentId,
+  requestCode,
+  amount,
+  checkout = false,
+  eligible = true,
+  autoGenerateQr = false,
+  inModal = false,
+  onCloseModal,
+  onPaid,
+}: {
+  shipmentId: number;
+  requestCode: string;
+  amount: number;
+  checkout?: boolean;
+  eligible?: boolean;
+  autoGenerateQr?: boolean;
+  inModal?: boolean;
+  onCloseModal?: () => void;
+  onPaid?: () => void;
+}) {
   const { t, language } = useLanguage();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState('');
   const [qrError, setQrError] = useState(false);
   const [qrAttempt, setQrAttempt] = useState(0);
+  const autoTriggeredRef = useRef(false);
+  const paidNotifiedRef = useRef(false);
   const money = (val: number) => `${val.toLocaleString('vi-VN')} VND`;
   const endpoint = `/orders/${shipmentId}/payments/sepay`;
-  const orderUrl = `/customer/requests/${shipmentId}#sepay-payment`;
+  const orderUrl = `/customer/requests/${shipmentId}?tab=payment#sepay-payment`;
   const checkoutUrl = `/customer/requests/${shipmentId}/payment`;
   const { data, error: loadError, mutate, isLoading, isValidating } = useSWR<PaymentState>(
     ['sepay', getCurrentUser().id, shipmentId], () => apiClient<PaymentState>(endpoint, { cache: 'no-store' }),
@@ -58,6 +81,43 @@ export function SepayPayment({ shipmentId, requestCode, amount, checkout = false
   const paymentUnlocked = data?.paymentUnlocked === true;
   const quoteChanged = !!payment && payment.status !== 'succeeded' && payment.amount !== amount;
   const canPay = checkout && eligible && paymentUnlocked && data?.enabled && !loadError && payment?.status === 'pending' && !!payment.qrUrl && !payment.blockedReason && !quoteChanged;
+
+  useEffect(() => {
+    if (payment?.status === 'succeeded' && !paidNotifiedRef.current) {
+      paidNotifiedRef.current = true;
+      onPaid?.();
+    }
+  }, [payment?.status, onPaid]);
+
+  useEffect(() => {
+    if (
+      autoGenerateQr &&
+      checkout &&
+      eligible &&
+      paymentUnlocked &&
+      data?.enabled &&
+      !loadError &&
+      !payment &&
+      !busy &&
+      !autoTriggeredRef.current &&
+      Number.isSafeInteger(amount) &&
+      amount > 0
+    ) {
+      autoTriggeredRef.current = true;
+      void (async () => {
+        setBusy(true);
+        setError('');
+        try {
+          const result = await apiClient<Payment>(endpoint, { method: 'POST' });
+          await mutate(current => current ? { ...current, payment: result } : current, false);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : t('sepay.errCreateRequest', 'Không tạo được yêu cầu thanh toán. Vui lòng thử lại.'));
+        } finally {
+          setBusy(false);
+        }
+      })();
+    }
+  }, [autoGenerateQr, checkout, eligible, paymentUnlocked, data?.enabled, loadError, payment, busy, amount, endpoint, mutate, t]);
 
   async function create() {
     if (!paymentUnlocked || !eligible || loadError) return;
@@ -134,14 +194,17 @@ export function SepayPayment({ shipmentId, requestCode, amount, checkout = false
               </p>
             )}
             {data.paymentDueAt && (
-              <p className="m-0">
-                {language === 'en' ? 'Payment deadline:' : 'Hạn thanh toán:'}{' '}
-                <strong>
-                  {new Date(data.paymentDueAt).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN', {
-                    timeZone: 'Asia/Ho_Chi_Minh',
-                  })}
-                </strong>
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="m-0">
+                  {language === 'en' ? 'Payment deadline:' : 'Hạn thanh toán:'}{' '}
+                  <strong>
+                    {new Date(data.paymentDueAt).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN', {
+                      timeZone: 'Asia/Ho_Chi_Minh',
+                    })}
+                  </strong>
+                </p>
+                <PaymentCountdownBadge paymentDueAt={data.paymentDueAt} />
+              </div>
             )}
             {data.graceDueAt && (
               <p className="m-0 mt-0.5">
@@ -167,7 +230,7 @@ export function SepayPayment({ shipmentId, requestCode, amount, checkout = false
         )}
         {!paymentUnlocked && payment?.status !== 'succeeded' && data && (
           <p role="status" className="rounded-lg border border-[#E8E2D8] bg-[#FAF8F4] p-4 text-sm leading-6 text-[#5B6779]">
-            {data.blockedReason || t('sepay.lockedDefaultReason', 'Lộ trình và chuyến xe đang được bộ phận điều phối thiết lập chi tiết. Cổng thanh toán sẽ tự động mở sau khi lịch trình được xác nhận.')}
+            {data.blockedReason || t('sepay.lockedDefaultReason', 'Lộ trình và chuyến xe đang được Quản lý vận hành thiết lập chi tiết. Cổng thanh toán sẽ tự động mở sau khi lịch trình được xác nhận.')}
           </p>
         )}
         {payment?.status === 'succeeded' ? (
@@ -302,12 +365,9 @@ export function SepayPayment({ shipmentId, requestCode, amount, checkout = false
                       </div>
                     ))}
                   </dl>
-                  <p className="text-sm text-[#5B6779]">
-                    {t('sepay.exactAmountInstruction', 'Giữ nguyên số tiền và mã nội dung. Đây là chuyển khoản tiền thật vào tài khoản thụ hưởng hiển thị ở trên.')}
-                  </p>
-                  <div className="flex items-start gap-2 text-sm text-[#A67C2E]" role="status">
-                    <ShieldCheck size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
-                    <p>{t('sepay.awaitingBankConfirm', 'Đang chờ xác nhận từ ngân hàng. Trang tự cập nhật khi nhận được thanh toán.')}</p>
+                  <div className="flex items-center gap-2 text-xs text-[#8C6621] bg-[#FAF8F4] border border-[#E8E2D8] rounded-lg px-3 py-2" role="status">
+                    <ShieldCheck size={15} className="shrink-0" aria-hidden="true" />
+                    <span>{t('sepay.awaitingBankConfirm', 'Giữ đúng số tiền & nội dung chuyển khoản — trang tự xác nhận khi ngân hàng nhận tiền.')}</span>
                   </div>
                 </div>
               </div>
@@ -325,17 +385,22 @@ export function SepayPayment({ shipmentId, requestCode, amount, checkout = false
             {isValidating ? t('sepay.checkingStatus', 'Đang kiểm tra…') : t('sepay.checkStatusBtn', 'Kiểm tra trạng thái')}
           </button>
         )}
-        {checkout && (
-          <footer className="space-y-3 border-t border-[#E8E2D8] pt-4">
-            {payment?.status !== 'succeeded' && (
-              <p className="text-sm text-[#5B6779]">
-                {t('sepay.closeCheckoutNotice', 'Nút bên dưới chỉ đóng màn hình thanh toán. Nếu đã chuyển khoản, tiền vẫn được xác nhận tự động; không chuyển lại khi đang chờ.')}
-              </p>
-            )}
+        {checkout && !inModal && (
+          <footer className="border-t border-[#E8E2D8] pt-4">
             <div className="flex flex-wrap gap-3">
-              <Link href={orderUrl} className={`${buttonStyle} border border-[#D8CEBE] text-[#181A17] hover:bg-[#FAF8F4]`}>
-                {payment?.status === 'succeeded' ? t('sepay.backToOrderDetailBtn', 'Về chi tiết đơn') : t('sepay.closeAndReturnOrderBtn', 'Đóng thanh toán và về đơn')}
-              </Link>
+              {onCloseModal ? (
+                <button
+                  type="button"
+                  onClick={onCloseModal}
+                  className={`${buttonStyle} border border-[#D8CEBE] text-[#181A17] hover:bg-[#FAF8F4] cursor-pointer`}
+                >
+                  {payment?.status === 'succeeded' ? t('sepay.backToOrderDetailBtn', 'Về chi tiết đơn') : t('sepay.closeAndReturnOrderBtn', 'Đóng thanh toán và về đơn')}
+                </button>
+              ) : (
+                <Link href={orderUrl} className={`${buttonStyle} border border-[#D8CEBE] text-[#181A17] hover:bg-[#FAF8F4]`}>
+                  {payment?.status === 'succeeded' ? t('sepay.backToOrderDetailBtn', 'Về chi tiết đơn') : t('sepay.closeAndReturnOrderBtn', 'Đóng thanh toán và về đơn')}
+                </Link>
+              )}
               {payment?.status === 'succeeded' && (
                 <Link href="/customer/requests" className={`${buttonStyle} bg-[#181A17] text-[#C4B38E] hover:bg-[#2C2F2A]`}>
                   {t('sepay.ordersListBtn', 'Danh sách đơn hàng')}

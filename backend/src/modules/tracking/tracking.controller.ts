@@ -188,6 +188,51 @@ export class TrackingController {
     return this.trackingService.updateVitalConfig(user, dto);
   }
 
+  @Get('evidence/attachments/:filename')
+  @ApiOperation({ summary: 'Xem ảnh minh chứng check-in / No-Show (có xác thực JWT & quyền truy cập chuyến)' })
+  async streamEvidencePhoto(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('filename') filename: string,
+    @Res() res: Response,
+  ) {
+    const info = await this.trackingService.getAuthorizedEvidencePhotoPath(user, filename);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(info.fileName)}"`);
+    return res.sendFile(info.absolutePath);
+  }
+
+  @Post('shipments/:shipmentId/evidence/upload')
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @UseInterceptors(
+    FilesInterceptor('files', 5, {
+      fileFilter: imageFileFilter,
+      storage: diskStorage({
+        destination: (_req, _file, cb) => {
+          const uploadPath = './uploads/tracking-evidence';
+          if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
+          cb(null, uploadPath);
+        },
+        filename: (req: any, file, cb) => {
+          const sid = String(req?.params?.shipmentId || '0').replace(/\D/g, '') || '0';
+          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+          cb(null, `ship-${sid}-${unique}${extname(file.originalname).toLowerCase()}`);
+        },
+      }),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Tải lên tối đa 5 ảnh minh chứng check-in thủ công / No-Show (<= 5MB/ảnh)' })
+  uploadEvidencePhotos(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('shipmentId', ParseIntPipe) shipmentId: number,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    return this.trackingService.handleUploadedEvidencePhotos(user, shipmentId, files);
+  }
+
   @Get('health-logs/attachments/:filename')
   @ApiOperation({ summary: 'Xem ảnh đính kèm nhật ký sức khỏe ngựa (có xác thực JWT & quyền truy cập chuyến)' })
   async streamHealthPhoto(

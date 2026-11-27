@@ -40,6 +40,7 @@ import {
   type BookingType,
 } from '@/features/orders/booking-policy';
 import { buildEquineRoute } from '@/lib/geo-corridors';
+import { formatShipmentStatusLabel } from '@/features/orders/shipment-status';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 
@@ -58,7 +59,7 @@ interface OrderSummary {
   stallUnitPrice?: number | null;
   requestedHorseCount?: number | null;
   bookingType?: BookingType;
-  transportMode?: 'road' | 'air' | null;
+  transportMode?: 'road' | 'air' | 'sea' | null;
   specialRequirements?: string | null;
   horses?: Array<{ id?: number; name?: string }>;
 }
@@ -115,22 +116,26 @@ export default function ManagerDashboardPage() {
 
   // Fetch data using SWR
   const {
-    data: pendingRequests = [],
+    data: allOrders = [],
     error: loadingError,
     isLoading: loadingRequests,
-    mutate: mutatePendingRequests,
-  } = useSWR('/orders?status=requested', ordersFetcher, {
-    refreshInterval: 30000,
-    revalidateOnFocus: true,
-  });
-
-  const {
-    data: allOrders = [],
     mutate: mutateAllOrders,
   } = useSWR('/orders', ordersFetcher, {
     refreshInterval: 30000,
     revalidateOnFocus: true,
   });
+
+  const pendingRequests = useMemo(
+    () =>
+      allOrders.filter(
+        (o) =>
+          o.status === 'requested' ||
+          o.status === 'paid_pending_review' ||
+          o.status === 'paid_pending_feasibility',
+      ),
+    [allOrders],
+  );
+  const mutatePendingRequests = mutateAllOrders;
 
   const {
     data: notifications = [],
@@ -235,16 +240,18 @@ export default function ManagerDashboardPage() {
   );
 
   const completionRatePct = useMemo(() => {
-    if (allOrders.length === 0) return 0;
-    return Math.round((completedCount / allOrders.length) * 1000) / 10;
-  }, [allOrders.length, completedCount]);
+    const EXCLUDED_COMPLETION = new Set(['cancelled', 'cancelled_operational', 'rejected', 'refunded', 'refund_requested', 'awaiting_payment']);
+    const eligible = allOrders.filter((o) => !EXCLUDED_COMPLETION.has(String(o.status || '').toLowerCase()));
+    if (eligible.length === 0) return 0;
+    return Math.round((completedCount / eligible.length) * 1000) / 10;
+  }, [allOrders, completedCount]);
 
   // Modal States
   const [activeModal, setActiveModal] = useState<'NONE' | 'APPROVE' | 'REJECT' | 'CHANGE'>('NONE');
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [approveQuotedPrice, setApproveQuotedPrice] = useState('');
-  const [approveTransportMode, setApproveTransportMode] = useState<'road' | 'air'>('road');
+  const [approveTransportMode, setApproveTransportMode] = useState<'road' | 'air' | 'sea'>('road');
   const [approveNote, setApproveNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState('');
@@ -254,10 +261,13 @@ export default function ManagerDashboardPage() {
     [pendingRequests, selectedOrderId]
   );
 
-  const inferOrderTransportMode = (ord?: OrderSummary | null): 'road' | 'air' => {
+  const inferOrderTransportMode = (ord?: OrderSummary | null): 'road' | 'air' | 'sea' => {
     if (!ord) return 'road';
-    if (ord.transportMode === 'road' || ord.transportMode === 'air') return ord.transportMode;
+    if (ord.transportMode === 'road' || ord.transportMode === 'air' || ord.transportMode === 'sea') {
+      return ord.transportMode;
+    }
     const notes = String(ord.specialRequirements || '').toLowerCase();
+    if (notes.includes('đường thủy') || notes.includes('tàu biển') || notes.includes('sea')) return 'sea';
     if (notes.includes('hàng không') || notes.includes('air') || notes.includes('bay')) return 'air';
     const o = String(ord.originLocation || '').toLowerCase();
     const d = String(ord.destinationLocation || '').toLowerCase();
@@ -296,7 +306,7 @@ export default function ManagerDashboardPage() {
     setModalError('');
   };
 
-  const handleDashboardModeToggle = (mode: 'road' | 'air') => {
+  const handleDashboardModeToggle = (mode: 'road' | 'air' | 'sea') => {
     setApproveTransportMode(mode);
     if (!selectedOrder) return;
     const routeInfo = buildEquineRoute(
@@ -421,33 +431,14 @@ export default function ManagerDashboardPage() {
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-10">
-      {/* 1. EDITORIAL LIGHT HEADER */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-5 pb-5 border-b border-[#E5DDD0]">
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#966516] m-0 mb-1.5">
-            {t('manager.dashboard.badgeGlobal', 'Điều Hành & Giám Sát Vận Tải')}
-          </p>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#181A17] m-0">
-            {t('manager.dashboard.greetingPrefix', 'Xin chào,')}{' '}
-            <span className="text-[#966516]">{greetingName}</span>
-          </h1>
-          <p className="text-sm text-[#5F6977] mt-1.5 mb-0 max-w-2xl">
-            {t(
-              'manager.dashboard.heroSubtitle',
-              'Tổng hợp hoạt động vận hành thực tế, thẩm định yêu cầu và phê duyệt báo giá.'
-            )}
-          </p>
-        </div>
+      {/* 1. COMPACT LIGHT HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E5DDD0]">
+        <h1 className="text-2xl font-extrabold tracking-tight text-[#181A17] m-0 leading-snug">
+          {t('manager.dashboard.greetingPrefix', 'Xin chào,')}{' '}
+          <span className="text-[#966516] whitespace-nowrap">{greetingName.replace(/\s*\([^)]*\)\s*$/, '').trim() || greetingName}</span>
+        </h1>
 
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <Link
-            href="/manager/planning"
-            className="no-underline px-4 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] text-xs font-bold border border-[#D8CEBE] inline-flex items-center gap-1.5 transition-colors"
-          >
-            <Map className="w-3.5 h-3.5 text-[#966516]" />
-            <span>{t('manager.dashboard.qaPlanTitle', 'Kế Hoạch Chuyến Đi')}</span>
-          </Link>
-
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -610,26 +601,8 @@ export default function ManagerDashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* LEFT COLUMN: Collapsible Incidents Alert + Transport Requests Table */}
         <div className="flex flex-col gap-5 lg:col-span-2 min-w-0">
-          {/* INCIDENTS STRIP (when 0) OR ACTIVE ALERTS TABLE */}
-          {liveIncidentItems.length === 0 ? (
-            <div className="rounded-xl border border-[#B7DBC4] bg-[#E8F2EB] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 text-xs font-semibold text-[#1E563B]">
-                <CheckCircle2 size={16} className="text-[#287653] shrink-0" />
-                <span>
-                  {t(
-                    'manager.dashboard.incidentsSafeBar',
-                    'Hệ thống vận hành an toàn · Không có sự cố nào cần xử lý'
-                  )}
-                </span>
-              </div>
-              <Link
-                href="/manager/incidents"
-                className="no-underline text-xs font-bold text-[#287653] hover:underline inline-flex items-center gap-1 shrink-0"
-              >
-                {t('manager.dashboard.viewIncidentHistory', 'Nhật ký sự cố')} <ChevronRight size={13} />
-              </Link>
-            </div>
-          ) : (
+          {/* ACTIVE INCIDENTS TABLE (hidden when 0; KPI 3 already reflects 0 incidents) */}
+          {liveIncidentItems.length > 0 && (
             <div className="bg-white rounded-2xl border border-[#E5B8B8] shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-[#E5B8B8] flex flex-wrap justify-between items-center gap-3 bg-[#FDF6F6]">
                 <div>
@@ -826,8 +799,9 @@ export default function ManagerDashboardPage() {
                 {paginatedPendingRequests.map((req) => {
                   const horseQty = req.requestedHorseCount || req.horses?.length || 0;
                   const needsQuote = req.totalCost == null || req.totalCost <= 0;
-                  const depDateStr = req.requestedDate
-                    ? new Date(req.requestedDate).toLocaleDateString(isEn ? 'en-GB' : 'vi-VN')
+                  const depDateRaw = (req as any).departureDate || req.requestedDate;
+                  const depDateStr = depDateRaw
+                    ? new Date(depDateRaw).toLocaleDateString(isEn ? 'en-GB' : 'vi-VN')
                     : '—';
 
                   return (
@@ -866,9 +840,7 @@ export default function ManagerDashboardPage() {
 
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A] whitespace-nowrap shrink-0">
                           <span className="w-1.5 h-1.5 rounded-full bg-[#A67C2E]" />
-                          {req.status === 'requested'
-                            ? t('manager.requests.statusRequested', 'Chờ duyệt')
-                            : req.status}
+                          {formatShipmentStatusLabel(req.status, isEn)}
                         </span>
                       </div>
 
@@ -878,11 +850,21 @@ export default function ManagerDashboardPage() {
                           <FlightyRouteDisplay
                             origin={req.originLocation}
                             destination={req.destinationLocation}
+                            mode={req.transportMode || undefined}
                             variant="compact"
                           />
                         </div>
 
                         <div className="flex flex-wrap items-center sm:justify-end gap-1.5 shrink-0">
+                          {(req.status === 'paid_pending_review' ||
+                            req.status === 'paid_pending_feasibility') && (
+                            <Link
+                              href={`/manager/requests/${req.id}`}
+                              className="no-underline px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-[#287653] hover:bg-[#1f5e42] transition-colors whitespace-nowrap shadow-xs"
+                            >
+                              {isEn ? 'Review Feasibility' : 'Duyệt khả thi'}
+                            </Link>
+                          )}
                           {req.status === 'requested' && (
                             <>
                               <button
@@ -1102,6 +1084,17 @@ export default function ManagerDashboardPage() {
                             }`}
                           >
                             {t('manager.requests.modeAir', 'Hàng không')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDashboardModeToggle('sea')}
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                              approveTransportMode === 'sea'
+                                ? 'bg-[#0E7490] text-white'
+                                : 'text-[#5C6658]'
+                            }`}
+                          >
+                            {t('manager.requests.modeSea', isEn ? 'Sea' : 'Đường thủy')}
                           </button>
                         </div>
                       </div>

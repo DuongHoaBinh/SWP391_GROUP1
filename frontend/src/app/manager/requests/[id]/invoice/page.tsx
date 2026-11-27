@@ -32,10 +32,10 @@ export default function ManagerOrderInvoicePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
+      <div className="min-h-[60vh] flex items-center justify-center bg-[#FAF8F4] rounded-2xl border border-[#D8CEBE]">
         <div className="flex flex-col items-center space-y-3">
-          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
-          <p className="text-sm text-slate-500">Đang tải hóa đơn điện tử từ hệ thống...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-[#A67C2E]" />
+          <p className="text-sm font-medium text-[#5C6658]">Đang tải hóa đơn điện tử từ hệ thống...</p>
         </div>
       </div>
     );
@@ -43,18 +43,20 @@ export default function ManagerOrderInvoicePage() {
 
   if (error || !data) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
-        <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-xl shadow p-6 text-center border border-slate-200 dark:border-slate-700">
-          <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Chưa thể xem hóa đơn</h2>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-            {error || 'Hóa đơn chưa được phát hành hoặc không tồn tại.'}
+      <div className="min-h-[60vh] flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-sm p-7 text-center border border-[#D8CEBE]">
+          <div className="w-12 h-12 rounded-2xl bg-[#F8EAEA] border border-[#E5B8B8] flex items-center justify-center mx-auto mb-3.5">
+            <AlertCircle className="w-6 h-6 text-[#B33E3E]" />
+          </div>
+          <h2 className="text-lg font-extrabold text-[#181A17] mb-2">Chưa có hóa đơn điện tử</h2>
+          <p className="text-sm text-[#5C6658] mb-6 leading-relaxed">
+            {error || 'Hóa đơn chưa được phát hành hoặc đơn hàng chưa hoàn tất thanh toán.'}
           </p>
           <Link
             href={`/manager/requests/${id}`}
-            className="inline-flex items-center justify-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm transition"
+            className="no-underline inline-flex items-center justify-center px-4 py-2.5 bg-[#181A17] hover:bg-[#2A2D28] text-[#FAF8F4] font-bold rounded-xl text-xs whitespace-nowrap transition-colors shadow-sm"
           >
-            Quay lại quản lý đơn hàng
+            Quay lại chi tiết đơn hàng
           </Link>
         </div>
       </div>

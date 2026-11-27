@@ -138,8 +138,8 @@ export default function VehicleManagementPage() {
                 ? `Capacity is fixed by class: ${selectedClass.horseCapacity} horses. A horse needing a private stall uses 2 places.`
                 : `Sức chứa theo loại: ${selectedClass.horseCapacity} ngựa. Ngựa cần chuồng riêng chiếm 2 chỗ.`
               : language === 'en'
-                ? 'Capacity depends on the vehicle carried; enter it below.'
-                : 'Sức chứa tùy xe chở trên phà; nhập ở ô bên dưới.'}
+                ? 'Capacity is variable; enter it below.'
+                : 'Sức chứa tùy phương tiện; nhập ở ô bên dưới.'}
             {selectedClass.isHeavyTruck ? (language === 'en' ? ' Heavy truck: city time windows apply.' : ' Xe tải nặng: bị giới hạn giờ chạy trong đô thị.') : ''}
           </p>
         )}
@@ -341,22 +341,24 @@ export default function VehicleManagementPage() {
   });
 
   const availableCount = vehicles.filter((v) => normalizeFleetStatus(v.status) === 'available').length;
-  const inUseCount = vehicles.filter((v) => normalizeFleetStatus(v.status) === 'in_use').length;
+  const inUseCount = vehicles.filter((v) => {
+    const s = normalizeFleetStatus(v.status);
+    if (s !== 'in_use') return false;
+    const isReservedOnly = Boolean((v as any).isReservedOnly) || /active:\s*req-/i.test(String(v.location || ''));
+    const shipStatus = String((v as any).assignedShipmentStatus || '').toLowerCase();
+    if (shipStatus) return shipStatus === 'in_transit' || shipStatus === 'return_pending';
+    return !isReservedOnly;
+  }).length;
   const maintenanceCount = vehicles.filter((v) => normalizeFleetStatus(v.status) === 'maintenance').length;
   const hasActiveFilter = Boolean(searchTerm.trim()) || filterType !== 'ALL' || filterDepot !== 'ALL';
 
   return (
     <div className="flex flex-col gap-6 pb-12">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[#181A17] m-0">
-            {t('fleet.pageTitle', 'Quản Lý Đội Xe & Thiết Bị Chuyên Dụng')}
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            {t('fleet.pageSubtitle', 'Quản lý đội xe thùng điều hòa nhiệt độ, xe van chuyên dụng, container đường bộ và chuồng bay quốc tế.')}
-          </p>
-        </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-[#181A17] m-0">
+          {t('fleet.pageTitle', 'Quản Lý Đội Xe')}
+        </h1>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -372,8 +374,8 @@ export default function VehicleManagementPage() {
             )}
             <span>
               {isSyncing
-                ? t('common.syncing', language === 'en' ? 'Syncing...' : 'Đang đồng bộ...')
-                : t('fleet.syncDbBtn', 'Đồng bộ Database')}
+                ? t('common.syncing', language === 'en' ? 'Refreshing...' : 'Đang làm mới...')
+                : t('common.refresh', language === 'en' ? 'Refresh' : 'Làm mới')}
             </span>
           </Button>
           <Button
@@ -514,22 +516,21 @@ export default function VehicleManagementPage() {
 
         {/* Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse min-w-[740px]">
+          <table className="w-full text-left text-sm border-collapse">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-4">{t('coordinator.vehicles.plate', 'Biển số / Mã xe')}</th>
-                <th className="p-4">{t('coordinator.vehicles.type', 'Loại phương tiện')}</th>
-                <th className="p-4">{t('coordinator.vehicles.capacity', 'Sức chứa buồng')}</th>
-                <th className="p-4">{language === 'en' ? 'Depot' : 'Trạm xe'}</th>
-                <th className="p-4">{t('coordinator.vehicles.location', 'Vị trí hiện tại')}</th>
-                <th className="p-4">{t('common.status', 'Trạng thái')}</th>
-                <th className="p-4 text-right">{t('common.actions', 'Thao tác')}</th>
+              <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <th className="py-3 px-2.5 whitespace-nowrap">{t('coordinator.vehicles.plate', 'Mã xe')}</th>
+                <th className="py-3 px-2.5 whitespace-nowrap">{t('coordinator.vehicles.type', 'Loại phương tiện')}</th>
+                <th className="py-3 px-2.5 whitespace-nowrap">{t('coordinator.vehicles.capacity', 'Sức chứa')}</th>
+                <th className="py-3 px-2.5 whitespace-nowrap">{language === 'en' ? 'Depot & Location' : 'Trạm xe & Vị trí'}</th>
+                <th className="py-3 px-2.5 whitespace-nowrap">{t('common.status', 'Trạng thái')}</th>
+                <th className="py-3 px-2.5 text-right whitespace-nowrap">{t('common.actions', 'Thao tác')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {!isLoaded ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-slate-500">
+                  <td colSpan={6} className="p-12 text-center text-slate-500">
                     <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-[#181A17] border-t-transparent mb-2" />
                     <div className="text-xs font-medium">
                       {t('fleet.loadingVehicles', language === 'en' ? 'Loading fleet vehicles...' : 'Đang tải danh sách đội xe chuyên dụng...')}
@@ -538,7 +539,7 @@ export default function VehicleManagementPage() {
                 </tr>
               ) : filteredVehicles.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center">
+                  <td colSpan={6} className="p-12 text-center">
                     <div className="flex flex-col items-center justify-center max-w-sm mx-auto text-slate-500">
                       <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
                         <Truck size={28} />
@@ -557,30 +558,52 @@ export default function VehicleManagementPage() {
               ) : (
                 filteredVehicles.map((v) => {
                   const normStatus = normalizeFleetStatus(v.status);
+                  const shipStatus = String((v as any).assignedShipmentStatus || '').toLowerCase();
+                  const isActiveOnRoad = shipStatus === 'in_transit' || shipStatus === 'return_pending';
+                  const isReservedHold =
+                    normStatus === 'in_use' &&
+                    !isActiveOnRoad &&
+                    (Boolean((v as any).isReservedOnly) || /active:\s*req-/i.test(String(v.location || '')));
                   return (
                     <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="p-4 font-bold text-slate-900">{v.code}</td>
-                      <td className="p-4 text-slate-700 font-medium">
-                        {v.vehicleClassName || translateVehicleType(v.type)}
+                      <td className="py-3 px-2.5 font-bold text-slate-900 whitespace-nowrap text-[13px]">{v.code}</td>
+                      <td className="py-3 px-2.5 text-slate-700 font-medium text-xs max-w-[190px]">
+                        <span className="line-clamp-2">
+                          {(language === 'en' && (v as any).vehicleClassNameEn)
+                            ? (v as any).vehicleClassNameEn
+                            : (v.vehicleClassName || translateVehicleType(v.type))}
+                        </span>
                         {v.isHeavyTruck && (
-                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 align-middle">
+                          <span className="mt-0.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
                             {language === 'en' ? 'Heavy' : 'Tải nặng'}
                           </span>
                         )}
                       </td>
-                      <td className="p-4 text-slate-700 font-semibold">
-                        {v.capacity} {t('fleet.stallsUnit', 'Buồng Stall')}
+                      <td className="py-3 px-2.5 text-slate-700 font-semibold text-xs whitespace-nowrap">
+                        {v.capacity} {language === 'en' ? (v.capacity === 1 ? 'stall' : 'stalls') : 'ô chuồng'}
                       </td>
-                      <td className="p-4 text-slate-700">{v.depotName || '—'}</td>
-                      <td className="p-4 text-slate-600">{v.location || t('coordinator.depot', 'Depot')}</td>
-                      <td className="p-4">
+                      <td className="py-3 px-2.5 text-xs max-w-[200px]">
+                        <div className="font-semibold text-slate-800 truncate" title={v.depotName || ''}>
+                          {v.depotName || '—'}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate mt-0.5" title={v.location || ''}>
+                          {v.location || t('coordinator.depot', 'Depot')}
+                        </div>
+                      </td>
+                      <td className="py-3 px-2.5 whitespace-nowrap">
                         <StatusBadge
-                          label={translateStatus(normStatus === 'in_use' ? 'in_transit' : normStatus)}
+                          label={
+                            isReservedHold
+                              ? language === 'en'
+                                ? 'Reserved'
+                                : 'Đang giữ chỗ'
+                              : translateStatus(normStatus)
+                          }
                           variant={normStatus === 'available' ? 'success' : normStatus === 'in_use' ? 'transit' : 'pending'}
                           hasDot
                         />
                       </td>
-                      <td className="p-4 text-right">
+                      <td className="py-3 px-2.5 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
                           <button
                             type="button"

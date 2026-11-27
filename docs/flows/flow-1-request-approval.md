@@ -1,9 +1,9 @@
 # Flow 1: Create and Approve Transport Request (Required)
 
-> **Cập nhật sau review 11/2026 (Step 7 - Prepaid Flow):** Hệ thống chuyển sang luồng **Trả trước (Prepaid Flow)** làm luồng vận hành chuẩn:
-> 1. Customer tạo báo giá (quote) tự động có hiệu lực 24h.
-> 2. Customer đặt đơn từ báo giá → đơn khởi tạo ở trạng thái `awaiting_payment` (`payment_flow = 'prepaid'`), kèm hóa đơn sơ bộ (`shipment_invoice`, `route_id = NULL`) và mã SePay VietQR.
-> 3. Customer thanh toán ngay trong 24h → SePay webhook chuyển đơn sang `paid_pending_review`. (Nếu quá 24h không thanh toán → SLA sweep tự hủy đơn `cancelled`, void hóa đơn, giải phóng ngựa).
+> **Cập nhật sau review 11/2026 (Step 7 - Prepaid Flow & Hạn thanh toán 12 giờ):** Hệ thống chuyển sang luồng **Trả trước (Prepaid Flow)** làm luồng vận hành chuẩn:
+> 1. Customer tạo báo giá (quote) tự động có hiệu lực 30 phút.
+> 2. Customer đặt đơn từ báo giá → đơn khởi tạo ở trạng thái `awaiting_payment` (`payment_flow = 'prepaid'`), kèm hóa đơn sơ bộ (`shipment_invoice`, `route_id = NULL`), mở ngay **Popup thanh toán SePay VietQR** trên giao diện.
+> 3. Customer thanh toán trong vòng **12 giờ** (`payment_due_at = created_at + 12h`, mặc định `ORDER_PAYMENT_WINDOW_MINUTES=720`) → SePay webhook chuyển đơn sang `paid_pending_review`. Nếu đóng popup hoặc thanh toán chưa thành công, đơn vẫn giữ trạng thái `awaiting_payment` kèm đồng hồ đếm ngược 12 giờ trên Dashboard/Danh sách đơn/Chi tiết đơn. Quá 12 giờ không thanh toán → SLA sweep tự hủy đơn (`cancelled` / `payment_expired`), void hóa đơn, nhả xe đã giữ chỗ và hoàn trả ngựa về `active`.
 > 4. Logistics Manager thẩm định khả năng vận hành (`PATCH /orders/:id/feasibility`):
 >    - **Duyệt khả thi (`approve`):** Đơn chuyển sang `planning` (hoặc `approved`) để Coordinator lập lộ trình và phân xe. Không cần thu tiền lần 2 ở Gate 2.
 >    - **Không thể đáp ứng (`cannot_fulfil`):** Manager chọn mã lý do và ghi chú giải trình ≥ 10 ký tự → Đơn chuyển sang `refund_requested`. Customer truy cập trang `/customer/requests/:id/refund` điền form STK nhận hoàn tiền 100% trong 3-5 ngày làm việc.
@@ -16,7 +16,7 @@ Customer, Logistics Manager, Admin/Finance
 ## Main path (Prepaid Flow - Step 7)
 
 1. **Tạo Báo Giá & Khóa Giá (Quote Snapshot):** Khách hàng chọn tuyến đường, phương thức vận chuyển (đường bộ/hàng không/thủy), gói bảo hiểm theo từng ngựa và nhận báo giá tự động có mã `quoteId` (hiệu lực 24 giờ).
-2. **Khởi Tạo Đơn & Phát Hành Hóa Đơn Sơ Bộ:** Khách hàng bấm "Đặt đơn từ báo giá" → hệ thống tạo đơn với `payment_flow = 'prepaid'`, trạng thái `awaiting_payment`, `payment_due_at = now + 24h`. Đồng thời, hệ thống tạo hóa đơn sơ bộ `primary` (`shipment_invoice.route_id = NULL`) và mã VietQR SePay. Báo giá chuyển sang `status = 'used'`.
+2. **Khởi Tạo Đơn & Phát Hành Hóa Đơn Sơ Bộ:** Khách hàng bấm "Đặt đơn từ báo giá" → hệ thống tạo đơn với `payment_flow = 'prepaid'`, trạng thái `awaiting_payment`, `payment_due_at = now + 12h` (`ORDER_PAYMENT_WINDOW_MINUTES=720`). Đồng thời, hệ thống tạo hóa đơn sơ bộ `primary` (`shipment_invoice.route_id = NULL`), sinh mã VietQR SePay và bật ngay Popup thanh toán SePay. Báo giá chuyển sang `status = 'used'`.
 3. **Thanh Toán Ngay & Hóa Đơn Điện Tử A4:** Khách hàng thanh toán qua SePay VietQR hoặc xem/in hóa đơn điện tử A4 chuẩn (`GET /orders/:id/invoice`, `numberToVietnameseWords`, mã tra cứu SePay).
 4. **Đối Soát & Chuyển Trạng Thái:** SePay webhook xác thực thanh toán thành công → chuyển trạng thái đơn sang `paid_pending_review` qua state machine atomic guard (`transitionShipment`), ghi lịch sử vào `shipment_status_history` và gửi email/thông báo cho Customer và Manager.
 5. **Thẩm Định Khả Thi (Feasibility Review):** Logistics Manager kiểm tra năng lực xe/chuồng/trạm kiểm dịch trên trang `/manager/requests/:id`:
@@ -30,7 +30,7 @@ Customer, Logistics Manager, Admin/Finance
 ## Key rules (Prepaid Flow)
 
 - Khách hàng bắt buộc phải có `quoteId` hợp lệ để tạo đơn vận chuyển mới.
-- Hạn thanh toán của đơn trả trước là 24 giờ kể từ thời điểm tạo đơn (`payment_due_at`).
+- Hạn thanh toán của đơn trả trước là **12 giờ** kể từ thời điểm tạo đơn (`payment_due_at`, cấu hình mặc định `ORDER_PAYMENT_WINDOW_MINUTES=720`); quá hạn hệ thống tự động hủy đơn (`payment_expired`), nhả xe và trả ngựa về trạng thái khả dụng.
 - Cổng thanh toán SePay mở ngay cho đơn `awaiting_payment` khi còn hạn; đóng tự động khi hết hạn.
 - Đơn trả trước không cho phép dùng các nút legacy `approve`, `reject`, `request-changes` (trả về 409 Conflict).
 - Đơn không đáp ứng được cam kết hoàn tiền 100% không thu bất kỳ chi phí nào; SLA xử lý từ 3 đến 5 ngày làm việc (không tính Thứ Bảy, Chủ Nhật).

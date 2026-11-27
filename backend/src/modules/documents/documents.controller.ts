@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -203,6 +204,7 @@ export class DocumentsController {
   }
 
   @Get()
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Lấy danh sách chứng từ (khách hàng xem của mình, chuyên viên xem toàn bộ)' })
   @ApiQuery({ name: 'status', required: false, description: 'Lọc theo trạng thái (submitted, approved, rejected, expired)' })
   @ApiQuery({ name: 'horseId', required: false, description: 'Lọc theo ID con ngựa' })
@@ -211,11 +213,14 @@ export class DocumentsController {
     @Query('status') status?: string,
     @Query('horseId') horseId?: string,
   ) {
-    return this.documentsService.getDocuments(
-      user,
-      status,
-      horseId ? Number(horseId) : undefined,
-    );
+    let parsedHorseId: number | undefined;
+    if (horseId !== undefined && horseId !== '') {
+      parsedHorseId = Number(horseId);
+      if (!Number.isInteger(parsedHorseId) || parsedHorseId <= 0) {
+        throw new BadRequestException('horseId không hợp lệ');
+      }
+    }
+    return this.documentsService.getDocuments(user, status, parsedHorseId);
   }
 
   // --- Compliance Orders List for Specialist ---
@@ -229,6 +234,7 @@ export class DocumentsController {
   }
 
   @Get(':id/file')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Tải hoặc xem tệp chứng từ đã xác thực quyền truy cập' })
   async downloadDocumentFile(
     @CurrentUser() user: AuthenticatedUser,
@@ -250,6 +256,7 @@ export class DocumentsController {
   }
 
   @Get(':id')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem chi tiết một tài liệu kèm lịch sử phê duyệt của cơ quan chức năng' })
   getDocumentById(
     @CurrentUser() user: AuthenticatedUser,
@@ -259,6 +266,7 @@ export class DocumentsController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Khách hàng hoặc chuyên viên xóa tài liệu' })
   deleteDocument(
     @CurrentUser() user: AuthenticatedUser,
@@ -268,6 +276,7 @@ export class DocumentsController {
   }
 
   @Get('horse/:horseId')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem danh sách toàn bộ tài liệu đã tải lên của một con ngựa' })
   getDocumentsByHorse(
     @CurrentUser() user: AuthenticatedUser,
@@ -279,6 +288,7 @@ export class DocumentsController {
   // --- Compliance Checklist & Setup for Orders ---
 
   @Get('order/:orderId/checklist')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Lấy bảng checklist tuân thủ hồ sơ kiểm dịch của toàn bộ các con ngựa trong một đơn hàng',
   })

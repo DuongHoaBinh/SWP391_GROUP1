@@ -49,156 +49,50 @@ export function BookingSummary({
     ? (isShared ? 'Shared Stall' : 'Dedicated Charter')
     : bookingName(bookingType);
 
+  if (!isShared) {
+    return (
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] px-4 py-3 text-xs"
+        aria-label={t('booking.summaryAriaLabel', 'Hình thức đặt chỗ')}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-bold text-[#181A17]">{bookingDisplayName}</span>
+          <span className="text-[#5B6779]">
+            · {language === 'en' ? `Flat charter rate for ${horseCount} horse(s)` : `Giá trọn gói riêng cho đoàn ${horseCount} ngựa`}
+          </span>
+        </div>
+        <span className="rounded-full bg-white border border-[#D8CEBE] px-2.5 py-0.5 font-semibold text-[#181A17]">
+          {horseCount} {language === 'en' ? (horseCount === 1 ? 'horse' : 'horses') : 'ngựa'}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div
-      className="space-y-3 rounded-2xl border border-[#D8CEBE] bg-white p-5 shadow-sm"
+      className="space-y-2.5 rounded-2xl border border-[#D8CEBE] bg-white p-4 shadow-sm"
       aria-label={t('booking.summaryAriaLabel', 'Hình thức đặt chỗ')}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E8E2D8] pb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-lg">{isShared ? '🟢' : '🔵'}</span>
-          <div>
-            <h4 className="text-sm font-bold text-[#181A17]">{bookingDisplayName}</h4>
-            <p className="text-xs text-[#5B6779]">
-              {isShared
-                ? t('booking.summarySharedSub', 'Dịch vụ ghép chuồng theo hành lang · Đặt trước ≥ 7 ngày · Chốt sổ trước 72h')
-                : t('booking.summaryCharterSub', 'Dịch vụ bao trọn xe chuyên dụng · Chạy thẳng độc quyền · Lịch trình linh hoạt')}
-            </p>
-          </div>
-        </div>
-        <span className="rounded-full bg-[#FAF8F4] border border-[#D8CEBE] px-3 py-1 text-xs font-semibold text-[#181A17]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-bold text-[#181A17] m-0">{bookingDisplayName}</h4>
+        <span className="rounded-full bg-[#FAF8F4] border border-[#D8CEBE] px-2.5 py-0.5 text-xs font-semibold text-[#181A17]">
           {t('booking.horsesAndStallsCount', '{count} ngựa ({count} ô chuồng)', { count: horseCount })}
         </span>
       </div>
 
-      <div className="rounded-lg bg-[#FAF8F4] border border-[#E8E2D8] p-3 text-sm text-[#181A17]">
-        {isShared ? (
-          stallUnitPrice == null ? (
-            <p className="text-xs leading-relaxed text-[#5B6779]">
-              {t('booking.awaitingStallQuotePrefix', 'Đơn hàng đang chờ quản lý duyệt báo giá theo từng ô chuồng. Cước = ')}{' '}
-              <span className="font-semibold text-[#181A17]">
-                {t('booking.stallUnitFormula', 'Đơn giá 1 ô × {count} ngựa', { count: horseCount })}
-              </span>.
-            </p>
-          ) : (
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-[#5B6779]">{t('booking.baseStallFreightLabel', 'Cước cơ bản theo ô chuồng:')}</span>
-              <span className="font-semibold text-[#181A17]">
-                {vnd(stallUnitPrice)} / {t('booking.perStallUnit', 'ô')} × {horseCount} {t('common.horsesUnit', 'ngựa')} = <strong className="text-[#A67C2E]">{vnd(stallUnitPrice * horseCount)}</strong>
-              </span>
-            </div>
-          )
-        ) : (
-          <p className="text-xs text-[#5B6779]">
-            {t('booking.charterFlatSummaryDesc', 'Giá trọn gói riêng cho đoàn {count} ngựa. Không đón/trả phụ, ưu tiên tuyến thẳng.', { count: horseCount })}
-          </p>
-        )}
-      </div>
+      {stallUnitPrice != null && (
+        <div className="flex items-center justify-between rounded-lg bg-[#FAF8F4] border border-[#E8E2D8] px-3 py-2 text-xs text-[#181A17]">
+          <span className="text-[#5B6779]">{t('booking.baseStallFreightLabel', 'Cước theo ô chuồng:')}</span>
+          <span className="font-semibold">
+            {vnd(stallUnitPrice)} × {horseCount} = <strong className="text-[#A67C2E]">{vnd(stallUnitPrice * horseCount)}</strong>
+          </span>
+        </div>
+      )}
 
-      {/* CONSOLIDATION TIMELINE TRACKER (FOR SHARED STALL) */}
-      {isShared && (
-        <div className="mt-3 rounded-xl border border-[#C4B38E]/50 bg-[#FAF8F4] p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#181A17] flex items-center gap-1.5">
-              <Clock className="h-4 w-4 text-[#A67C2E]" />
-              {t('booking.consolidationSlaHeader', 'Tiến độ Ghép chuồng & Chốt lộ trình (Consolidation SLA)')}
-            </span>
-            {departureDate && (
-              <span className="text-[11px] font-semibold text-[#A67C2E]">
-                {t('booking.expectedDeparture', 'Ngày đi dự kiến')}: {departureDate}
-              </span>
-            )}
-          </div>
-
-          {/* Stepper Visual */}
-          <div className={`mt-3 grid gap-2 text-center text-[11px] ${compact ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2 md:grid-cols-5'}`}>
-            <div className={`min-w-0 break-words leading-snug rounded-md p-2 border transition-all ${
-              activeStep > 1
-                ? 'border-[#2D5A3F]/40 bg-[#E8F2EB] text-[#2D5A3F]'
-                : activeStep === 1
-                ? 'border-[#181A17] bg-white shadow-sm font-bold text-[#181A17]'
-                : 'border-[#D8CEBE] bg-white/70 text-[#5B6779]'
-            }`}>
-              <div className="font-semibold">{t('booking.step1Label', '1. Đặt chỗ')}</div>
-              <div className="mt-0.5 text-[10px] opacity-80">{t('booking.step1Timing', 'Trước ≥ 7 ngày')}</div>
-              <div className="mt-1 font-medium text-[10px]">
-                {activeStep > 1 ? t('booking.stepDoneCreated', '✓ Đã tạo') : activeStep === 1 ? t('booking.stepProcessing', '● Đang xử lý') : t('booking.stepWaiting', 'Chờ')}
-              </div>
-            </div>
-
-            <div className={`min-w-0 break-words leading-snug rounded-md p-2 border transition-all ${
-              activeStep > 2
-                ? 'border-[#2D5A3F]/40 bg-[#E8F2EB] text-[#2D5A3F]'
-                : activeStep === 2
-                ? 'border-[#181A17] bg-white shadow-sm font-bold text-[#181A17]'
-                : 'border-[#D8CEBE] bg-white/70 text-[#5B6779]'
-            }`}>
-              <div className="font-semibold">{t('booking.step2Label', '2. Hồ sơ thú y')}</div>
-              <div className="mt-0.5 text-[10px] opacity-80">{t('booking.step2Timing', 'Trước ≥ 5 ngày')}</div>
-              <div className="mt-1 font-medium text-[10px]">
-                {activeStep > 2 ? t('booking.stepDoneValid', '✓ Hợp lệ') : activeStep === 2 ? t('booking.stepReviewing', '● Thẩm định') : t('booking.stepWaiting', 'Chờ')}
-              </div>
-            </div>
-
-            <div className={`min-w-0 break-words leading-snug rounded-md p-2 border transition-all ${
-              activeStep > 3
-                ? 'border-[#2D5A3F]/40 bg-[#E8F2EB] text-[#2D5A3F]'
-                : activeStep === 3
-                ? 'border-[#181A17] bg-white shadow-sm font-bold text-[#181A17]'
-                : 'border-[#D8CEBE] bg-white/70 text-[#5B6779]'
-            }`}>
-              <div className="font-semibold">{t('booking.step3Label', '3. Chốt sổ tuyến')}</div>
-              <div className="mt-0.5 text-[10px] opacity-80">{t('booking.step3Timing', 'Trước 72h (D-3)')}</div>
-              <div className="mt-1 font-medium text-[10px]">
-                {activeStep > 3 ? t('booking.stepDoneLocked', '✓ Đã chốt') : activeStep === 3 ? t('booking.stepConsolidating', '● Đang gom xe') : t('booking.stepWaiting', 'Chờ')}
-              </div>
-            </div>
-
-            <div className={`min-w-0 break-words leading-snug rounded-md p-2 border transition-all ${
-              activeStep > 4
-                ? 'border-[#2D5A3F]/40 bg-[#E8F2EB] text-[#2D5A3F]'
-                : activeStep === 4
-                ? 'border-[#181A17] bg-white shadow-sm font-bold text-[#181A17]'
-                : 'border-[#D8CEBE] bg-white/70 text-[#5B6779]'
-            }`}>
-              <div className="font-semibold">{t('booking.step4Label', '4. Thanh toán')}</div>
-              <div className="mt-0.5 text-[10px] opacity-80">{t('booking.step4Timing', 'Trước 24h')}</div>
-              <div className="mt-1 font-medium text-[10px]">
-                {activeStep > 4 ? t('booking.stepDonePaid', '✓ Đã thanh toán') : activeStep === 4 ? t('booking.stepScanSepay', '● Quét SePay') : t('booking.stepWaiting', 'Chờ')}
-              </div>
-            </div>
-
-            <div className={`min-w-0 break-words leading-snug rounded-md p-2 border transition-all ${compact ? 'col-span-2 sm:col-span-1' : 'col-span-2 md:col-span-1'} ${
-              activeStep === 5
-                ? 'border-[#2D5A3F] bg-[#E8F2EB] font-bold text-[#2D5A3F]'
-                : 'border-[#D8CEBE] bg-white/70 text-[#5B6779]'
-            }`}>
-              <div className="font-semibold">{t('booking.step5Label', '5. Khởi hành')}</div>
-              <div className="mt-0.5 text-[10px] opacity-80">{t('booking.step5Timing', 'Ngày D')}</div>
-              <div className="mt-1 font-medium text-[10px]">
-                {activeStep === 5 ? t('booking.stepRunning', '● Đang chạy') : t('booking.stepWaiting', 'Chờ')}
-              </div>
-            </div>
-          </div>
-
-          {/* Contextual Status Guidance */}
-          <div className="mt-3 text-xs text-[#181A17]">
-            {activeStep === 1 && (
-              <p>{t('booking.guidanceStep1', '💡 Đơn hàng đã ghi nhận. Vui lòng hoàn tất nộp giấy tờ tiêm phòng và xét nghiệm máu của ngựa trước ngày khởi hành tối thiểu 5 ngày.')}</p>
-            )}
-            {activeStep === 2 && (
-              <p>{t('booking.guidanceStep2', '📋 Đơn hàng đã được duyệt sơ bộ. Chuyên viên đang hoàn thiện hồ sơ xin kiểm dịch thú y liên tỉnh.')}</p>
-            )}
-            {activeStep === 3 && (
-              <p>{t('booking.guidanceStep3', '🚚 Điều phối viên đang gom đơn ghép tuyến & sắp xếp ô chuồng. Lộ trình đón/trả và hóa đơn sẽ được xác nhận chậm nhất trước giờ chạy 72 giờ.')}</p>
-            )}
-            {activeStep === 4 && (
-              <p>{t('booking.guidanceStep4', '💳 Lộ trình đã được chốt thành công! Quý khách vui lòng quét mã QR SePay bên dưới để thanh toán và khóa slot chuồng trước giờ xuất phát.')}</p>
-            )}
-            {activeStep === 5 && (
-              <p>{t('booking.guidanceStep5', '🏁 Chuyến đi đã sẵn sàng hoặc đang lăn bánh đón/trả ngựa theo lộ trình multi-stop.')}</p>
-            )}
-          </div>
+      {departureDate && (
+        <div className="flex items-center gap-1.5 text-xs text-[#5B6779]">
+          <Clock className="h-3.5 w-3.5 text-[#A67C2E]" />
+          <span>{t('booking.expectedDeparture', 'Ngày đi dự kiến')}: <strong className="text-[#181A17]">{departureDate}</strong></span>
         </div>
       )}
     </div>
@@ -235,7 +129,7 @@ export function ManagerFreightSuggestionCard({
   currency = 'VND',
   onApplySuggestion,
 }: {
-  transportMode: 'road' | 'air';
+  transportMode: 'road' | 'air' | 'sea';
   bookingType?: BookingType;
   horseCount: number;
   distanceKm: number;
@@ -258,10 +152,11 @@ export function ManagerFreightSuggestionCard({
 
   const isCharter = suggestion.bookingType === 'dedicated_charter';
   const isAir = suggestion.transportMode === 'air';
+  const isSea = suggestion.transportMode === 'sea';
 
   const modeBadgeLabel = isEn
-    ? `${isAir ? 'Air Cargo' : 'Overland Road'} · ${isCharter ? 'Dedicated Charter' : 'Shared Stall'}`
-    : `${isAir ? 'Hàng không' : 'Đường bộ'} · ${isCharter ? 'Bao trọn chuyến' : 'Ghép ô chuồng'}`;
+    ? `${isSea ? 'Sea Freight' : isAir ? 'Air Cargo' : 'Overland Road'} · ${isCharter ? 'Dedicated Charter' : 'Shared Stall'}`
+    : `${isSea ? 'Đường thủy' : isAir ? 'Hàng không' : 'Đường bộ'} · ${isCharter ? 'Bao trọn chuyến' : 'Ghép ô chuồng'}`;
 
   const currentNumeric = Number(currentInput || 0);
   const targetInput = currency === 'USD' ? suggestion.suggestedInputUsd : suggestion.suggestedInputVnd;

@@ -22,13 +22,20 @@ export function NumberTicker({
   className = '',
 }: NumberTickerProps) {
   const numericTarget = typeof value === 'number' ? value : parseFloat(value) || 0;
-  const [displayValue, setDisplayValue] = useState<number>(0);
+  const [displayValue, setDisplayValue] = useState<number>(numericTarget);
+  const prevTargetRef = React.useRef<number>(numericTarget);
 
   useEffect(() => {
+    const startValue = prevTargetRef.current;
+    prevTargetRef.current = numericTarget;
+    if (startValue === numericTarget) {
+      setDisplayValue(numericTarget);
+      return;
+    }
+
     let startTime: number | null = null;
     let animationFrameId: number;
 
-    const startValue = 0;
     const change = numericTarget - startValue;
 
     const animate = (currentTime: number) => {

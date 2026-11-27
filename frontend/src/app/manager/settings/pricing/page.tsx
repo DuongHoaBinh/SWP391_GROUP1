@@ -62,13 +62,13 @@ const PRESET_SAMPLES = [
     },
   },
   {
-    id: 'rachgia_phuquoc',
-    name: 'Rạch Giá → Phú Quốc (Phà RoRo, 1 ngựa)',
+    id: 'hcm_sin_sea',
+    name: 'TP.HCM → Singapore (Tàu biển, 1 ngựa)',
     mode: 'sea' as const,
-    seaMode: 'ferry' as const,
+    seaMode: 'vessel' as const,
     sample: {
-      origin: { address: 'Rạch Giá, Kiên Giang', lat: 10.0125, lng: 105.0809, country: 'Vietnam' },
-      destination: { address: 'Phú Quốc, Kiên Giang', lat: 10.2289, lng: 103.9572, country: 'Vietnam' },
+      origin: { address: 'TP.HCM, Việt Nam', lat: 10.8231, lng: 106.6297, country: 'Vietnam' },
+      destination: { address: 'Singapore Turf Club, Singapore', lat: 1.4206, lng: 103.7619, country: 'Singapore' },
       horses: [{ quantity: 1, requiresPrivateStall: false }],
     },
   },
@@ -111,7 +111,6 @@ export default function PricingSettingsPage() {
 
   // Sea tariff state
   const [seaParams, setSeaParams] = useState({
-    ferry: { ticketPerVehicle: 3000000 },
     vessel: { baseFeePerHorse: 15000000, pricePerKmPerHorse: 8000 },
     roundingUnit: 1000,
   });
@@ -227,25 +226,19 @@ export default function PricingSettingsPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
-      {/* Title & Info */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[#181A17] flex items-center gap-2">
+      {/* Compact Title & Demo Pill */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <h1 className="text-2xl font-bold text-[#181A17] flex items-center gap-2 m-0">
             <Coins className="w-6 h-6 text-[#A67C2E]" />
-            {isEn ? 'Pricing Tariffs & Rate Versioning' : 'Cấu Hình Bảng Giá & Định Mức Cước'}
+            {isEn ? 'Pricing Tariffs' : 'Cấu Hình Bảng Giá'}
           </h1>
-          <p className="text-xs text-[#5B6779] mt-1">
-            {isEn
-              ? 'Manage immutable tariff versions for Road, Air & Sea transport. Existing quotes and shipments remain locked to their issued tariff.'
-              : 'Quản lý bảng giá có phiên bản cho đường Bộ, Hàng không và Thủy. Báo giá và đơn hàng cũ giữ nguyên giá đã khóa.'}
-          </p>
-        </div>
-
-        {/* Legal / Demo note */}
-        <div className="px-3.5 py-1.5 rounded-xl border border-amber-300 bg-amber-50 text-[11px] text-amber-900 font-medium">
-          {isEn
-            ? 'Demo Data: Rates must be audited against official commercial tariffs before production.'
-            : 'Dữ liệu demo: Biểu phí cần đối chiếu với định mức doanh nghiệp trước khi áp dụng thương mại.'}
+          <span
+            title={isEn ? 'Demo simulation tariffs — audit before production' : 'Dữ liệu biểu phí demo — cần đối chiếu trước khi dùng thật'}
+            className="px-2 py-0.5 rounded-full border border-amber-300 bg-amber-50 text-[10.5px] text-amber-900 font-bold"
+          >
+            Demo
+          </span>
         </div>
       </div>
 
@@ -282,7 +275,7 @@ export default function PricingSettingsPage() {
           }`}
         >
           <Ship className="w-4 h-4" />
-          {isEn ? 'Sea Freight (Ferry / Vessel)' : 'Đường Thủy (Phà / Tàu Biển)'}
+          {isEn ? 'Sea Freight (Vessel)' : 'Đường Thủy (Tàu Biển)'}
         </button>
       </div>
 
@@ -312,9 +305,14 @@ export default function PricingSettingsPage() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-xs font-bold text-[#181A17] block mb-1">
-                        {isEn ? 'Opening Fee (VND / vehicle)' : 'Phí mở chuyến (VNĐ / xe)'}
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-[#181A17]">
+                          {isEn ? 'Opening Fee (VND / vehicle)' : 'Phí mở chuyến (VNĐ / xe)'}
+                        </label>
+                        <span className="text-[11px] font-bold text-[#966516] tabular-nums">
+                          {Number(roadParams.openingFeePerVehicle || 0).toLocaleString('vi-VN')} ₫
+                        </span>
+                      </div>
                       <input
                         type="number"
                         value={roadParams.openingFeePerVehicle}
@@ -325,9 +323,14 @@ export default function PricingSettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-[#181A17] block mb-1">
-                        {isEn ? 'Care & Handling Fee (VND / horse)' : 'Phụ phí chăm sóc, bốc xếp (VNĐ / con)'}
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-[#181A17]">
+                          {isEn ? 'Care & Handling Fee (VND / horse)' : 'Phụ phí chăm sóc, bốc xếp (VNĐ / con)'}
+                        </label>
+                        <span className="text-[11px] font-bold text-[#966516] tabular-nums">
+                          {Number(roadParams.careFeePerHorse || 0).toLocaleString('vi-VN')} ₫
+                        </span>
+                      </div>
                       <input
                         type="number"
                         value={roadParams.careFeePerHorse}
@@ -338,9 +341,14 @@ export default function PricingSettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-[#181A17] block mb-1">
-                        {isEn ? 'Deadhead Fee (VND / km / vehicle)' : 'Phí chạy rỗng từ trạm (VNĐ / km / xe)'}
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-[#181A17]">
+                          {isEn ? 'Deadhead Fee (VND / km / vehicle)' : 'Phí chạy rỗng từ trạm (VNĐ / km / xe)'}
+                        </label>
+                        <span className="text-[11px] font-bold text-[#966516] tabular-nums">
+                          {Number(roadParams.deadheadPerKm || 0).toLocaleString('vi-VN')} ₫/km
+                        </span>
+                      </div>
                       <input
                         type="number"
                         value={roadParams.deadheadPerKm}
@@ -351,9 +359,14 @@ export default function PricingSettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-[#181A17] block mb-1">
-                        {isEn ? 'Border Crossing Fee (VND / border)' : 'Phí qua cửa khẩu đường bộ (VNĐ)'}
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-[#181A17]">
+                          {isEn ? 'Border Crossing Fee (VND / border)' : 'Phí qua cửa khẩu đường bộ (VNĐ)'}
+                        </label>
+                        <span className="text-[11px] font-bold text-[#966516] tabular-nums">
+                          {Number(roadParams.borderCrossingFee || 0).toLocaleString('vi-VN')} ₫
+                        </span>
+                      </div>
                       <input
                         type="number"
                         value={roadParams.borderCrossingFee}
@@ -511,29 +524,7 @@ export default function PricingSettingsPage() {
                 <div className="space-y-4">
                   <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] space-y-3">
                     <h3 className="text-xs font-bold text-[#181A17] uppercase">
-                      {isEn ? '1. RoRo Ferry (Horses on Truck)' : '1. Phà RoRo (Ngựa ở nguyên trên xe)'}
-                    </h3>
-                    <div>
-                      <label className="text-xs text-[#5B6779] block mb-1">
-                        {isEn ? 'Ferry Ticket (VND / vehicle)' : 'Giá vé phà qua eo/đảo (VNĐ / xe)'}
-                      </label>
-                      <input
-                        type="number"
-                        value={seaParams.ferry.ticketPerVehicle}
-                        onChange={(e) =>
-                          setSeaParams({
-                            ...seaParams,
-                            ferry: { ticketPerVehicle: Number(e.target.value) },
-                          })
-                        }
-                        className="w-full h-10 px-3 rounded-xl border border-[#D8CEBE] font-mono text-sm"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] space-y-3">
-                    <h3 className="text-xs font-bold text-[#181A17] uppercase">
-                      {isEn ? '2. Livestock Vessel (International Ship Pens)' : '2. Tàu Chở Gia Súc Quốc Tế (Ô chuồng)'}
+                      {isEn ? 'Dedicated Maritime Vessel (Ship Pens)' : 'Tàu Biển Chuyên Dụng (Ô chuồng)'}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>

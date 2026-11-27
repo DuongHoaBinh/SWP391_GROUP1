@@ -4,8 +4,8 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'EquiTransit Logistics - Hệ Thống Vận Tải Ngựa Đua Quốc Tế',
-  description: 'Hệ thống quản lý và điều phối vận chuyển ngựa đua xuyên quốc gia theo tiêu chuẩn IATA LAR và FEI / WOAH.',
+  title: 'EquiTransit Logistics — International Equine Transport',
+  description: 'Cross-border racehorse transport management & dispatch platform compliant with IATA LAR and FEI / WOAH standards.',
   icons: {
     icon: [
       { url: '/icon.png', type: 'image/png' },

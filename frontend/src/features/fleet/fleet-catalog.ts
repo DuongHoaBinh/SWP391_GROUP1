@@ -7,7 +7,7 @@ export interface VehicleClassOption {
   mode: TransportMode;
   nameVi: string;
   nameEn: string;
-  /** null = theo xe chở trên phà */
+  /** null = sức chứa không cố định */
   horseCapacity: number | null;
   priceCoefficient: number;
   isHeavyTruck: boolean;

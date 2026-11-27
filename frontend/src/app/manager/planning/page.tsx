@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { DispatchSectionTabs } from '@/components/layout/DispatchSectionTabs';
 import {
   routesApi,
   AirlineItem,
@@ -380,9 +381,13 @@ export default function ManagerPlanningPage() {
         'singapore',
         'australia',
         'japan',
+        'nhật bản',
         'hong kong',
+        'hồng kông',
         'malaysia',
         'thailand',
+        'thái lan',
+        'bangkok',
         'indonesia',
         'kalimantan',
         'borneo',
@@ -396,9 +401,16 @@ export default function ManagerPlanningPage() {
         'united states',
         'uk',
         'china',
+        'trung quốc',
         'korea',
+        'hàn quốc',
         'cambodia',
+        'campuchia',
+        'phnom penh',
+        'siem reap',
         'laos',
+        'lào',
+        'vientiane',
         'dubai',
         'uae',
         'qatar',
@@ -411,7 +423,7 @@ export default function ManagerPlanningPage() {
     if (isDomesticLoc(o) && isDomesticLoc(d)) return false;
 
     const tt = (order.transportType || '').toLowerCase();
-    if (tt.includes('domestic') || tt.includes('nội địa') || tt.includes('road') || tt.includes('đường bộ')) {
+    if (tt.includes('domestic') || tt.includes('nội địa')) {
       return false;
     }
     if (tt.includes('international') || tt.includes('quốc tế') || tt.includes('air')) {
@@ -1000,77 +1012,23 @@ export default function ManagerPlanningPage() {
     );
 
   return (
-    <div className="flex flex-col gap-6 pb-12">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[#181A17] m-0">
-            {t('manager.planning.pageTitle', 'Master Trip Planning & Dispatch Control')}
-          </h1>
-          <p className="text-sm text-[#5C6658] mt-1">
-            {t(
-              'manager.planning.pageSubtitle',
-              'Quy trình phê duyệt lộ trình đa phương thức, phân công nhân sự và kiểm soát cổng xuất phát.'
-            )}
-          </p>
-        </div>
+    <div className="flex flex-col gap-5 pb-12">
+      <DispatchSectionTabs />
+
+      {/* Compact Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-[#181A17] m-0">
+          {t('manager.planning.pageTitle', 'Kế Hoạch Chuyến Đi & Điều Phối')}
+        </h1>
         <button
           type="button"
           onClick={loadData}
           disabled={loading}
-          className="self-start sm:self-auto px-3.5 py-2 bg-white border border-[#D8CEBE] hover:bg-[#FAF8F4] text-[#242722] text-xs font-semibold rounded-lg shadow-sm inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+          className="self-start sm:self-auto px-3.5 py-2 bg-white border border-[#D8CEBE] hover:bg-[#FAF8F4] text-[#242722] text-xs font-semibold rounded-lg shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin text-[#A67C2E]' : 'text-[#5C6658]'} />
-          {t('manager.common.refresh', 'Làm mới')}
+          <span>{t('manager.common.refresh', 'Làm mới')}</span>
         </button>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white border border-[#D8CEBE] rounded-xl p-4 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-[#5C6658] uppercase tracking-wider m-0">
-              {t('manager.planning.kpiUnplanned', 'Chờ lập kế hoạch')}
-            </p>
-            <p className="text-2xl font-black text-[#A67C2E] mt-1 m-0">{needFrameworkCount}</p>
-            <p className="text-[11px] text-[#7E867B] mt-0.5 m-0">
-              {t('manager.planning.kpiUnplannedDesc', 'Cần thiết lập loại xe và định hướng chặng')}
-            </p>
-          </div>
-          <div className="w-10 h-10 rounded-lg bg-[#F8F0DF] text-[#966516] flex items-center justify-center shrink-0">
-            <Truck size={20} />
-          </div>
-        </div>
-
-        <div className="bg-white border border-[#D8CEBE] rounded-xl p-4 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-[#5C6658] uppercase tracking-wider m-0">
-              {t('manager.planning.kpiPendingReview', 'Chờ phê duyệt')}
-            </p>
-            <p className="text-2xl font-black text-[#181A17] mt-1 m-0">{pendingApprovalCount}</p>
-            <p className="text-[11px] text-[#7E867B] mt-0.5 m-0">
-              {t('manager.planning.kpiPendingReviewDesc', 'Coordinator đã hoàn thiện kế hoạch chi tiết')}
-            </p>
-          </div>
-          <div className="w-10 h-10 rounded-lg bg-[#FAF8F4] text-[#A67C2E] border border-[#EAE5DA] flex items-center justify-center shrink-0">
-            <Clock size={20} />
-          </div>
-        </div>
-
-        <div className="bg-white border border-[#D8CEBE] rounded-xl p-4 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-[#5C6658] uppercase tracking-wider m-0">
-              {t('manager.planning.kpiReadyToDepart', 'Đủ điều kiện xuất phát')}
-            </p>
-            <p className="text-2xl font-black text-[#287653] mt-1 m-0">{readyToDepartCount}</p>
-            <p className="text-[11px] text-[#7E867B] mt-0.5 m-0">
-              {t('manager.planning.kpiReadyToDepartDesc', 'Kế hoạch đã chốt & kiểm dịch hoàn tất')}
-            </p>
-          </div>
-          <div className="w-10 h-10 rounded-lg bg-[#E8F2EB] text-[#287653] flex items-center justify-center shrink-0">
-            <CheckCircle2 size={20} />
-          </div>
-        </div>
       </div>
 
       {/* Error Alert Banner */}
@@ -1097,7 +1055,7 @@ export default function ManagerPlanningPage() {
       <div className="bg-white rounded-xl border border-[#D8CEBE] shadow-sm overflow-hidden">
         {/* Table Filters */}
         <div className="p-4 border-b border-[#EAE5DA] flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#FAF9F5]">
-          <div role="tablist" aria-label={t('manager.planning.pageTitle', 'Bộ lọc kế hoạch')} className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
+          <div role="tablist" aria-label={t('manager.planning.pageTitle', 'Bộ lọc kế hoạch')} className="flex flex-wrap items-center gap-1.5">
             {tabOptions.map((tab) => (
               <button
                 key={tab.key}
@@ -1131,21 +1089,20 @@ export default function ManagerPlanningPage() {
 
         {/* Table Content */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse min-w-[980px]">
+          <table className="w-full text-left text-sm border-collapse">
             <thead>
-              <tr className="bg-[#FAF9F5] border-b border-[#D8CEBE] text-xs font-bold text-[#5C6658] uppercase tracking-wider">
-                <th className="p-4">{t('manager.planning.colOrder', 'Đơn vận chuyển')}</th>
-                <th className="p-4">{t('manager.planning.colRoute', 'Hành trình & Loại chuyến')}</th>
-                <th className="p-4">{t('manager.planning.colFramework', 'Kế hoạch chiến lược')}</th>
-                <th className="p-4">{t('manager.planning.colStatus', 'Trạng thái lộ trình')}</th>
-                <th className="p-4">{t('manager.planning.colGate', 'Điều kiện xuất phát')}</th>
-                <th className="p-4 text-right">{t('manager.planning.colActions', 'Thao tác')}</th>
+              <tr className="bg-[#FAF9F5] border-b border-[#D8CEBE] text-[11px] font-bold text-[#5C6658] uppercase tracking-wider">
+                <th className="py-3 px-3 whitespace-nowrap">{t('manager.planning.colOrder', 'Đơn vận chuyển')}</th>
+                <th className="py-3 px-3 whitespace-nowrap">{t('manager.planning.colRoute', 'Hành trình')}</th>
+                <th className="py-3 px-3 whitespace-nowrap">{t('manager.planning.colFramework', 'Khung chiến lược')}</th>
+                <th className="py-3 px-3 whitespace-nowrap">{isEn ? 'Status & Gate' : 'Trạng thái & Cổng'}</th>
+                <th className="py-3 px-3 text-right whitespace-nowrap">{t('manager.planning.colActions', 'Thao tác')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F0EEE8]">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center text-[#5C6658] font-medium">
+                  <td colSpan={5} className="p-12 text-center text-[#5C6658] font-medium">
                     <Loader2 size={24} className="animate-spin text-[#A67C2E] mx-auto mb-2" />
                     {t('manager.planning.loadingTrips', 'Đang tải dữ liệu kế hoạch chuyến đi...')}
                   </td>
@@ -1159,14 +1116,14 @@ export default function ManagerPlanningPage() {
                   return (
                     <tr key={order.id} className="hover:bg-[#FAF9F5] transition-colors">
                       {/* Code & Horse */}
-                      <td className="p-4 align-middle">
+                      <td className="py-3 px-3 align-middle whitespace-nowrap">
                         <span className="font-bold text-[#A67C2E] text-xs">{order.requestCode}</span>
                         {order.customerRequestCode && order.customerRequestCode !== order.requestCode && (
                           <span className="text-[10px] text-[#7E867B] block font-normal">
                             ({t('manager.planning.customerCode', 'Mã khách: {code}', { code: order.customerRequestCode })})
                           </span>
                         )}
-                        <p className="text-xs text-[#181A17] font-semibold m-0 mt-0.5">
+                        <p className="text-xs text-[#181A17] font-semibold m-0 mt-0.5 max-w-[155px] truncate" title={order.customerName || ''}>
                           {order.customerName || (isEn ? 'Customer' : 'Khách hàng')}
                         </p>
                         <p className="text-[11px] text-[#7E867B] m-0">
@@ -1175,13 +1132,13 @@ export default function ManagerPlanningPage() {
                       </td>
 
                       {/* Route Corridor */}
-                      <td className="p-4 align-middle">
-                        <div className="flex items-center gap-2 text-xs font-semibold text-[#181A17] leading-normal">
-                          <span className="truncate max-w-[140px]" title={order.originLocation}>
+                      <td className="py-3 px-3 align-middle max-w-[260px]">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#181A17] leading-normal">
+                          <span className="truncate max-w-[115px]" title={order.originLocation}>
                             {order.originLocation}
                           </span>
-                          <span className="text-[#7E867B] font-bold shrink-0 text-sm">→</span>
-                          <span className="truncate max-w-[140px] text-[#181A17]" title={order.destinationLocation}>
+                          <span className="text-[#7E867B] font-bold shrink-0">→</span>
+                          <span className="truncate max-w-[115px] text-[#181A17]" title={order.destinationLocation}>
                             {order.destinationLocation}
                           </span>
                         </div>
@@ -1196,7 +1153,7 @@ export default function ManagerPlanningPage() {
                           );
                           return (
                             <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold mt-1.5 ${
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold mt-1.5 whitespace-nowrap ${
                                 isIntl
                                   ? 'bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE]'
                                   : isAir
@@ -1206,120 +1163,125 @@ export default function ManagerPlanningPage() {
                             >
                               {isIntl || isAir ? <Plane size={10} /> : <Truck size={10} />}
                               {isIntl
-                                ? t('manager.planning.intlMultimodal', 'Vận chuyển Quốc tế')
+                                ? t('manager.planning.intlMultimodal', 'Quốc tế')
                                 : isAir
-                                ? t('manager.planning.domesticAir', 'Nội địa (Hàng không)')
-                                : t('manager.planning.domesticRoad', 'Vận chuyển Nội địa')}
+                                ? t('manager.planning.domesticAir', 'Nội địa (Bay)')
+                                : t('manager.planning.domesticRoad', 'Nội địa (Đường bộ)')}
                             </span>
                           );
                         })()}
                       </td>
 
                       {/* Strategic Framework */}
-                      <td className="p-4 align-middle">
+                      <td className="py-3 px-3 align-middle max-w-[200px]">
                         {plan?.managerVehicleType ? (
                           <div className="text-xs">
-                            <p className="font-semibold text-[#181A17] m-0">
+                            <p className="font-semibold text-[#181A17] m-0 line-clamp-2" title={translateVehicleType(plan.managerVehicleType)}>
                               {translateVehicleType(plan.managerVehicleType)}
                             </p>
                             {plan.managerAirlineName && isIntl && (
-                              <p className="text-[11px] text-[#A67C2E] font-medium m-0 flex items-center gap-1 mt-0.5">
-                                <Plane size={11} /> {plan.managerAirlineName} ({plan.managerDepartureAirportCode} →{' '}
-                                {plan.managerArrivalAirportCode})
+                              <p className="text-[11px] text-[#A67C2E] font-medium m-0 flex items-center gap-1 mt-0.5 whitespace-nowrap">
+                                <Plane size={11} className="shrink-0" />
+                                <span className="truncate">
+                                  {plan.managerAirlineName} ({plan.managerDepartureAirportCode} → {plan.managerArrivalAirportCode})
+                                </span>
                               </p>
                             )}
-                            <p className="text-[10px] text-[#5C6658] m-0 mt-0.5">
-                              {t('manager.planning.assignedTo', 'Phụ trách: {name}', {
-                                name: plan.assignedCoordinatorName || t('manager.planning.unassigned', 'Chưa chỉ định'),
-                              })}
-                            </p>
+                            {plan.assignedCoordinatorName && (
+                              <p className="text-[10.5px] text-[#5C6658] m-0 mt-0.5 truncate">
+                                {plan.assignedCoordinatorName}
+                              </p>
+                            )}
                           </div>
                         ) : (
-                          <span className="text-xs text-[#966516] font-semibold italic bg-[#F8F0DF] px-2.5 py-1 rounded border border-[#DFCA9A] inline-block">
-                            {t('manager.planning.unplannedNotice', 'Chưa thiết lập kế hoạch')}
+                          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[#966516] font-semibold bg-[#F8F0DF] px-2.5 py-1 rounded-full border border-[#DFCA9A] whitespace-nowrap">
+                            <Clock size={11} className="shrink-0" />
+                            <span>{isEn ? 'Not configured' : 'Chưa lập khung'}</span>
                           </span>
                         )}
                       </td>
 
-                      {/* Plan Status */}
-                      <td className="p-4 align-middle">
-                        {planStatus === 'in_transit' || order.status === 'in_transit' ? (
-                          <span className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#FAF8F4] text-[#A67C2E] border border-[#C4B38E]">
-                            <Truck size={12} className="text-[#A67C2E] animate-pulse" />{' '}
-                            {t('manager.planning.statusInTransit', 'Đang di chuyển')}
-                          </span>
-                        ) : planStatus === 'completed' || order.status === 'completed' ? (
-                          <span className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#F0EEE8] text-[#242722] border border-[#D8CEBE]">
-                            <CheckCircle2 size={12} className="text-[#287653]" />{' '}
-                            {t('manager.planning.statusCompleted', 'Đã hoàn thành')}
-                          </span>
-                        ) : planStatus === 'draft' ? (
-                          <span className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A]">
-                            <Clock size={12} /> {t('manager.planning.statusDraft', 'Bản nháp')}
-                          </span>
-                        ) : planStatus === 'pending_approval' ? (
-                          <span className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#FAF8F4] text-[#181A17] border border-[#B49A68] animate-pulse">
-                            <Clock size={12} className="text-[#A67C2E]" />{' '}
-                            {t('manager.planning.statusPendingApproval', 'Chờ phê duyệt')}
-                          </span>
-                        ) : planStatus === 'approved' ? (
-                          <span className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE]">
-                            <Check size={12} className="text-[#287653]" />{' '}
-                            {t('manager.planning.statusApproved', 'Đã duyệt')}
-                          </span>
-                        ) : planStatus === 'confirmed' ? (
-                          <span className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]">
-                            <CheckCircle2 size={12} /> {t('manager.planning.statusConfirmed', 'Đã nhận chuyến')}
-                          </span>
-                        ) : planStatus === 'ready_to_depart' ? (
-                          <span className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#287653] text-white shadow-sm">
-                            <CheckCircle2 size={12} /> {t('manager.planning.statusReadyToDepart', 'Sẵn sàng xuất phát')}
-                          </span>
-                        ) : null}
-                      </td>
+                      {/* Plan Status & Departure Gate (Merged cleanly) */}
+                      <td className="py-3 px-3 align-middle whitespace-nowrap">
+                        <div className="flex flex-col items-start gap-1.5">
+                          {planStatus === 'in_transit' || order.status === 'in_transit' ? (
+                            <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#FAF8F4] text-[#A67C2E] border border-[#C4B38E]">
+                              <Truck size={11} className="text-[#A67C2E] animate-pulse shrink-0" />
+                              {t('manager.planning.statusInTransit', 'Đang di chuyển')}
+                            </span>
+                          ) : planStatus === 'completed' || order.status === 'completed' ? (
+                            <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]">
+                              <CheckCircle2 size={11} className="shrink-0" />
+                              {t('manager.planning.statusCompleted', 'Đã hoàn thành')}
+                            </span>
+                          ) : planStatus === 'draft' ? (
+                            <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A]">
+                              <Clock size={11} className="shrink-0" />
+                              {t('manager.planning.statusDraft', 'Bản nháp')}
+                            </span>
+                          ) : planStatus === 'pending_approval' ? (
+                            <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#FAF8F4] text-[#181A17] border border-[#B49A68] animate-pulse">
+                              <Clock size={11} className="text-[#A67C2E] shrink-0" />
+                              {t('manager.planning.statusPendingApproval', 'Chờ xác nhận')}
+                            </span>
+                          ) : planStatus === 'approved' ? (
+                            <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE]">
+                              <Check size={11} className="text-[#287653] shrink-0" />
+                              {t('manager.planning.statusApproved', 'Đã duyệt')}
+                            </span>
+                          ) : planStatus === 'confirmed' ? (
+                            <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]">
+                              <CheckCircle2 size={11} className="shrink-0" />
+                              {t('manager.planning.statusConfirmed', 'Đã nhận chuyến')}
+                            </span>
+                          ) : planStatus === 'ready_to_depart' ? (
+                            <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#287653] text-white shadow-sm">
+                              <CheckCircle2 size={11} className="shrink-0" />
+                              {t('manager.planning.statusReadyToDepart', 'Sẵn sàng xuất phát')}
+                            </span>
+                          ) : null}
 
-                      {/* Gate Readiness */}
-                      <td className="p-4 align-middle">
-                        {order.status === 'in_transit' || planStatus === 'in_transit' ? (
-                          <span className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#FAF8F4] text-[#A67C2E] border border-[#C4B38E]">
-                            <CheckCircle2 size={13} /> {t('manager.planning.gateDeparted', 'Đã xuất phát cổng')}
-                          </span>
-                        ) : order.status === 'completed' || planStatus === 'completed' ? (
-                          <span className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#F0EEE8] text-[#242722] border border-[#D8CEBE]">
-                            <CheckCircle2 size={13} className="text-[#287653]" />{' '}
-                            {t('manager.planning.gateArrived', 'Đã cập bến đích')}
-                          </span>
-                        ) : order.readiness?.isReadyToDepart ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCurrentReadiness(order.readiness || null);
-                              setIsReadinessModalOpen(true);
-                            }}
-                            className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4] hover:bg-[#d7eadc] transition-colors shadow-sm cursor-pointer"
-                          >
-                            <ShieldCheck size={13} /> {t('manager.planning.gateReady', '100% Đủ điều kiện')}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCurrentReadiness(order.readiness || null);
-                              setIsReadinessModalOpen(true);
-                            }}
-                            className="inline-flex items-center px-3 py-1.5 whitespace-nowrap gap-1.5 rounded-md text-xs font-bold bg-[#FAF9F5] text-[#242722] hover:bg-[#F0EEE8] border border-[#D8CEBE] transition-colors cursor-pointer"
-                          >
-                            <AlertCircle size={12} className="text-[#A67C2E]" />
-                            {t('manager.planning.gatePending', 'Đang chờ ({count} điều kiện)', {
-                              count: order.readiness?.pendingConditions?.length || 1,
-                            })}
-                          </button>
-                        )}
+                          {order.status === 'in_transit' || planStatus === 'in_transit' ? (
+                            <span className="text-[11px] text-[#7A591C] font-semibold pl-1">
+                              • {t('manager.planning.gateDeparted', 'Đã xuất phát cổng')}
+                            </span>
+                          ) : order.status === 'completed' || planStatus === 'completed' ? (
+                            <span className="text-[11px] text-[#287653] font-semibold pl-1">
+                              • {t('manager.planning.gateArrived', 'Đã cập bến đích')}
+                            </span>
+                          ) : order.readiness?.isReadyToDepart ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCurrentReadiness(order.readiness || null);
+                                setIsReadinessModalOpen(true);
+                              }}
+                              className="inline-flex items-center px-2 py-0.5 whitespace-nowrap gap-1 rounded text-[10.5px] font-bold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4] hover:bg-[#d7eadc] transition-colors cursor-pointer"
+                            >
+                              <ShieldCheck size={11} className="shrink-0" />
+                              {t('manager.planning.gateReady', '100% Đủ điều kiện')}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCurrentReadiness(order.readiness || null);
+                                setIsReadinessModalOpen(true);
+                              }}
+                              className="inline-flex items-center px-2 py-0.5 whitespace-nowrap gap-1 rounded text-[10.5px] font-semibold bg-[#FAF9F5] text-[#5C6658] hover:text-[#181A17] hover:bg-[#F0EEE8] border border-[#D8CEBE] transition-colors cursor-pointer"
+                            >
+                              <AlertCircle size={11} className="text-[#A67C2E] shrink-0" />
+                              {t('manager.planning.gatePending', 'Chờ {count} điều kiện', {
+                                count: order.readiness?.pendingConditions?.length || 1,
+                              })}
+                            </button>
+                          )}
+                        </div>
                       </td>
 
                       {/* Actions */}
-                      <td className="p-4 align-middle text-right">
-                        <div className="flex flex-wrap items-center justify-end gap-2">
+                      <td className="py-3 px-3 align-middle text-right whitespace-nowrap">
+                        <div className="inline-flex items-center justify-end gap-1.5">
                           {/* Strategic Plan Button */}
                           {(() => {
                             const isCompleted = order.status === 'completed' || planStatus === 'completed';
@@ -1339,7 +1301,7 @@ export default function ManagerPlanningPage() {
                               <button
                                 type="button"
                                 onClick={() => router.push(`/manager/dispatch/routes?shipmentId=${order.id}`)}
-                                className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer border ${
+                                className={`px-2.5 py-1.5 text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer border ${
                                   hasActiveIncident
                                     ? 'bg-rose-100 hover:bg-rose-200 text-[#B33E3E] border-rose-300 animate-pulse'
                                     : plan?.managerVehicleType
@@ -1357,15 +1319,17 @@ export default function ManagerPlanningPage() {
                                 }
                               >
                                 {hasActiveIncident ? (
-                                  <AlertCircle size={13} className="text-[#B33E3E]" />
+                                  <AlertCircle size={13} className="text-[#B33E3E] shrink-0" />
                                 ) : (
-                                  <Truck size={13} />
+                                  <Truck size={13} className="shrink-0" />
                                 )}
-                                {hasActiveIncident
-                                  ? t('manager.planning.btnEditFrameworkIncident', 'Điều chỉnh do sự cố')
-                                  : isEn
-                                  ? 'Plan Route'
-                                  : 'Lập kế hoạch'}
+                                <span>
+                                  {hasActiveIncident
+                                    ? t('manager.planning.btnEditFrameworkIncident', 'Sửa do sự cố')
+                                    : isEn
+                                    ? 'Plan Route'
+                                    : 'Lập kế hoạch'}
+                                </span>
                               </button>
                             );
                           })()}
@@ -1375,15 +1339,15 @@ export default function ManagerPlanningPage() {
                             <button
                               type="button"
                               onClick={() => handleOpenReviewModal(order)}
-                              className="px-3 py-1.5 bg-[#FAF9F5] hover:bg-[#F0EEE8] text-[#242722] text-xs font-semibold rounded-lg border border-[#D8CEBE] shadow-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                              className="px-2.5 py-1.5 bg-[#FAF9F5] hover:bg-[#F0EEE8] text-[#242722] text-xs font-semibold rounded-lg border border-[#D8CEBE] shadow-sm transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
                               title={
                                 isEn
                                   ? 'Trip safely arrived at destination - Click to view route details'
                                   : 'Chuyến đi đã cập bến đích an toàn - Bấm để xem chi tiết lộ trình'
                               }
                             >
-                              <Eye size={13} className="text-[#5C6658]" />{' '}
-                              {t('manager.planning.btnViewRoute', 'Xem lộ trình')}
+                              <Eye size={13} className="text-[#5C6658] shrink-0" />
+                              <span>{t('manager.planning.btnViewRoute', 'Xem lộ trình')}</span>
                             </button>
                           )}
 
@@ -1392,7 +1356,7 @@ export default function ManagerPlanningPage() {
                             <button
                               type="button"
                               onClick={() => handleOpenReviewModal(order)}
-                              className={`px-3 py-1.5 text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer border-0 ${
+                              className={`px-2.5 py-1.5 text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer border-0 ${
                                 Boolean(plan?.activeIncident)
                                   ? 'bg-[#B33E3E] hover:bg-[#963232] animate-pulse'
                                   : 'bg-[#287653] hover:bg-[#1f5e42]'
@@ -1403,10 +1367,12 @@ export default function ManagerPlanningPage() {
                                   : 'Xem chi tiết các chặng và phê duyệt kế hoạch'
                               }
                             >
-                              <Eye size={13} />
-                              {Boolean(plan?.activeIncident)
-                                ? t('manager.planning.btnReviewPlanIncident', 'Duyệt điều chỉnh sự cố')
-                                : t('manager.planning.btnReviewPlan', 'Duyệt kế hoạch')}
+                              <Eye size={13} className="shrink-0" />
+                              <span>
+                                {Boolean(plan?.activeIncident)
+                                  ? t('manager.planning.btnReviewPlanIncident', 'Duyệt sự cố')
+                                  : t('manager.planning.btnReviewPlan', 'Duyệt kế hoạch')}
+                              </span>
                             </button>
                           )}
 
@@ -1425,15 +1391,15 @@ export default function ManagerPlanningPage() {
                                   <button
                                     type="button"
                                     onClick={() => handleOpenAssignModal(order)}
-                                    className="px-3 py-1.5 bg-[#242722] hover:bg-[#181A17] text-[#FAF8F4] text-xs font-bold rounded-lg border border-[#B49A68] shadow-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                                    className="px-2.5 py-1.5 bg-[#242722] hover:bg-[#181A17] text-[#FAF8F4] text-xs font-bold rounded-lg border border-[#B49A68] shadow-sm transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
                                     title={
                                       isEn
                                         ? 'View crew assigned to active trip'
                                         : 'Xem nhân sự đang phụ trách chuyến đi'
                                     }
                                   >
-                                    <UserCheck size={13} className="text-[#B49A68]" />{' '}
-                                    {t('manager.planning.btnViewCrew', 'Xem nhân sự')}
+                                    <UserCheck size={13} className="text-[#B49A68] shrink-0" />
+                                    <span>{t('manager.planning.btnViewCrew', 'Xem nhân sự')}</span>
                                   </button>
                                 );
                               }
@@ -1446,15 +1412,15 @@ export default function ManagerPlanningPage() {
                                   <button
                                     type="button"
                                     onClick={() => handleOpenAssignModal(order)}
-                                    className="px-3 py-1.5 bg-[#287653] hover:bg-[#1f5e42] text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer border-0"
+                                    className="px-2.5 py-1.5 bg-[#287653] hover:bg-[#1f5e42] text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer border-0"
                                     title={
                                       isEn
                                         ? 'Crew assigned and 100% departure ready - Click to view or update crew'
                                         : 'Đã phân công đầy đủ nhân sự và đạt 100% điều kiện xuất phát - Bấm để xem hoặc cập nhật nhân sự'
                                     }
                                   >
-                                    <CheckCircle2 size={13} />{' '}
-                                    {t('manager.planning.btnCrewAssigned', 'Phân công thành công')}
+                                    <CheckCircle2 size={13} className="shrink-0" />
+                                    <span>{t('manager.planning.btnCrewAssigned', 'Đã phân công')}</span>
                                   </button>
                                 );
                               }
@@ -1463,15 +1429,15 @@ export default function ManagerPlanningPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleOpenAssignModal(order)}
-                                  className="px-3 py-1.5 bg-[#181A17] hover:bg-[#242722] text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 cursor-pointer border-0"
+                                  className="px-2.5 py-1.5 bg-[#181A17] hover:bg-[#242722] text-white text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer border-0"
                                   title={
                                     isEn
                                       ? 'Assign driver and escort veterinarian'
                                       : 'Phân công tài xế và bác sĩ hộ tống'
                                   }
                                 >
-                                  <UserCheck size={13} />{' '}
-                                  {t('manager.planning.btnAssignCrew', 'Phân công nhân sự')}
+                                  <UserCheck size={13} className="shrink-0" />
+                                  <span>{t('manager.planning.btnAssignCrew', 'Phân công')}</span>
                                 </button>
                               );
                             })()}
@@ -1482,7 +1448,7 @@ export default function ManagerPlanningPage() {
                 })
               ) : (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center text-[#5C6658] font-medium">
+                  <td colSpan={5} className="p-12 text-center text-[#5C6658] font-medium">
                     {t('manager.planning.noOrdersFound', 'Không tìm thấy chuyến đi nào phù hợp với bộ lọc.')}
                   </td>
                 </tr>
@@ -1971,10 +1937,22 @@ export default function ManagerPlanningPage() {
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#F3EFE4] text-[#181A17]">
                             {leg.legType === 'flight'
                               ? t('manager.planning.legFlight', 'HÀNG KHÔNG')
-                              : t('manager.planning.legRoad', 'ĐƯỜNG BỘ')}
+                              : (leg.legType as string) === 'sea'
+                                ? t('manager.planning.legSea', isEn ? 'SEA FREIGHT' : 'ĐƯỜNG THỦY')
+                                : t('manager.planning.legRoad', 'ĐƯỜNG BỘ')}
                           </span>
                         </div>
-                        {leg.legType === 'road' ? (
+                        {(leg.legType as string) === 'sea' ? (
+                          <p className="text-[11px] text-[#0E7490] m-0 font-medium">
+                            {isEn ? 'Dedicated Equine Vessel' : 'Tàu biển chuyên dụng'}:{' '}
+                            <strong>{leg.originLocation} → {leg.destinationLocation}</strong> •{' '}
+                            {t(
+                              'manager.planning.estDistanceDuration',
+                              `Dự kiến: ${leg.distanceKm || 0} km (~${leg.durationHours || 0}h)`,
+                              { distance: leg.distanceKm || 0, hours: leg.durationHours || 0 }
+                            )}
+                          </p>
+                        ) : leg.legType === 'road' ? (
                           <p className="text-[11px] text-[#5C6658] m-0">
                             {t('manager.planning.vehicleLabel', 'Phương tiện:')}{' '}
                             {leg.vehiclePlate?.includes('đến đón') ||
@@ -2344,16 +2322,16 @@ export default function ManagerPlanningPage() {
                         )}
                   </option>
                   {(() => {
-                    const freeDrivers = availableDrivers.filter((d) => {
-                      const isDriverRole =
-                        d.specialization === 'driver' ||
-                        (!d.specialization &&
-                          !d.fullName?.toLowerCase().includes('thú y') &&
-                          !d.email?.includes('escort'));
-                      if (!isDriverRole) return false;
-                      const isCurrentDriver = String(d.id) === selectedDriverId;
-                      return Number(d.activeTrips || 0) === 0 || isCurrentDriver;
-                    });
+                    const freeDrivers = availableDrivers
+                      .filter((d) => {
+                        const isDriverRole =
+                          d.specialization === 'driver' ||
+                          (!d.specialization &&
+                            !d.fullName?.toLowerCase().includes('thú y') &&
+                            !d.email?.includes('escort'));
+                        return isDriverRole;
+                      })
+                      .sort((a, b) => Number(a.activeTrips || 0) - Number(b.activeTrips || 0));
 
                     if (freeDrivers.length === 0) {
                       return (

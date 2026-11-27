@@ -12,6 +12,7 @@ import {
 } from '../insurance-policy';
 import { AlertCircle, FileText, Loader2, ShieldAlert, Upload, X } from 'lucide-react';
 import { getAuthToken } from '@/lib/auth';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 export interface CustomerClaimModalProps {
   shipmentId: number;
@@ -36,6 +37,9 @@ export function CustomerClaimModal({
   onClaimCreated,
   payoutRules = DEFAULT_PAYOUT_RULES_V2,
 }: CustomerClaimModalProps) {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
+
   const [severity, setSeverity] = useState<Severity>('M1');
   const [description, setDescription] = useState('');
   const [vetCost, setVetCost] = useState<string>('');
@@ -64,12 +68,12 @@ export function CustomerClaimModal({
     if (e.target.files) {
       const selected = Array.from(e.target.files);
       if (files.length + selected.length > 10) {
-        setError('Tối đa 10 tệp bằng chứng.');
+        setError(isEn ? 'Maximum 10 evidence files allowed.' : 'Tối đa 10 tệp bằng chứng.');
         return;
       }
       for (const f of selected) {
         if (f.size > 10 * 1024 * 1024) {
-          setError(`Tệp ${f.name} vượt quá 10MB.`);
+          setError(isEn ? `File ${f.name} exceeds 10MB.` : `Tệp ${f.name} vượt quá 10MB.`);
           return;
         }
       }
@@ -87,12 +91,20 @@ export function CustomerClaimModal({
     if (submitting) return;
 
     if (!description.trim() || description.trim().length < 20) {
-      setError('Mô tả sự cố phải có ít nhất 20 ký tự để làm căn cứ thẩm định.');
+      setError(
+        isEn
+          ? 'Incident description must be at least 20 characters for claim review.'
+          : 'Mô tả sự cố phải có ít nhất 20 ký tự để làm căn cứ thẩm định.',
+      );
       return;
     }
 
     if (!currentRequested || currentRequested <= 0) {
-      setError('Số tiền yêu cầu bồi thường phải lớn hơn 0.');
+      setError(
+        isEn
+          ? 'Requested compensation amount must be greater than 0.'
+          : 'Số tiền yêu cầu bồi thường phải lớn hơn 0.',
+      );
       return;
     }
 
@@ -124,27 +136,50 @@ export function CustomerClaimModal({
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || `Yêu cầu thất bại (HTTP ${res.status})`);
+        throw new Error(
+          data.message || (isEn ? `Request failed (HTTP ${res.status})` : `Yêu cầu thất bại (HTTP ${res.status})`),
+        );
       }
 
       onClaimCreated();
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Không thể gửi yêu cầu bồi thường. Vui lòng thử lại.');
+      setError(
+        err.message ||
+          (isEn
+            ? 'Unable to submit claim. Please try again.'
+            : 'Không thể gửi yêu cầu bồi thường. Vui lòng thử lại.'),
+      );
       setSubmitting(false);
     }
   };
+
+  const pkgName =
+    insurancePackage === 'basic'
+      ? isEn
+        ? 'Basic'
+        : 'Cơ bản'
+      : insurancePackage === 'standard'
+        ? isEn
+          ? 'Standard'
+          : 'Tiêu chuẩn'
+        : isEn
+          ? 'Comprehensive'
+          : 'Toàn diện';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="max-w-2xl w-full bg-white rounded-2xl shadow-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center border-b border-[#E8E2D8] pb-3">
           <div className="flex items-center gap-2">
-            <ShieldAlert className="h-6 w-6 text-[#8C7A5B]" />
+            <ShieldAlert className="h-6 w-6 text-[#8C7A5B]" aria-hidden="true" />
             <div>
-              <h3 className="font-bold text-lg text-[#181A17]">Yêu cầu bồi thường bảo hiểm</h3>
-              <p className="text-xs text-[#5B6779]">
-                Ngựa: <strong>{horseName}</strong> · Giá trị khai báo:{' '}
+              <h3 className="font-bold text-lg text-[#181A17] m-0">
+                {isEn ? 'Submit Insurance Claim' : 'Yêu cầu bồi thường bảo hiểm'}
+              </h3>
+              <p className="text-xs text-[#5B6779] m-0 mt-0.5">
+                {isEn ? 'Horse:' : 'Ngựa:'} <strong>{horseName}</strong> ·{' '}
+                {isEn ? 'Declared Value:' : 'Giá trị khai báo:'}{' '}
                 <strong>{vnd(declaredValueVnd)}</strong>
               </p>
             </div>
@@ -152,6 +187,7 @@ export function CustomerClaimModal({
           <button
             type="button"
             onClick={onClose}
+            aria-label={isEn ? 'Close modal' : 'Đóng'}
             className="text-gray-400 hover:text-gray-600 rounded-lg p-1.5 transition-colors cursor-pointer"
           >
             <X className="h-5 w-5" />
@@ -159,10 +195,10 @@ export function CustomerClaimModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Mức độ sự cố */}
+          {/* Severity level */}
           <div>
             <label className="block text-xs font-bold text-[#181A17] uppercase tracking-wider mb-2">
-              1. Mức độ sự cố (M1 – M4)
+              {isEn ? '1. Incident Severity (M1 – M4)' : '1. Mức độ sự cố (M1 – M4)'}
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {(['M1', 'M2', 'M3', 'M4'] as const).map((sev) => {
@@ -201,15 +237,18 @@ export function CustomerClaimModal({
               })}
             </div>
             <div className="mt-2 text-[11px] text-[#8C7A5B] bg-[#FAF3E0] p-2 rounded border border-[#EAD8B1]">
-              📋 <strong>Bằng chứng cần cung cấp:</strong> {SEVERITY_DEFINITIONS[severity].requiredEvidenceVi}
+              📋 <strong>{isEn ? 'Required Evidence:' : 'Bằng chứng cần cung cấp:'}</strong>{' '}
+              {SEVERITY_DEFINITIONS[severity].requiredEvidenceVi}
             </div>
           </div>
 
-          {/* Chi phí thú y thực tế (nếu có) */}
+          {/* Actual Vet Cost */}
           {(severity === 'M1' || severity === 'M2') && (
             <div>
               <label className="block text-xs font-bold text-[#181A17] mb-1">
-                Chi phí thú y thực tế đã thanh toán (VNĐ)
+                {isEn
+                  ? 'Actual Veterinary Cost Paid (VND)'
+                  : 'Chi phí thú y thực tế đã thanh toán (VNĐ)'}
               </label>
               <input
                 type="number"
@@ -220,31 +259,37 @@ export function CustomerClaimModal({
                   setVetCost(e.target.value);
                   setRequestedAmount('');
                 }}
-                placeholder="Ví dụ: 3500000"
+                placeholder={isEn ? 'e.g. 3500000' : 'Ví dụ: 3500000'}
                 className="w-full rounded-lg border border-[#D8CEBE] bg-white px-3 py-2 text-sm text-[#181A17] focus:border-[#181A17] focus:outline-none"
               />
-              <p className="text-[11px] text-[#7D8A99] mt-1">
-                Gói {insurancePackage === 'basic' ? 'Cơ bản' : insurancePackage === 'standard' ? 'Tiêu chuẩn' : 'Toàn diện'}{' '}
-                đền bù theo chi phí thú y thực tế kèm hóa đơn, tối đa theo trần quy định.
+              <p className="text-[11px] text-[#7D8A99] mt-1 mb-0">
+                {isEn
+                  ? `${pkgName} package reimburses actual invoiced veterinary costs up to the policy ceiling.`
+                  : `Gói ${pkgName} đền bù theo chi phí thú y thực tế kèm hóa đơn, tối đa theo trần quy định.`}
               </p>
             </div>
           )}
 
-          {/* Hộp gợi ý số tiền bồi thường */}
+          {/* Suggested Payout Box */}
           <div className="rounded-xl border border-[#D8CEBE] bg-[#F4F1EA] p-3.5 space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-[#5B6779]">Số tiền hệ thống gợi ý theo quy định:</span>
-              <span className="text-base font-bold text-[#8C7A5B]">{vnd(displaySuggestedAmount)}</span>
+              <span className="text-xs font-medium text-[#5B6779]">
+                {isEn ? 'Policy-suggested payout:' : 'Số tiền hệ thống gợi ý theo quy định:'}
+              </span>
+              <span className="text-base font-bold text-[#8C7A5B]">
+                {vnd(displaySuggestedAmount)}
+              </span>
             </div>
-            <p className="text-[11px] text-[#7D8A99]">
-              Căn cứ: {suggestion.explanation} (Trần tối đa: {vnd(suggestion.maxAllowed)})
+            <p className="text-[11px] text-[#7D8A99] m-0">
+              {isEn ? 'Basis:' : 'Căn cứ:'} {suggestion.explanation} (
+              {isEn ? 'Max cap:' : 'Trần tối đa:'} {vnd(suggestion.maxAllowed)})
             </p>
           </div>
 
-          {/* Số tiền yêu cầu */}
+          {/* Requested Amount */}
           <div>
             <label className="block text-xs font-bold text-[#181A17] mb-1">
-              Số tiền yêu cầu bồi thường (VNĐ) *
+              {isEn ? 'Requested Claim Amount (VND) *' : 'Số tiền yêu cầu bồi thường (VNĐ) *'}
             </label>
             <input
               type="number"
@@ -256,10 +301,12 @@ export function CustomerClaimModal({
             />
           </div>
 
-          {/* Mô tả chi tiết */}
+          {/* Description */}
           <div>
             <label className="block text-xs font-bold text-[#181A17] mb-1">
-              Mô tả chi tiết sự cố và diễn biến sức khỏe * (Tối thiểu 20 ký tự)
+              {isEn
+                ? 'Incident & Health Description * (Min. 20 characters)'
+                : 'Mô tả chi tiết sự cố và diễn biến sức khỏe * (Tối thiểu 20 ký tự)'}
             </label>
             <textarea
               rows={3}
@@ -267,23 +314,29 @@ export function CustomerClaimModal({
               minLength={20}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Mô tả cụ thể triệu chứng, thời điểm phát hiện, tình trạng ngựa tại thời điểm bàn giao..."
+              placeholder={
+                isEn
+                  ? 'Describe symptoms, time of discovery, and horse condition at handover...'
+                  : 'Mô tả cụ thể triệu chứng, thời điểm phát hiện, tình trạng ngựa tại thời điểm bàn giao...'
+              }
               className="w-full rounded-lg border border-[#D8CEBE] bg-white p-2.5 text-xs text-[#181A17] focus:border-[#181A17] focus:outline-none"
             />
             <div className="text-right text-[10px] text-[#7D8A99]">
-              {description.trim().length} / 20 ký tự tối thiểu
+              {description.trim().length} / 20 {isEn ? 'min characters' : 'ký tự tối thiểu'}
             </div>
           </div>
 
-          {/* Tải lên tệp bằng chứng */}
+          {/* Evidence Files */}
           <div>
             <label className="block text-xs font-bold text-[#181A17] mb-1">
-              Tệp bằng chứng (Ảnh chụp, biên bản bàn giao, hóa đơn thú y)
+              {isEn
+                ? 'Supporting Evidence (Photos, Handover Report, Vet Invoices)'
+                : 'Tệp bằng chứng (Ảnh chụp, biên bản bàn giao, hóa đơn thú y)'}
             </label>
             <div className="border-2 border-dashed border-[#D8CEBE] rounded-lg p-3 text-center bg-[#FAF8F5]">
-              <Upload className="h-5 w-5 mx-auto text-[#7D8A99] mb-1" />
+              <Upload className="h-5 w-5 mx-auto text-[#7D8A99] mb-1" aria-hidden="true" />
               <label className="text-xs text-[#8C7A5B] font-semibold hover:underline cursor-pointer">
-                Chọn tệp đính kèm (Ảnh/PDF ≤ 10MB)
+                {isEn ? 'Choose attachments (Image/PDF ≤ 10MB)' : 'Chọn tệp đính kèm (Ảnh/PDF ≤ 10MB)'}
                 <input
                   type="file"
                   multiple
@@ -292,18 +345,20 @@ export function CustomerClaimModal({
                   className="hidden"
                 />
               </label>
-              <p className="text-[10px] text-[#7D8A99] mt-0.5">Tối đa 10 tệp. Được kiểm tra an toàn tệp.</p>
+              <p className="text-[10px] text-[#7D8A99] mt-0.5 mb-0">
+                {isEn ? 'Up to 10 files. Security-verified.' : 'Tối đa 10 tệp. Được kiểm tra an toàn tệp.'}
+              </p>
             </div>
 
             {files.length > 0 && (
               <div className="mt-2 space-y-1.5">
                 {files.map((file, idx) => (
                   <div
-                    key={idx}
+                    key={`${file.name}-${idx}`}
                     className="flex items-center justify-between text-xs bg-white p-2 rounded border border-[#E8E2D8]"
                   >
                     <span className="truncate max-w-[80%] flex items-center gap-1.5 text-[#181A17]">
-                      <FileText className="h-3.5 w-3.5 text-[#7D8A99]" />
+                      <FileText className="h-3.5 w-3.5 text-[#7D8A99]" aria-hidden="true" />
                       {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
                     </span>
                     <button
@@ -311,7 +366,7 @@ export function CustomerClaimModal({
                       onClick={() => removeFile(idx)}
                       className="text-red-500 hover:text-red-700 text-xs font-bold cursor-pointer"
                     >
-                      Xóa
+                      {isEn ? 'Remove' : 'Xóa'}
                     </button>
                   </div>
                 ))}
@@ -321,7 +376,7 @@ export function CustomerClaimModal({
 
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
               <span>{error}</span>
             </div>
           )}
@@ -333,15 +388,21 @@ export function CustomerClaimModal({
               onClick={onClose}
               className="px-4 py-2 rounded-lg border border-[#D8CEBE] text-xs font-medium text-[#181A17] hover:bg-[#F0EEE8] cursor-pointer"
             >
-              Hủy
+              {isEn ? 'Cancel' : 'Hủy'}
             </button>
             <button
               type="submit"
               disabled={submitting}
               className="px-5 py-2 rounded-lg bg-[#181A17] text-xs font-bold text-white hover:bg-[#242722] disabled:opacity-50 flex items-center gap-2 cursor-pointer"
             >
-              {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {submitting ? 'Đang gửi hồ sơ...' : 'Nộp yêu cầu bồi thường'}
+              {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+              {submitting
+                ? isEn
+                  ? 'Submitting...'
+                  : 'Đang gửi hồ sơ...'
+                : isEn
+                  ? 'Submit Claim'
+                  : 'Nộp yêu cầu bồi thường'}
             </button>
           </div>
         </form>

@@ -220,7 +220,7 @@ export default function RegisterPage() {
             marginBottom: '16px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }} className="lg:hidden">
+          <div className="flex lg:hidden items-center gap-2.5">
             <div
               style={{
                 width: '36px',
@@ -239,9 +239,6 @@ export default function RegisterPage() {
             </div>
             <div>
               <div style={{ fontSize: '17px', fontWeight: 800, color: '#F7F7F4', lineHeight: 1.1 }}>EquiTransit</div>
-              <div style={{ fontSize: '9px', fontWeight: 700, color: '#B49A68', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                EQUINE LOGISTICS
-              </div>
             </div>
           </div>
           <div className="hidden lg:block" />
@@ -262,26 +259,6 @@ export default function RegisterPage() {
         >
           {step === 'REGISTER' ? (
             <>
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '3px 10px',
-                  borderRadius: '9999px',
-                  backgroundColor: 'rgba(180, 154, 104, 0.14)',
-                  border: '1px solid rgba(180, 154, 104, 0.35)',
-                  color: '#B49A68',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  marginBottom: '12px',
-                }}
-              >
-                {t('auth.customerPortal', 'Tài khoản Chủ ngựa / Khách hàng')}
-              </div>
-
               <h1
                 style={{
                   fontSize: '28px',
@@ -289,20 +266,11 @@ export default function RegisterPage() {
                   color: '#F7F7F4',
                   letterSpacing: '-0.02em',
                   lineHeight: 1.2,
-                  marginBottom: '6px',
+                  marginBottom: '24px',
                 }}
               >
                 {t('auth.registerTitle', 'Tạo tài khoản')}
               </h1>
-              <p
-                style={{
-                  fontSize: '13.5px',
-                  color: '#CBD5E1',
-                  marginBottom: '24px',
-                }}
-              >
-                {t('auth.registerSubtitle', 'Bắt đầu quản lý hành trình vận chuyển ngựa đua quốc tế.')}
-              </p>
 
               {error && (
                 <div
@@ -753,20 +721,14 @@ export default function RegisterPage() {
             width: '100%',
             maxWidth: '430px',
             display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
+            justifyContent: 'center',
             alignItems: 'center',
-            gap: '8px',
             fontSize: '12px',
             color: '#94A3B8',
             marginTop: '24px',
           }}
         >
           <div>© 2026 EquiTransit Logistics Ltd.</div>
-          <div style={{ display: 'flex', gap: '16px' }}>
-            <span>{t('auth.privacy', 'Bảo mật')}</span>
-            <span>{t('auth.terms', 'Điều khoản')}</span>
-          </div>
         </div>
       </div>
     </div>

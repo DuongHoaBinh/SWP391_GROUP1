@@ -37,6 +37,11 @@ const STORAGE_KEY = 'equitransit_lang';
 // ─── STATUS DICTIONARY & NORMALIZER ──────────────────────────────────────────
 const STATUS_DATA: Record<string, { en: string; vi: string }> = {
   requested: { en: 'Pending Approval', vi: 'Chờ phê duyệt' },
+  awaiting_payment: { en: 'Awaiting Payment', vi: 'Chờ thanh toán' },
+  paid_pending_review: { en: 'Paid · Pending Review', vi: 'Đã thanh toán · Chờ duyệt' },
+  paid_pending_feasibility: { en: 'Paid · Pending Feasibility', vi: 'Đã thanh toán · Chờ duyệt khả thi' },
+  refund_requested: { en: 'Refund Requested', vi: 'Chờ hoàn tiền' },
+  refunded: { en: 'Refunded', vi: 'Đã hoàn tiền' },
   change_requested: { en: 'Change Requested', vi: 'Yêu cầu chỉnh sửa' },
   under_review: { en: 'Under Review', vi: 'Đang xem xét' },
   in_review: { en: 'Under Review', vi: 'Đang thẩm định' },
@@ -46,8 +51,10 @@ const STATUS_DATA: Record<string, { en: string; vi: string }> = {
   scheduled: { en: 'Scheduled', vi: 'Đã lên lịch' },
   ready_to_depart: { en: 'Ready to Depart', vi: 'Sẵn sàng xuất phát' },
   ready: { en: 'Ready to Depart', vi: 'Sẵn sàng xuất phát' },
-  confirmed: { en: 'Confirmed Plan', vi: 'Đã xác nhận nhận chuyến' },
+  confirmed: { en: 'Confirmed Plan', vi: 'Đã xác nhận chuyến' },
   in_transit: { en: 'In Transit', vi: 'Đang vận chuyển' },
+  return_pending: { en: 'Return Leg Pending', vi: 'Chờ chặng về' },
+  return_in_transit: { en: 'Return In Transit', vi: 'Đang chạy chặng về' },
   incident_reported: { en: 'Incident Reported', vi: 'Có sự cố phát sinh' },
   incident_hold: { en: 'Incident Hold', vi: 'Tạm dừng do sự cố' },
   delayed: { en: 'Delayed', vi: 'Bị trễ chuyến' },
@@ -55,6 +62,8 @@ const STATUS_DATA: Record<string, { en: string; vi: string }> = {
   delivered: { en: 'Delivered', vi: 'Đã giao ngựa' },
   completed: { en: 'Completed', vi: 'Hoàn tất' },
   cancelled: { en: 'Cancelled', vi: 'Đã hủy' },
+  cancelled_operational: { en: 'Cancelled (Operational)', vi: 'Đã hủy vận hành' },
+  payment_overdue: { en: 'Payment Overdue', vi: 'Quá hạn thanh toán' },
   draft: { en: 'Draft Plan', vi: 'Bản nháp' },
   submitted: { en: 'Submitted', vi: 'Đã nộp' },
   expired: { en: 'Expired', vi: 'Hết hạn' },
@@ -62,6 +71,7 @@ const STATUS_DATA: Record<string, { en: string; vi: string }> = {
   waiting_authority: { en: 'Awaiting Authority', vi: 'Chờ cơ quan thẩm quyền' },
   available: { en: 'Available', vi: 'Sẵn sàng' },
   in_use: { en: 'In Use', vi: 'Đang di chuyển' },
+  reserved: { en: 'Reserved', vi: 'Đang giữ chỗ' },
   maintenance: { en: 'Maintenance', vi: 'Bảo trì / Kiểm định' },
   open: { en: 'Open Incident', vi: 'Đang xử lý' },
   resolved: { en: 'Resolved', vi: 'Đã giải quyết' },
@@ -198,7 +208,7 @@ const GENDER_DATA: Record<string, { en: string; vi: string }> = {
   female: { en: 'Female', vi: 'Cái' },
   mare: { en: 'Female', vi: 'Cái' },
   other: { en: 'Other', vi: 'Khác' },
-  gelding: { en: 'Other', vi: 'Khác' },
+  gelding: { en: 'Gelding', vi: 'Thiến' },
 };
 
 // ─── INCIDENT TYPES & SEVERITIES ─────────────────────────────────────────────
@@ -527,7 +537,8 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (GENDER_DATA[lower]) return GENDER_DATA[lower][language];
       if (lower.includes('đực') || lower.includes('stallion') || lower === 'male') return GENDER_DATA.male[language];
       if (lower.includes('cái') || lower.includes('mare') || lower === 'female') return GENDER_DATA.female[language];
-      if (lower.includes('khác') || lower.includes('other') || lower.includes('thiến') || lower.includes('gelding')) return GENDER_DATA.other[language];
+      if (lower.includes('thiến') || lower.includes('gelding')) return GENDER_DATA.gelding[language];
+      if (lower.includes('khác') || lower.includes('other')) return GENDER_DATA.other[language];
       return gender;
     },
     [language]
@@ -908,8 +919,36 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 20. Notification Translator
   const translateNotification = useCallback(
     (title?: string | null, message?: string | null): { title: string; message: string; actionText?: string } => {
-      const rawTitle = (title || '').trim();
-      const rawMsg = (message || '').trim();
+      const sanitizeText = (text: string): string => {
+        if (!text) return '';
+        const isEn = language === 'en';
+        let out = text;
+        const replacements: Array<[RegExp, string, string]> = [
+          [/\bhealth_certificate\b/gi, 'Health Certificate', 'Giấy kiểm dịch y tế'],
+          [/\bhorse_passport\b/gi, 'FEI Horse Passport', 'Hộ chiếu ngựa FEI'],
+          [/\bimport_permit\b/gi, 'Import Permit', 'Giấy phép nhập khẩu'],
+          [/\bexport_permit\b/gi, 'Export Permit', 'Giấy phép xuất khẩu'],
+          [/\bcustoms_declaration\b/gi, 'Customs Declaration', 'Tờ khai hải quan'],
+          [/\bcoggins_test\b/gi, 'Coggins Test (EIA)', 'Xét nghiệm Coggins (EIA)'],
+          [/\bawaiting_payment\b/gi, 'Awaiting Payment', 'Chờ thanh toán'],
+          [/\bpaid_pending_review\b/gi, 'Pending Feasibility Review', 'Chờ duyệt khả thi'],
+          [/\brefund_requested\b/gi, 'Refund Requested', 'Chờ hoàn tiền'],
+          [/\bready_to_depart\b/gi, 'Ready to Depart', 'Sẵn sàng xuất phát'],
+          [/\bin_transit\b/gi, 'In Transit', 'Đang vận chuyển'],
+          [/Chuyên viên kiểm dịch/g, 'Logistics Manager', 'Quản lý vận hành'],
+          [/Quarantine Specialist/g, 'Logistics Manager', 'Quản lý vận hành'],
+        ];
+        for (const [rx, enVal, viVal] of replacements) {
+          out = out.replace(rx, isEn ? enVal : viVal);
+        }
+        if (!isEn) {
+          out = out.replace(/\b(20\d{2})-(\d{2})-(\d{2})\b/g, '$3/$2/$1');
+        }
+        return out;
+      };
+
+      const rawTitle = sanitizeText((title || '').trim());
+      const rawMsg = sanitizeText((message || '').trim());
       const full = (rawTitle + ' ' + rawMsg).toLowerCase();
 
       // Missing Document

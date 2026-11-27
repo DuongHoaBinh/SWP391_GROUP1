@@ -27,9 +27,10 @@ import { openAuthenticatedApiFile } from '@/lib/api-client';
 
 interface Props {
   mode: 'manager' | 'coordinator';
+  hideDisputes?: boolean;
 }
 
-export function IncidentChangeRequestsPanel({ mode }: Props) {
+export function IncidentChangeRequestsPanel({ mode, hideDisputes = false }: Props) {
   const { language } = useLanguage();
   const isEn = language === 'en';
 
@@ -260,7 +261,7 @@ export function IncidentChangeRequestsPanel({ mode }: Props) {
                       >
                         <option value="none">{isEn ? 'No extra cost' : 'Không phát sinh chi phí'}</option>
                         <option value="operating_cost">{isEn ? 'Operating Cost (Company)' : 'Hạch toán Chi phí Vận hành'}</option>
-                        <option value="emergency_vet_covered">{isEn ? 'Emergency Vet (Premium Ins.)' : 'Cấp cứu Thú y (Gói Premium)'}</option>
+                        <option value="emergency_vet_covered">{isEn ? 'Emergency Vet (Standard ≤20M / Premium)' : 'Cấp cứu Thú y (Tiêu chuẩn ≤20tr / Toàn diện)'}</option>
                         <option value="customer_addendum">{isEn ? 'Customer Addendum' : 'Phụ lục tính phí khách'}</option>
                       </select>
                     </div>
@@ -419,8 +420,8 @@ export function IncidentChangeRequestsPanel({ mode }: Props) {
         )}
       </div>
 
-      {/* Manager Flow 6 Disputed Handovers Queue */}
-      {mode === 'manager' && disputedHandovers.length > 0 && (
+      {/* Manager Flow 6 Disputed Handovers Queue (hidden when parent already renders Tab 3 Disputes) */}
+      {mode === 'manager' && !hideDisputes && disputedHandovers.length > 0 && (
         <div className="space-y-2.5 pt-3 border-t border-[#EAE5DA]">
           <h3 className="text-xs font-bold uppercase tracking-wider text-[#B33E3E] flex items-center gap-1.5 m-0">
             <ShieldAlert size={14} aria-hidden="true" />

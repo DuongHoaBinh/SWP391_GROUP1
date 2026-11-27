@@ -126,6 +126,9 @@ export class AllocationService {
 
   // --- Xe đã giữ chỗ của đơn ---
   async getShipmentReservations(user: AuthenticatedUser, shipmentId: number) {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem thông tin giữ chỗ / phân bổ đội xe của đơn hàng');
+    }
     const pool = this.store.getPool();
     const [rows] = await pool.execute<RowDataPacket[]>(
       'SELECT shipment_id, customer_id, allocation_option_code, allocation_snapshot, pickup_at, night_surcharge_applied FROM shipment WHERE shipment_id = ?',

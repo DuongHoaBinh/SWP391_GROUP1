@@ -21,6 +21,7 @@ export enum PlanStatus {
 export enum LegType {
   ROAD = 'road',
   FLIGHT = 'flight',
+  SEA = 'sea',
 }
 
 export enum RouteStopType {

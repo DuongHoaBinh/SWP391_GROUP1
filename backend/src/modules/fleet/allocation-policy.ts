@@ -227,7 +227,7 @@ export function jetStallCount(horses: StallHorse[]): number {
   return privateCount + Math.ceil(normal / 3);
 }
 
-/** Tàu gia súc: mỗi ngựa 1 ô chuồng. */
+/** Tàu gia súc: ngựa thường 1 ô chuồng, ngựa cần chuồng riêng chiếm 2 ô chuồng (không gian tách biệt). */
 export function vesselPenCount(horses: StallHorse[]): number {
-  return horses.reduce((s, h) => s + qtyOf(h), 0);
+  return horses.reduce((s, h) => s + qtyOf(h) * (h.requiresPrivateStall ? 2 : 1), 0);
 }

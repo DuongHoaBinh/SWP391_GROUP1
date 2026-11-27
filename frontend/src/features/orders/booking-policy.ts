@@ -41,7 +41,7 @@ export interface FreightSuggestionLineItem {
 }
 
 export interface ManagerFreightSuggestion {
-  transportMode: 'road' | 'air';
+  transportMode: 'road' | 'air' | 'sea';
   bookingType: BookingType;
   horseCount: number;
   distanceKm: number;
@@ -69,7 +69,7 @@ function roundTo100k(val: number): number {
 }
 
 function computeModeFreightCore(
-  transportMode: 'road' | 'air',
+  transportMode: 'road' | 'air' | 'sea',
   bookingType: BookingType,
   safeCount: number,
   safeKm: number,
@@ -196,6 +196,41 @@ function computeModeFreightCore(
     };
   }
 
+  if (transportMode === 'sea') {
+    const portTransferAndClearance = 8_000_000 + checkpoints * 2_000_000;
+    const vesselBasePerHorse = 15_000_000;
+    const vesselDistancePerHorse = roundTo100k(safeKm * 8_000);
+    const perHorseTotal = vesselBasePerHorse + vesselDistancePerHorse;
+    const totalFreightVnd = portTransferAndClearance + perHorseTotal * safeCount;
+    const operatingCostVnd = roundTo100k(totalFreightVnd * 0.70);
+    const unitVnd = bookingType === 'shared_stall' ? roundTo100k(totalFreightVnd / safeCount) : null;
+
+    return {
+      unitVnd,
+      totalFreightVnd,
+      operatingCostVnd,
+      capacityBlockLabelVi: `Tàu biển chuyên dụng (Dedicated Vessel) cho ${safeCount} ngựa + Xe thùng trung chuyển cảng & Bác sĩ thú y theo tàu`,
+      capacityBlockLabelEn: `Dedicated Equine Vessel for ${safeCount} horse(s) + Port transfer truck & On-board Vet Escort`,
+      breakdown: [
+        {
+          labelVi: `Xe thùng trung chuyển ra/vào cảng & Hải quan cảng biển (${checkpoints} trạm)`,
+          labelEn: `Port transfer trucks & maritime customs clearance (${checkpoints} gate(s))`,
+          amountVnd: portTransferAndClearance,
+        },
+        {
+          labelVi: `Phí ô chuồng cố định trên tàu biển (${safeCount} ngựa × 15.000.000 ₫)`,
+          labelEn: `Dedicated vessel equine pen fee (${safeCount} horse(s) × 15,000,000 VND)`,
+          amountVnd: vesselBasePerHorse * safeCount,
+        },
+        {
+          labelVi: `Cước hải trình tàu biển (${safeKm.toLocaleString('vi-VN')} km × 8.000 ₫/km × ${safeCount} ngựa)`,
+          labelEn: `Maritime voyage tariff (${safeKm.toLocaleString('en-US')} km × 8,000 VND/km × ${safeCount} horse(s))`,
+          amountVnd: vesselDistancePerHorse * safeCount,
+        },
+      ],
+    };
+  }
+
   // Air + Dedicated Charter
   const palletCount = Math.max(1, Math.ceil(safeCount / 3));
   const palletAndPrivateTruckBase = palletCount * 55_000_000;
@@ -231,14 +266,19 @@ function computeModeFreightCore(
 }
 
 export function suggestManagerFreightQuote(params: {
-  transportMode?: 'road' | 'air' | null;
+  transportMode?: 'road' | 'air' | 'sea' | null;
   bookingType?: BookingType | null;
   horseCount?: number | null;
   distanceKm?: number | null;
   customsCount?: number | null;
   usdToVndRate?: number | null;
 }): ManagerFreightSuggestion {
-  const mode: 'road' | 'air' = params.transportMode === 'air' ? 'air' : 'road';
+  const mode: 'road' | 'air' | 'sea' =
+    params.transportMode === 'air'
+      ? 'air'
+      : params.transportMode === 'sea'
+        ? 'sea'
+        : 'road';
   const type: BookingType = params.bookingType === 'dedicated_charter' ? 'dedicated_charter' : 'shared_stall';
   const safeCount = Math.max(1, Math.round(Number(params.horseCount) || 1));
   const safeKm = Math.max(30, Math.round(Number(params.distanceKm) || 350));

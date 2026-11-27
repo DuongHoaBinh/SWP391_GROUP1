@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -35,6 +36,7 @@ export class FleetController {
   constructor(private readonly fleetService: FleetService) {}
 
   @Get('vehicles')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Lấy danh sách tất cả phương tiện vận chuyển' })
   @ApiQuery({ name: 'status', enum: VehicleStatus, required: false })
   @ApiQuery({ name: 'type', enum: VehicleType, required: false })
@@ -44,7 +46,14 @@ export class FleetController {
     @Query('type') type?: VehicleType,
     @Query('depotId') depotId?: string,
   ) {
-    return this.fleetService.getAllVehicles(status, type, depotId ? Number(depotId) : undefined);
+    let parsedDepotId: number | undefined;
+    if (depotId !== undefined && depotId !== '') {
+      parsedDepotId = Number(depotId);
+      if (!Number.isInteger(parsedDepotId) || parsedDepotId <= 0) {
+        throw new BadRequestException('depotId không hợp lệ');
+      }
+    }
+    return this.fleetService.getAllVehicles(status, type, parsedDepotId);
   }
 
   // --- Loại phương tiện & trạm xe (Step 3, review 11/2026) ---
@@ -90,6 +99,7 @@ export class FleetController {
   }
 
   @Get('vehicles/:id')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Lấy chi tiết một phương tiện theo ID' })
   getVehicleById(@Param('id', ParseIntPipe) id: number) {
     return this.fleetService.getVehicleById(id);

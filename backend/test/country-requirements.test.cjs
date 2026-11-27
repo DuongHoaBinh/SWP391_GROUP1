@@ -559,16 +559,16 @@ test('8. DocumentExpiryMonitorService: auto-expires, demotes ready_to_depart ord
 
   const pool = {
     execute: async (sql, params) => {
-      if (sql.includes("SELECT shipment_id, customer_id, request_code FROM shipment WHERE status = 'ready_to_depart'")) {
+      if (sql.includes("SELECT shipment_id, customer_id FROM shipment WHERE status = 'ready_to_depart'")) {
         const rows = [...store.orders.entries()]
           .filter(([_, o]) => o.status === 'ready_to_depart')
-          .map(([id, o]) => ({ shipment_id: id, customer_id: o.customer_id || 10, request_code: o.request_code || `REQ-${id}` }));
+          .map(([id, o]) => ({ shipment_id: id, customer_id: o.customer_id || 10 }));
         return [rows];
       }
-      if (sql.includes("UPDATE shipment SET status = 'planning'")) {
+      if (sql.includes("UPDATE shipment SET status = 'confirmed'")) {
         const orderId = params[0];
         const o = store.orders.get(orderId);
-        if (o && o.status === 'ready_to_depart') o.status = 'planning';
+        if (o && o.status === 'ready_to_depart') o.status = 'confirmed';
         return [{ affectedRows: 1 }];
       }
       return [[]];
@@ -591,8 +591,8 @@ test('8. DocumentExpiryMonitorService: auto-expires, demotes ready_to_depart ord
   // Doc 60 is now expired
   assert.equal(store.docs.get(60).status, 'expired');
 
-  // Order 701 (ready_to_depart) demoted back to planning
-  assert.equal(store.orders.get(701).status, 'planning');
+  // Order 701 (ready_to_depart) demoted back to confirmed
+  assert.equal(store.orders.get(701).status, 'confirmed');
 
   // Order 702 (in_transit) was NOT demoted
   assert.equal(store.orders.get(702).status, 'in_transit');

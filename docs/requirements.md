@@ -214,7 +214,7 @@ Toàn bộ KPI của Logistics Manager phải tính trực tiếp từ dữ li�
 
 ## 12. Luồng đặt chỗ trả trước, duyệt khả thi, hóa đơn VAT và hoàn tiền SoD (Step 7 — Review 11/2026)
 
-- **Quy trình thanh toán trả trước (Prepaid Booking Flow):** Khách hàng thanh toán đặt cọc 100% ngay sau khi chọn phương án báo giá. Sau khi thanh toán thành công, đơn chuyển sang trạng thái `paid_pending_feasibility` để Logistics Manager thẩm định tính khả thi vận hành (`feasibility_status`).
+- **Quy trình thanh toán trả trước (Prepaid Booking Flow):** Khách hàng mở ngay popup thanh toán VietQR SePay sau khi gửi đơn từ báo giá (đơn khởi tạo ở trạng thái `awaiting_payment`). Nếu khách đóng popup hoặc chưa thanh toán thành công ngay, đơn được giữ trong thời hạn **12 giờ** (`payment_due_at = created_at + 12h`, cấu hình qua `ORDER_PAYMENT_WINDOW_MINUTES=720`); quá 12 giờ chưa ghi nhận SePay thành công, tác vụ SLA tự động hủy đơn (`cancelled` / `payment_expired`), void hóa đơn và giải phóng xe + ngựa về trạng thái khả dụng. Sau khi thanh toán thành công, đơn chuyển sang trạng thái `paid_pending_review` để Logistics Manager thẩm định tính khả thi vận hành (`feasibility_status`).
 - **Thẩm định khả thi (`PATCH /orders/:id/feasibility`):**
   - Nếu khả thi (`feasible`): Đơn được phê duyệt chính thức (`approved`), chuyển sang lập kế hoạch lộ trình chi tiết (Flow 3).
   - Nếu không khả thi (`unfeasible`): Manager từ chối với lý do cụ thể, hệ thống tự động sinh hồ sơ hoàn tiền 100% (`shipment_refund_record`) và form tiếp nhận tài khoản ngân hàng của khách hàng.

@@ -20,8 +20,41 @@ interface CustomerNotification {
   actionUrl?: string;
 }
 
+function humanizeNotificationText(text: string, isEn: boolean): string {
+  if (!text) return '';
+  let result = text;
+
+  const tokenReplacements: Array<[RegExp, string, string]> = [
+    [/\bhealth_certificate\b/gi, 'Health Certificate', 'Giấy kiểm dịch y tế'],
+    [/\bhorse_passport\b/gi, 'FEI Horse Passport', 'Hộ chiếu ngựa FEI'],
+    [/\bimport_permit\b/gi, 'Import Permit', 'Giấy phép nhập khẩu'],
+    [/\bexport_permit\b/gi, 'Export Permit', 'Giấy phép xuất khẩu'],
+    [/\bcustoms_declaration\b/gi, 'Customs Declaration', 'Tờ khai hải quan'],
+    [/\bcoggins_test\b/gi, 'Coggins Test (EIA)', 'Xét nghiệm Coggins (EIA)'],
+    [/\bawaiting_payment\b/gi, 'Awaiting Payment', 'Chờ thanh toán'],
+    [/\bpaid_pending_review\b/gi, 'Pending Feasibility Review', 'Chờ duyệt khả thi'],
+    [/\brefund_requested\b/gi, 'Refund Requested', 'Chờ hoàn tiền'],
+    [/\bready_to_depart\b/gi, 'Ready to Depart', 'Sẵn sàng xuất phát'],
+    [/\bin_transit\b/gi, 'In Transit', 'Đang vận chuyển'],
+    [/Chuyên viên kiểm dịch/g, 'Logistics Manager', 'Quản lý vận hành'],
+    [/Quarantine Specialist/g, 'Logistics Manager', 'Quản lý vận hành'],
+  ];
+
+  for (const [regex, enVal, viVal] of tokenReplacements) {
+    result = result.replace(regex, isEn ? enVal : viVal);
+  }
+
+  // Localize bare YYYY-MM-DD dates in Vietnamese mode to DD/MM/YYYY
+  if (!isEn) {
+    result = result.replace(/\b(20\d{2})-(\d{2})-(\d{2})\b/g, '$3/$2/$1');
+  }
+
+  return result;
+}
+
 export default function NotificationsPage() {
   const { t, language, translateNotification, translateTimeAgo } = useLanguage();
+  const isEn = language === 'en';
   const [notifications, setNotifications] = useState<CustomerNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -30,52 +63,61 @@ export default function NotificationsPage() {
   const [filterMode, setFilterMode] = useState<'all' | 'unread'>('all');
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
-  const fetchNotifications = useCallback(async (showLoadingSpinner = true) => {
-    if (showLoadingSpinner) setLoading(true);
-    setIsRefreshing(true);
-    setLoadError('');
-    try {
-      const data = await apiClient<any[]>('/notifications');
-      if (Array.isArray(data) && data.length > 0) {
-        const mapped: CustomerNotification[] = data.map((item) => {
-          const titleLower = String(item.title || '').toLowerCase();
-          const isSuccess = titleLower.includes('phê duyệt') || titleLower.includes('approved');
-          const isCritical =
-            item.notifType === 'health_alert' ||
-            titleLower.includes('từ chối') ||
-            titleLower.includes('rejected');
+  const fetchNotifications = useCallback(
+    async (showLoadingSpinner = true) => {
+      if (showLoadingSpinner) setLoading(true);
+      setIsRefreshing(true);
+      setLoadError('');
+      try {
+        const data = await apiClient<any[]>('/notifications');
+        if (Array.isArray(data) && data.length > 0) {
+          const mapped: CustomerNotification[] = data.map((item) => {
+            const titleLower = String(item.title || '').toLowerCase();
+            const isSuccess =
+              titleLower.includes('phê duyệt') ||
+              titleLower.includes('approved') ||
+              titleLower.includes('hoàn tất') ||
+              titleLower.includes('thành công');
+            const isCritical =
+              item.notifType === 'health_alert' ||
+              titleLower.includes('từ chối') ||
+              titleLower.includes('rejected') ||
+              titleLower.includes('hủy') ||
+              titleLower.includes('quá hạn');
 
-          return {
-            id: String(item.id || item.notification_id),
-            type: isCritical ? 'CRITICAL' : isSuccess ? 'SUCCESS' : 'INFO',
-            title: item.title || '',
-            message: item.message || '',
-            createdAt: item.createdAt || item.created_at,
-            timeAgo: item.createdAt || item.created_at,
-            isRead: Boolean(item.isRead ?? item.is_read),
-            actionText: item.shipmentId
-              ? language === 'en'
-                ? 'View Order Details'
-                : 'Xem chi tiết đơn'
-              : undefined,
-            actionUrl: item.shipmentId ? `/customer/requests/${item.shipmentId}` : undefined,
-          };
-        });
-        setNotifications(mapped);
-      } else {
-        setNotifications([]);
+            return {
+              id: String(item.id || item.notification_id),
+              type: isCritical ? 'CRITICAL' : isSuccess ? 'SUCCESS' : 'INFO',
+              title: item.title || '',
+              message: item.message || '',
+              createdAt: item.createdAt || item.created_at,
+              timeAgo: item.createdAt || item.created_at,
+              isRead: Boolean(item.isRead ?? item.is_read),
+              actionText: item.shipmentId
+                ? isEn
+                  ? 'View Order Details'
+                  : 'Xem chi tiết đơn'
+                : undefined,
+              actionUrl: item.shipmentId ? `/customer/requests/${item.shipmentId}` : undefined,
+            };
+          });
+          setNotifications(mapped);
+        } else {
+          setNotifications([]);
+        }
+      } catch (err: any) {
+        console.error('Failed to fetch notifications:', err);
+        setLoadError(
+          err?.message ||
+            (isEn ? 'Failed to load notifications.' : 'Không thể tải danh sách thông báo.'),
+        );
+      } finally {
+        setLoading(false);
+        setIsRefreshing(false);
       }
-    } catch (err: any) {
-      console.error('Failed to fetch notifications:', err);
-      setLoadError(
-        err?.message ||
-          (language === 'en' ? 'Failed to load notifications.' : 'Không thể tải danh sách thông báo.'),
-      );
-    } finally {
-      setLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [language]);
+    },
+    [isEn],
+  );
 
   useEffect(() => {
     void fetchNotifications(true);
@@ -128,10 +170,15 @@ export default function NotificationsPage() {
       <header className="border-b border-[#E5DDD0] pb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
-            {t('notifications.title', 'Thông báo')}
+            {t('notifications.title', isEn ? 'Notifications' : 'Thông báo')}
           </h1>
           <p className="text-sm text-[#5F6977] mt-1 mb-0">
-            {t('notifications.subtitle', 'Cập nhật phê duyệt đơn vận chuyển, thủ tục kiểm dịch và hành trình của ngựa.')}
+            {t(
+              'notifications.subtitle',
+              isEn
+                ? 'Updates on order payments, feasibility reviews, quarantine dossiers, and live journeys.'
+                : 'Cập nhật thanh toán, phê duyệt đơn vận chuyển, thủ tục kiểm dịch và hành trình của ngựa.',
+            )}
           </p>
         </div>
 
@@ -145,7 +192,7 @@ export default function NotificationsPage() {
                 filterMode === 'all' ? 'bg-[#181A17] text-white' : 'text-[#5F6977] hover:text-[#181A17]'
               }`}
             >
-              {t('common.all', 'Tất cả')} ({notifications.length})
+              {t('common.all', isEn ? 'All' : 'Tất cả')} ({notifications.length})
             </button>
             <button
               type="button"
@@ -155,7 +202,7 @@ export default function NotificationsPage() {
                 filterMode === 'unread' ? 'bg-[#181A17] text-white' : 'text-[#5F6977] hover:text-[#181A17]'
               }`}
             >
-              {t('common.unread', language === 'en' ? 'Unread' : 'Chưa đọc')} ({unreadCount})
+              {t('common.unread', isEn ? 'Unread' : 'Chưa đọc')} ({unreadCount})
             </button>
           </div>
 
@@ -167,7 +214,7 @@ export default function NotificationsPage() {
             className="min-h-[36px]"
           >
             <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} aria-hidden="true" />
-            {t('common.refresh', 'Làm mới')}
+            {t('common.refresh', isEn ? 'Refresh' : 'Làm mới')}
           </Button>
           <Button
             variant="outline"
@@ -176,7 +223,7 @@ export default function NotificationsPage() {
             disabled={isMarkingAll || unreadCount === 0}
             className="min-h-[36px]"
           >
-            {t('common.markAllRead', 'Đánh dấu đã đọc tất cả')}
+            {t('common.markAllRead', isEn ? 'Mark all read' : 'Đánh dấu đã đọc tất cả')}
           </Button>
         </div>
       </header>
@@ -192,7 +239,7 @@ export default function NotificationsPage() {
             <span>{loadError}</span>
           </div>
           <Button variant="outline" size="sm" onClick={() => void fetchNotifications(true)}>
-            <RefreshCw size={14} aria-hidden="true" /> {t('common.retry', language === 'en' ? 'Retry' : 'Thử lại')}
+            <RefreshCw size={14} aria-hidden="true" /> {t('common.retry', isEn ? 'Retry' : 'Thử lại')}
           </Button>
         </div>
       )}
@@ -213,24 +260,33 @@ export default function NotificationsPage() {
             <CheckCircle2 size={32} className="mx-auto mb-3 text-[#287653]" aria-hidden="true" />
             <div className="text-sm font-bold text-[#181A17] mb-1">
               {filterMode === 'unread'
-                ? t('common.allRead', language === 'en' ? 'All notifications read' : 'Bạn đã đọc hết thông báo')
-                : t('common.noNotifications', 'Không có thông báo mới nào')}
+                ? t('common.allRead', isEn ? 'All notifications read' : 'Bạn đã đọc hết thông báo')
+                : t('common.noNotifications', isEn ? 'No notifications yet' : 'Không có thông báo mới nào')}
             </div>
             <div className="text-xs text-[#747D88]">
-              {t('notifications.emptyDesc', 'Thông báo về duyệt đơn, danh mục kiểm dịch và hành trình sẽ xuất hiện tại đây.')}
+              {t(
+                'notifications.emptyDesc',
+                isEn
+                  ? 'Updates on order approvals, compliance documents, and trips will appear here.'
+                  : 'Thông báo về duyệt đơn, danh mục kiểm dịch và hành trình sẽ xuất hiện tại đây.',
+              )}
             </div>
           </div>
         ) : (
           <div className="divide-y divide-[#EFEAE0]">
             {visibleNotifications.map((notif) => {
               const localized = translateNotification(notif.title, notif.message);
-              const actionText = notif.actionText ? localized.actionText || notif.actionText : localized.actionText;
+              const cleanTitle = humanizeNotificationText(localized.title, isEn);
+              const cleanMessage = humanizeNotificationText(localized.message, isEn);
+              const actionText = notif.actionText
+                ? localized.actionText || notif.actionText
+                : localized.actionText;
               const dotColor =
                 notif.type === 'CRITICAL'
                   ? 'bg-[#B33E3E]'
                   : notif.type === 'SUCCESS'
-                  ? 'bg-[#287653]'
-                  : 'bg-[#A67C2E]';
+                    ? 'bg-[#287653]'
+                    : 'bg-[#A67C2E]';
 
               return (
                 <div
@@ -256,8 +312,10 @@ export default function NotificationsPage() {
                       }`}
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="font-bold text-[#181A17] text-sm">{localized.title}</div>
-                      <div className="text-xs sm:text-sm text-[#5F6977] mt-1 leading-relaxed">{localized.message}</div>
+                      <div className="font-bold text-[#181A17] text-sm">{cleanTitle}</div>
+                      <div className="text-xs sm:text-sm text-[#5F6977] mt-1 leading-relaxed">
+                        {cleanMessage}
+                      </div>
                       <div className="flex items-center gap-4 mt-2 flex-wrap">
                         <span className="text-[11px] text-[#747D88]">
                           {translateTimeAgo(notif.createdAt || notif.timeAgo)}
@@ -265,16 +323,20 @@ export default function NotificationsPage() {
                         {notif.actionUrl ? (
                           <Link
                             href={notif.actionUrl}
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!notif.isRead) void handleMarkSingleRead(notif.id);
+                            }}
                             className="inline-flex items-center gap-1 text-xs font-semibold text-[#A67C2E] hover:underline no-underline"
                           >
-                            {actionText || t('common.viewDetails', 'Xem chi tiết')} →
+                            {actionText || t('common.viewDetails', isEn ? 'View Details' : 'Xem chi tiết')} →
                           </Link>
                         ) : actionText ? (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (!notif.isRead) void handleMarkSingleRead(notif.id);
                               setIsUploadOpen(true);
                             }}
                             className={`inline-flex items-center text-xs font-semibold bg-transparent border-0 p-0 cursor-pointer hover:underline ${
@@ -290,7 +352,7 @@ export default function NotificationsPage() {
 
                   {!notif.isRead && (
                     <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-[#F5EFE2] text-[#8C6621] border border-[#DFCA9A] whitespace-nowrap shrink-0">
-                      {t('common.new', 'MỚI')}
+                      {t('common.new', isEn ? 'NEW' : 'MỚI')}
                     </span>
                   )}
                 </div>

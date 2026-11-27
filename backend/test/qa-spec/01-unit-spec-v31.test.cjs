@@ -43,14 +43,14 @@ test('BR-F1-02: Insurance calculates 3 packages, half-up 1 VND rounding, USD sna
     assert.equal(basicZero.maxCompensation, 50_000_000);
     assert.equal(basicZero.emergencyVetCovered, false);
 
-    // Half-up rounding to 1 VND on 1.5%:
+    // Half-up rounding to 1 VND on 1.5% (equine-v1 without 1M minimum fee floor):
     // 33 * 0.015 = 0.495 -> 0 VND; 100 * 0.015 = 1.5 -> 2 VND
     assert.equal(
-      calculateInsurance({ declaredValue: 33, declaredCurrency: 'VND', insurancePackage: 'standard' }).insuranceFee,
+      calculateInsurance({ declaredValue: 33, declaredCurrency: 'VND', insurancePackage: 'standard' }, undefined, 'equine-v1').insuranceFee,
       0,
     );
     assert.equal(
-      calculateInsurance({ declaredValue: 100, declaredCurrency: 'VND', insurancePackage: 'standard' }).insuranceFee,
+      calculateInsurance({ declaredValue: 100, declaredCurrency: 'VND', insurancePackage: 'standard' }, undefined, 'equine-v1').insuranceFee,
       2,
     );
 
@@ -61,7 +61,7 @@ test('BR-F1-02: Insurance calculates 3 packages, half-up 1 VND rounding, USD sna
     });
     assert.equal(std.insuranceFee, 1_500_000);
     assert.equal(std.maxCompensation, 80_000_000);
-    assert.equal(std.emergencyVetCovered, false);
+    assert.equal(std.emergencyVetCovered, true);
 
     const prem = calculateInsurance({
       declaredValue: 100_000_000,
@@ -72,7 +72,7 @@ test('BR-F1-02: Insurance calculates 3 packages, half-up 1 VND rounding, USD sna
     assert.equal(prem.maxCompensation, 100_000_000);
     assert.equal(prem.emergencyVetCovered, true);
 
-    // USD conversion with configured rate
+    // USD conversion with configured rate (equine-v2 applies 1M VND min fee floor on 25M VND)
     process.env.INSURANCE_USD_TO_VND = '25000';
     const usdLive = calculateInsurance({
       declaredValue: 1000,
@@ -81,7 +81,15 @@ test('BR-F1-02: Insurance calculates 3 packages, half-up 1 VND rounding, USD sna
     });
     assert.equal(usdLive.exchangeRate, 25_000);
     assert.equal(usdLive.declaredValueVnd, 25_000_000);
-    assert.equal(usdLive.insuranceFee, 375_000);
+    assert.equal(usdLive.insuranceFee, 1_000_000);
+
+    const usdAboveFloor = calculateInsurance({
+      declaredValue: 10_000,
+      declaredCurrency: 'USD',
+      insurancePackage: 'standard',
+    });
+    assert.equal(usdAboveFloor.declaredValueVnd, 250_000_000);
+    assert.equal(usdAboveFloor.insuranceFee, 3_750_000);
 
     // Historical saved rate overrides current env
     process.env.INSURANCE_USD_TO_VND = '26000';
@@ -539,7 +547,7 @@ test('BR-F2-02 & BR-F2-05: Dynamic Tier-A deadline, Order Cutoff & exact minute 
   assert.equal(c1.tierADeadline, '2026-12-11');
   assert.equal(c1.orderCutoffDate, '2026-12-09');
 
-  // dedicated_charter + lead_time_days=2 -> min floor D-3 Tier A, D-4 Order Cutoff
+  // dedicated_charter + lead_time_days=2 -> min floor D-2 Tier A (baseDays=1, maxTierALead=2), D-4 Order Cutoff
   const svc2 = buildSvc(
     [{ id: 2, country: 'Vietnam', docTier: 'A', leadTimeDays: 2, minValidityBufferHours: 24, transportMode: 'road' }],
     {
@@ -551,7 +559,7 @@ test('BR-F2-02 & BR-F2-05: Dynamic Tier-A deadline, Order Cutoff & exact minute 
     [],
   );
   const c2 = await svc2.getOrderComplianceChecklist({ id: 6, role: UserRole.CUSTOMER }, 300);
-  assert.equal(c2.tierADeadline, '2026-12-22');
+  assert.equal(c2.tierADeadline, '2026-12-23');
   assert.equal(c2.orderCutoffDate, '2026-12-21');
 
   // Minute-precision arrival + 48h buffer boundary: arrival 2026-12-10T10:00Z + 48h = 2026-12-12T10:00Z

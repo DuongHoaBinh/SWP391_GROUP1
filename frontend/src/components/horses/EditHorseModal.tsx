@@ -67,17 +67,17 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
   const { updateHorse, uploadHorseAvatar, refreshHorses } = useCustomerStore();
   const { t, language, translateBreed, translateGender, translateStatus } = useLanguage();
 
-  const normalizeGender = (g?: string | null): 'male' | 'female' | 'other' => {
+  const normalizeGender = (g?: string | null): 'male' | 'female' | 'gelding' => {
     const lower = String(g || '').toLowerCase().trim();
     if (lower === 'female' || lower === 'mare' || lower.includes('cái')) return 'female';
-    if (lower === 'other' || lower === 'gelding' || lower.includes('khác') || lower.includes('thiến')) return 'other';
+    if (lower === 'other' || lower === 'gelding' || lower.includes('khác') || lower.includes('thiến')) return 'gelding';
     return 'male';
   };
 
   const [activeTab, setActiveTab] = useState<'identity' | 'passport'>('identity');
   const [name, setName] = useState(horse.name || '');
   const [breed, setBreed] = useState(horse.breed || 'Thoroughbred');
-  const [gender, setGender] = useState<'male' | 'female' | 'other'>(normalizeGender(horse.gender));
+  const [gender, setGender] = useState<'male' | 'female' | 'gelding'>(normalizeGender(horse.gender));
   const [age, setAge] = useState(horse.age || 5);
   const [temperament, setTemperament] = useState<HorseTemperament>(horse.temperament || 'normal');
   const [requiresPrivateStall, setRequiresPrivateStall] = useState(Boolean(horse.requiresPrivateStall));
@@ -144,6 +144,11 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
     }
     if (!microchipNumber.trim()) {
       setError('Vui lòng nhập Số vi mạch (Microchip Number).');
+      setActiveTab('passport');
+      return;
+    }
+    if (!/^[A-Za-z0-9-]{9,20}$/.test(microchipNumber.trim())) {
+      setError('Mã Microchip không hợp lệ (chuẩn ISO 11784/11785 gồm 15 chữ số, tối thiểu 9 ký tự chữ-số).');
       setActiveTab('passport');
       return;
     }
@@ -393,11 +398,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                         <h4 className="text-sm font-bold text-text-primary uppercase tracking-wide">
                           {t('horses.portraitPhoto', 'Ảnh Chân Dung Chiến Mã')}
                         </h4>
-                        <p className="text-xs text-text-secondary mt-0.5">
-                          {language === 'en'
-                            ? 'Upload an actual photo of your racehorse from your device (PNG, JPG, WEBP)'
-                            : 'Tải ảnh thực tế của chiến mã từ thiết bị (PNG, JPG, WEBP)'}
-                        </p>
                       </div>
                       <button
                         type="button"
@@ -485,9 +485,9 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                   </label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
-                      { value: 'male' as const, label: language === 'en' ? 'Male' : 'Đực' },
-                      { value: 'female' as const, label: language === 'en' ? 'Female' : 'Cái' },
-                      { value: 'other' as const, label: language === 'en' ? 'Other' : 'Khác' },
+                      { value: 'male' as const, label: language === 'en' ? 'Stallion' : 'Đực giống' },
+                      { value: 'female' as const, label: language === 'en' ? 'Mare' : 'Cái' },
+                      { value: 'gelding' as const, label: language === 'en' ? 'Gelding' : 'Thiến' },
                     ].map((opt) => (
                       <button
                         key={opt.value}

@@ -33,10 +33,10 @@ export default function DriverProfilePage() {
     const u = getCurrentUser();
     const resolveRoleLabel = (src: any) => {
       if (src?.specialization === 'escort' || src?.persona === 'escort' || src?.email?.toLowerCase().includes('escort')) {
-        return language === 'en' ? 'Equine Veterinarian / Welfare Escort' : 'Bác sĩ Thú y / Chuyên viên Hộ tống';
+        return language === 'en' ? 'Equine Vet / Escort' : 'Bác sĩ thú y / Áp tải';
       }
-      if (src?.specialization || src?.role) {
-        return language === 'en' ? 'Specialized Equine Transport Driver' : 'Tài xế Vận tải Ngựa đua Chuyên dụng';
+      if (src?.specialization === 'driver' || src?.persona === 'driver' || src?.role) {
+        return language === 'en' ? 'Driver' : 'Tài xế';
       }
       return '';
     };
@@ -59,7 +59,7 @@ export default function DriverProfilePage() {
           fullName: data.fullName || data.name || u?.fullName || u?.name || '',
           email: data.email || u?.email || '',
           phone: data.phone || u?.phone || '',
-          roleDisplay: data.specialization || resolveRoleLabel(data) || resolveRoleLabel(u),
+          roleDisplay: resolveRoleLabel(data) || resolveRoleLabel(u),
         });
         updateAuthUser({
           name: data.fullName || data.name,

@@ -725,12 +725,18 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
 
       const newFreight = Math.round(Number(charterTransportCost));
       const insuranceFee = Math.round(Number(order.insurance_fee ?? 0));
-      const oldFreight = Math.round(Number(order.transport_cost ?? order.total_cost ?? 0));
       const oldTotalCost = Math.round(Number(order.total_cost ?? 0));
+      const parsedTransportCost = order.transport_cost != null ? Math.round(Number(order.transport_cost)) : 0;
+      const oldFreight = parsedTransportCost > 0 ? parsedTransportCost : Math.max(0, oldTotalCost - insuranceFee);
       const newTotalCost = newFreight + insuranceFee;
 
       if (!Number.isSafeInteger(newFreight) || newFreight <= 0 || newTotalCost > 9999999999999) {
         throw new BadRequestException('Giá cước charter không hợp lệ.');
+      }
+      if (newFreight < oldFreight) {
+        throw new BadRequestException(
+          `Giá cước bao nguyên xe (${newFreight.toLocaleString('vi-VN')} VND) không được thấp hơn giá cước cũ (${oldFreight.toLocaleString('vi-VN')} VND).`,
+        );
       }
 
       await db.execute(
@@ -873,18 +879,26 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
     shipmentId: number,
     newDepartureDate: string,
     reason?: string,
+    options?: { requireSharedStall?: boolean },
   ): Promise<{ shipmentId: number; customerId: number; newDepartureDate: string }> {
     const dep = new Date(newDepartureDate);
     if (!Number.isFinite(dep.getTime()) || dep.getTime() <= Date.now()) {
       throw new BadRequestException('Ngày khởi hành mới phải hợp lệ và nằm ở tương lai.');
     }
 
+    const requireSharedStall = options?.requireSharedStall !== false;
+
     return this.tx(async (db) => {
       const [orders] = await db.execute<RowDataPacket[]>(
-        'SELECT shipment_id, customer_id, status FROM shipment WHERE shipment_id = ? FOR UPDATE',
+        'SELECT shipment_id, customer_id, status, booking_type FROM shipment WHERE shipment_id = ? FOR UPDATE',
         [shipmentId],
       );
       if (!orders[0]) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+      if (requireSharedStall && orders[0].booking_type !== 'shared_stall') {
+        throw new ConflictException(
+          `Chỉ áp dụng dời lịch chuyến ghép cho đơn hình thức ghép chuồng (shared_stall). Hình thức hiện tại: "${orders[0].booking_type}".`,
+        );
+      }
       if (['in_transit', 'return_pending', 'completed', 'cancelled', 'cancelled_operational', 'rejected'].includes(orders[0].status)) {
         throw new ConflictException(`Không thể dời chuyến ở trạng thái "${orders[0].status}".`);
       }
@@ -899,6 +913,8 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
          WHERE shipment_id = ?`,
         [dep, dep, reason ?? 'Dời sang chuyến ghép kế tiếp miễn phí', shipmentId],
       );
+
+      await releaseShipmentReservations(db, shipmentId, 'rescheduled');
 
       return {
         shipmentId,
@@ -1138,13 +1154,14 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
           }
 
           try {
+            const windowHours = Math.max(1, Math.round((Number(process.env.ORDER_PAYMENT_WINDOW_MINUTES) || 720) / 60));
             await transitionShipment(db, {
               shipmentId: sid,
               to: 'cancelled',
               actorId: null,
               actorRole: 'SYSTEM',
               reasonCode: 'payment_expired',
-              note: 'Hết hạn thời gian thanh toán (24h). Hệ thống tự động hủy đơn và hoàn trả ngựa.',
+              note: `Hết hạn thời gian thanh toán (${windowHours}h). Hệ thống tự động hủy đơn, nhả xe và hoàn trả ngựa.`,
             });
 
             await db.execute(

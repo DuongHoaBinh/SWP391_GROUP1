@@ -88,10 +88,10 @@ export class PreviewPricingDto {
   @IsIn(['road', 'air', 'sea'])
   mode: 'road' | 'air' | 'sea';
 
-  @ApiPropertyOptional({ enum: ['ferry', 'vessel'], example: 'ferry' })
+  @ApiPropertyOptional({ enum: ['vessel'], example: 'vessel' })
   @IsOptional()
-  @IsIn(['ferry', 'vessel'])
-  seaMode?: 'ferry' | 'vessel';
+  @IsIn(['vessel'])
+  seaMode?: 'vessel';
 
   @ApiPropertyOptional({ description: 'Tham số bảng giá muốn thử nghiệm trước khi lưu' })
   @IsOptional()

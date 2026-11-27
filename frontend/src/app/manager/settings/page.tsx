@@ -24,6 +24,7 @@ export default function ManagerSettingsPage() {
   const [showNewPw, setShowNewPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [settingsSubTab, setSettingsSubTab] = useState<'account' | 'gps'>('account');
   const [isSavingTracking, setIsSavingTracking] = useState(false);
   const [trackingSettings, setTrackingSettings] = useState<TrackingSystemSettings>({
     simulationEnabled: false,
@@ -201,20 +202,49 @@ export default function ManagerSettingsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-8 pb-12 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold text-[#181A17] m-0">
-          {language === 'en'
-            ? 'Logistics Manager Account Settings'
-            : 'Cài Đặt Tài Khoản Logistics Manager'}
-        </h1>
-        <p className="text-sm text-[#5F6977] mt-1 mb-0">
-          {language === 'en'
-            ? 'Manage executive profile details and security credentials.'
-            : 'Quản lý thông tin quản trị và bảo mật tài khoản điều hành.'}
-        </p>
+    <div className="flex flex-col gap-6 pb-12 max-w-4xl">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-[#181A17] m-0">
+            {language === 'en'
+              ? 'Account & GPS System Settings'
+              : 'Tài Khoản & Cấu Hình Định Vị GPS'}
+          </h1>
+          <p className="text-sm text-[#5F6977] mt-1 mb-0">
+            {language === 'en'
+              ? 'Manage personal profile, security credentials, and GPS tracking parameters separately.'
+              : 'Tách biệt thông tin tài khoản cá nhân và cấu hình giám sát định vị toàn hệ thống.'}
+          </p>
+        </div>
+
+        <div className="inline-flex items-center gap-1 bg-white border border-[#D8CEBE] rounded-xl p-1 self-start">
+          <button
+            type="button"
+            onClick={() => setSettingsSubTab('account')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer border-0 transition-colors ${
+              settingsSubTab === 'account'
+                ? 'bg-[#181A17] text-[#FAF8F4]'
+                : 'bg-transparent text-[#5F6977] hover:text-[#181A17]'
+            }`}
+          >
+            {language === 'en' ? 'Profile & Password' : 'Hồ Sơ & Mật Khẩu'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSettingsSubTab('gps')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer border-0 transition-colors ${
+              settingsSubTab === 'gps'
+                ? 'bg-[#181A17] text-[#FAF8F4]'
+                : 'bg-transparent text-[#5F6977] hover:text-[#181A17]'
+            }`}
+          >
+            {language === 'en' ? 'GPS & Geofence' : 'GPS & Hàng Rào Địa Lý'}
+          </button>
+        </div>
       </div>
 
+      {settingsSubTab === 'account' && (
+      <>
       <div className="bg-white rounded-2xl border border-[#D8CEBE] p-5 sm:p-6 shadow-sm">
         <h2 className="text-base font-bold text-[#181A17] mb-4 flex items-center gap-2">
           <User size={18} className="text-[#A67C2E]" aria-hidden="true" />{' '}
@@ -407,8 +437,11 @@ export default function ManagerSettingsPage() {
           </div>
         </form>
       </div>
+      </>
+      )}
 
       {/* Tracking & Geofence System Settings */}
+      {settingsSubTab === 'gps' && (
       <div className="bg-white rounded-2xl border border-[#D8CEBE] p-5 sm:p-6 shadow-sm">
         <h2 className="text-base font-bold text-[#181A17] mb-2 flex items-center gap-2">
           <Compass size={18} className="text-[#A67C2E]" aria-hidden="true" />
@@ -500,24 +533,24 @@ export default function ManagerSettingsPage() {
             </label>
           </div>
 
+          {isAdmin ? (
           <div className="pt-2 border-t border-[#EFEAE0] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="text-xs font-bold text-[#181A17] flex items-center gap-1.5">
-                <span>{language === 'en' ? 'Simulation Mode' : 'Chế độ Giả lập Tọa độ (Simulation Mode)'}</span>
+                <span>{language === 'en' ? 'GPS Simulation Mode' : 'Chế độ Giả lập Tọa độ GPS'}</span>
                 <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-300">
-                  DEV / TEST
+                  Admin
                 </span>
               </div>
               <div className="text-[11px] text-[#5F6977]">
                 {language === 'en'
-                  ? 'Enable route pings from simulation engine for testing without physical vehicles (Admin permission).'
-                  : 'Cho phép tiếp nhận tọa độ giả lập để kiểm thử luồng di chuyển mà không cần xe thật chạy trên đường (Quyền Admin).'}
+                  ? 'Enable simulated GPS pings for training and operational drills.'
+                  : 'Cho phép tiếp nhận tọa độ giả lập phục vụ kiểm thử và diễn tập vận hành.'}
               </div>
             </div>
-            <label className={`relative inline-flex items-center ${!isAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
+            <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
-                disabled={!isAdmin}
                 checked={trackingSettings.simulationEnabled}
                 onChange={(e) =>
                   setTrackingSettings({
@@ -530,13 +563,20 @@ export default function ManagerSettingsPage() {
               <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#A67C2E]"></div>
             </label>
           </div>
+          ) : (
+            <div className="pt-2 border-t border-[#EFEAE0] text-xs text-[#5F6977] bg-[#FAF8F4] px-3.5 py-2.5 rounded-xl border border-[#EAE5DA]">
+              {language === 'en'
+                ? 'System-wide GPS simulation mode is managed exclusively by System Administrators.'
+                : 'Chế độ giả lập GPS toàn hệ thống chỉ được cấu hình bởi Quản trị viên (Admin).'}
+            </div>
+          )}
 
           <div className="flex justify-end mt-2">
             <Button
               type="submit"
               variant="primary"
               size="sm"
-              disabled={isSavingTracking}
+              disabled={isSavingTracking || !isAdmin}
               className="h-11 px-5 rounded-xl"
             >
               {isSavingTracking ? (
@@ -553,6 +593,7 @@ export default function ManagerSettingsPage() {
           </div>
         </form>
       </div>
+      )}
     </div>
   );
 }

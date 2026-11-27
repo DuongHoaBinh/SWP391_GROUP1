@@ -76,6 +76,29 @@ export class HorseInfoDto {
   quantity?: number;
 }
 
+export class DeferredDocumentDto {
+  @ApiProperty({ example: 12, description: 'ID ngựa cần nộp bổ sung giấy tờ' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  horseId: number;
+
+  @ApiProperty({ example: 'health_certificate', description: 'Mã loại giấy tờ kiểm dịch' })
+  @IsNotEmpty()
+  @IsString()
+  documentTypeCode: string;
+
+  @ApiPropertyOptional({ example: 'Giấy chứng nhận sức khỏe thú y', description: 'Tên hiển thị loại giấy tờ' })
+  @IsOptional()
+  @IsString()
+  documentTypeName?: string;
+
+  @ApiPropertyOptional({ example: '2026-12-08', description: 'Hạn nộp bổ sung khuyến nghị (YYYY-MM-DD)' })
+  @IsOptional()
+  @IsString()
+  submitDeadline?: string;
+}
+
 export class CreateOrderDto {
   @ApiPropertyOptional({ example: 501, description: 'ID báo giá hợp lệ từ POST /quotes' })
   @IsOptional()
@@ -115,10 +138,10 @@ export class CreateOrderDto {
   @IsIn(['road', 'air', 'sea'])
   transportMode?: 'road' | 'air' | 'sea';
 
-  @ApiPropertyOptional({ enum: ['ferry', 'vessel'], description: 'Hình thức đường thủy' })
+  @ApiPropertyOptional({ enum: ['vessel'], description: 'Hình thức đường thủy (tàu biển chuyên dụng)' })
   @IsOptional()
-  @IsIn(['ferry', 'vessel'])
-  seaMode?: 'ferry' | 'vessel';
+  @IsIn(['vessel'])
+  seaMode?: 'vessel';
 
   @ApiPropertyOptional({ example: 10.734, description: 'Vĩ độ điểm đón' })
   @IsOptional()
@@ -250,4 +273,14 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => HorseInfoDto)
   horses?: HorseInfoDto[];
+
+  @ApiPropertyOptional({
+    type: [DeferredDocumentDto],
+    description: 'Danh sách giấy tờ khách cam kết nộp bổ sung sau (Step 3)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DeferredDocumentDto)
+  deferredDocuments?: DeferredDocumentDto[];
 }

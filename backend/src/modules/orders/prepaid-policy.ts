@@ -2,6 +2,21 @@
  * Step 7 Prepaid & Refund Pure Policies
  */
 
+/** Mặc định hạn thanh toán cho đơn trả trước (awaiting_payment): 12 giờ (720 phút). */
+export const DEFAULT_PREPAID_PAYMENT_WINDOW_MINUTES = 720;
+
+export function getPrepaidPaymentWindowMinutes(envValue = process.env.ORDER_PAYMENT_WINDOW_MINUTES): number {
+  const parsed = Number(envValue);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return DEFAULT_PREPAID_PAYMENT_WINDOW_MINUTES;
+}
+
+export function computePrepaidPaymentDueAt(now: Date = new Date(), windowMinutes = getPrepaidPaymentWindowMinutes()): Date {
+  return new Date(now.getTime() + windowMinutes * 60 * 1000);
+}
+
 export function addBusinessDays(startDate: Date, businessDays: number): Date {
   const result = new Date(startDate);
   let added = 0;

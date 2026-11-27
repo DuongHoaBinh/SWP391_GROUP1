@@ -35,7 +35,7 @@ export default function TripSchedulePage() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<string>('ready_to_depart');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
 
   // Custom Confirmation Modal state

@@ -99,12 +99,17 @@ export class HandoverService {
       const fileUrls = files.map((f) => `/api/tracking/handovers/attachments/${f.filename}`);
       const mergedEvidence = [...fileUrls, ...(dto.evidenceUrls || [])].slice(0, 10);
 
+      const inferredDirection: 'outbound' | 'return' =
+        dto.direction ?? (target.tripType === 'round_trip' && (target.shipmentStatus === 'return_pending' || target.returnStatus === 'in_progress') ? 'return' : 'outbound');
+      const defaultLocation = inferredDirection === 'return' ? (target.originLocation || target.destinationLocation) : target.destinationLocation;
+
       const created = await this.handoverStore.createHandover({
         shipmentId,
         shipmentHorseId: dto.shipmentHorseId,
+        direction: inferredDirection,
         handedOverBy: Number(user.id),
         receivedByName: dto.receivedByName.trim(),
-        handoverLocation: dto.handoverLocation?.trim() || target.destinationLocation,
+        handoverLocation: dto.handoverLocation?.trim() || defaultLocation,
         handoverDatetime: dt,
         deliveredQuantity: dto.deliveredQuantity ?? 1,
         horseConditionAtHandover: dto.horseConditionAtHandover ?? 'healthy',
@@ -208,9 +213,15 @@ export class HandoverService {
     if (!existing) throw new NotFoundException(`Không tìm thấy biên bản bàn giao #${handoverId}`);
 
     const compensation = Number(dto.compensationAmount || 0);
-    if (compensation > existing.maxCompensation) {
+    const claimedAlready = typeof this.handoverStore.sumExistingClaimCompensation === 'function'
+      ? await this.handoverStore.sumExistingClaimCompensation(existing.shipmentHorseId)
+      : 0;
+    if (compensation + claimedAlready > existing.maxCompensation) {
+      const remaining = Math.max(0, existing.maxCompensation - claimedAlready);
       throw new UnprocessableEntityException(
-        `Số tiền bồi thường (${compensation.toLocaleString('vi-VN')} VND) vượt trần bảo hiểm tối đa (${existing.maxCompensation.toLocaleString('vi-VN')} VND) của cá thể ngựa này.`,
+        claimedAlready > 0
+          ? `Tổng bồi thường (bàn giao ${compensation.toLocaleString('vi-VN')} VND + yêu cầu bảo hiểm ${claimedAlready.toLocaleString('vi-VN')} VND) vượt trần bảo hiểm tối đa (${existing.maxCompensation.toLocaleString('vi-VN')} VND). Phần còn lại tối đa: ${remaining.toLocaleString('vi-VN')} VND.`
+          : `Số tiền bồi thường (${compensation.toLocaleString('vi-VN')} VND) vượt trần bảo hiểm tối đa (${existing.maxCompensation.toLocaleString('vi-VN')} VND) của cá thể ngựa này.`,
       );
     }
 

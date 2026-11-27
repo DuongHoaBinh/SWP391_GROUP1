@@ -66,7 +66,9 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException('Báo giá phải là số nguyên VND lớn hơn 0');
       }
 
-      const creatingSupp = Boolean(supp && existing.some((p) => p.status === 'succeeded'));
+      const creatingSupp = Boolean(
+        supp && supp.status !== 'paid' && (gate.invoice?.status === 'paid' || existing.some((p) => p.status === 'succeeded')),
+      );
       const payableAmount = creatingSupp ? Number(supp.amount) : totalOrderAmount;
       const targetInvoiceId = creatingSupp ? Number(supp.id) : (gate.invoice?.id ?? null);
       const relevantExisting = creatingSupp ? targetSuppPayment : existing[0];
@@ -171,7 +173,9 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
           );
           try {
             const [managers] = await db.execute<RowDataPacket[]>(
-              "SELECT user_id FROM `user` WHERE role IN ('LOGISTICS_MANAGER', 'ADMIN')"
+              `SELECT u.user_id FROM \`user\` u
+               JOIN \`role\` r ON u.role_id = r.role_id
+               WHERE r.role_name IN ('Logistics Manager', 'Admin') AND u.status = 'active'`
             );
             for (const m of managers) {
               await db.execute(

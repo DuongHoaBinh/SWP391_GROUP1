@@ -14,11 +14,11 @@ export class CreateHorseDto {
   breed?: string;
 
   @ApiPropertyOptional({
-    description: 'Giới tính (male: đực, female: cái, other: khác)',
+    description: 'Giới tính (male: đực giống, female: cái, gelding: ngựa thiến)',
     enum: HorseGender,
     example: HorseGender.MALE,
   })
-  @IsEnum(HorseGender, { message: 'Giới tính phải là male, female hoặc other' })
+  @IsEnum(HorseGender, { message: 'Giới tính phải là male, female hoặc gelding' })
   @IsOptional()
   gender?: HorseGender;
 
@@ -44,9 +44,10 @@ export class CreateHorseDto {
   @IsOptional()
   status?: HorseStatus;
 
-  @ApiPropertyOptional({ description: 'Số lượng con ngựa', example: 5, default: 1 })
+  @ApiPropertyOptional({ description: 'Số lượng con ngựa (luôn là 1 cho mỗi hồ sơ Microchip cá thể)', example: 1, default: 1 })
   @IsInt()
   @Min(1)
+  @Max(1, { message: 'Mỗi hồ sơ cá thể ngựa gắn với 1 mã Microchip duy nhất, số lượng tối đa là 1.' })
   @IsOptional()
   quantity?: number;
 

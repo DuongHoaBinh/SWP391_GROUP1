@@ -97,22 +97,22 @@ async function main() {
     // 2. Seed Demo Accounts
     console.log('Seeding demo accounts (A/B testing, dual-approval SoD)...');
     const demoUsers = [
-      { email: 'customer_a@example.com', name: 'Nguyễn Văn Chủ Ngựa (Khách A)', roleId: customerRoleId, phone: '0901111222' },
-      { email: 'customer_b@example.com', name: 'Trần Thị Chủ Ngựa (Khách B)', roleId: customerRoleId, phone: '0902222333' },
-      { email: 'manager_a@example.com', name: 'Ngô Văn Quản Lý (Manager 1)', roleId: managerRoleId, phone: '0903333444' },
-      { email: 'manager_b@example.com', name: 'Vũ Thị Quản Lý (Manager 2 - SoD)', roleId: managerRoleId, phone: '0904444555' },
-      { email: 'admin_demo@example.com', name: 'Admin Demo (Quản trị viên)', roleId: adminRoleId, phone: '0905555666' },
-      { email: 'driver_demo1@example.com', name: 'Đặng Văn Lái 1 (Tài xế)', roleId: driverRoleId, phone: '0906666777' },
-      { email: 'driver_demo2@example.com', name: 'Hoàng Văn Lái 2 (Tài xế)', roleId: driverRoleId, phone: '0907777888' },
-      { email: 'escort_demo@example.com', name: 'BS. Phạm Thú Y (Áp tải lâm sàng)', roleId: driverRoleId, phone: '0908888999' },
+      { email: 'customer_a@example.com', name: 'Nguyễn Văn Chủ Ngựa (Khách A)', roleId: customerRoleId, phone: '0901111222', specialization: null },
+      { email: 'customer_b@example.com', name: 'Trần Thị Chủ Ngựa (Khách B)', roleId: customerRoleId, phone: '0902222333', specialization: null },
+      { email: 'manager_a@example.com', name: 'Ngô Văn Quản Lý (Manager 1)', roleId: managerRoleId, phone: '0903333444', specialization: null },
+      { email: 'manager_b@example.com', name: 'Vũ Thị Quản Lý (Manager 2 - SoD)', roleId: managerRoleId, phone: '0904444555', specialization: null },
+      { email: 'admin_demo@example.com', name: 'Admin Demo (Quản trị viên)', roleId: adminRoleId, phone: '0905555666', specialization: null },
+      { email: 'driver_demo1@example.com', name: 'Đặng Văn Lái 1 (Tài xế)', roleId: driverRoleId, phone: '0906666777', specialization: 'driver' },
+      { email: 'driver_demo2@example.com', name: 'Hoàng Văn Lái 2 (Tài xế)', roleId: driverRoleId, phone: '0907777888', specialization: 'driver' },
+      { email: 'escort_demo@example.com', name: 'BS. Phạm Thú Y (Áp tải lâm sàng)', roleId: driverRoleId, phone: '0908888999', specialization: 'escort' },
     ];
 
     for (const u of demoUsers) {
       await db.execute(
-        `INSERT INTO \`user\` (role_id, full_name, email, phone, password_hash, account_origin, auth_provider, email_verified, status)
-         VALUES (?, ?, ?, ?, ?, 'system_created', 'local', TRUE, 'active')
-         ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), password_hash = VALUES(password_hash), phone = VALUES(phone), role_id = VALUES(role_id), status = 'active'`,
-        [u.roleId, u.name, u.email, u.phone, passwordHash],
+        `INSERT INTO \`user\` (role_id, full_name, email, phone, specialization, password_hash, account_origin, auth_provider, email_verified, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'system_created', 'local', TRUE, 'active')
+         ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), password_hash = VALUES(password_hash), phone = VALUES(phone), specialization = VALUES(specialization), role_id = VALUES(role_id), status = 'active'`,
+        [u.roleId, u.name, u.email, u.phone, u.specialization, passwordHash],
       );
     }
 
@@ -680,6 +680,7 @@ async function main() {
       managerAId: userMap.get('manager_a@example.com'),
       driver1Id: userMap.get('driver_demo1@example.com'),
       driver2Id: userMap.get('driver_demo2@example.com'),
+      seedDriverId: userMap.get('driver@example.com') || null,
       escortId: userMap.get('escort_demo@example.com'),
       horseMap,
       vehicleMap,
@@ -1032,7 +1033,14 @@ async function seedCustomerAShipments(db, ctx) {
      VALUES (?, 1, 'road', 'Trạm Điều phối Thủ Đức (TP.HCM)', 'Trạm Liên vận Miền Trung (Đà Nẵng)', 950.0, ?, 'pending', 'outbound')`,
     [readyRouteId, vehicleMap.get('DEMO-51C-003')]
   );
-  await assignStaff(idReady, driver2Id, 'driver', true);
+  await db.query('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [idReady]);
+  if (vehicleMap.get('DEMO-51C-003')) {
+    await db.query('INSERT INTO shipment_vehicle (shipment_id, vehicle_id) VALUES (?, ?)', [idReady, vehicleMap.get('DEMO-51C-003')]);
+  }
+  await assignStaff(idReady, ctx.seedDriverId || driver2Id, 'driver', true);
+  if (ctx.seedDriverId && driver2Id && ctx.seedDriverId !== driver2Id) {
+    await assignStaff(idReady, driver2Id, 'driver', true);
+  }
   await assignStaff(idReady, escortId, 'escort', true);
 
   // 6. in_transit (En route, live GPS telemetry pings, route stops cleared, clinical health logs)
@@ -1068,14 +1076,21 @@ async function seedCustomerAShipments(db, ctx) {
   await db.query(
     `INSERT INTO route_stop (route_id, sequence_no, stop_type, location_name, country, status, direction, lat, lng, actual_arrival, actual_departure)
      VALUES
-       (?, 1, 'border_check', 'Cửa khẩu Quốc tế Mộc Bài', 'Vietnam', 'customs_cleared', 'outbound', 11.071200, 106.182300, ?, ?),
+       (?, 1, 'border_check', 'Cửa khẩu Quốc tế Mộc Bài', 'Vietnam', 'departed', 'outbound', 11.071200, 106.182300, ?, ?),
        (?, 2, 'rest', 'Trạm dừng nghỉ Soài Riêng', 'Cambodia', 'pending', 'outbound', 11.085000, 105.799000, NULL, NULL)`,
     [
       transitRouteId, toSqlDateTime(subHours(now, 1)), toSqlDateTime(subMinutes(now, 45)),
       transitRouteId,
     ]
   );
-  await assignStaff(idTransit, driver1Id, 'driver', true);
+  await db.query('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [idTransit]);
+  if (transitTruck) {
+    await db.query('INSERT INTO shipment_vehicle (shipment_id, vehicle_id) VALUES (?, ?)', [idTransit, transitTruck]);
+  }
+  await assignStaff(idTransit, ctx.seedDriverId || driver1Id, 'driver', true);
+  if (ctx.seedDriverId && driver1Id && ctx.seedDriverId !== driver1Id) {
+    await assignStaff(idTransit, driver1Id, 'driver', true);
+  }
   await assignStaff(idTransit, escortId, 'escort', true);
 
   // Position pings
@@ -1150,8 +1165,26 @@ async function seedCustomerAShipments(db, ctx) {
   });
   const bachLongId = getHorseId('Bạch Long');
   await linkShipmentHorse(idCompleted, bachLongId, { declared_value: 800000000, insurance_fee: 5000000 });
-  await upsertRoute(idCompleted, 'TP.HCM - Singapore Turf Club', 1850.0, 'completed', 'completed', managerAId, managerAId);
-  await upsertHandover(idCompleted, driver1Id, 'David Lee (Đại diện Singapore Turf Club)', '1 Turf Club Ave, Singapore', 'healthy', customerAId);
+  const compRouteId = await upsertRoute(idCompleted, 'TP.HCM - Singapore Turf Club', 1850.0, 'completed', 'completed', managerAId, managerAId);
+  const compTruck = vehicleMap.get('DEMO-51C-002') || vehicleMap.get('DEMO-51C-001');
+  if (compTruck) {
+    await db.query('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [idCompleted]);
+    await db.query('INSERT INTO shipment_vehicle (shipment_id, vehicle_id) VALUES (?, ?)', [idCompleted, compTruck]);
+  }
+  await assignStaff(idCompleted, ctx.seedDriverId || driver1Id, 'driver', true);
+  await assignStaff(idCompleted, escortId, 'escort', true);
+  await db.query('DELETE FROM horse_health_log WHERE shipment_id = ?', [idCompleted]);
+  await db.query(
+    `INSERT INTO horse_health_log (shipment_id, horse_id, horse_name, leg_name, recorded_by, recorded_by_role, condition_status, temperature_c, heart_rate_bpm, respiratory_rate_bpm, alert_tier, notes, recorded_at)
+     VALUES
+       (?, ?, 'Bạch Long', 'Chặng 1: TP.HCM - Sân bay Tân Sơn Nhất', ?, 'escort', 'stable', 37.9, 36, 12, 'green', 'Kiểm tra tiền bay ổn định, đủ điều kiện lên khoang chuồng bay HMA.', ?),
+       (?, ?, 'Bạch Long', 'Chặng cuối: Changi - Singapore Turf Club', ?, 'escort', 'stable', 38.0, 38, 13, 'green', 'Hạ cánh an toàn, sinh hiệu bình thường, sẵn sàng bàn giao.', ?)`,
+    [
+      idCompleted, bachLongId, escortId, toSqlDateTime(subDays(now, 3)),
+      idCompleted, bachLongId, escortId, toSqlDateTime(subDays(now, 1)),
+    ]
+  );
+  await upsertHandover(idCompleted, ctx.seedDriverId || driver1Id, 'David Lee (Đại diện Singapore Turf Club)', '1 Turf Club Ave, Singapore', 'healthy', customerAId);
 
   // 9. refund_requested (Operational cancellation e.g. vet_unfit, refund record pending approval)
   const idRefund = await upsertShipment({

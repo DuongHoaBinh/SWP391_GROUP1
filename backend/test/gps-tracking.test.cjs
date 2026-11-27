@@ -93,6 +93,9 @@ function makeMockTrackingStore(initialData = {}) {
         hrGreenMax: 44,
         hrAmberLowMin: 24,
         hrAmberHighMax: 52,
+        consecutiveAlertWindowHours: 6,
+        escalatableConditions: ['not_eating', 'stressed'],
+        observationalConditions: ['climate_change', 'other'],
       };
     },
     async findHealthLogsForStop(shipmentId, arrivalTime, stopId) {
@@ -537,4 +540,286 @@ test('9. System settings tracking: Manager gọi PATCH -> 403, Admin gọi PATCH
   });
   assert.equal(updated.simulationEnabled, true);
   assert.equal(updated.customerVitalsDetail, false);
+});
+
+test('10. getLiveTracking preserves route_polyline column (tuple and {lat,lng} formats) and sea leg_type', async () => {
+  const seaPolyline = [
+    [10.7617, 106.7894],
+    [1.18, 103.82],
+    [25.0112, 55.0612],
+  ];
+  const geoPointPolyline = [
+    { lat: 25.0112, lng: 55.0612 },
+    { lat: 25.158, lng: 55.304 },
+  ];
+  const store = makeMockTrackingStore({
+    shipments: [
+      [2, { shipment_id: 2, customer_id: 100, status: 'in_transit', request_code: 'REQ-SEA-002' }],
+    ],
+    legs: [
+      [
+        21,
+        {
+          leg_id: 21,
+          sequence_no: 1,
+          leg_type: 'sea',
+          origin_location: 'Cảng Cát Lái (TP.HCM)',
+          destination_location: 'Cảng Jebel Ali (Dubai, UAE)',
+          status: 'in_transit',
+          route_polyline: JSON.stringify(seaPolyline),
+        },
+      ],
+      [
+        22,
+        {
+          leg_id: 22,
+          sequence_no: 2,
+          leg_type: 'road',
+          origin_location: 'Cảng Jebel Ali (Dubai, UAE)',
+          destination_location: 'Meydan Racecourse',
+          status: 'pending',
+          route_polyline: JSON.stringify(geoPointPolyline),
+        },
+      ],
+    ],
+  });
+  const notif = makeMockNotificationsService();
+  const service = new TrackingService(store, notif, {});
+
+  const live = await service.getLiveTracking(CUSTOMER_ALICE, 2);
+  assert.equal(live.legs.length, 2);
+  assert.equal(live.legs[0].type, 'sea');
+  assert.equal(live.legs[0].legType, 'sea');
+  assert.equal(live.legs[0].polylineJson, JSON.stringify(seaPolyline));
+  assert.deepEqual(live.legs[0].polyline, seaPolyline);
+  assert.equal(live.legs[1].type, 'road');
+  assert.deepEqual(live.legs[1].polyline, [
+    [25.0112, 55.0612],
+    [25.158, 55.304],
+  ]);
+});
+
+test('11. Live tracking IDOR & privacy: unassigned driver gets 403, customer omits transfer_hub, simulationEnabled returned', async () => {
+  const UNASSIGNED_DRIVER = { id: 99, email: 'other-driver@test.local', fullName: 'Other Driver', role: UserRole.DRIVER_ESCORT };
+  const store = makeMockTrackingStore({
+    settings: {
+      'tracking.simulation_enabled': true,
+    },
+    shipments: [
+      [1, { shipment_id: 1, customer_id: 100, status: 'in_transit', request_code: 'REQ-IDOR-01' }],
+    ],
+    legs: [
+      [1, { leg_id: 1, sequence_no: 1, status: 'active' }],
+    ],
+    stops: [
+      [10, { route_stop_id: 10, leg_id: 1, sequence_no: 1, location_name: 'Trạm nghỉ Bến Lức', stop_type: 'rest', status: 'arrived', lat: 10.6, lng: 106.5 }],
+      [11, { route_stop_id: 11, leg_id: 1, sequence_no: 2, location_name: 'Hub ghép chuyến nội bộ', stop_type: 'transfer_hub', status: 'pending', lat: 10.7, lng: 106.6 }],
+    ],
+  });
+  const notif = makeMockNotificationsService();
+  const service = new TrackingService(store, notif, {});
+
+  // Unassigned driver blocked (P0 IDOR fix)
+  await assert.rejects(
+    async () => service.getLiveTracking(UNASSIGNED_DRIVER, 1),
+    (err) => err instanceof ForbiddenException,
+  );
+
+  // Assigned driver allowed & sees transfer_hub + simulationEnabled
+  const liveDriver = await service.getLiveTracking(DRIVER_USER, 1);
+  assert.equal(liveDriver.simulationEnabled, true);
+  assert.equal(liveDriver.stops.length, 2);
+
+  // Customer allowed & transfer_hub is filtered out
+  const liveCustomer = await service.getLiveTracking(CUSTOMER_ALICE, 1);
+  assert.equal(liveCustomer.simulationEnabled, true);
+  assert.equal(liveCustomer.stops.length, 1);
+  assert.equal(liveCustomer.stops[0].stopType, 'rest');
+});
+
+test('12. Timeline & Milestone sync: active leg, multi-leg, milestoneId binding, quarantine customs->depart, no-show TINYINT(1), no upcoming gps/actor, auto routeStopId', async () => {
+  const store = makeMockTrackingStore({
+    shipments: [
+      [
+        6,
+        {
+          shipment_id: 6,
+          customer_id: 100,
+          status: 'in_transit',
+          trip_type: 'round_trip',
+          request_code: 'REQ-006',
+          origin_location: 'Củ Chi, TP.HCM',
+          destination_location: 'Phnom Penh, Cambodia',
+          created_at: new Date('2026-11-20T06:00:00Z'),
+        },
+      ],
+      [
+        7,
+        {
+          shipment_id: 7,
+          customer_id: 100,
+          status: 'completed',
+          trip_type: 'round_trip',
+          return_no_show: 1, // MySQL TINYINT(1)
+          return_status: 'no_show',
+          request_code: 'REQ-007',
+          created_at: new Date('2026-11-20T06:00:00Z'),
+        },
+      ],
+      [
+        8,
+        {
+          shipment_id: 8,
+          customer_id: 100,
+          status: 'rejected',
+          trip_type: 'one_way',
+          request_code: 'REQ-008',
+          created_at: new Date('2026-11-20T06:00:00Z'),
+        },
+      ],
+    ],
+    legs: [
+      [
+        61,
+        {
+          leg_id: 61,
+          sequence_no: 1,
+          direction: 'outbound',
+          leg_type: 'road',
+          origin_location: 'Củ Chi, TP.HCM',
+          destination_location: 'Bavet, Cambodia',
+          status: 'active',
+          actual_departure: new Date('2026-11-20T08:00:00Z'),
+        },
+      ],
+      [
+        62,
+        {
+          leg_id: 62,
+          sequence_no: 2,
+          direction: 'outbound',
+          leg_type: 'road',
+          origin_location: 'Bavet, Cambodia',
+          destination_location: 'Phnom Penh, Cambodia',
+          status: 'pending',
+        },
+      ],
+      [
+        63,
+        {
+          leg_id: 63,
+          sequence_no: 3,
+          direction: 'return',
+          leg_type: 'road',
+          origin_location: 'Phnom Penh, Cambodia',
+          destination_location: 'Củ Chi, TP.HCM',
+          status: 'pending',
+        },
+      ],
+    ],
+    stops: [
+      [
+        601,
+        {
+          route_stop_id: 601,
+          leg_id: 61,
+          sequence_no: 1,
+          direction: 'outbound',
+          stop_type: 'quarantine',
+          location_name: 'Trạm kiểm dịch Mộc Bài',
+          country: 'Vietnam',
+          status: 'arrived',
+          actual_arrival: new Date('2026-11-20T09:30:00Z'),
+        },
+      ],
+      [
+        602,
+        {
+          route_stop_id: 602,
+          leg_id: 62,
+          sequence_no: 1,
+          direction: 'outbound',
+          stop_type: 'rest',
+          location_name: 'Trạm dừng nghỉ Soài Riêng',
+          country: 'Cambodia',
+          status: 'pending',
+        },
+      ],
+    ],
+  });
+
+  const notif = makeMockNotificationsService();
+  const service = new TrackingService(store, notif, {});
+
+  // 12a. Tracking details milestones: Mộc Bài (arrived quarantine) only offers clear_customs (NOT depart_stop)
+  const details = await service.getTrackingDetails(DRIVER_USER, 6);
+  const mocBaiMs = details.milestones.find((m) => m.id === 'stop-601');
+  assert.ok(mocBaiMs);
+  assert.equal(mocBaiMs.status, 'CURRENT');
+  assert.deepEqual(mocBaiMs.allowedActions, ['clear_customs']);
+
+  // 12b. Shipment timeline matches milestoneId, emits intermediate leg 62, keeps return_pickup upcoming, and has no spurious gps/actor on upcoming items
+  const tl = await service.getShipmentTimeline(DRIVER_USER, 6);
+  const mocBaiTl = tl.items.find((it) => it.milestoneId === 'stop-601');
+  assert.ok(mocBaiTl);
+  assert.equal(mocBaiTl.status, 'current');
+  assert.ok(tl.items.some((it) => it.milestoneId === 'leg-62-start'), 'Intermediate leg 62 must be emitted');
+  const returnPickup = tl.items.find((it) => it.id === 'return_pickup');
+  assert.ok(returnPickup);
+  assert.equal(returnPickup.status, 'upcoming', 'return_pickup must NOT be current while outbound is active');
+  assert.equal(returnPickup.locationSource, undefined, 'upcoming items must not have spurious gps');
+  assert.equal(returnPickup.actorLabel, undefined, 'upcoming items must not have spurious actorLabel');
+
+  // 12c. Auto-populate routeStopId in createHealthLog when active stop exists
+  const healthLog = await service.createHealthLog(DRIVER_USER, 6, {
+    horseId: 1,
+    horseName: 'Bạch Mã',
+    conditionStatus: 'stable',
+    temperatureC: 37.8,
+    heartRateBpm: 38,
+    respiratoryRate: 14,
+  });
+  assert.equal(healthLog.routeStopId, 601);
+
+  // 12d. Quarantine stop after customs_cleared remains CURRENT and offers depart_stop (enforcing VITALS_REQUIRED)
+  store.stops.get(601).status = 'customs_cleared';
+  const detailsAfterClear = await service.getTrackingDetails(DRIVER_USER, 6);
+  const mocBaiCleared = detailsAfterClear.milestones.find((m) => m.id === 'stop-601');
+  assert.equal(mocBaiCleared.status, 'CURRENT');
+  assert.deepEqual(mocBaiCleared.allowedActions, ['depart_stop']);
+
+  // 12e. MySQL TINYINT(1) return_no_show = 1 produces post_noshow failed item
+  const tlNoShow = await service.getShipmentTimeline(MANAGER_USER, 7);
+  const noShowItem = tlNoShow.items.find((it) => it.kind === 'no_show');
+  assert.ok(noShowItem);
+  assert.equal(noShowItem.status, 'failed');
+
+  // 12f. Rejected order does NOT mark pre_payment or pre_approval as done
+  const tlRejected = await service.getShipmentTimeline(MANAGER_USER, 8);
+  const prePay = tlRejected.items.find((it) => it.id === 'pre_payment');
+  const preApp = tlRejected.items.find((it) => it.id === 'pre_approval');
+  assert.notEqual(prePay.status, 'done');
+  assert.equal(preApp.status, 'failed');
+});
+
+test('13. Evidence upload URL validation & assignment guard', async () => {
+  const { assertSafeExternalOrUploadUrl } = require('../dist/common/utils/upload-validation');
+  assert.doesNotThrow(() => assertSafeExternalOrUploadUrl('/api/tracking/evidence/attachments/ship-6-12345.jpg'));
+  assert.throws(() => assertSafeExternalOrUploadUrl('/api/tracking/evidence/attachments/../secret.jpg'), BadRequestException);
+  assert.throws(() => assertSafeExternalOrUploadUrl('javascript:alert(1)'), BadRequestException);
+
+  const UNASSIGNED_DRIVER = { id: 99, email: 'other@test.local', fullName: 'Other', role: UserRole.DRIVER_ESCORT };
+  const store = makeMockTrackingStore({
+    shipments: [[6, { shipment_id: 6, customer_id: 100, status: 'in_transit' }]],
+  });
+  const service = new TrackingService(store, makeMockNotificationsService(), {});
+
+  await assert.rejects(
+    async () => service.handleUploadedEvidencePhotos(UNASSIGNED_DRIVER, 6, []),
+    (err) => err instanceof ForbiddenException,
+  );
+  await assert.rejects(
+    async () => service.handleUploadedEvidencePhotos(DRIVER_USER, 6, []),
+    (err) => err instanceof BadRequestException,
+  );
 });

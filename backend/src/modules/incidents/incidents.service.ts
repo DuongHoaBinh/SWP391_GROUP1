@@ -172,10 +172,21 @@ export class IncidentsService {
     if (!shipment) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${inc.shipmentId}`);
 
     const allocation = dto.costAllocation ?? 'none';
-    if (allocation === 'emergency_vet_covered' && !shipment.hasEmergencyVetCoverage) {
-      throw new UnprocessableEntityException(
-        'Không thể hạch toán emergency_vet_covered vì chuyến đi không có ngựa sử dụng gói bảo hiểm Premium.',
-      );
+    const estimatedExtraCost = Number(dto.estimatedExtraCost || 0);
+    if (allocation === 'emergency_vet_covered') {
+      if (!shipment.hasEmergencyVetCoverage) {
+        throw new UnprocessableEntityException(
+          'Không thể hạch toán emergency_vet_covered vì chuyến đi không có ngựa sử dụng gói bảo hiểm Tiêu chuẩn (Standard) hoặc Toàn diện (Premium).',
+        );
+      }
+      if (shipment.emergencyVetCapVnd !== undefined && shipment.emergencyVetCapVnd !== null) {
+        const usedVetCost = Number(shipment.usedEmergencyVetCostVnd || 0);
+        if (usedVetCost + estimatedExtraCost > shipment.emergencyVetCapVnd) {
+          throw new UnprocessableEntityException(
+            `Chi phí cấp cứu thú y tích lũy (${(usedVetCost + estimatedExtraCost).toLocaleString('vi-VN')} VND) vượt hạn mức tối đa (${shipment.emergencyVetCapVnd.toLocaleString('vi-VN')} VND) của gói bảo hiểm Tiêu chuẩn (Standard).`,
+          );
+        }
+      }
     }
 
     const created = await this.incidentsStore.createChangeRequest({
@@ -186,7 +197,7 @@ export class IncidentsService {
       oldValue: dto.oldValue?.trim() || null,
       newValue: dto.newValue?.trim() || null,
       reason: dto.reason.trim(),
-      estimatedExtraCost: Number(dto.estimatedExtraCost || 0),
+      estimatedExtraCost,
       costAllocation: allocation,
       crossesNewBorder: Boolean(dto.crossesNewBorder),
     });

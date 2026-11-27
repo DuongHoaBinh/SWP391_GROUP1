@@ -7,7 +7,7 @@ export interface ShipmentQuoteRecord {
   quoteId: number;
   customerId: number;
   transportMode: 'road' | 'air' | 'sea';
-  seaMode: 'ferry' | 'vessel' | null;
+  seaMode: 'vessel' | null;
   tripType: 'one_way' | 'round_trip';
   inputJson: any;
   resultJson: any;
@@ -85,7 +85,7 @@ export class QuotesStore implements OnModuleInit, OnModuleDestroy {
   async createQuote(data: {
     customerId: number;
     transportMode: 'road' | 'air' | 'sea';
-    seaMode: 'ferry' | 'vessel' | null;
+    seaMode: 'vessel' | null;
     tripType?: 'one_way' | 'round_trip';
     inputJson: any;
     resultJson: any;

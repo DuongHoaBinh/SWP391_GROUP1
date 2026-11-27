@@ -104,9 +104,13 @@ export function verifyUploadedFileMagicBytes(
 export function assertSafeExternalOrUploadUrl(url?: string | null): void {
   if (!url || !url.trim()) return;
   const trimmed = url.trim();
+  if (trimmed.includes('..')) {
+    throw new BadRequestException('Đường dẫn tệp (fileUrl) không hợp lệ.');
+  }
   if (trimmed.startsWith('/uploads/')) return;
+  if (trimmed.startsWith('/api/tracking/evidence/attachments/')) return;
   if (/^https?:\/\//i.test(trimmed)) return;
   throw new BadRequestException(
-    'Đường dẫn tệp (fileUrl) không hợp lệ. Chỉ chấp nhận URL http(s):// hoặc đường dẫn nội bộ /uploads/.',
+    'Đường dẫn tệp (fileUrl) không hợp lệ. Chỉ chấp nhận URL http(s):// hoặc đường dẫn ảnh tải lên hợp lệ.',
   );
 }

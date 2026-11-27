@@ -1,5 +1,6 @@
 export enum LegStatus {
   PENDING = 'pending',
+  ACTIVE = 'active',
   DEPARTED = 'departed',
   IN_TRANSIT = 'in_transit',
   ARRIVED = 'arrived',
@@ -108,7 +109,7 @@ export interface TrackingMilestoneItem {
   plannedTime: string | null;
   actualTime: string | null;
   isCustomsBorder: boolean;
-  legType: 'road' | 'flight';
+  legType: 'road' | 'flight' | 'sea';
   responsibleRole: 'driver' | 'escort';
   notes: string | null;
   updatedBy: string | null;
@@ -235,7 +236,7 @@ export interface LiveTrackingLeg {
   legId: number;
   sequenceNo?: number;
   direction?: 'outbound' | 'return';
-  type?: 'road' | 'flight';
+  type?: 'road' | 'flight' | 'sea';
   legType?: string;
   originLocation?: string;
   destinationLocation?: string;
@@ -290,6 +291,7 @@ export interface LiveTrackingDetails {
   status: string;
   simulation?: boolean;
   isSimulated?: boolean;
+  simulationEnabled?: boolean;
   vehicle?: LiveVehiclePosition | null;
   vehiclePosition?: LiveVehiclePosition | null;
   path: LivePathPoint[];
@@ -318,6 +320,7 @@ export interface LiveOverviewItem {
   destinationLocation?: string;
   assignedDriver?: string | null;
   assignedVehicle?: string | null;
+  horsesCount?: number;
   currentMilestone?: string | null;
   latestPosition?: LiveVehiclePosition | null;
   latestAlertTier?: 'green' | 'amber' | 'red' | null;
@@ -375,6 +378,9 @@ export interface TimelinePhoto {
 
 export interface TimelineItemDto {
   id: string;
+  milestoneId?: string | null;
+  legId?: number | null;
+  stopId?: number | null;
   group: 'pre_trip' | 'outbound' | 'return' | 'post_trip';
   kind: TimelineKind;
   title: string;

@@ -18,6 +18,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { SEVERITY_DEFINITIONS, Severity, vnd } from '@/features/orders/insurance-policy';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface InsuranceClaim {
   id: number;
@@ -48,12 +49,12 @@ interface InsuranceClaim {
 }
 
 const STATUS_TABS = [
-  { key: '', label: 'Tất cả' },
-  { key: 'submitted', label: 'Chờ xem xét' },
-  { key: 'under_review', label: 'Đang thẩm định' },
-  { key: 'approved', label: 'Đã duyệt' },
-  { key: 'rejected', label: 'Đã từ chối' },
-  { key: 'paid', label: 'Đã chi trả' },
+  { key: '', labelVi: 'Tất cả', labelEn: 'All' },
+  { key: 'submitted', labelVi: 'Chờ xem xét', labelEn: 'Submitted' },
+  { key: 'under_review', labelVi: 'Đang thẩm định', labelEn: 'Under Review' },
+  { key: 'approved', labelVi: 'Đã duyệt', labelEn: 'Approved' },
+  { key: 'rejected', labelVi: 'Đã từ chối', labelEn: 'Rejected' },
+  { key: 'paid', labelVi: 'Đã chi trả', labelEn: 'Paid' },
 ];
 
 const REJECTION_REASONS = [
@@ -67,6 +68,8 @@ const REJECTION_REASONS = [
 ];
 
 export default function ManagerInsuranceClaimsPage() {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
   const [selectedStatus, setSelectedStatus] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeClaim, setActiveClaim] = useState<InsuranceClaim | null>(null);
@@ -196,10 +199,12 @@ export default function ManagerInsuranceClaimsPage() {
         <div>
           <h1 className="text-xl font-bold text-[#181A17] flex items-center gap-2">
             <ShieldAlert className="h-6 w-6 text-[#8C7A5B]" />
-            Quản Lý & Thẩm Định Bồi Thường Bảo Hiểm
+            {isEn ? 'Insurance Claims Assessment & Approval' : 'Quản Lý & Thẩm Định Bồi Thường Bảo Hiểm'}
           </h1>
           <p className="text-xs text-[#5B6779] mt-1">
-            Xem xét các yêu cầu bồi thường theo mức độ sự cố M1–M4, đối soát số tiền gợi ý và phê duyệt chi trả.
+            {isEn
+              ? 'Review incident claims across severity tiers, verify suggested payouts, and approve disbursements.'
+              : 'Xem xét các yêu cầu bồi thường theo mức độ sự cố, đối soát số tiền gợi ý và phê duyệt chi trả.'}
           </p>
         </div>
       </div>
@@ -218,7 +223,7 @@ export default function ManagerInsuranceClaimsPage() {
                   isSelected ? 'bg-[#181A17] text-white shadow-sm' : 'text-[#5B6779] hover:text-[#181A17]'
                 }`}
               >
-                {tab.label}
+                {isEn ? tab.labelEn : tab.labelVi}
               </button>
             );
           })}
@@ -229,24 +234,26 @@ export default function ManagerInsuranceClaimsPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Tìm theo mã đơn, tên ngựa, khách..."
+            placeholder={isEn ? 'Search by order code, horse, customer...' : 'Tìm theo mã đơn, tên ngựa, khách...'}
             className="w-full pl-9 pr-3 py-2 rounded-lg border border-[#D8CEBE] bg-white text-xs text-[#181A17] focus:outline-none focus:border-[#181A17]"
           />
         </div>
       </div>
 
       {/* Main Grid: Claims List & Detail Inspector */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
         {/* Left Column: Claims List */}
-        <div className="lg:col-span-5 space-y-3">
+        <div className="md:col-span-5 space-y-3">
           {isLoading ? (
             <div className="p-8 text-center bg-white rounded-xl border border-[#D8CEBE]">
               <Loader2 className="h-6 w-6 animate-spin mx-auto text-[#8C7A5B]" />
-              <p className="text-xs text-[#7D8A99] mt-2">Đang tải danh sách bồi thường...</p>
+              <p className="text-xs text-[#7D8A99] mt-2">
+                {isEn ? 'Loading insurance claims...' : 'Đang tải danh sách bồi thường...'}
+              </p>
             </div>
           ) : filteredClaims.length === 0 ? (
             <div className="p-8 text-center bg-white rounded-xl border border-[#D8CEBE] text-xs text-[#7D8A99]">
-              Không tìm thấy yêu cầu bồi thường nào.
+              {isEn ? 'No insurance claims found.' : 'Không tìm thấy yêu cầu bồi thường nào.'}
             </div>
           ) : (
             filteredClaims.map((claim) => {
@@ -320,7 +327,7 @@ export default function ManagerInsuranceClaimsPage() {
         </div>
 
         {/* Right Column: Claim Inspector & Decision Form */}
-        <div className="lg:col-span-7">
+        <div className="md:col-span-7">
           {activeClaim ? (
             <div className="space-y-5 rounded-2xl border border-[#D8CEBE] bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between border-b border-[#E8E2D8] pb-3">
@@ -345,7 +352,15 @@ export default function ManagerInsuranceClaimsPage() {
                             : 'bg-rose-50 text-rose-800 border-rose-200'
                   }`}
                 >
-                  Trạng thái: {activeClaim.status}
+                  {activeClaim.status === 'submitted'
+                    ? 'Chờ xem xét'
+                    : activeClaim.status === 'under_review'
+                      ? 'Đang thẩm định'
+                      : activeClaim.status === 'approved'
+                        ? 'Đã duyệt'
+                        : activeClaim.status === 'paid'
+                          ? 'Đã chi trả'
+                          : 'Từ chối'}
                 </span>
               </div>
 
@@ -564,7 +579,9 @@ export default function ManagerInsuranceClaimsPage() {
             </div>
           ) : (
             <div className="p-12 text-center bg-white rounded-2xl border border-dashed border-[#D8CEBE] text-xs text-[#7D8A99]">
-              Chọn một yêu cầu bồi thường từ danh sách bên trái để xem chi tiết và thẩm định.
+              {isEn
+                ? 'Select a claim from the list on the left to view details and evaluate.'
+                : 'Chọn một yêu cầu bồi thường từ danh sách bên trái để xem chi tiết và thẩm định.'}
             </div>
           )}
         </div>

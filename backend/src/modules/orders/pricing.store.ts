@@ -266,7 +266,7 @@ export class PricingStore implements OnModuleInit, OnModuleDestroy {
   /**
    * Lấy danh sách tuyến biển đang hoạt động theo sea_mode kèm tọa độ 2 cảng.
    */
-  async getActiveSeaRoutes(seaMode: 'ferry' | 'vessel'): Promise<
+  async getActiveSeaRoutes(seaMode: 'vessel'): Promise<
     Array<{
       seaRouteId: number;
       fromPortId: number;

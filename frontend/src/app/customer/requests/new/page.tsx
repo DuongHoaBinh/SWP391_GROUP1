@@ -23,7 +23,6 @@ import { normalizeVietnamese, resolveLocation, type GeocodedLocation, type Route
 import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
 import { requestQuote, type QuoteResult } from '@/features/orders/quote-api';
 import { QuoteBreakdown } from '@/features/orders/components/QuoteBreakdown';
-import { checkCityRestriction, type CityRestrictionCheck } from '@/features/fleet/allocation-api';
 const HORSE_PLACEHOLDER_SVG =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='40' fill='%23F0EEE8'/%3E%3Ctext x='40' y='47' text-anchor='middle' font-family='serif' font-weight='700' font-size='22' fill='%23A67C2E'%3EEQ%3C/text%3E%3C/svg%3E";
 import { Horse } from '@/lib/types';
@@ -35,13 +34,12 @@ import toast from 'react-hot-toast';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import useSWR from 'swr';
 import { InsuranceSelection } from '@/features/orders/components/InsuranceSelection';
-import { CostSummary } from '@/features/orders/components/InsuranceSummary';
-import { BookingSummary } from '@/features/orders/components/BookingSummary';
 import { type BookingType } from '@/features/orders/booking-policy';
-import { defaultInsurance, insuranceNames, previewInsurance, vnd, type InsuranceInput, type InsurancePolicy } from '@/features/orders/insurance-policy';
+import { defaultInsurance, insuranceNames, previewInsurance, type InsuranceInput, type InsurancePolicy } from '@/features/orders/insurance-policy';
 import { RequirementChecklist } from '@/features/documents/components/RequirementChecklist';
 import { fetchComplianceRequirements, type ComplianceRequirementsResponse } from '@/features/documents/requirements-api';
 import { HorseDocumentUploadModal } from '@/features/documents/components/HorseDocumentVault';
+import { SepayPaymentModal } from '@/features/orders/components/SepayPaymentModal';
 
 const MapLoadingFallback = () => {
   const { language } = useLanguage();
@@ -88,7 +86,6 @@ const parseLocalDate = (val: string) => {
 
 const getFormSchema = (lang: string) =>
   z.object({
-    title: z.string().min(1, lang === 'en' ? 'Request title is required' : 'Vui lòng nhập tiêu đề yêu cầu'),
     transportType: z.enum(['International', 'Domestic']),
     origin: z.string().min(1, lang === 'en' ? 'Origin is required' : 'Vui lòng chọn điểm khởi hành'),
     destination: z.string().min(1, lang === 'en' ? 'Destination is required' : 'Vui lòng chọn điểm đến'),
@@ -113,34 +110,49 @@ function CreateTransportRequestForm() {
   const { t, language, translateBreed, translateCountry } = useLanguage();
   const searchParams = useSearchParams();
   const preselectedHorseId = searchParams.get('horseId');
+  const preselectedHorseIdsParam = searchParams.get('horseIds');
 
-  const { horses, requests, refreshHorses } = useCustomerStore();
+  const { horses, requests, refreshHorses, refreshRequests } = useCustomerStore();
 
   useEffect(() => {
-    refreshHorses();
-  }, []);
+    void refreshHorses();
+    void refreshRequests();
+  }, [refreshHorses, refreshRequests]);
 
-  // Helper to find any active (in-progress) transport order for this horse
-  const getHorseActiveOrder = (horse: Horse) => {
+  // Helper to find any active (in-progress) transport order for this horse (from real /orders/my-orders)
+  const getHorseActiveOrder = useCallback((horse: Horse) => {
     return requests.find((r) => {
       const match =
         String(r.horseId) === String(horse.id) ||
         String(r.horse?.id) === String(horse.id) ||
         (horse.backendId && String(r.horseId) === String(horse.backendId)) ||
-        (r.horses && r.horses.some((h: any) => String(h.horse?.id) === String(horse.id) || String(h.id) === String(horse.id))) ||
+        (r.horses && r.horses.some((h: any) => String(h.horse?.id) === String(horse.id) || String(h.horseId) === String(horse.id) || String(h.id) === String(horse.id))) ||
         (r.horse?.name && horse.name && r.horse.name.toLowerCase().trim() === horse.name.toLowerCase().trim());
 
-      const isFinished = r.status === 'COMPLETED' || r.status === 'CANCELLED' || r.status === 'REJECTED';
+      const st = String(r.status || '').toUpperCase();
+      const rawSt = String(r.statusLabel || '').toLowerCase();
+      const isFinished =
+        st === 'COMPLETED' ||
+        st === 'CANCELLED' ||
+        st === 'REJECTED' ||
+        ['completed', 'cancelled', 'cancelled_operational', 'rejected', 'refunded'].includes(rawSt);
       return match && !isFinished;
     });
-  };
+  }, [requests]);
 
-  // Step state (1 to 3)
+  // Step state (1 to 4)
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
+  const [createdOrderForPayment, setCreatedOrderForPayment] = useState<{
+    id: number;
+    requestCode: string;
+    totalCost: number;
+    paymentDueAt?: string | null;
+    createdAt?: string | null;
+  } | null>(null);
 
-  const defaultDepartureStr = getDateOffsetString(7);
+  const defaultDepartureStr = getDateOffsetString(6);
 
   // Form states using react-hook-form
   const currentFormSchema = useMemo(() => getFormSchema(language), [language]);
@@ -154,7 +166,6 @@ function CreateTransportRequestForm() {
   } = useForm<FormData>({
     resolver: zodResolver(currentFormSchema),
     defaultValues: {
-      title: '',
       transportType: 'International',
       origin: 'Ho Chi Minh City, Vietnam',
       destination: 'Singapore Turf Club',
@@ -176,15 +187,9 @@ function CreateTransportRequestForm() {
     isDomestic?: boolean;
     estimatedTotalPriceVnd?: number;
     legs?: RouteLegPreview[];
+    seaUnavailableNotice?: { vi: string; en: string } | null;
   } | null>(null);
-  const [customerProposedPrice, setCustomerProposedPrice] = useState<string>('');
-
-  const parsedCustomerProposedPrice = useMemo(() => {
-    const digits = customerProposedPrice.replace(/[^\d]/g, '');
-    if (!digits) return undefined;
-    const num = Number(digits);
-    return Number.isFinite(num) && num > 0 ? num : undefined;
-  }, [customerProposedPrice]);
+  const lastScopeRef = useRef<'Domestic' | 'International' | null>('International');
 
   const handleRouteCalculated = useCallback(
     (data: {
@@ -194,10 +199,15 @@ function CreateTransportRequestForm() {
       isDomestic: boolean;
       estimatedTotalPriceVnd: number;
       legs?: RouteLegPreview[];
+      seaUnavailableNotice?: { vi: string; en: string } | null;
     }) => {
       setRouteData(data);
       const detectedType: 'Domestic' | 'International' = data.isDomestic ? 'Domestic' : 'International';
       setValue('transportType', detectedType, { shouldValidate: true });
+      if (lastScopeRef.current !== detectedType) {
+        lastScopeRef.current = detectedType;
+        setTransportMode(detectedType === 'International' ? 'air' : 'road');
+      }
     },
     [setValue]
   );
@@ -248,8 +258,21 @@ function CreateTransportRequestForm() {
     earliestDepartureDate: string;
   }>(cutoffQuery, (url) => apiClient(url), { shouldRetryOnError: false });
 
-  const minLeadDays = cutoffPolicy?.minLeadDays ?? (bookingType === 'dedicated_charter' ? 2 : 3);
+  const minLeadDays = cutoffPolicy?.minLeadDays ?? 2;
   const earliestDepartureDate = cutoffPolicy?.earliestDepartureDate ?? getDateOffsetString(minLeadDays);
+  const autoSyncedCutoffRef = useRef<string>('');
+  const autoSyncedFeasibleRef = useRef<string>('');
+
+  // Auto-select earliest valid departure date on initial load / route policy change
+  useEffect(() => {
+    if (!earliestDepartureDate) return;
+    const isInitialDefault =
+      !autoSyncedCutoffRef.current && formValues.departureDate === defaultDepartureStr;
+    if (isInitialDefault || !formValues.departureDate || formValues.departureDate < earliestDepartureDate) {
+      autoSyncedCutoffRef.current = earliestDepartureDate;
+      setValue('departureDate', earliestDepartureDate, { shouldValidate: true });
+    }
+  }, [earliestDepartureDate, formValues.departureDate, defaultDepartureStr, setValue]);
 
   const refreshedStep = useRef<number | null>(null);
   const initializedSelection = useRef<string | null>(null);
@@ -260,11 +283,19 @@ function CreateTransportRequestForm() {
   }, [currentStep, refreshHorses]);
 
   useEffect(() => {
-    const selectionKey = preselectedHorseId ?? 'default';
+    const requestedIds = preselectedHorseIdsParam
+      ? preselectedHorseIdsParam.split(',').map((s) => s.trim()).filter(Boolean)
+      : preselectedHorseId
+        ? [preselectedHorseId]
+        : [];
+    const selectionKey = requestedIds.length > 0 ? requestedIds.join(',') : 'default';
     if (initializedSelection.current === selectionKey) return;
-    if (preselectedHorseId) {
-      const target = horses.find((item) => String(item.id) === String(preselectedHorseId));
-      if (target) {
+    if (requestedIds.length > 0 && horses.length > 0) {
+      const nextQuantities: Record<string, number> = {};
+      const skippedNames: string[] = [];
+      for (const reqId of requestedIds) {
+        const target = horses.find((item) => String(item.id) === String(reqId) || String(item.backendId) === String(reqId));
+        if (!target) continue;
         const order = getHorseActiveOrder(target);
         const unavailable =
           Boolean(order) ||
@@ -273,16 +304,22 @@ function CreateTransportRequestForm() {
           target.status === 'retired' ||
           target.status === 'deceased';
         if (!unavailable) {
-          setHorseQuantities({ [preselectedHorseId]: 1 });
-          initializedSelection.current = selectionKey;
+          nextQuantities[target.id] = 1;
         } else {
-          toast.error(
-            order
-              ? (language === 'en' ? `Horse "${target.name}" is already assigned to shipment ${order.requestCode}.` : `Chiến mã "${target.name}" đã được phân bổ trong đơn ${order.requestCode}.`)
-              : (language === 'en' ? `Horse "${target.name}" is not ready for transit.` : `Chiến mã "${target.name}" hiện không sẵn sàng vận chuyển.`)
-          );
-          initializedSelection.current = selectionKey;
-        }      }
+          skippedNames.push(target.name);
+        }
+      }
+      if (Object.keys(nextQuantities).length > 0) {
+        setHorseQuantities(nextQuantities);
+      }
+      if (skippedNames.length > 0) {
+        toast.error(
+          language === 'en'
+            ? `Unavailable horse(s) skipped: ${skippedNames.join(', ')}.`
+            : `Đã bỏ qua ngựa đang bận / không khả dụng: ${skippedNames.join(', ')}.`,
+        );
+      }
+      initializedSelection.current = selectionKey;
     } else if (horses.length > 0 && Object.keys(horseQuantities).length === 0) {
       const firstAvailable = horses.find((h) => {
         const order = getHorseActiveOrder(h);
@@ -300,7 +337,7 @@ function CreateTransportRequestForm() {
         initializedSelection.current = selectionKey;
       }
     }
-  }, [preselectedHorseId, horses, requests]);
+  }, [preselectedHorseId, preselectedHorseIdsParam, horses, requests, getHorseActiveOrder, language]);
 
   const selectedHorseIds = Object.keys(horseQuantities).filter((id) => (horseQuantities[id] || 0) > 0);
   const totalSelectedHorses = Object.values(horseQuantities).reduce((sum, q) => sum + (q || 0), 0);
@@ -318,18 +355,33 @@ function CreateTransportRequestForm() {
       }));
   }, [horses, horseQuantities]);
 
-  const [transportMode, setTransportMode] = useState<'road' | 'air' | 'sea'>('road');
-  const [seaMode, setSeaMode] = useState<'ferry' | 'vessel'>('ferry');
+  const [transportMode, setTransportMode] = useState<'road' | 'air' | 'sea'>('air');
+  const [seaMode] = useState<'vessel'>('vessel');
   const [tripType, setTripType] = useState<'one_way' | 'round_trip'>('one_way');
   const [returnDepartureAt, setReturnDepartureAt] = useState<string>('');
   const [acceptReturnPolicy, setAcceptReturnPolicy] = useState<boolean>(false);
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [selectedOptionCode, setSelectedOptionCode] = useState<string>('standard');
-  // Step 9: giờ đón mong muốn (giờ Việt Nam) + khung giờ được phép khi điểm đón trong vùng cấm xe tải
+  // Giờ đón mong muốn (giờ Việt Nam)
   const [pickupTime, setPickupTime] = useState<string>('08:00');
-  const [cityCheck, setCityCheck] = useState<CityRestrictionCheck | null>(null);
   const [isQuoteLoading, setIsQuoteLoading] = useState<boolean>(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+
+  // Auto-shift returnDepartureAt when outbound departureDate or duration changes on round-trip
+  useEffect(() => {
+    if (tripType !== 'round_trip' || !formValues.departureDate) return;
+    const depMs = new Date(`${formValues.departureDate}T${pickupTime || '08:00'}:00`).getTime();
+    if (!Number.isFinite(depMs)) return;
+    const minReturnMs = depMs + (Number(routeData?.durationHours || 6) + 12) * 3600 * 1000;
+    const currentReturnMs = returnDepartureAt ? new Date(returnDepartureAt).getTime() : 0;
+    if (!currentReturnMs || !Number.isFinite(currentReturnMs) || currentReturnMs < minReturnMs) {
+      const shifted = new Date(minReturnMs + 12 * 3600 * 1000);
+      shifted.setMinutes(0, 0, 0);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const localIso = `${shifted.getFullYear()}-${pad(shifted.getMonth() + 1)}-${pad(shifted.getDate())}T${pad(shifted.getHours())}:00`;
+      setReturnDepartureAt(localIso);
+    }
+  }, [tripType, formValues.departureDate, pickupTime, routeData?.durationHours, returnDepartureAt]);
 
   // Dynamic country compliance requirements (Step 8)
   const [complianceReqs, setComplianceReqs] = useState<ComplianceRequirementsResponse | null>(null);
@@ -385,12 +437,23 @@ function CreateTransportRequestForm() {
         returnDate: tripType === 'round_trip' && returnDepartureAt ? returnDepartureAt.slice(0, 10) : undefined,
       });
       setComplianceReqs(res);
+      // Auto-advance initial departure date to earliestFeasibleDeparture when horse docs require lead time
+      if (
+        res &&
+        !res.isDepartureFeasible &&
+        res.earliestFeasibleDeparture &&
+        formValues.departureDate < res.earliestFeasibleDeparture &&
+        autoSyncedFeasibleRef.current !== res.earliestFeasibleDeparture
+      ) {
+        autoSyncedFeasibleRef.current = res.earliestFeasibleDeparture;
+        setValue('departureDate', res.earliestFeasibleDeparture, { shouldValidate: true });
+      }
     } catch (err) {
       console.warn('Failed to load compliance requirements:', err);
     } finally {
       setIsComplianceLoading(false);
     }
-  }, [targetCountry, transportMode, selectedHorseNumericIds, formValues.departureDate, tripType, returnDepartureAt]);
+  }, [targetCountry, transportMode, selectedHorseNumericIds, formValues.departureDate, tripType, returnDepartureAt, setValue]);
 
   useEffect(() => {
     if (!complianceParamsKey) {
@@ -525,35 +588,28 @@ function CreateTransportRequestForm() {
       lastQuoteKeyRef.current = '';
       return;
     }
+    if (lastQuoteKeyRef.current && lastQuoteKeyRef.current !== quoteParamsKey) {
+      // Clear stale quote when user edits route, dates, horses, or insurance on earlier steps
+      setQuote(null);
+    }
+    if (currentStep !== 4) {
+      return;
+    }
     if (lastQuoteKeyRef.current === quoteParamsKey) {
       return;
     }
     const timer = setTimeout(() => {
       lastQuoteKeyRef.current = quoteParamsKey;
       void fetchQuoteNow();
-    }, 600);
+    }, 250);
     return () => clearTimeout(timer);
-  }, [quoteParamsKey, fetchQuoteNow]);
+  }, [currentStep, quoteParamsKey, fetchQuoteNow]);
 
-  // Step 9: khung giờ xe tải nặng được vào điểm đón trong ngày đã chọn (HN, HCM có giờ cấm)
-  useEffect(() => {
-    if (!selectedOriginGeo || !formValues.departureDate) {
-      setCityCheck(null);
-      return;
-    }
-    let cancelled = false;
-    checkCityRestriction(selectedOriginGeo.coords[0], selectedOriginGeo.coords[1], formValues.departureDate, true)
-      .then((res) => { if (!cancelled) setCityCheck(res); })
-      .catch(() => { if (!cancelled) setCityCheck(null); });
-    return () => { cancelled = true; };
-  }, [selectedOriginGeo, formValues.departureDate]);
-
-  const pickupInBannedWindow = useMemo(() => {
-    if (!cityCheck?.restricted || !pickupTime) return false;
-    return !cityCheck.allowedWindows.some((w) => pickupTime >= w.from && pickupTime < w.to);
-  }, [cityCheck, pickupTime]);
-
-  const estimatedInsuranceFee = selectedHorses.reduce((sum, h) => sum + previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null).fee * h.quantity, 0);
+  const estimatedInsuranceFee = selectedHorses.reduce((sum, h) => {
+    const oneWayFee = previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null).fee;
+    const effectiveFee = tripType === 'round_trip' ? oneWayFee + Math.round(oneWayFee * 0.9) : oneWayFee;
+    return sum + effectiveFee * h.quantity;
+  }, 0);
   const validateInsurance = () => {
     const invalid = selectedHorses.map(h => ({ name: h.name, ...previewInsurance(insuranceValues[h.id] ?? defaultInsurance, policy ?? null) })).find(p => p.error);
     const message = invalid
@@ -638,23 +694,32 @@ function CreateTransportRequestForm() {
 
   const cutoffViolationMessage = () =>
     language === 'en'
-      ? `Order Cutoff: route requires booking at least ${minLeadDays} day(s) ahead (earliest departure: ${earliestDepartureDate}).`
-      : `Sát hạn đặt đơn (Order Cutoff): tuyến này yêu cầu đặt trước tối thiểu ${minLeadDays} ngày (ngày khởi hành sớm nhất: ${earliestDepartureDate}).`;
+      ? `Booking deadline: route requires booking at least ${minLeadDays} day(s) ahead (earliest departure: ${earliestDepartureDate}).`
+      : `Sát hạn đặt đơn: tuyến này yêu cầu đặt trước tối thiểu ${minLeadDays} ngày (ngày khởi hành sớm nhất: ${earliestDepartureDate}).`;
 
-  const handleContinue = async () => {
-    if (currentStep === 1) {
-      const isValid = await trigger(['title', 'origin', 'destination', 'departureDate']);
-      if (!isValid) return;
+  const validateStep = async (stepNum: number): Promise<boolean> => {
+    if (stepNum === 1) {
+      const isValid = await trigger(['origin', 'destination', 'departureDate']);
+      if (!isValid) return false;
+      if (transportMode === 'sea' && routeData?.seaUnavailableNotice) {
+        toast.error(language === 'en' ? routeData.seaUnavailableNotice.en : routeData.seaUnavailableNotice.vi);
+        return false;
+      }
       if (isDepartureBeforeCutoff(formValues.departureDate)) {
         toast.error(cutoffViolationMessage());
-        return;
+        return false;
       }
+      if (tripType === 'round_trip' && !returnDepartureAt) {
+        toast.error(language === 'en' ? 'Please select return departure date & time' : 'Vui lòng chọn ngày giờ hẹn đón chặng về');
+        return false;
+      }
+      return true;
     }
-    if (currentStep === 2) {
-      if (!validateInsurance()) return;
+    if (stepNum === 2) {
+      if (!validateInsurance()) return false;
       if (totalSelectedHorses === 0) {
         toast.error(language === 'en' ? 'Please select at least one horse available for transit.' : 'Vui lòng chọn ít nhất một con ngựa sẵn sàng vận chuyển.');
-        return;
+        return false;
       }
       const invalidSelected = selectedHorses.find((h) => getHorseRowState(h).isUnavailable);
       if (invalidSelected) {
@@ -664,12 +729,59 @@ function CreateTransportRequestForm() {
             ? (language === 'en' ? `Horse "${invalidSelected.name}" is in order ${activeOrder.requestCode}, cannot create new request.` : `Chiến mã "${invalidSelected.name}" đang trong đơn ${activeOrder.requestCode}, không thể tạo đơn mới.`)
             : (language === 'en' ? `Horse "${invalidSelected.name}" is not available for transit.` : `Chiến mã "${invalidSelected.name}" không khả dụng để vận chuyển.`)
         );
-        return;
+        return false;
       }
+      return true;
     }
-    if (currentStep < 3) {
+    if (stepNum === 3) {
+      if (complianceReqs && !complianceReqs.isDepartureFeasible) {
+        const blockingUnresolved: string[] = [];
+        for (const hGroup of complianceReqs.horses) {
+          for (const req of hGroup.requirements) {
+            const key = `${hGroup.horseId}_${req.documentTypeCode}`;
+            const isSatisfied =
+              req.status === 'reusable' ||
+              req.status === 'pending_review' ||
+              req.status === 'expiring' ||
+              submittedLaterKeys.has(key);
+            if (!isSatisfied) {
+              blockingUnresolved.push(`${hGroup.horseName}: ${req.documentTypeName}`);
+            }
+          }
+        }
+        if (blockingUnresolved.length > 0) {
+          toast.error(
+            language === 'en'
+              ? `Cannot proceed for ${formValues.departureDate}. Upload documents, choose "Submit later", or select from ${complianceReqs.earliestFeasibleDeparture}.`
+              : `Chưa thể tiếp tục với ngày ${formValues.departureDate}. Vui lòng nộp giấy tờ, đánh dấu "Nộp bổ sung sau", hoặc chọn ngày từ ${complianceReqs.earliestFeasibleDeparture}.`
+          );
+          return false;
+        }
+      }
+      return true;
+    }
+    return true;
+  };
+
+  const handleContinue = async () => {
+    const ok = await validateStep(currentStep);
+    if (!ok) return;
+    if (currentStep < 4) {
       setCurrentStep(currentStep + 1);
     }
+  };
+
+  const handleStepClick = async (targetStep: number) => {
+    if (targetStep === currentStep) return;
+    if (targetStep < currentStep) {
+      setCurrentStep(targetStep);
+      return;
+    }
+    for (let s = currentStep; s < targetStep; s++) {
+      const ok = await validateStep(s);
+      if (!ok) return;
+    }
+    setCurrentStep(targetStep);
   };
 
   const handleBack = () => {
@@ -695,7 +807,10 @@ function CreateTransportRequestForm() {
         for (const req of hGroup.requirements) {
           const key = `${hGroup.horseId}_${req.documentTypeCode}`;
           const isSatisfied =
-            req.status === 'reusable' || req.status === 'pending_review' || submittedLaterKeys.has(key);
+            req.status === 'reusable' ||
+            req.status === 'pending_review' ||
+            req.status === 'expiring' ||
+            submittedLaterKeys.has(key);
           if (!isSatisfied) {
             blockingUnresolved.push(`${hGroup.horseName}: ${req.documentTypeName}`);
           }
@@ -748,6 +863,30 @@ function CreateTransportRequestForm() {
       const currentUser = getCurrentUser();
       const combinedReqs = data.specialReqs?.trim() || '';
 
+      const deferredDocumentsPayload: Array<{
+        horseId: number;
+        documentTypeCode: string;
+        documentTypeName?: string;
+        submitDeadline?: string;
+      }> = [];
+      if (complianceReqs?.horses) {
+        for (const hGroup of complianceReqs.horses) {
+          for (const req of hGroup.requirements) {
+            const key = `${hGroup.horseId}_${req.documentTypeCode}`;
+            const isAlreadyReady =
+              req.status === 'reusable' || req.status === 'pending_review' || req.status === 'expiring';
+            if (!isAlreadyReady && submittedLaterKeys.has(key)) {
+              deferredDocumentsPayload.push({
+                horseId: Number(hGroup.horseId),
+                documentTypeCode: req.documentTypeCode,
+                documentTypeName: req.documentTypeName,
+                submitDeadline: req.submitDeadline,
+              });
+            }
+          }
+        }
+      }
+
       const payload = {
         bookingType,
         contactName: currentUser.fullName || currentUser.name || 'Current Customer',
@@ -766,9 +905,9 @@ function CreateTransportRequestForm() {
         acceptReturnPolicy: tripType === 'round_trip' ? acceptReturnPolicy : undefined,
         quoteId: quote?.quoteId ? Number(quote.quoteId) : undefined,
         optionCode: selectedOptionCode,
-        customerProposedPrice: parsedCustomerProposedPrice,
         specialRequirements: combinedReqs || undefined,
         horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
+        deferredDocuments: deferredDocumentsPayload.length > 0 ? deferredDocumentsPayload : undefined,
         // Fallback for single horse if array is not preferred by backend yet
         horseName: selectedHorsesData[0]?.name,
         horseBreed: selectedHorsesData[0]?.breed,
@@ -780,13 +919,31 @@ function CreateTransportRequestForm() {
         body: JSON.stringify(payload),
       });
 
-      // Refresh horse stock in store
+      // Refresh horse stock & orders in store
       try {
-        await refreshHorses();
+        await Promise.allSettled([refreshHorses(), refreshRequests()]);
+        window.dispatchEvent(new CustomEvent('customer-orders-updated'));
       } catch {}
 
-      toast.success(t('requests.createSuccess', 'Yêu cầu vận chuyển đã được tạo thành công!'));
-      router.push(`/customer/requests/${newReq.id}`);
+      const reqCode = newReq.customerRequestCode || newReq.requestCode || `REQ-${String(newReq.id).padStart(3, '0')}`;
+      toast.success(
+        language === 'en'
+          ? `Order ${reqCode} created! Complete payment via VietQR or pay within 12 hours.`
+          : `Đã tạo đơn ${reqCode}! Quét mã VietQR để thanh toán ngay hoặc hoàn tất trong vòng 12 giờ.`,
+      );
+      setIsSubmitting(false);
+
+      if (String(newReq.status || '').toLowerCase() === 'awaiting_payment' && Number(newReq.totalCost) > 0) {
+        setCreatedOrderForPayment({
+          id: Number(newReq.id),
+          requestCode: reqCode,
+          totalCost: Number(newReq.totalCost),
+          paymentDueAt: newReq.paymentDueAt,
+          createdAt: newReq.createdAt,
+        });
+      } else {
+        router.push(`/customer/requests/${newReq.id}`);
+      }
     } catch (error: any) {
       console.error('Failed to create request:', error);
       if (
@@ -820,236 +977,127 @@ function CreateTransportRequestForm() {
     }
   };
 
-  const progressPercent = ((currentStep - 1) / 2) * 100;
+  const progressPercent = ((currentStep - 1) / 3) * 100;
+
+  const complianceSummary = useMemo(() => {
+    if (!complianceReqs) return null;
+    let total = 0;
+    let ready = 0;
+    let deferred = 0;
+    let earliestDue: string | null = null;
+    let hasPastRecommendedDue = false;
+    for (const hg of complianceReqs.horses || []) {
+      for (const req of hg.requirements || []) {
+        total++;
+        const key = `${hg.horseId}_${req.documentTypeCode}`;
+        if (req.status === 'reusable' || req.status === 'pending_review' || req.status === 'expiring') {
+          ready++;
+        } else if (submittedLaterKeys.has(key)) {
+          deferred++;
+          if (req.submitDeadline && (!earliestDue || req.submitDeadline < earliestDue)) {
+            earliestDue = req.submitDeadline;
+          }
+          if (req.canSubmitLater === false) {
+            hasPastRecommendedDue = true;
+          }
+        }
+      }
+    }
+    return {
+      total,
+      ready,
+      deferred,
+      satisfied: ready + deferred,
+      remaining: Math.max(0, total - ready - deferred),
+      earliestDue,
+      hasPastRecommendedDue,
+    };
+  }, [complianceReqs, submittedLaterKeys]);
+
+  const activeQuoteOption = quote?.options?.find((o) => o.optionCode === (selectedOptionCode || quote.recommendedOptionCode)) || quote?.options?.[0];
+  const liveQuoteTotal = quote
+    ? (Array.isArray(activeQuoteOption?.vehicleIds)
+        ? (activeQuoteOption?.freight?.total ?? 0) + (quote.insurance?.total || 0)
+        : quote.total)
+    : null;
 
   return (
-    <div className="flex flex-col gap-6 pb-8">
-      {/* Editorial Header */}
-      <header className="border-b border-[#E5DDD0] pb-5">
-        <div className="flex items-center gap-1.5 text-xs text-[#747D88] mb-1.5 flex-wrap">
-          <Link href="/customer" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
-            {language === 'en' ? 'Dashboard' : 'Bảng điều khiển'}
-          </Link>
-          <ChevronRight size={12} aria-hidden="true" />
-          <Link href="/customer/requests" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
-            {t('customer.requestsTitle', 'Yêu cầu vận chuyển')}
-          </Link>
-          <ChevronRight size={12} aria-hidden="true" />
-          <span className="text-[#181A17] font-semibold">{t('customer.createRequestTitle', 'Tạo yêu cầu vận chuyển')}</span>
-        </div>
-        <h1 className="text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
-          {t('customer.createRequestTitle', 'Tạo Yêu Cầu Vận Chuyển')}
+    <div className="flex flex-col gap-5 pb-8">
+      {/* Compact Editorial Header */}
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E5DDD0] pb-3">
+        <h1 className="text-xl sm:text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
+          {language === 'en' ? 'New Transport Order' : 'Tạo Đơn Vận Chuyển Mới'}
         </h1>
-        <p className="text-sm text-[#5F6977] mt-1 mb-0">
-          {language === 'en'
-            ? 'Configure your route, select horses, and confirm insurance preferences.'
-            : 'Điền thông tin hành trình, chọn ngựa vận chuyển và xác nhận gói bảo hiểm.'}
-        </p>
+        <Link
+          href="/customer/requests"
+          className="text-xs font-bold text-[#5F6977] hover:text-[#181A17] no-underline"
+        >
+          ← {language === 'en' ? 'Back to Orders' : 'Quay lại danh sách đơn'}
+        </Link>
       </header>
 
-      {/* PROGRESS INDICATOR */}
-      <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 shadow-sm">
-        <div className="max-w-[720px] mx-auto relative">
-          <div className="absolute top-4 left-[16.666%] right-[16.666%] h-[2px] bg-[#EFEAE0] z-0">
+      {/* CLICKABLE PROGRESS STEPPER */}
+      <div className="bg-white rounded-2xl border border-[#E5DDD0] p-4 sm:p-5 shadow-sm">
+        <div className="max-w-[820px] mx-auto relative">
+          <div className="absolute top-4 left-[12.5%] right-[12.5%] h-[2px] bg-[#EFEAE0] z-0">
             <div
               className="h-full bg-[#181A17] transition-all duration-300"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
 
-          <div className="grid grid-cols-3 relative z-[1]">
+          <div className="grid grid-cols-4 relative z-[1]">
             {[
-              { num: 1, label: t('customer.newRequest.step1', 'Thông tin lộ trình') },
-              { num: 2, label: t('customer.newRequest.step2', 'Chọn ngựa vận chuyển') },
-              { num: 3, label: t('customer.newRequest.step3', 'Rà soát & Gửi đơn') },
+              { num: 1, label: language === 'en' ? 'Route & Mode' : 'Lộ trình & Lịch' },
+              { num: 2, label: language === 'en' ? 'Horses & Insurance' : 'Ngựa & Bảo hiểm' },
+              { num: 3, label: language === 'en' ? 'Quarantine Docs' : 'Hồ sơ kiểm dịch' },
+              { num: 4, label: language === 'en' ? 'Quotation & Pay' : 'Báo giá & Gửi đơn' },
             ].map((step) => {
               const isPast = step.num < currentStep;
               const isActive = step.num === currentStep;
 
               return (
-                <div key={step.num} className="flex flex-col items-center gap-1.5 text-center">
+                <button
+                  key={step.num}
+                  type="button"
+                  onClick={() => void handleStepClick(step.num)}
+                  className="flex flex-col items-center gap-1.5 text-center px-1 bg-transparent border-0 cursor-pointer group focus-visible:outline-none"
+                >
                   <div
                     className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
                       isPast
-                        ? 'bg-[#287653] text-white'
+                        ? 'bg-[#287653] text-white group-hover:scale-105'
                         : isActive
                           ? 'bg-[#181A17] text-[#C4B38E] ring-4 ring-[#C4B38E]/25'
-                          : 'bg-white text-[#5F6977] border border-[#D8CEBE]'
+                          : 'bg-white text-[#5F6977] border border-[#D8CEBE] group-hover:border-[#A67C2E]'
                     }`}
                   >
                     {isPast ? <Check size={15} strokeWidth={3} aria-hidden="true" /> : `0${step.num}`}
                   </div>
-                  <span className={`text-xs ${isActive ? 'font-bold text-[#181A17]' : 'font-medium text-[#5F6977]'}`}>
+                  <span className={`text-[11px] sm:text-xs ${isActive ? 'font-bold text-[#181A17]' : 'font-medium text-[#5F6977] group-hover:text-[#181A17]'}`}>
                     {step.label}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>
         </div>
       </div>
 
-      {/* STEP CONTENT CONTAINER */}
-      <div className="max-w-[850px] w-full mx-auto">
-        {/* STEP 1: TRANSPORT INFORMATION */}
+      {/* SINGLE-COLUMN FOCUSED WIZARD LAYOUT (Full width on Steps 1–3; unified summary on Step 4) */}
+      <div className="w-full max-w-5xl mx-auto">
+      <div className="min-w-0 w-full">
+        {/* STEP 1: ROUTE, TRANSPORT MODE & SCHEDULE */}
         {currentStep === 1 && (
           <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
             <div className="px-6 py-4 bg-white border-b border-[#EFEAE0]">
               <h2 className="text-base font-extrabold text-[#181A17] m-0">
-                {language === 'en' ? 'Transport Information' : 'Thông tin vận chuyển'}
+                {language === 'en' ? 'Route, Mode & Schedule' : 'Lộ trình, Phương thức & Lịch trình'}
               </h2>
-              <p className="text-xs text-[#5F6977] mt-1 mb-0">
-                {language === 'en' ? 'Please provide the route and schedule details for your request.' : 'Vui lòng cung cấp chi tiết lộ trình và lịch trình dự kiến cho yêu cầu của bạn.'}
-              </p>
             </div>
 
             <div className="p-5 sm:p-7 flex flex-col gap-5">
-              {/* Row 1: Title & Auto-detected Route Scope */}
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <label htmlFor="req-title" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: 0 }}>
-                    {language === 'en' ? 'Request Title' : 'Tiêu đề yêu cầu'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
-                  </label>
-                  <span
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
-                      formValues.transportType === 'Domestic'
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                        : 'bg-[#FAF8F4] text-[#8C6621] border-[#DFCA9A]'
-                    }`}
-                  >
-                    <span>{formValues.transportType === 'Domestic' ? '🇻🇳' : '🌐'}</span>
-                    <span>
-                      {formValues.transportType === 'Domestic'
-                        ? language === 'en'
-                          ? 'Auto-detected: Domestic Transit'
-                          : 'Tự động nhận diện: Vận chuyển nội địa'
-                        : language === 'en'
-                          ? 'Auto-detected: International Cross-Border'
-                          : 'Tự động nhận diện: Quốc tế xuyên biên giới'}
-                    </span>
-                  </span>
-                </div>
-                <input
-                  id="req-title"
-                  type="text"
-                  aria-invalid={Boolean(errors.title)}
-                  {...register('title')}
-                  placeholder={language === 'en' ? 'Enter request title (e.g. Championship Transport to Singapore)' : 'Nhập tiêu đề yêu cầu (VD: Vận chuyển thi đấu đến Singapore)'}
-                  className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.title ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
-                />
-                {errors.title && (
-                  <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <AlertCircle size={12} aria-hidden="true" /> {errors.title.message}
-                  </span>
-                )}
-              </div>
-
-              {/* Transport Mode & Sea Mode Selection */}
-              <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex flex-col gap-3">
-                <div>
-                  <span className="text-xs font-bold text-[#181A17] block mb-1.5 uppercase tracking-wide">
-                    {language === 'en' ? 'Transport Mode' : 'Phương thức vận tải'}
-                  </span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setTransportMode('road')}
-                      className={`px-3 py-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                        transportMode === 'road'
-                          ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
-                          : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
-                      }`}
-                    >
-                      <Truck size={15} />
-                      <span>{language === 'en' ? 'Road' : 'Đường bộ'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTransportMode('air')}
-                      className={`px-3 py-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                        transportMode === 'air'
-                          ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
-                          : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
-                      }`}
-                    >
-                      <Plane size={15} />
-                      <span>{language === 'en' ? 'Air Cargo' : 'Hàng không'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTransportMode('sea')}
-                      className={`px-3 py-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                        transportMode === 'sea'
-                          ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
-                          : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
-                      }`}
-                    >
-                      <Ship size={15} />
-                      <span>{language === 'en' ? 'Sea' : 'Đường thủy'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {transportMode === 'sea' && (
-                  <div className="pt-3 border-t border-[#E5DDD0] flex flex-col gap-2.5">
-                    <span className="text-xs font-bold text-[#181A17] block">
-                      {language === 'en' ? 'Sea Transport Type' : 'Hình thức đường thủy'}
-                    </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <label className={`p-3 rounded-lg border cursor-pointer flex items-start gap-2.5 ${seaMode === 'ferry' ? 'bg-white border-[#A67C2E] ring-1 ring-[#A67C2E]' : 'bg-[#F5EFE2]/50 border-[#D8CEBE]'}`}>
-                        <input
-                          type="radio"
-                          name="seaMode"
-                          value="ferry"
-                          checked={seaMode === 'ferry'}
-                          onChange={() => setSeaMode('ferry')}
-                          className="mt-0.5"
-                        />
-                        <div>
-                          <div className="text-xs font-bold text-[#181A17]">
-                            {language === 'en' ? 'Ferry (Truck on Ferry)' : 'Phà (Xe tải lên phà)'}
-                          </div>
-                          <div className="text-[11px] text-[#5F6977]">
-                            {language === 'en' ? 'Horses remain inside climate-controlled vehicle (legs <= 12h)' : 'Ngựa ở trong xe chuyên dụng, áp dụng chặng biển dưới 12h'}
-                          </div>
-                        </div>
-                      </label>
-                      <label className={`p-3 rounded-lg border cursor-pointer flex items-start gap-2.5 ${seaMode === 'vessel' ? 'bg-white border-[#A67C2E] ring-1 ring-[#A67C2E]' : 'bg-[#F5EFE2]/50 border-[#D8CEBE]'}`}>
-                        <input
-                          type="radio"
-                          name="seaMode"
-                          value="vessel"
-                          checked={seaMode === 'vessel'}
-                          onChange={() => setSeaMode('vessel')}
-                          className="mt-0.5"
-                        />
-                        <div>
-                          <div className="text-xs font-bold text-[#181A17]">
-                            {language === 'en' ? 'Dedicated Vessel' : 'Tàu biển chuyên dụng (Vessel)'}
-                          </div>
-                          <div className="text-[11px] text-[#5F6977]">
-                            {language === 'en' ? 'Specialized stalls on deck or hold for long-distance routes' : 'Ô chuồng cố định trên tàu cho chặng đường dài'}
-                          </div>
-                        </div>
-                      </label>
-                    </div>
-
-                    {seaMode === 'vessel' && (
-                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
-                        <AlertCircle size={15} className="text-amber-700 shrink-0 mt-0.5" />
-                        <div>
-                          <strong>{language === 'en' ? 'Health Advisory:' : 'Khuyến cáo sức khỏe:'}</strong>{' '}
-                          {language === 'en'
-                            ? 'Sea transport is more economical but slower and carries higher health risks. Air transport is recommended for competition racehorses.'
-                            : 'Đường thủy rẻ hơn nhưng lâu hơn và rủi ro sức khỏe cao hơn. Khuyến nghị đường hàng không cho ngựa đua thi đấu.'}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Row 2: Route */}
+              {/* 1. Addresses & Route Map (without price) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                 <div>
                   <label htmlFor="req-origin" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
@@ -1102,16 +1150,66 @@ function CreateTransportRequestForm() {
                 </div>
               </div>
 
-              {/* Interactive Route & Border Checkpoints Map */}
+              {/* 2. Transport Mode Selection */}
+              <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex flex-col gap-3">
+                <div>
+                  <span className="text-xs font-bold text-[#181A17] block mb-1.5 uppercase tracking-wide">
+                    {language === 'en' ? 'Transport Mode' : 'Phương thức vận tải'}
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTransportMode('road')}
+                      className={`px-3 py-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                        transportMode === 'road'
+                          ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                          : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
+                      }`}
+                    >
+                      <Truck size={15} />
+                      <span>{language === 'en' ? 'Road' : 'Đường bộ'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTransportMode('air')}
+                      className={`px-3 py-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                        transportMode === 'air'
+                          ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                          : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
+                      }`}
+                    >
+                      <Plane size={15} />
+                      <span>{language === 'en' ? 'Air Cargo' : 'Hàng không'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTransportMode('sea')}
+                      className={`px-3 py-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                        transportMode === 'sea'
+                          ? 'bg-[#181A17] text-white border-[#181A17] shadow-sm'
+                          : 'bg-white text-[#5F6977] border-[#D8CEBE] hover:border-[#181A17]'
+                      }`}
+                    >
+                      <Ship size={15} />
+                      <span>{language === 'en' ? 'Sea' : 'Đường thủy'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Interactive Route & Border Checkpoints Map (preview only, pricing shown at Step 4) */}
               <RoutePlanningMap
                 originText={formValues.origin}
                 destinationText={formValues.destination}
                 mode={transportMode}
                 seaMode={seaMode}
+                tripType={tripType}
                 horseCount={Math.max(1, totalSelectedHorses)}
+                showPricing={false}
                 selectedOriginGeo={selectedOriginGeo}
                 selectedDestGeo={selectedDestGeo}
                 onRouteCalculated={handleRouteCalculated}
+                onRequestModeChange={setTransportMode}
                 onApplyPreset={(preset) => {
                   setSelectedOriginGeo(null);
                   setSelectedDestGeo(null);
@@ -1120,219 +1218,11 @@ function CreateTransportRequestForm() {
                 }}
               />
 
-              {/* Customer Proposed Trip Price / Budget */}
-              <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex flex-col gap-2.5">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <label
-                    htmlFor="req-customer-proposed-price"
-                    className="text-xs font-bold text-[#181A17] uppercase tracking-wide"
-                  >
-                    {language === 'en'
-                      ? 'Customer Proposed Trip Price / Budget (VND)'
-                      : 'Giá tiền / Ngân sách đề xuất của khách hàng (VNĐ)'}
-                  </label>
-                  {routeData?.estimatedTotalPriceVnd ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCustomerProposedPrice(
-                          routeData.estimatedTotalPriceVnd!.toLocaleString('vi-VN')
-                        )
-                      }
-                      className="text-[11px] font-bold text-[#8C6621] bg-white border border-[#DFCA9A] hover:bg-[#F5EFE2] px-2.5 py-1 rounded-full transition-colors cursor-pointer"
-                    >
-                      {language === 'en'
-                        ? `Use map estimate (${routeData.estimatedTotalPriceVnd.toLocaleString('vi-VN')} đ)`
-                        : `Dùng giá ước tính từ bản đồ (${routeData.estimatedTotalPriceVnd.toLocaleString('vi-VN')} đ)`}
-                    </button>
-                  ) : null}
-                </div>
-
-                <div className="relative">
-                  <input
-                    id="req-customer-proposed-price"
-                    type="text"
-                    inputMode="numeric"
-                    value={customerProposedPrice}
-                    onChange={(e) => {
-                      const rawDigits = e.target.value.replace(/[^\d]/g, '');
-                      if (!rawDigits) {
-                        setCustomerProposedPrice('');
-                        return;
-                      }
-                      const num = Number(rawDigits);
-                      if (Number.isFinite(num) && num <= 999_999_999_999) {
-                        setCustomerProposedPrice(num.toLocaleString('vi-VN'));
-                      }
-                    }}
-                    placeholder={
-                      routeData?.estimatedTotalPriceVnd
-                        ? `${language === 'en' ? 'e.g.' : 'VD:'} ${routeData.estimatedTotalPriceVnd.toLocaleString('vi-VN')}`
-                        : language === 'en'
-                          ? 'Enter your proposed trip price in VND (optional)'
-                          : 'Nhập mức giá mong muốn cho chuyến đi bằng VNĐ (tùy chọn)'
-                    }
-                    className="w-full pl-3.5 pr-16 py-2.5 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-mono font-bold text-sm placeholder:font-sans placeholder:font-normal placeholder:text-[#8892A0] focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all"
-                  />
-                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#5F6977] pointer-events-none">
-                    VNĐ
-                  </span>
-                </div>
-
-                <p className="m-0 text-[11.5px] text-[#5F6977] leading-relaxed">
-                  {parsedCustomerProposedPrice && routeData?.estimatedTotalPriceVnd ? (
-                    <>
-                      {language === 'en' ? 'Compared to map estimate: ' : 'So với ước tính từ bản đồ: '}
-                      <strong
-                        className={
-                          parsedCustomerProposedPrice >= routeData.estimatedTotalPriceVnd
-                            ? 'text-emerald-700'
-                            : 'text-amber-700'
-                        }
-                      >
-                        {parsedCustomerProposedPrice === routeData.estimatedTotalPriceVnd
-                          ? language === 'en'
-                            ? 'Matches map estimate'
-                            : 'Khớp với giá ước tính từ bản đồ'
-                          : parsedCustomerProposedPrice > routeData.estimatedTotalPriceVnd
-                            ? `+${(parsedCustomerProposedPrice - routeData.estimatedTotalPriceVnd).toLocaleString('vi-VN')} đ`
-                            : `-${(routeData.estimatedTotalPriceVnd - parsedCustomerProposedPrice).toLocaleString('vi-VN')} đ`}
-                      </strong>
-                      {' · '}
-                      {language === 'en'
-                        ? 'Your proposed price will be attached to the order for Logistics Manager review.'
-                        : 'Mức giá đề xuất của bạn sẽ được đính kèm theo đơn để Quản lý vận hành xem xét.'}
-                    </>
-                  ) : language === 'en' ? (
-                    'Optional: Enter your expected budget or proposed fare for this trip. Official billing follows the server-locked quotation.'
-                  ) : (
-                    'Tùy chọn: Nhập mức giá hoặc ngân sách dự kiến bạn mong muốn cho chuyến đi này. Thông tin sẽ hiển thị kèm báo giá cho Quản lý vận hành.'
-                  )}
-                </p>
-              </div>
-
-              <p className="m-0 text-xs text-[#5F6977] rounded-xl border border-[#E5DDD0] bg-[#FAF8F4] px-4 py-3">
-                {language === 'en'
-                  ? 'Each booking travels in its own vehicle (dedicated charter). Trip consolidation is no longer offered.'
-                  : 'Mỗi đơn đi xe riêng (bao nguyên xe). Hệ thống không còn ghép chuyến với khách khác.'}
-              </p>
-
-              {/* Row 3: Dates */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-                <div>
-                  <label htmlFor="req-departure-date" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    {language === 'en' ? 'Departure Date' : 'Ngày xuất phát'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
-                  </label>
-                  <input
-                    id="req-departure-date"
-                    type="date"
-                    min={earliestDepartureDate}
-                    aria-invalid={Boolean(errors.departureDate) || isDepartureBeforeCutoff(formValues.departureDate)}
-                    {...register('departureDate')}
-                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.departureDate || isDepartureBeforeCutoff(formValues.departureDate) ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
-                  />
-                  {errors.departureDate && (
-                    <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', display: 'block', marginTop: '4px' }}>
-                      {errors.departureDate.message}
-                    </span>
-                  )}
-                  {isDepartureBeforeCutoff(formValues.departureDate) ? (
-                    <span role="alert" style={{ fontSize: '12px', color: '#991B1B', backgroundColor: '#FEF2F2', padding: '7px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', border: '1px solid #FECACA' }}>
-                      <AlertCircle size={13} aria-hidden="true" style={{ flexShrink: 0, color: '#B33E3E' }} />
-                      <span>{cutoffViolationMessage()}</span>
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: '12px', color: '#8C6621', backgroundColor: '#F5EFE2', padding: '7px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', border: '1px solid #DFCA9A' }}>
-                      <Clock size={13} aria-hidden="true" style={{ flexShrink: 0, color: '#A67C2E' }} />
-                      <span>
-                        {language === 'en' ? (
-                          <>Route <strong>Order Cutoff</strong>: requires booking at least <strong>{minLeadDays} days</strong> ahead (earliest: <strong>{earliestDepartureDate}</strong>).</>
-                        ) : (
-                          <>Hạn đặt đơn (<strong>Order Cutoff</strong>): tuyến yêu cầu đặt trước tối thiểu <strong>{minLeadDays} ngày</strong> (sớm nhất: <strong>{earliestDepartureDate}</strong>).</>
-                        )}
-                      </span>
-                    </span>
-                  )}
-                </div>
-
-                {/* Step 9: giờ đón + khung giờ hợp lệ khi điểm đón trong vùng cấm xe tải */}
-                <div>
-                  <label htmlFor="req-pickup-time" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    {language === 'en' ? 'Pickup time (Vietnam time)' : 'Giờ đón (giờ Việt Nam)'}
-                  </label>
-                  <input
-                    id="req-pickup-time"
-                    type="time"
-                    value={pickupTime}
-                    onChange={(e) => setPickupTime(e.target.value)}
-                    aria-describedby="req-pickup-time-hint"
-                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${pickupInBannedWindow ? 'border-[#D9A441]' : 'border-[#D8CEBE]'}`}
-                  />
-                  <div id="req-pickup-time-hint">
-                    {cityCheck?.restricted ? (
-                      <div className="mt-1.5 text-xs rounded-lg border border-[#DFCA9A] bg-[#F5EFE2] text-[#6B4E16] px-2.5 py-2 flex flex-col gap-1.5">
-                        <span>
-                          {language === 'en'
-                            ? `Heavy trucks may only enter central ${cityCheck.cities.join(', ')} during: ${cityCheck.allowedWindows.map((w) => `${w.from}–${w.to}`).join(', ')}.`
-                            : cityCheck.messageVi}
-                          {pickupInBannedWindow && (language === 'en'
-                            ? ' Your time falls in the ban: heavy-truck options will be moved to the nearest allowed time (night surcharge may apply).'
-                            : ' Giờ bạn chọn rơi vào giờ cấm: phương án xe tải nặng sẽ tự dời sang khung hợp lệ gần nhất (có thể cộng phụ phí đêm).')}
-                        </span>
-                        <span className="flex flex-wrap gap-1.5">
-                          {cityCheck.allowedWindows.map((w) => (
-                            <button
-                              key={w.from}
-                              type="button"
-                              onClick={() => setPickupTime(w.from)}
-                              className="px-2 py-0.5 rounded-md border border-[#A67C2E] text-[#8B6724] bg-white text-[11px] font-bold cursor-pointer hover:bg-[#A67C2E] hover:text-white"
-                            >
-                              {w.from}
-                            </button>
-                          ))}
-                        </span>
-                        <span className="text-[10px] text-[#8C6621]">
-                          {language === 'en' ? 'Demo regulation data — verify with official sources.' : 'Dữ liệu quy định là demo — cần đối chiếu văn bản gốc.'}
-                        </span>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-[#747D88] mt-1.5 mb-0">
-                        {language === 'en' ? 'Default 08:00. Used to check city truck-ban hours and vehicle availability.' : 'Mặc định 08:00. Dùng để kiểm tra giờ cấm xe tải nội đô và xe rảnh.'}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
-                    {language === 'en' ? 'Estimated Arrival (Auto-calculated)' : 'Dự kiến đến nơi (ước tính tự động)'}
-                  </span>
-                  <div className="w-full px-3.5 py-2.5 rounded-lg border border-[#E5DDD0] bg-[#FAF8F4] text-[#181A17] font-semibold text-sm flex items-center justify-between gap-2">
-                    <span>{estimatedArrivalDisplay}</span>
-                    {routeData && (
-                      <span className="text-xs font-medium text-[#5F6977]">
-                        (~{routeData.durationHours}{language === 'en' ? 'h' : ' giờ'})
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-[#747D88] mt-1.5 mb-0">
-                    {language === 'en'
-                      ? 'Final ETA is confirmed by the Coordinator during route planning.'
-                      : 'Thời gian đến chính thức sẽ do Điều phối viên chốt theo lịch xe/bay.'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Trip Type & Round-Trip Configuration */}
-              <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex flex-col gap-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-[#181A17] uppercase tracking-wide">
-                    {language === 'en' ? 'Trip Type & Schedule' : 'Hình thức chuyến & Lịch trình'}
-                  </span>
-                  <span className="text-[11px] font-semibold text-[#8B6724] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
-                    {language === 'en' ? 'Round-trip: -10% return freight & insurance' : 'Khứ hồi: Giảm 10% cước chặng về & 10% bảo hiểm'}
-                  </span>
-                </div>
+              {/* 3. Trip Type & Schedule */}
+              <div className="p-4 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex flex-col gap-4">
+                <span className="text-xs font-bold text-[#181A17] uppercase tracking-wide">
+                  {language === 'en' ? 'Trip Type & Schedule' : 'Hình thức chuyến & Lịch trình'}
+                </span>
 
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -1354,10 +1244,12 @@ function CreateTransportRequestForm() {
                     onClick={() => {
                       setTripType('round_trip');
                       if (!returnDepartureAt && formValues.departureDate) {
-                        const dep = new Date(formValues.departureDate);
-                        dep.setDate(dep.getDate() + 3);
-                        dep.setHours(9, 0, 0, 0);
-                        setReturnDepartureAt(dep.toISOString().slice(0, 16));
+                        const [yr, mo, dy] = formValues.departureDate.split('-').map(Number);
+                        const dep = new Date(yr, (mo || 1) - 1, (dy || 1) + 3, 9, 0, 0, 0);
+                        const pad = (n: number) => String(n).padStart(2, '0');
+                        setReturnDepartureAt(
+                          `${dep.getFullYear()}-${pad(dep.getMonth() + 1)}-${pad(dep.getDate())}T${pad(dep.getHours())}:${pad(dep.getMinutes())}`
+                        );
                       }
                     }}
                     className={`px-3 py-2.5 rounded-lg border text-xs font-bold cursor-pointer transition-all ${
@@ -1370,35 +1262,102 @@ function CreateTransportRequestForm() {
                   </button>
                 </div>
 
-                {tripType === 'round_trip' && (
-                  <div className="pt-3 border-t border-[#E5DDD0] flex flex-col gap-2">
-                    <label htmlFor="req-return-departure-at" className="text-xs font-bold text-[#181A17]">
-                      {language === 'en' ? 'Return Pickup Date & Time' : 'Ngày giờ hẹn đón chặng về'} <span className="text-[#B33E3E]">*</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-[#E5DDD0]">
+                  <div>
+                    <label htmlFor="req-departure-date" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                      {language === 'en' ? 'Departure Date' : 'Ngày xuất phát'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
                     </label>
                     <input
-                      id="req-return-departure-at"
-                      type="datetime-local"
-                      value={returnDepartureAt}
-                      min={
-                        formValues.departureDate
-                          ? new Date(new Date(formValues.departureDate).getTime() + (Number(routeData?.durationHours || 6) + 12) * 3600 * 1000)
-                              .toISOString()
-                              .slice(0, 16)
-                          : undefined
-                      }
-                      onChange={(e) => setReturnDepartureAt(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E]"
+                      id="req-departure-date"
+                      type="date"
+                      min={earliestDepartureDate}
+                      aria-invalid={Boolean(errors.departureDate) || isDepartureBeforeCutoff(formValues.departureDate)}
+                      {...register('departureDate')}
+                      className={`w-full px-3.5 py-2.5 rounded-lg border bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all ${errors.departureDate || isDepartureBeforeCutoff(formValues.departureDate) ? 'border-[#B33E3E]' : 'border-[#D8CEBE]'}`}
                     />
-                    <p className="text-[11px] text-[#747D88] m-0">
-                      {language === 'en'
-                        ? 'Return pickup must be at least the transit duration plus 12 hours rest time after departure.'
-                        : 'Thời điểm đón chặng về phải sau giờ xuất phát tối thiểu thời gian hành trình + 12 giờ nghỉ ngơi.'}
-                    </p>
+                    {errors.departureDate && (
+                      <span role="alert" style={{ fontSize: '12px', color: '#B33E3E', display: 'block', marginTop: '4px' }}>
+                        {errors.departureDate.message}
+                      </span>
+                    )}
+                    {isDepartureBeforeCutoff(formValues.departureDate) ? (
+                      <span role="alert" style={{ fontSize: '12px', color: '#991B1B', backgroundColor: '#FEF2F2', padding: '7px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', border: '1px solid #FECACA' }}>
+                        <AlertCircle size={13} aria-hidden="true" style={{ flexShrink: 0, color: '#B33E3E' }} />
+                        <span>{cutoffViolationMessage()}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[11.5px] text-[#8C6621] flex items-center gap-1.5 mt-1.5">
+                        <Clock size={12} aria-hidden="true" className="shrink-0 text-[#A67C2E]" />
+                        <span>
+                          {language === 'en' ? (
+                            <>Book ≥ <strong>{minLeadDays} days</strong> ahead (from <strong>{earliestDepartureDate}</strong>)</>
+                          ) : (
+                            <>Đặt trước ≥ <strong>{minLeadDays} ngày</strong> (từ <strong>{earliestDepartureDate}</strong>)</>
+                          )}
+                        </span>
+                      </span>
+                    )}
                   </div>
-                )}
+
+                  <div>
+                    <label htmlFor="req-pickup-time" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                      {language === 'en' ? 'Pickup Time' : 'Giờ đón'}
+                    </label>
+                    <input
+                      id="req-pickup-time"
+                      type="time"
+                      value={pickupTime}
+                      onChange={(e) => setPickupTime(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E] focus:ring-2 focus:ring-[#A67C2E]/20 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                      {language === 'en' ? 'Estimated Arrival (Auto-calculated)' : 'Dự kiến đến nơi (ước tính tự động)'}
+                    </span>
+                    <div className="w-full px-3.5 py-2.5 rounded-lg border border-[#E5DDD0] bg-white text-[#181A17] font-semibold text-sm flex items-center justify-between gap-2">
+                      <span>{estimatedArrivalDisplay}</span>
+                      {routeData && (
+                        <span className="text-xs font-medium text-[#5F6977]">
+                          (~{routeData.durationHours}{language === 'en' ? 'h' : ' giờ'})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {tripType === 'round_trip' && (
+                    <div>
+                      <label htmlFor="req-return-departure-at" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'block', marginBottom: '6px' }}>
+                        {language === 'en' ? 'Return Pickup Date & Time' : 'Ngày giờ hẹn đón chặng về'} <span style={{ color: '#B33E3E' }} aria-hidden="true">*</span>
+                      </label>
+                      <input
+                        id="req-return-departure-at"
+                        type="datetime-local"
+                        value={returnDepartureAt}
+                        min={
+                          formValues.departureDate
+                            ? (() => {
+                                const [yr, mo, dy] = formValues.departureDate.split('-').map(Number);
+                                const [hh, mm] = (pickupTime || '08:00').split(':').map(Number);
+                                const d = new Date(
+                                  new Date(yr, (mo || 1) - 1, dy || 1, hh || 8, mm || 0, 0, 0).getTime() +
+                                    (Number(routeData?.durationHours || 6) + 12) * 3600 * 1000
+                                );
+                                const pad = (n: number) => String(n).padStart(2, '0');
+                                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                              })()
+                            : undefined
+                        }
+                        onChange={(e) => setReturnDepartureAt(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-lg border border-[#D8CEBE] bg-white text-[#181A17] font-medium text-sm focus:outline-none focus:border-[#A67C2E]"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Row 4: Special Requirements */}
+              {/* 4. Special Requirements */}
               <div>
                 <label htmlFor="req-special-reqs" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-heading)', display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                   <span>{language === 'en' ? 'Special Requirements' : 'Yêu cầu đặc biệt'}</span>
@@ -1572,23 +1531,20 @@ function CreateTransportRequestForm() {
 
               {/* Bounded Scrollable Table with Sticky Header */}
               <div className="overflow-x-auto max-h-[380px] overflow-y-auto rounded-xl border border-[#E5DDD0] w-full">
-                <table className="w-full min-w-[650px] border-collapse text-left">
+                <table className="w-full min-w-0 border-collapse text-left">
                   <thead className="sticky top-0 z-10 bg-[#FAF8F4] shadow-[0_1px_0_#E5DDD0]">
                     <tr>
-                      <th className="py-2.5 px-3 w-11" />
-                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                      <th className="py-2.5 px-2 w-9" />
+                      <th className="py-2.5 px-2 text-[11px] font-bold uppercase tracking-wider text-[#5F6977]">
                         {t('customer.newRequest.horse', 'Horse')}
                       </th>
-                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
-                        {t('customer.table.breed', 'Breed')}
+                      <th className="py-2.5 px-2 text-[11px] font-bold uppercase tracking-wider text-[#5F6977]">
+                        {language === 'en' ? 'Breed & Age' : 'Giống / Tuổi'}
                       </th>
-                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
-                        {t('customer.newRequest.ageHandling', 'Tuổi / Lưu ý')}
-                      </th>
-                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] whitespace-nowrap">
+                      <th className="py-2.5 px-2 text-[11px] font-bold uppercase tracking-wider text-[#5F6977]">
                         {t('customer.newRequest.medicalStatus', 'Medical Status')}
                       </th>
-                      <th className="py-2.5 px-3 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] text-right whitespace-nowrap">
+                      <th className="py-2.5 px-2 text-[11px] font-bold uppercase tracking-wider text-[#5F6977] text-right whitespace-nowrap">
                         {t('customer.newRequest.profile', 'Profile')}
                       </th>
                     </tr>
@@ -1596,7 +1552,7 @@ function CreateTransportRequestForm() {
                   <tbody>
                     {horses.length === 0 ? (
                       <tr>
-                        <td colSpan={6} style={{ padding: '40px 20px', textAlign: 'center', color: '#5F6977' }}>
+                        <td colSpan={5} style={{ padding: '40px 20px', textAlign: 'center', color: '#5F6977' }}>
                           <p style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600 }}>
                             {language === 'en' ? 'No horses in your stable yet.' : 'Chưa có ngựa nào trong chuồng của bạn.'}
                           </p>
@@ -1623,7 +1579,7 @@ function CreateTransportRequestForm() {
                       </tr>
                     ) : filteredHorses.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-5 py-8 text-center text-[#5F6977]">
+                        <td colSpan={5} className="px-5 py-8 text-center text-[#5F6977]">
                           {horseSearch.trim() ? (
                             <div className="space-y-3">
                               <p className="text-sm font-semibold text-[#181A17] m-0">
@@ -1683,9 +1639,9 @@ function CreateTransportRequestForm() {
                               opacity: isUnavailable ? 0.72 : 1,
                             }}
                           >
-                            <td className="py-2 px-3 text-center">
+                            <td className="py-2 px-2 text-center">
                               <label
-                                className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center cursor-pointer select-none"
+                                className="min-h-[32px] min-w-[32px] inline-flex items-center justify-center cursor-pointer select-none"
                                 style={{ cursor: isUnavailable ? 'not-allowed' : 'pointer' }}
                               >
                                 <input
@@ -1710,10 +1666,10 @@ function CreateTransportRequestForm() {
                                 />
                               </label>
                             </td>
-                            <td className="py-2.5 px-3 font-bold text-[#181A17]">
-                              <div className="flex items-center gap-2.5">
+                            <td className="py-2 px-2 font-bold text-[#181A17]">
+                              <div className="flex items-center gap-2">
                                 <div
-                                  className="w-9 h-9 rounded-full overflow-hidden bg-[#F0EEE8] border-2 border-white shadow-xs shrink-0 flex items-center justify-center"
+                                  className="w-8 h-8 rounded-full overflow-hidden bg-[#F0EEE8] border-2 border-white shadow-xs shrink-0 flex items-center justify-center"
                                 >
                                   <img
                                     src={getFullPhotoUrl(h.photoUrl) || HORSE_PLACEHOLDER_SVG}
@@ -1726,7 +1682,7 @@ function CreateTransportRequestForm() {
                                   />
                                 </div>
                                 <div className="min-w-0">
-                                  <div className="text-[13px] font-bold text-[#181A17] leading-snug">{h.name}</div>
+                                  <div className="text-[12.5px] font-bold text-[#181A17] leading-snug">{h.name}</div>
                                   {isSelected && Number(h.quantity ?? 1) > 1 && (
                                     <label className="mt-1.5 flex items-center gap-2 text-xs font-medium">
                                       {language === 'en' ? 'Horses' : 'Số ngựa'}
@@ -1749,33 +1705,33 @@ function CreateTransportRequestForm() {
                                     </label>
                                   )}
                                   {isInTransit ? (
-                                    <div className="inline-flex items-center gap-1 mt-0.5 px-2 py-0.5 rounded bg-[#F5EFE2] text-[#8C6621] text-[11px] font-bold">
-                                      <Truck size={11} aria-hidden="true" />
+                                    <div className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded bg-[#F5EFE2] text-[#8C6621] text-[10.5px] font-bold">
+                                      <Truck size={10} aria-hidden="true" />
                                       <span>{t('customer.newRequest.inTransitStatus', 'In Transit ({code})').replace('{code}', orderCode || 'REQ-001')}</span>
                                     </div>
                                   ) : isScheduled ? (
-                                    <div className="inline-flex items-center gap-1 mt-0.5 px-2 py-0.5 rounded bg-[#D8CEBE] text-[#242722] text-[11px] font-bold">
-                                      <Clock size={11} aria-hidden="true" />
+                                    <div className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded bg-[#D8CEBE] text-[#242722] text-[10.5px] font-bold">
+                                      <Clock size={10} aria-hidden="true" />
                                       <span>{t('customer.newRequest.scheduledStatus', 'Scheduled ({code})').replace('{code}', orderCode || 'REQ-002')}</span>
                                     </div>
                                   ) : (
-                                    <div className="text-[11px] font-semibold text-[#287653] mt-0.5 flex items-center gap-1.5">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-[#287653] inline-block" />
+                                    <div className="text-[10.5px] font-semibold text-[#287653] mt-0.5 flex items-center gap-1">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-[#287653] inline-block shrink-0" />
                                       {t('customer.newRequest.readyStatus', 'Ready for transit')}
                                     </div>
                                   )}
                                 </div>
                               </div>
                             </td>
-                            <td className="py-2.5 px-3 text-[13px] text-[#3F443D] whitespace-nowrap">
-                              {translateBreed(h.breed)}
+                            <td className="py-2 px-2 text-[12px] text-[#3F443D]">
+                              <div className="font-medium text-[#181A17] leading-snug">{translateBreed(h.breed)}</div>
+                              <div className="text-[11px] text-[#5F6977]">
+                                {h.age} {t('horses.yearsOld', 'years old')}{h.requiresPrivateStall ? ` • ${t('horses.privateStallShort', 'Chuồng riêng')}` : ''}
+                              </div>
                             </td>
-                            <td className="py-2.5 px-3 text-[13px] text-[#3F443D] whitespace-nowrap">
-                              {h.age} {t('horses.yearsOld', 'years old')}{h.requiresPrivateStall ? ` • ${t('horses.privateStallShort', 'Chuồng riêng')}` : ''}
-                            </td>
-                            <td className="py-2.5 px-3 whitespace-nowrap">
+                            <td className="py-2 px-2">
                               <span
-                                className="inline-block whitespace-nowrap px-2 py-0.5 rounded-md text-[11px] font-bold"
+                                className="inline-block px-2 py-0.5 rounded-md text-[10.5px] font-bold leading-tight"
                                 style={{
                                   backgroundColor: isUnavailable ? '#F0EEE8' : '#E8F2EB',
                                   color: isUnavailable ? '#5F6977' : '#287653',
@@ -1787,11 +1743,11 @@ function CreateTransportRequestForm() {
                                       : isScheduled
                                       ? t('customer.newRequest.scheduledBadge', 'Scheduled')
                                       : t('customer.newRequest.unavailableBadge', 'Unavailable'))
-                                  : (h.medicalStatus || (language === 'en' ? 'Healthy' : 'Khỏe mạnh'))}
+                                  : (h.medicalStatus || (language === 'en' ? 'Pending Verification' : 'Chưa xác minh'))}
                               </span>
                             </td>
-                            <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                              <Link href={`/customer/horses/${h.id}`} target="_blank" className="text-xs text-[#A67C2E] hover:underline font-semibold whitespace-nowrap">
+                            <td className="py-2 px-2 text-right whitespace-nowrap">
+                              <Link href={`/customer/horses/${h.id}`} target="_blank" className="text-[11.5px] text-[#A67C2E] hover:underline font-semibold whitespace-nowrap">
                                 {t('customer.newRequest.viewProfile', 'View Profile ↗')}
                               </Link>
                             </td>
@@ -1831,48 +1787,117 @@ function CreateTransportRequestForm() {
           </div>
         )}
 
-        {/* STEP 3: REVIEW & SUBMIT */}
+        {/* STEP 3: QUARANTINE & COUNTRY DOCUMENTS */}
         {currentStep === 3 && (
-          <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
-            <div className="px-6 py-4 bg-white border-b border-[#EFEAE0]">
-              <h2 className="text-base font-extrabold text-[#181A17] m-0">
-                {t('customer.newRequest.reviewTitle', 'Review & Submit Request')}
-              </h2>
-              <p className="text-xs text-[#5F6977] mt-1 mb-0">
-                {t('customer.newRequest.reviewDesc', 'Please review your shipment parameters carefully before submitting to the operations team.')}
-              </p>
+          <section
+            aria-label={language === 'en' ? 'Required Documents & Quarantine Checklist' : 'Hồ sơ pháp lý & kiểm dịch theo quốc gia'}
+            className="bg-white p-5 sm:p-6 rounded-2xl border border-[#E5DDD0] shadow-sm space-y-4"
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-[#EFEAE0] pb-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-extrabold text-base text-[#181A17] m-0">
+                  {language === 'en' ? 'Quarantine Documents' : 'Hồ sơ kiểm dịch'}
+                </h2>
+                <span className="px-2 py-0.5 rounded-md bg-[#FAF8F4] border border-[#E5DDD0] text-[11px] font-semibold text-[#5F6977]">
+                  {targetCountry} · {transportMode === 'air' ? (language === 'en' ? 'Air' : 'Hàng không') : transportMode === 'sea' ? (language === 'en' ? 'Sea' : 'Đường thủy') : (language === 'en' ? 'Road' : 'Đường bộ')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadComplianceRequirements()}
+                className="text-xs font-bold text-[#A67C2E] hover:underline cursor-pointer"
+              >
+                {language === 'en' ? 'Recheck' : 'Kiểm tra lại'}
+              </button>
             </div>
 
-            <div className="p-5 sm:p-7 flex flex-col gap-5">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
-                  <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
-                    {t('customer.newRequest.summaryTitle', 'Request Title')}
-                  </span>
-                  <div className="font-bold text-sm text-[#181A17] mt-1">
-                    {formValues.title || (language === 'en' ? 'Untitled Request' : 'Yêu cầu vận chuyển')}
-                  </div>
-                </div>
-                <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
-                  <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
-                    {t('customer.newRequest.summaryRoute', 'Route')}
-                  </span>
-                  <div className="font-bold text-sm text-[#181A17] mt-1">
-                    {translateCountry(formValues.origin)} → {translateCountry(formValues.destination)}
-                  </div>
-                </div>
-                <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
-                  <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
-                    {t('customer.newRequest.summaryDepartureDate', 'Departure Date')}
-                  </span>
-                  <div className="font-bold text-sm text-[#181A17] mt-1">{formValues.departureDate}</div>
-                </div>
+            <RequirementChecklist
+              requirements={complianceReqs}
+              isLoading={isComplianceLoading}
+              submittedLaterKeys={submittedLaterKeys}
+              onSelectDepartureDate={(dateStr) => {
+                setValue('departureDate', dateStr, { shouldValidate: true });
+              }}
+              onToggleSubmitLater={(hId, docCode) => {
+                const key = `${hId}_${docCode}`;
+                setSubmittedLaterKeys((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(key)) next.delete(key);
+                  else next.add(key);
+                  return next;
+                });
+              }}
+              onUploadClick={(hId, docCode) => {
+                setUploadModalState({ isOpen: true, horseId: hId, documentTypeCode: docCode });
+              }}
+            />
+          </section>
+        )}
+
+        {/* STEP 4: QUOTATION & SUBMIT */}
+        {currentStep === 4 && (
+          <div className="flex flex-col gap-5">
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
+              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0]">
+                <h2 className="text-base font-extrabold text-[#181A17] m-0">
+                  {language === 'en' ? 'Trip Summary' : 'Tóm tắt thông tin chuyến đi'}
+                </h2>
               </div>
 
-              {/* Route & Multimodal Logistics Summary */}
-              {routeData && (
-                <div className="bg-[#FAF8F4] p-4 sm:p-5 rounded-xl border border-[#D8CEBE] flex flex-col gap-3.5">
-                  <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="p-5 sm:p-6 flex flex-col gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                  <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
+                    <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
+                      {language === 'en' ? 'Transport Mode' : 'Phương thức'}
+                    </span>
+                    <div className="font-bold text-sm text-[#181A17] mt-1">
+                      {transportMode === 'air'
+                        ? language === 'en'
+                          ? 'Air Cargo'
+                          : 'Hàng không'
+                        : transportMode === 'sea'
+                          ? language === 'en'
+                            ? 'Sea Vessel'
+                            : 'Đường thủy'
+                          : language === 'en'
+                            ? 'Road Truck'
+                            : 'Đường bộ'}
+                    </div>
+                  </div>
+                  <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
+                    <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
+                      {t('customer.newRequest.summaryRoute', 'Route')}
+                    </span>
+                    <div className="font-bold text-sm text-[#181A17] mt-1">
+                      {translateCountry(formValues.origin)} → {translateCountry(formValues.destination)}
+                    </div>
+                  </div>
+                  <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
+                    <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
+                      {t('customer.newRequest.summaryDepartureDate', 'Departure Date')}
+                    </span>
+                    <div className="font-bold text-sm text-[#181A17] mt-1">
+                      {formValues.departureDate} · {pickupTime}
+                    </div>
+                  </div>
+                  <div className="bg-[#FAF8F4] border border-[#E5DDD0] p-3.5 rounded-xl">
+                    <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
+                      {language === 'en' ? 'Trip Type' : 'Hình thức'}
+                    </span>
+                    <div className="font-bold text-sm text-[#181A17] mt-1">
+                      {tripType === 'round_trip'
+                        ? language === 'en'
+                          ? 'Round-Trip (-10%)'
+                          : 'Khứ Hồi (Giảm 10%)'
+                        : language === 'en'
+                          ? 'One-Way'
+                          : 'Một Chiều'}
+                    </div>
+                  </div>
+                </div>
+
+                {routeData && !quote && (
+                  <div className="bg-[#FAF8F4] p-4 rounded-xl border border-[#D8CEBE] flex flex-col gap-3">
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-lg bg-[#E5DDD0] text-[#181A17] flex items-center justify-center shrink-0">
                         <Navigation size={18} aria-hidden="true" />
@@ -1895,310 +1920,211 @@ function CreateTransportRequestForm() {
                           <strong className="text-[#181A17]">
                             ~{routeData.durationHours} {t('customer.newRequest.hours', 'giờ')}
                           </strong>
-                          {routeData.estimatedTotalPriceVnd ? (
-                            <>
-                              {' '}• {language === 'en' ? 'Map est. fare:' : 'Ước tính bản đồ:'}{' '}
-                              <strong className="text-[#8C6621] font-mono">
-                                {routeData.estimatedTotalPriceVnd.toLocaleString('vi-VN')} đ
-                              </strong>
-                            </>
-                          ) : null}
                         </div>
                       </div>
                     </div>
-                  </div>
 
-                  {routeData.legs && routeData.legs.length > 0 && (
-                    <div className="pt-3 border-t border-dashed border-[#D8CEBE] space-y-2">
-                      {routeData.legs.map((leg) => (
-                        <div
-                          key={`${leg.sequenceNo}-${leg.type}`}
-                          className="flex items-center justify-between gap-2 text-xs bg-white border border-[#E5DDD0] rounded-lg px-3 py-2 flex-wrap"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-bold text-[#181A17] shrink-0">
-                              {language === 'en' ? `Leg ${leg.sequenceNo}` : `Chặng ${leg.sequenceNo}`}
-                            </span>
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold shrink-0 ${
-                                leg.type === 'air'
-                                  ? 'bg-[#181A17] text-[#C4B38E]'
-                                  : leg.type === 'sea'
-                                    ? 'bg-[#ECFEFF] text-[#0E7490] border border-[#A5F3FC]'
-                                    : 'bg-[#F5EFE2] text-[#8C6621] border border-[#DFCA9A]'
-                              }`}
-                            >
-                              {leg.type === 'air' ? (
-                                <Plane size={11} aria-hidden="true" />
-                              ) : leg.type === 'sea' ? (
-                                <Ship size={11} aria-hidden="true" />
-                              ) : (
-                                <Truck size={11} aria-hidden="true" />
-                              )}
-                              <span>{language === 'en' ? leg.vehicleLabelEn : leg.vehicleLabelVi}</span>
-                            </span>
-                            <span className="text-[#181A17] font-medium truncate">
-                              {leg.fromName} <span className="text-[#A67C2E]">→</span> {leg.toName}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3 shrink-0">
-                            <span className="text-[#5F6977] font-semibold">
+                    {routeData.legs && routeData.legs.length > 0 && (
+                      <div className="pt-3 border-t border-dashed border-[#D8CEBE] space-y-2">
+                        {routeData.legs.map((leg) => (
+                          <div
+                            key={`${leg.sequenceNo}-${leg.type}`}
+                            className="flex items-center justify-between gap-2 text-xs bg-white border border-[#E5DDD0] rounded-lg px-3 py-2 flex-wrap"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-bold text-[#181A17] shrink-0">
+                                {language === 'en' ? `Leg ${leg.sequenceNo}` : `Chặng ${leg.sequenceNo}`}
+                              </span>
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold shrink-0 ${
+                                  leg.type === 'air'
+                                    ? 'bg-[#181A17] text-[#C4B38E]'
+                                    : leg.type === 'sea'
+                                      ? 'bg-[#ECFEFF] text-[#0E7490] border border-[#A5F3FC]'
+                                      : 'bg-[#F5EFE2] text-[#8C6621] border border-[#DFCA9A]'
+                                }`}
+                              >
+                                {leg.type === 'air' ? (
+                                  <Plane size={11} aria-hidden="true" />
+                                ) : leg.type === 'sea' ? (
+                                  <Ship size={11} aria-hidden="true" />
+                                ) : (
+                                  <Truck size={11} aria-hidden="true" />
+                                )}
+                                <span>{language === 'en' ? leg.vehicleLabelEn : leg.vehicleLabelVi}</span>
+                              </span>
+                              <span className="text-[#181A17] font-medium truncate">
+                                {leg.fromName} <span className="text-[#A67C2E]">→</span> {leg.toName}
+                              </span>
+                            </div>
+                            <span className="text-[#5F6977] font-semibold shrink-0">
                               ~{leg.distanceKm.toLocaleString()} km · ~{leg.durationHours}h
                             </span>
-                            <span className="font-mono font-bold text-[#8C6621]">
-                              {Number(leg.estimatedPriceVnd || 0).toLocaleString('vi-VN')} đ
-                            </span>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
-                  {parsedCustomerProposedPrice && (
-                    <div className="pt-2.5 border-t border-[#E5DDD0] flex items-center justify-between gap-2 text-xs">
-                      <span className="font-semibold text-[#5F6977]">
-                        {language === 'en' ? 'Customer proposed trip price:' : 'Giá tiền đề xuất của khách hàng:'}
-                      </span>
-                      <span className="font-mono font-extrabold text-sm text-[#181A17]">
-                        {parsedCustomerProposedPrice.toLocaleString('vi-VN')} đ
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)' }}>
+                <div>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#5F6977', textTransform: 'uppercase' }}>
                     {t('customer.newRequest.selectedHorsesCount', 'Selected Horses ({count} horses)').replace('{count}', String(totalSelectedHorses))}
                   </span>
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {Object.entries(breedBreakdown).map(([breed, count]) => (
-                      <span
-                        key={breed}
-                        style={{
-                          fontSize: '11px',
-                          padding: '2px 8px',
-                          borderRadius: '12px',
-                          backgroundColor: '#F5EFE2',
-                          color: '#8C6621',
-                          fontWeight: 600,
-                          border: '1px solid #DFCA9A',
-                        }}
-                      >
-                        {translateBreed(breed)}: {count}
-                      </span>
-                    ))}
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                    {selectedHorses.map((h) => {
+                      const insVal = insuranceValues[h.id] ?? defaultInsurance;
+                      return (
+                        <span
+                          key={h.id}
+                          style={{
+                            padding: '5px 12px',
+                            borderRadius: '8px',
+                            backgroundColor: '#FAF8F4',
+                            color: 'var(--primary)',
+                            fontSize: '12.5px',
+                            fontWeight: 600,
+                            border: '1px solid #D8CEBE',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <span>{h.name}{h.quantity > 1 ? ` ×${h.quantity}` : ''}</span>
+                          <span style={{ color: '#5F6977', fontSize: '11.5px', fontWeight: 500 }}>
+                            · {insuranceNames[insVal.insurancePackage]}
+                          </span>
+                        </span>
+                      );
+                    })}
                   </div>
-                </div>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
-                  {selectedHorses.map((h) => (
-                    <span
-                      key={h.id}
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: '8px',
-                        backgroundColor: '#FAF8F4',
-                        color: 'var(--primary)',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        border: '1px solid #D8CEBE',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                      }}
-                    >
-                      <span>{h.name}</span>
-                      <span style={{ color: '#5F6977', fontSize: '12px', fontWeight: 500 }}>• {translateBreed(h.breed)}</span>
-                    </span>
-                  ))}
                 </div>
               </div>
             </div>
+
+            <div>
+              <QuoteBreakdown
+                quote={quote}
+                isLoading={isQuoteLoading}
+                onRefresh={() => void fetchQuoteNow()}
+                selectedOptionCode={selectedOptionCode}
+                onSelectOptionCode={(code) => setSelectedOptionCode(code)}
+                onPickShortageDate={(date) => setValue('departureDate', date, { shouldValidate: true })}
+              />
+              {quoteError && (
+                <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
+                  <span>{quoteError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchQuoteNow()}
+                    className="font-bold underline cursor-pointer"
+                  >
+                    {language === 'en' ? 'Retry quote' : 'Thử lại'}
+                  </button>
+                </div>
+              )}
+              {insuranceError && <p role="alert" className="mt-2 text-sm text-[#B33E3E]">{insuranceError}</p>}
+            </div>
+
+            {tripType === 'round_trip' && (
+              <section
+                aria-label={language === 'en' ? 'Return Policy Agreement' : 'Cam kết chính sách khứ hồi'}
+                className="space-y-3 rounded-2xl border border-[#DFCA9A] bg-[#FAF8F4] p-4 sm:p-5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex items-start gap-2.5 cursor-pointer flex-1 min-w-[240px]">
+                    <input
+                      type="checkbox"
+                      checked={acceptReturnPolicy}
+                      onChange={(e) => setAcceptReturnPolicy(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-[#D8CEBE] text-[#A67C2E] focus:ring-[#A67C2E] cursor-pointer"
+                    />
+                    <span className="text-xs font-semibold text-[#181A17] leading-relaxed">
+                      {language === 'en'
+                        ? 'I agree to the round-trip cancellation, rescheduling & 120-minute no-show policy.'
+                        : 'Tôi đồng ý chính sách hủy, đổi ngày chặng về và quy định chờ tối đa 120 phút (no-show).'}
+                    </span>
+                  </label>
+                </div>
+
+                <details className="text-xs text-[#5F6977]">
+                  <summary className="cursor-pointer font-semibold text-[#8C6621] hover:underline select-none">
+                    {language === 'en' ? 'View policy terms' : 'Xem điều khoản chi tiết'}
+                  </summary>
+                  <div className="mt-2.5 p-3 rounded-xl bg-white border border-[#E5DDD0] space-y-1.5 leading-relaxed">
+                    <p className="m-0">
+                      <strong>{language === 'en' ? 'Discount:' : 'Ưu đãi:'}</strong>{' '}
+                      {language === 'en' ? '-10% return freight & return insurance.' : 'Giảm 10% cước và bảo hiểm chặng về.'}
+                    </p>
+                    <p className="m-0">
+                      <strong>{language === 'en' ? 'Cancellation:' : 'Hủy chặng về:'}</strong>{' '}
+                      {language === 'en' ? '≥168h: 80% refund · 72–168h: 50% · <72h: 0% (100% insurance refunded).' : '≥168h hoàn 80% · 72–168h hoàn 50% · <72h hoàn 0% (bảo hiểm hoàn 100%).'}
+                    </p>
+                    <p className="m-0">
+                      <strong>{language === 'en' ? 'Reschedule & No-show:' : 'Đổi ngày & No-show:'}</strong>{' '}
+                      {language === 'en' ? 'Free ≥168h, 10% fee <168h. Driver waits 120m; no-show forfeits return freight.' : 'Miễn phí ≥168h, phí 10% nếu <168h. Chờ tối đa 120 phút; quá giờ mất cước chặng về.'}
+                    </p>
+                  </div>
+                </details>
+              </section>
+            )}
+
+            {/* Deferred ("Submit Later") Compliance Commitment Notice */}
+            {complianceSummary && complianceSummary.deferred > 0 && (
+              <section className="rounded-xl border border-amber-300 bg-amber-50/90 px-4 py-3 flex items-start gap-2.5">
+                <AlertCircle size={16} className="text-amber-700 shrink-0 mt-0.5" aria-hidden="true" />
+                <p className="text-xs text-amber-950 m-0 leading-relaxed">
+                  <strong>
+                    {language === 'en'
+                      ? `${complianceSummary.deferred} document(s) marked "Submit later"`
+                      : `Nộp sau ${complianceSummary.deferred} giấy tờ kiểm dịch`}
+                  </strong>
+                  {complianceSummary.earliestDue ? (
+                    <span className="font-mono"> ({language === 'en' ? 'due' : 'hạn'} {complianceSummary.earliestDue})</span>
+                  ) : null}
+                  {' — '}
+                  {language === 'en'
+                    ? 'upload from Order Detail before departure.'
+                    : 'bổ sung tại Chi tiết đơn trước khi xuất phát.'}
+                  {complianceSummary.hasPastRecommendedDue && (
+                    <span className="ml-1 font-semibold text-rose-800">
+                      {language === 'en' ? '(Past recommended due date)' : '(Sát/quá hạn khuyến nghị)'}
+                    </span>
+                  )}
+                </p>
+              </section>
+            )}
           </div>
         )}
       </div>
+      </div>
 
-      {currentStep === 3 && (
-        <section
-          aria-label={language === 'en' ? 'Required Documents & Quarantine Checklist' : 'Hồ sơ pháp lý & kiểm dịch theo quốc gia'}
-          className="mx-auto w-full max-w-[850px] mb-4 bg-white p-5 sm:p-6 rounded-2xl border border-[#E5DDD0] shadow-sm space-y-4"
-        >
-          <div className="flex items-center justify-between gap-2 border-b border-[#EFEAE0] pb-3">
-            <div>
-              <h3 className="font-extrabold text-sm sm:text-base text-[#181A17] m-0">
-                {language === 'en' ? 'Quarantine & Country Regulatory Requirements' : 'Hồ sơ pháp lý & Kiểm dịch theo Nước đến'}
-              </h3>
-              <p className="text-xs text-[#5F6977] mt-0.5 m-0">
-                {language === 'en'
-                  ? `Requirements for ${targetCountry} (${transportMode.toUpperCase()}). Reusable horse documents are recognized automatically.`
-                  : `Yêu cầu giấy tờ cho ${targetCountry} (đường ${transportMode === 'air' ? 'hàng không' : transportMode === 'sea' ? 'biển' : 'bộ'}). Hồ sơ đã có của ngựa được tự động tái sử dụng.`}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void loadComplianceRequirements()}
-              className="text-xs font-bold text-[#A67C2E] hover:underline cursor-pointer"
-            >
-              {language === 'en' ? 'Recheck' : 'Kiểm tra lại'}
-            </button>
-          </div>
-
-          <RequirementChecklist
-            requirements={complianceReqs}
-            isLoading={isComplianceLoading}
-            submittedLaterKeys={submittedLaterKeys}
-            onSelectDepartureDate={(dateStr) => {
-              setValue('departureDate', dateStr, { shouldValidate: true });
-            }}
-            onToggleSubmitLater={(hId, docCode) => {
-              const key = `${hId}_${docCode}`;
-              setSubmittedLaterKeys((prev) => {
-                const next = new Set(prev);
-                if (next.has(key)) next.delete(key);
-                else next.add(key);
-                return next;
-              });
-            }}
-            onUploadClick={(hId, docCode) => {
-              setUploadModalState({ isOpen: true, horseId: hId, documentTypeCode: docCode });
-            }}
-          />
-        </section>
-      )}
-
-      {currentStep === 3 && (
-        <div className="mx-auto w-full max-w-[850px] mb-4">
-          <QuoteBreakdown
-            quote={quote}
-            isLoading={isQuoteLoading}
-            onRefresh={() => void fetchQuoteNow()}
-            selectedOptionCode={selectedOptionCode}
-            onSelectOptionCode={(code) => setSelectedOptionCode(code)}
-            onPickShortageDate={(date) => setValue('departureDate', date, { shouldValidate: true })}
-          />
-          {quoteError && (
-            <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
-              <span>{quoteError}</span>
-              <button
-                type="button"
-                onClick={() => void fetchQuoteNow()}
-                className="font-bold underline cursor-pointer"
-              >
-                {language === 'en' ? 'Retry quote' : 'Thử lại'}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {currentStep === 3 && (
-        <section
-          aria-label={language === 'en' ? 'Insurance confirmation' : 'Xác nhận bảo hiểm'}
-          className="mx-auto w-full max-w-[850px] space-y-4 rounded-2xl border border-[#E5DDD0] bg-white p-5 sm:p-6 shadow-sm"
-        >
-          <h3 className="font-bold text-[#181A17]">
-            {language === 'en' ? 'Insurance & Estimated Cost' : 'Bảo hiểm & chi phí dự kiến'}
-          </h3>
-          <ul className="space-y-2 text-sm text-[#181A17]">
-            {selectedHorses.map((h) => {
-              const value = insuranceValues[h.id] ?? defaultInsurance;
-              return (
-                <li key={h.id}>
-                  <strong>{h.name}</strong> · {Number(value.declaredValue || 0).toLocaleString('vi-VN')} {value.declaredCurrency}/
-                  {language === 'en' ? 'horse' : 'ngựa'} · {language === 'en' ? 'Package' : 'Gói'} {insuranceNames[value.insurancePackage]} ·{' '}
-                  {vnd(previewInsurance(value, policy ?? null).fee * h.quantity)}
-                </li>
-              );
-            })}
-          </ul>
-          <BookingSummary bookingType={bookingType} horseCount={totalSelectedHorses} />
-          <CostSummary transportCost={null} insuranceFee={estimatedInsuranceFee} />
-          {insuranceError && <p role="alert" className="text-sm text-[#B33E3E]">{insuranceError}</p>}
-        </section>
-      )}
-
-      {currentStep === 3 && tripType === 'round_trip' && (
-        <section
-          aria-label={language === 'en' ? 'Return Policy Agreement' : 'Cam kết chính sách khứ hồi'}
-          className="mx-auto w-full max-w-[850px] space-y-4 rounded-2xl border-2 border-[#A67C2E]/40 bg-[#FAF8F4] p-5 sm:p-6 shadow-sm mt-4"
-        >
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#A67C2E]" />
-            <h3 className="font-bold text-[#181A17] m-0">
-              {language === 'en' ? 'Round-Trip Service & No-Show Policy' : 'Chính sách vận chuyển khứ hồi & cam kết no-show'}
-            </h3>
-          </div>
-
-          <div className="p-4 rounded-xl bg-white border border-[#E5DDD0] text-xs space-y-2 text-[#5F6977] leading-relaxed">
-            <p className="m-0">
-              <strong>{language === 'en' ? '1. Freight & Insurance Discount:' : '1. Ưu đãi cước & bảo hiểm:'}</strong>{' '}
-              {language === 'en'
-                ? 'Return freight is discounted by 10%. Insurance for round-trip is calculated as 2 legs × 0.9.'
-                : 'Cước vận chuyển chặng về được giảm 10%. Bảo hiểm cho chuyến khứ hồi được áp dụng ưu đãi tổng 2 chặng × 0,9.'}
-            </p>
-            <p className="m-0">
-              <strong>{language === 'en' ? '2. Cancellation & Refund Tiers:' : '2. Quy định hủy chặng về & tỷ lệ hoàn:'}</strong>{' '}
-              {language === 'en'
-                ? '≥ 168h before return departure: 80% freight refund; 72h-168h: 50% refund; < 72h: 0% refund. 100% of return insurance is refunded. Company cancellations receive 100% refund.'
-                : 'Trước ≥ 168 giờ: hoàn 80% cước chặng về; từ 72h đến 168h: hoàn 50%; dưới 72h: không hoàn cước (0%). Tiền bảo hiểm chặng về được hoàn 100%. Nếu công ty hủy: hoàn 100%.'}
-            </p>
-            <p className="m-0">
-              <strong>{language === 'en' ? '3. Rescheduling:' : '3. Đổi ngày đón chặng về:'}</strong>{' '}
-              {language === 'en'
-                ? 'Free if rescheduled ≥ 168h before return departure. Within 168h, a 10% late change fee is incurred.'
-                : 'Miễn phí nếu đổi trước ≥ 168 giờ. Đổi trong vòng 168 giờ trước khi đón: thu phí 10% cước chặng về.'}
-            </p>
-            <p className="m-0">
-              <strong>{language === 'en' ? '4. No-Show Policy:' : '4. Quy định no-show:'}</strong>{' '}
-              {language === 'en'
-                ? 'Driver will wait up to 120 minutes past the scheduled pickup time. If horses are not delivered, the trip is completed with 0% refund.'
-                : 'Tài xế chờ tối đa 120 phút tại điểm đón chặng về. Nếu khách không giao ngựa, chuyến đi sẽ được kết thúc với 0% hoàn tiền (mất 100% cước chặng về).'}
-            </p>
-          </div>
-
-          <label className="flex items-start gap-2.5 cursor-pointer pt-1">
-            <input
-              type="checkbox"
-              checked={acceptReturnPolicy}
-              onChange={(e) => setAcceptReturnPolicy(e.target.checked)}
-              className="mt-0.5 w-4 h-4 rounded border-[#D8CEBE] text-[#A67C2E] focus:ring-[#A67C2E] cursor-pointer"
-            />
-            <span className="text-xs font-semibold text-[#181A17] leading-relaxed">
-              {language === 'en'
-                ? 'I have read and agree to the return leg cancellation and no-show policy (driver waits up to 2 hours, failing to hand over horses forfeits 100% return freight).'
-                : 'Tôi đã đọc và đồng ý chính sách hủy chặng về và no-show (chờ tối đa 2 giờ, không giao ngựa thì mất 100% cước chặng về).'}
-            </span>
-          </label>
-        </section>
-      )}
-
-      {/* STICKY BOTTOM ACTION BAR (stays clear of Sidebar) */}
+      {/* BOTTOM ACTION BAR (normal flow on mobile & placed cleanly below grid without covering Live Trip Summary) */}
       <div
-        className="sticky bottom-0 z-20 mx-auto w-full max-w-[850px] rounded-2xl border border-[#E5DDD0] bg-white/95 px-5 py-3.5 shadow-[0_-6px_20px_rgba(24,26,23,0.06)] backdrop-blur-sm flex items-center justify-between gap-3 flex-wrap"
+        className="mt-4 w-full rounded-2xl border border-[#E5DDD0] bg-white px-4 sm:px-5 py-3.5 shadow-[0_-4px_16px_rgba(24,26,23,0.05)] flex items-center justify-between gap-3 flex-wrap"
         style={{ paddingBottom: 'max(14px, env(safe-area-inset-bottom, 14px))' }}
       >
         <span className="text-xs font-semibold text-[#5F6977]">
-          {language === 'en' ? `Step ${currentStep} of 3` : `Bước ${currentStep} / 3`}
+          {language === 'en' ? `Step ${currentStep} of 4` : `Bước ${currentStep} / 4`}
         </span>
-        <div className="flex items-center gap-3 ml-auto">
+        <div className="flex items-center gap-2.5 sm:gap-3 ml-auto">
           {currentStep > 1 && (
             <button
               type="button"
               onClick={handleBack}
-              className="px-5 py-2.5 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E]"
+              className="px-4 sm:px-5 py-2.5 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E]"
             >
-              {t('common.back', 'Back')}
+              {t('common.back', 'Quay lại')}
             </button>
           )}
 
-          {currentStep < 3 ? (
+          {currentStep < 4 ? (
             <button
               type="button"
-              onClick={handleContinue}
+              onClick={() => void handleContinue()}
               className="px-5 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold inline-flex items-center gap-2 cursor-pointer shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C4B38E]"
             >
-              {t('customer.newRequest.continueBtn', 'Continue')} <ArrowRight size={15} className="text-[#C4B38E]" aria-hidden="true" />
+              {t('customer.newRequest.continueBtn', 'Tiếp tục')} <ArrowRight size={15} className="text-[#C4B38E]" aria-hidden="true" />
             </button>
           ) : (
             <button
@@ -2207,16 +2133,16 @@ function CreateTransportRequestForm() {
                 if (isSubmitting) return;
                 handleSubmit(onSubmitForm)();
               }}
-              disabled={isSubmitting || (tripType === 'round_trip' && (!returnDepartureAt || !acceptReturnPolicy))}
-              className="px-6 py-2.5 rounded-xl bg-[#287653] hover:bg-[#205F43] disabled:bg-[#8892A0] text-white text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-colors cursor-pointer disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287653]"
+              disabled={isSubmitting || isQuoteLoading || !quote?.quoteId || (tripType === 'round_trip' && (!returnDepartureAt || !acceptReturnPolicy))}
+              className="px-5 sm:px-6 py-2.5 rounded-xl bg-[#287653] hover:bg-[#205F43] disabled:bg-[#8892A0] text-white text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-colors cursor-pointer disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287653]"
             >
               {isSubmitting ? (
                 <>
-                  {t('customer.newRequest.submitting', 'Submitting...')} <Loader2 size={15} className="animate-spin" aria-hidden="true" />
+                  {t('customer.newRequest.submitting', 'Đang tạo đơn...')} <Loader2 size={15} className="animate-spin" aria-hidden="true" />
                 </>
               ) : (
                 <>
-                  {t('customer.newRequest.submitBtn', 'Submit Request')} <Check size={15} strokeWidth={2.5} aria-hidden="true" />
+                  {language === 'en' ? 'Submit & Pay via VietQR' : 'Gửi đơn & Mở QR thanh toán'} <Check size={15} strokeWidth={2.5} aria-hidden="true" />
                 </>
               )}
             </button>
@@ -2245,6 +2171,27 @@ function CreateTransportRequestForm() {
           void loadComplianceRequirements();
         }}
       />
+
+      {createdOrderForPayment && (
+        <SepayPaymentModal
+          isOpen={Boolean(createdOrderForPayment)}
+          shipmentId={createdOrderForPayment.id}
+          requestCode={createdOrderForPayment.requestCode}
+          amount={createdOrderForPayment.totalCost}
+          paymentDueAt={createdOrderForPayment.paymentDueAt}
+          createdAt={createdOrderForPayment.createdAt}
+          justCreated
+          onClose={() => {
+            const targetId = createdOrderForPayment.id;
+            setCreatedOrderForPayment(null);
+            router.push(`/customer/requests/${targetId}?tab=payment`);
+          }}
+          onPaid={() => {
+            void refreshRequests();
+            window.dispatchEvent(new CustomEvent('customer-orders-updated'));
+          }}
+        />
+      )}
     </div>
   );
 }

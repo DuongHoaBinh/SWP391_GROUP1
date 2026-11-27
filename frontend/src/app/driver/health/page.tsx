@@ -21,7 +21,7 @@ import { Modal } from '@/components/ui/Modal';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { getCurrentUser } from '@/lib/auth';
 import { openAuthenticatedApiFile } from '@/lib/api-client';
-import { routesApi } from '@/features/routes/api/routes.api';
+import { incidentsApi } from '@/features/incidents/api/incidents.api';
 import {
   trackingApi,
   AssignedTripSummary,
@@ -75,23 +75,27 @@ function HorseHealthContent() {
   const [photoPreviewMap, setPhotoPreviewMap] = useState<Record<string, string>>({});
   const previewUrlsRef = useRef<string[]>([]);
 
-  // Form state (tempC & heartRateBpm stored as strings for clean mobile editing)
+  // Form state (tempC, heartRateBpm, respiratoryRate stored as strings for clean mobile editing)
   const [formData, setFormData] = useState<{
     horseName: string;
     horseId: number | undefined;
     legName: string;
+    routeStopId: number | undefined;
     conditionStatus: 'stable' | 'not_eating' | 'stressed' | 'climate_change' | 'other';
     tempC: string;
     heartRateBpm: string;
+    respiratoryRate: string;
     notes: string;
     attachments: string[];
   }>({
     horseName: '',
     horseId: undefined,
     legName: '',
+    routeStopId: undefined,
     conditionStatus: 'stable',
     tempC: '38.0',
     heartRateBpm: '40',
+    respiratoryRate: '14',
     notes: '',
     attachments: [],
   });
@@ -196,12 +200,9 @@ function HorseHealthContent() {
   const handleOpenAdd = () => {
     if (!canRecordHealth) {
       toast.error(
-        t(
-          'driver.health.onlyEscortAllowed',
-          language === 'en'
-            ? 'Only assigned Veterinary Escort or Driver (DEC-07 backup) personnel may record health logs.'
-            : 'Chỉ Bác sĩ Thú y / Nhân viên Hộ tống hoặc Tài xế được phân công (dự phòng DEC-07) mới có quyền ghi nhật ký.'
-        )
+        language === 'en'
+          ? 'Only assigned Veterinary Escort or Driver personnel may record health logs.'
+          : 'Chỉ Bác sĩ thú y / Áp tải hoặc Tài xế được phân công chuyến mới có quyền ghi nhật ký.',
       );
       return;
     }
@@ -244,9 +245,11 @@ function HorseHealthContent() {
       horseName: firstHorse.name,
       horseId: firstHorse.id,
       legName: defaultLegName,
+      routeStopId: currentMilestone?.stopId ?? undefined,
       conditionStatus: 'stable',
       tempC: '38.0',
       heartRateBpm: '40',
+      respiratoryRate: '14',
       notes: '',
       attachments: [],
     });
@@ -340,15 +343,27 @@ function HorseHealthContent() {
       return;
     }
 
+    const parsedResp = formData.respiratoryRate.trim() ? Number(formData.respiratoryRate.trim()) : undefined;
+    if (parsedResp !== undefined && (!Number.isFinite(parsedResp) || parsedResp < 4 || parsedResp > 80)) {
+      toast.error(
+        language === 'en'
+          ? 'Respiratory rate must be between 4 and 80 breaths/min.'
+          : 'Nhịp thở phải nằm trong khoảng hợp lệ 4 - 80 nhịp/phút.',
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const created = await trackingApi.createHealthLog(selectedShipmentId, {
         horseId: formData.horseId,
         horseName: formData.horseName,
         legName: formData.legName,
+        routeStopId: formData.routeStopId,
         conditionStatus: formData.conditionStatus,
         temperatureC: parsedTemp,
         heartRateBpm: Math.round(parsedHeartRate),
+        respiratoryRate: parsedResp !== undefined ? Math.round(parsedResp) : undefined,
         notes: formData.notes,
         attachments: formData.attachments,
       });
@@ -419,25 +434,21 @@ function HorseHealthContent() {
     if (!selectedShipmentId || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await routesApi.reportIncident(selectedShipmentId, {
+      const activeMs = trackingDetails?.milestones?.find((m) => m.status === 'CURRENT');
+      await incidentsApi.createIncident(selectedShipmentId, {
         incidentType: 'horse_medical',
         description:
           incidentNotes.trim() ||
-          t(
-            'driver.health.defaultIncidentDesc',
-            language === 'en'
-              ? 'Horse showing fever or colic signs requiring urgent veterinary intervention'
-              : 'Chiến mã có biểu hiện sốt cao hoặc đau bụng cần can thiệp thú y khẩn cấp trên tuyến'
-          ),
+          (language === 'en'
+            ? 'Horse showing fever or colic signs requiring urgent veterinary intervention'
+            : 'Chiến mã có biểu hiện sốt cao hoặc đau bụng cần can thiệp thú y khẩn cấp trên tuyến'),
         severity: 'critical',
+        locationText: activeMs?.location || currentTrip?.origin_location || undefined,
       });
       toast.success(
-        t(
-          'driver.health.incidentSentSuccess',
-          language === 'en'
-            ? 'Equine medical emergency reported to Manager & Coordinator!'
-            : 'Báo cáo sự cố y tế ngựa đã được gửi tới Logistics Manager & Fleet Coordinator!'
-        )
+        language === 'en'
+          ? 'Equine medical emergency reported to Logistics Manager!'
+          : 'Báo cáo sự cố y tế ngựa đã được gửi tới Logistics Manager!',
       );
       setIsIncidentOpen(false);
       setIncidentNotes('');
@@ -445,10 +456,7 @@ function HorseHealthContent() {
     } catch (err: any) {
       toast.error(
         err?.message ||
-          t(
-            'driver.health.incidentSentFailed',
-            language === 'en' ? 'Failed to report medical incident.' : 'Không thể gửi báo cáo sự cố y tế'
-          )
+          (language === 'en' ? 'Failed to report medical incident.' : 'Không thể gửi báo cáo sự cố y tế'),
       );
     } finally {
       setIsSubmitting(false);
@@ -492,53 +500,14 @@ function HorseHealthContent() {
   );
 
   return (
-    <div className="flex flex-col gap-6 pb-12">
-      {/* Role Banner */}
-      <div
-        className={`p-4 rounded-xl border flex flex-wrap items-center justify-between gap-3 text-xs transition-all ${
-          isEscort
-            ? 'bg-[#E8F2EB] border-[#2D5A3F]/25 text-[#1E402C]'
-            : 'bg-[#FAF5EB] border-[#D4C5A3] text-[#181A17]'
-        }`}
-      >
-        <div className="flex items-start sm:items-center gap-2.5">
-          <Stethoscope
-            size={20}
-            className={`${isEscort ? 'text-[#2D5A3F]' : 'text-[#A67C2E]'} shrink-0 mt-0.5 sm:mt-0`}
-            aria-hidden="true"
-          />
-          <div>
-            <span className="font-bold block text-sm">
-              {isEscort
-                ? t('driver.health.roleBannerEscort', language === 'en' ? 'Veterinary Access: Equine Vet / Escort' : '🩺 Chuyên môn Theo dõi Thú y: Bác Sĩ Thú Y / Nhân Viên Hộ Tống')
-                : t('driver.health.roleBannerDriverBackup', language === 'en' ? 'Access Level: Assigned Driver — DEC-07 Health Backup Mode' : '🛡️ Quyền Hạn: Tài xế phụ trách chuyến — Chế độ dự phòng ghi nhận sinh hiệu (DEC-07)')}
-            </span>
-            <p className="m-0 mt-0.5 opacity-90 text-xs">
-              {isEscort
-                ? t(
-                    'driver.health.escortRoleDesc',
-                    language === 'en'
-                      ? 'Authorized to record temperature, heart rate, clinical remarks, and photos during transit.'
-                      : 'Theo quy chuẩn quốc tế, bạn có trách nhiệm theo dõi thân nhiệt, nhịp tim và biểu hiện hành vi của đàn ngựa trong suốt chuyến đi.'
-                  )
-                : t(
-                    'driver.health.driverRoleBackupDesc',
-                    language === 'en'
-                      ? 'Assigned drivers may record backup vital checks when Veterinary Escort is absent on a trip (audit-tagged as driver).'
-                      : 'Bạn có thể ghi nhận sinh hiệu dự phòng khi chuyến chưa có Nhân viên Hộ tống trực tiếp đi cùng; hệ thống lưu rõ vai trò người ghi.'
-                  )}
-            </p>
-          </div>
-        </div>
-      </div>
-
+    <div className="flex flex-col gap-5 pb-12">
       {/* Top Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold text-[#181A17] m-0">
-            {t('driver.healthTitle', language === 'en' ? 'Equine Health & Vitals Log' : 'Nhật ký Sức khỏe & Sinh hiệu Ngựa Đua')}
+            {t('driver.healthTitle', language === 'en' ? 'Equine Health & Vitals' : 'Nhật ký Sinh hiệu Ngựa')}
           </h1>
-          <p className="text-sm text-[#57564E] mt-1 mb-0 break-words">
+          <p className="text-xs text-[#57564E] mt-1 mb-0 break-words">
             {t('common.trip', language === 'en' ? 'Trip' : 'Chuyến')}:{' '}
             <strong className="text-[#A67C2E]">#{currentTrip?.request_code || '—'}</strong> •{' '}
             {t('driver.health.assignedHorsesList', language === 'en' ? 'Horses' : 'Đàn ngựa')}:{' '}
@@ -808,12 +777,12 @@ function HorseHealthContent() {
                                 }`}
                               >
                                 {tier === 'red'
-                                  ? 'RED ALERT'
+                                  ? language === 'en' ? 'Red Alert' : 'Cảnh báo đỏ'
                                   : tier === 'amber_escalatable'
-                                  ? 'AMBER ESCALATE'
+                                  ? language === 'en' ? 'Amber Alert' : 'Cảnh báo vàng'
                                   : tier === 'amber_observational'
-                                  ? 'OBSERVATIONAL'
-                                  : 'GREEN'}
+                                  ? language === 'en' ? 'Observational' : 'Theo dõi'
+                                  : language === 'en' ? 'Normal' : 'Bình thường'}
                               </span>
                             )}
                             {log.legName && (
@@ -857,8 +826,9 @@ function HorseHealthContent() {
 
                       <div className="text-left sm:text-right shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-[#EAE5DA]">
                         <span className="font-extrabold text-sm text-[#181A17] block">
-                          {log.temperatureC ? `${log.temperatureC}°C` : 'N/A'} •{' '}
+                          {log.temperatureC ? `${log.temperatureC}°C` : 'N/A'} ·{' '}
                           {log.heartRateBpm ? `${log.heartRateBpm} bpm` : 'N/A'}
+                          {log.respiratoryRateBpm ? ` · ${log.respiratoryRateBpm} ${language === 'en' ? 'rpm' : 'lần/p'}` : ''}
                         </span>
                         <span suppressHydrationWarning className="text-[11px] text-[#747D88] mt-0.5 block">
                           {new Date(log.recordedAt).toLocaleTimeString(language === 'en' ? 'en-US' : 'vi-VN')}{' '}
@@ -866,8 +836,11 @@ function HorseHealthContent() {
                         </span>
                         <span className="text-[11px] text-[#57564E] font-medium block">
                           {t('driver.health.recordedBy', language === 'en' ? 'Recorded by:' : 'Người ghi:')}{' '}
-                          {log.recordedByName || (language === 'en' ? 'Equine Vet' : 'Bác sĩ thú y')} (
-                          {translateRole(log.recordedByRole || 'escort')})
+                          {(() => {
+                            const name = log.recordedByName || (language === 'en' ? 'Equine Vet' : 'Bác sĩ thú y');
+                            if (name.includes('(')) return name;
+                            return `${name} (${translateRole(log.recordedByRole || 'escort')})`;
+                          })()}
                         </span>
                       </div>
                     </div>
@@ -990,12 +963,12 @@ function HorseHealthContent() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label htmlFor="health-temp-input" className="font-bold text-[#181A17] block mb-1.5">
                   {t('driver.health.tempLabel', language === 'en' ? 'Body Temp (°C)' : 'Thân nhiệt (°C)')}{' '}
-                  <span className="text-[#747D88] font-normal">
-                    ({t('driver.health.tempStandard', language === 'en' ? 'Normal 37.5 - 38.5' : 'Chuẩn 37.5 - 38.5')})
+                  <span className="text-[#747D88] font-normal block text-[10px]">
+                    ({language === 'en' ? 'Normal 37.5–38.5' : 'Chuẩn 37.5–38.5'})
                   </span>
                 </label>
                 <input
@@ -1013,8 +986,8 @@ function HorseHealthContent() {
               <div>
                 <label htmlFor="health-hr-input" className="font-bold text-[#181A17] block mb-1.5">
                   {t('driver.health.heartRateLabel', language === 'en' ? 'Heart Rate (bpm)' : 'Nhịp tim (bpm)')}{' '}
-                  <span className="text-[#747D88] font-normal">
-                    ({t('driver.health.heartRateStandard', language === 'en' ? 'Normal 28 - 44' : 'Chuẩn 28 - 44')})
+                  <span className="text-[#747D88] font-normal block text-[10px]">
+                    ({language === 'en' ? 'Normal 28–44' : 'Chuẩn 28–44'})
                   </span>
                 </label>
                 <input
@@ -1025,6 +998,24 @@ function HorseHealthContent() {
                   value={formData.heartRateBpm}
                   onChange={(e) => setFormData({ ...formData, heartRateBpm: e.target.value })}
                   placeholder="40"
+                  className="w-full h-11 px-3 border border-[#D8CEBE] rounded-xl outline-none text-sm font-bold text-[#181A17] focus:border-[#2D5A3F]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="health-resp-input" className="font-bold text-[#181A17] block mb-1.5">
+                  {language === 'en' ? 'Respiration (/min)' : 'Nhịp thở (/phút)'}{' '}
+                  <span className="text-[#747D88] font-normal block text-[10px]">
+                    ({language === 'en' ? 'Normal 8–16' : 'Chuẩn 8–16'})
+                  </span>
+                </label>
+                <input
+                  id="health-resp-input"
+                  type="text"
+                  inputMode="numeric"
+                  value={formData.respiratoryRate}
+                  onChange={(e) => setFormData({ ...formData, respiratoryRate: e.target.value })}
+                  placeholder="14"
                   className="w-full h-11 px-3 border border-[#D8CEBE] rounded-xl outline-none text-sm font-bold text-[#181A17] focus:border-[#2D5A3F]"
                 />
               </div>
@@ -1261,12 +1252,9 @@ function HorseHealthContent() {
         >
           <form onSubmit={handleReportIncident} className="flex flex-col gap-4 text-xs">
             <div className="p-3 bg-rose-50 border border-[#9E3B3B]/30 rounded-xl text-rose-900">
-              {t(
-                'driver.health.emergencyNotice',
-                language === 'en'
-                  ? 'Urgent medical emergency alert goes straight to Logistics Manager and Fleet Coordinator.'
-                  : 'Kênh liên lạc sự cố khẩn cấp: Báo cáo này sẽ được ưu tiên phát cảnh báo đỏ ngay lập tức đến màn hình của Logistics Manager và Fleet Coordinator để kích hoạt phương án cứu hộ.'
-              )}
+              {language === 'en'
+                ? 'Urgent medical emergency alert goes straight to Logistics Manager to coordinate veterinary rescue.'
+                : 'Kênh liên lạc sự cố khẩn cấp: Báo cáo này sẽ được ưu tiên phát cảnh báo đỏ ngay lập tức tới Logistics Manager để kích hoạt phương án cứu hộ thú y.'}
             </div>
 
             <div>

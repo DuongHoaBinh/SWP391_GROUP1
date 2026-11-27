@@ -100,14 +100,29 @@ function TripMonitoringContent() {
       try {
         setLoadError(null);
         const data = await trackingApi.getMyTrips();
-        setTrips(data);
-        if (data.length > 0) {
+        const priorityRank = (st?: string) => {
+          const s = String(st || '').toLowerCase();
+          if (s === 'in_transit' || s === 'return_in_transit') return 0;
+          if (s === 'return_pending') return 1;
+          if (s === 'ready_to_depart') return 2;
+          if (s === 'confirmed' || s === 'planning' || s === 'approved') return 3;
+          if (s === 'completed' || s === 'delivered') return 5;
+          return 4;
+        };
+        const sortedData = [...data].sort((a, b) => {
+          const pa = priorityRank(a.shipment_status);
+          const pb = priorityRank(b.shipment_status);
+          if (pa !== pb) return pa - pb;
+          return Number(b.shipment_id) - Number(a.shipment_id);
+        });
+        setTrips(sortedData);
+        if (sortedData.length > 0) {
           if (!keepSelected || !selectedIdRef.current) {
-            const directMatch = urlShipmentId ? data.find((item) => item.shipment_id === Number(urlShipmentId)) : null;
+            const directMatch = urlShipmentId ? sortedData.find((item) => item.shipment_id === Number(urlShipmentId)) : null;
             if (directMatch) {
               setSelectedShipmentId(directMatch.shipment_id);
             } else {
-              setSelectedShipmentId(data[0].shipment_id);
+              setSelectedShipmentId(sortedData[0].shipment_id);
             }
           }
         } else {
@@ -141,7 +156,7 @@ function TripMonitoringContent() {
       setTrackingDetails(details);
       if (live) setLiveTracking(live);
       if (timelineRes) {
-        setTimelineItems(buildTimeline({ timelineData: timelineRes, viewer: 'manager' }));
+        setTimelineItems(buildTimeline({ timelineData: timelineRes, viewer: 'manager', language }));
       }
     } catch {
       if (!isSilent) {
@@ -150,7 +165,7 @@ function TripMonitoringContent() {
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [language]);
 
   const fetchFleetOverview = useCallback(async () => {
     try {
@@ -304,9 +319,18 @@ function TripMonitoringContent() {
     }
   };
 
-  const totalCount = trackingDetails?.milestones.length || 0;
-  const completedCount = trackingDetails?.milestones.filter((m) => m.status === 'COMPLETED').length || 0;
-  const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  const rawTotalCount = trackingDetails?.milestones.length || 0;
+  const rawCompletedCount = trackingDetails?.milestones.filter((m) => m.status === 'COMPLETED').length || 0;
+  const timelineTotalCount = timelineItems.length;
+  const timelineCompletedCount = timelineItems.filter((item) => item.status === 'done').length;
+  const totalCount = rawTotalCount > 0 ? rawTotalCount : timelineTotalCount;
+  const completedCount = rawTotalCount > 0 ? rawCompletedCount : timelineCompletedCount;
+  const progressPct =
+    totalCount > 0
+      ? Math.round((completedCount / totalCount) * 100)
+      : trackingDetails?.shipmentStatus === 'completed'
+      ? 100
+      : 0;
   const allMilestonesCompleted = totalCount > 0 && completedCount === totalCount;
 
   return (
@@ -487,11 +511,16 @@ function TripMonitoringContent() {
 
                     <h3 className="text-sm font-bold text-slate-900 mt-1 mb-0">{item.customerName}</h3>
                     <p className="text-xs text-slate-500 mt-1 mb-0 flex items-center gap-2">
-                      <span>{item.assignedVehicle || '—'}</span>
+                      <span>{item.assignedVehicle || (item as any).vehiclePlate || '—'}</span>
                       <span>•</span>
-                      <span>{item.assignedDriver || '—'}</span>
+                      <span>{item.assignedDriver || (item as any).driverName || '—'}</span>
                       <span>•</span>
-                      <span>{item.horsesCount} {language === 'en' ? 'horses' : 'ngựa'}</span>
+                      <span>
+                        {Number(item.horsesCount ?? 0)}{' '}
+                        {language === 'en'
+                          ? (Number(item.horsesCount ?? 0) === 1 ? 'horse' : 'horses')
+                          : 'ngựa'}
+                      </span>
                     </p>
 
                     {item.alertReason && (
@@ -547,33 +576,60 @@ function TripMonitoringContent() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left: Active Telemetry Data (2 Cols) */}
           <div className="lg:col-span-2 flex flex-col gap-6 min-w-0">
-            {viewMode === 'live_map' && liveTracking && (
-              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900 m-0">
-                      {language === 'en' ? 'Live Telemetry & Geofence Map' : 'Bản Đồ Định Vị GPS & Trạm Dừng'}
-                    </h3>
-                    {liveTracking.isSimulated && (
-                      <span className="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5 rounded border border-amber-300">
-                        {language === 'en' ? 'SIMULATION' : 'GIẢ LẬP'}
+            {viewMode === 'live_map' && (
+              liveTracking ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-900 m-0">
+                        {language === 'en' ? 'Live Telemetry & Geofence Map' : 'Bản Đồ Định Vị GPS & Trạm Dừng'}
+                      </h3>
+                      {liveTracking.isSimulated && (
+                        <span className="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5 rounded border border-amber-300">
+                          {language === 'en' ? 'SIMULATION' : 'GIẢ LẬP'}
+                        </span>
+                      )}
+                    </div>
+                    {(liveTracking.currentPosition || liveTracking.vehiclePosition) && (
+                      <span className="text-xs text-slate-500">
+                        {language === 'en' ? 'Speed: ' : 'Vận tốc: '}
+                        <strong className="text-slate-800">
+                          {Math.round(
+                            (liveTracking.currentPosition || liveTracking.vehiclePosition)?.speedKmh || 0,
+                          )}{' '}
+                          km/h
+                        </strong>
                       </span>
                     )}
                   </div>
-                  {(liveTracking.currentPosition || liveTracking.vehiclePosition) && (
-                    <span className="text-xs text-slate-500">
-                      {language === 'en' ? 'Speed: ' : 'Vận tốc: '}
-                      <strong className="text-slate-800">
-                        {Math.round(
-                          (liveTracking.currentPosition || liveTracking.vehiclePosition)?.speedKmh || 0,
-                        )}{' '}
-                        km/h
-                      </strong>
-                    </span>
-                  )}
+                  <LiveTrackingMap
+                    key={selectedShipmentId ?? 'map'}
+                    liveData={{
+                      ...liveTracking,
+                      progressPct,
+                      progress: liveTracking.progress
+                        ? { ...liveTracking.progress, percent: progressPct }
+                        : { percent: progressPct },
+                    }}
+                    height="440px"
+                    autoCenter
+                  />
                 </div>
-                <LiveTrackingMap liveData={liveTracking} height="440px" autoCenter />
-              </div>
+              ) : (
+                <div className="bg-white rounded-xl border border-dashed border-[#D8CEBE] p-8 text-center text-sm text-[#5C6658]">
+                  <MapPin size={28} className="mx-auto text-[#A67C2E] mb-2" />
+                  <p className="font-bold text-[#181A17] m-0">
+                    {language === 'en'
+                      ? 'No live GPS coordinates available for this trip yet'
+                      : 'Chuyến đi này chưa có dữ liệu tọa độ GPS trực tuyến'}
+                  </p>
+                  <p className="text-xs text-[#5C6658] mt-1 mb-0">
+                    {language === 'en'
+                      ? 'Coordinates will appear automatically once the driver starts transmitting location pings.'
+                      : 'Vị trí xe sẽ hiển thị tự động ngay khi tài xế bắt đầu gửi tín hiệu định vị trên đường.'}
+                  </p>
+                </div>
+              )
             )}
 
             <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-sm flex flex-col gap-6">
@@ -675,33 +731,43 @@ function TripMonitoringContent() {
                 items={timelineItems}
                 viewer="manager"
                 emptyText={t('monitoring.noMilestones', 'Chưa có mốc kiểm soát nào.')}
-                renderCurrentActions={(item) => (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const m =
-                          trackingDetails?.milestones.find(
-                            (x) => String(x.id) === item.id || x.title === item.title,
-                          ) || trackingDetails?.milestones[0];
-                        if (m) {
+                renderCurrentActions={(item) => {
+                  const m =
+                    (item.milestoneId
+                      ? trackingDetails?.milestones.find((x) => x.id === item.milestoneId)
+                      : null) ||
+                    trackingDetails?.milestones.find(
+                      (x) => String(x.id) === item.id || x.title === item.title,
+                    ) ||
+                    trackingDetails?.milestones.find((x) => x.status === 'CURRENT');
+
+                  if (!m) return null;
+
+                  return (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
                           setOverrideMilestone(m);
+                          const firstAllowed = m.allowedActions?.[0];
                           if (m.itemType === 'leg_start') setOverrideAction('start_leg');
                           else if (m.itemType === 'leg_end') setOverrideAction('complete_leg');
+                          else if (firstAllowed === 'clear_customs') setOverrideAction('customs_cleared');
+                          else if (firstAllowed === 'depart_stop') setOverrideAction('departed');
                           else setOverrideAction('arrived');
                           setOverrideReasonCode('lost_signal');
                           setOverrideNotes('');
-                        }
-                      }}
-                      className="text-[#181A17] border-[#D4C5A3] bg-[#FAF8F4] hover:bg-[#F3EFE4] text-xs font-bold"
-                    >
-                      <Edit3 size={13} className="mr-1.5 text-[#A67C2E]" />
-                      <span>{t('monitoring.overrideDriverBtn', 'Cập nhật thay Driver')}</span>
-                    </Button>
-                  </div>
-                )}
+                        }}
+                        className="text-[#181A17] border-[#D4C5A3] bg-[#FAF8F4] hover:bg-[#F3EFE4] text-xs font-bold cursor-pointer"
+                      >
+                        <Edit3 size={13} className="mr-1.5 text-[#A67C2E]" />
+                        <span>{t('monitoring.overrideDriverBtn', 'Cập nhật thay Driver')}</span>
+                      </Button>
+                    </div>
+                  );
+                }}
               />
             </div>
 
@@ -864,7 +930,14 @@ function TripMonitoringContent() {
 
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 mt-2">
                       <span>{t('monitoring.clientPrefix', 'Khách: {name}', { name: trip.contact_name })}</span>
-                      <span>{t('common.horsesCount', '{count} ngựa', { count: trip.requested_horse_count || 1 })}</span>
+                      <span>
+                        {trip.requested_horse_count || 1}{' '}
+                        {language === 'en'
+                          ? (trip.requested_horse_count || 1) === 1
+                            ? 'horse'
+                            : 'horses'
+                          : 'ngựa'}
+                      </span>
                     </div>
                   </button>
                 );
@@ -907,6 +980,11 @@ function TripMonitoringContent() {
                   ) : (
                     <>
                       <option value="arrived">{t('monitoring.actionArriveStop', 'Đến trạm kiểm soát')}</option>
+                      {overrideMilestone.isCustomsBorder && (
+                        <option value="customs_cleared">
+                          {language === 'en' ? 'Customs & Quarantine Cleared' : 'Hoàn tất thông quan & kiểm dịch'}
+                        </option>
+                      )}
                       <option value="departed">{t('monitoring.actionDepartStop', 'Rời trạm kiểm soát')}</option>
                     </>
                   )}

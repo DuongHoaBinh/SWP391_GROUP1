@@ -1,17 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
+  ArrowLeft,
   ChevronRight,
   Clock,
   Check,
-  Search,
-  ThumbsUp,
-  CalendarCheck,
   Plane,
-  Flag,
   ArrowRight,
   AlertTriangle,
   Upload,
@@ -27,11 +24,13 @@ import {
   CreditCard,
   Route,
   FileCheck2,
+  Navigation,
+  RotateCcw,
 } from 'lucide-react';
 import { useCustomerStore } from '@/lib/customer-store';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { BatchDocumentUploadModal } from '@/features/documents/components/BatchDocumentUploadModal';
-import { TripTrackingModal } from '@/features/tracking/components/TripTrackingModal';
+import { HorseDocumentUploadModal } from '@/features/documents/components/HorseDocumentVault';
 import { apiClient, openAuthenticatedDocument } from '@/lib/api-client';
 import { Modal } from '@/components/ui/Modal';
 import { OrderComplianceChecklist } from '@/features/documents/api/documents.api';
@@ -39,6 +38,7 @@ import { buildEquineRoute, geocodeAddress, resolveLocation, GeocodedLocation } f
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 import { SepayPayment } from '@/features/orders/components/SepayPayment';
+import { PaymentCountdownBadge } from '@/features/orders/components/PaymentCountdownBadge';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
 import { BookingSummary } from '@/features/orders/components/BookingSummary';
@@ -159,13 +159,25 @@ const fetcher = async (url: string) => {
   // 2. Fallback resolution via known locations
   const resolvedDest = resolveLocation(destStr);
 
-  // 3. Parse saved route/mode metrics from specialRequirements if present
+  // 3. Parse saved route/mode metrics from backend transportMode or specialRequirements if present
   const routeMatch = specialReq.match(/\[Lộ trình:\s*([^,]+),\s*([0-9,]+)\s*km,\s*~?([0-9]+)h\]/i);
-  const savedMode = routeMatch
-    ? routeMatch[1].toLowerCase().includes('hàng không') || routeMatch[1].toLowerCase().includes('air')
-      ? 'air'
-      : 'road'
-    : null;
+  const rawOrderMode = String(data.transportMode || data.transport_mode || '').toLowerCase();
+  const explicitOrderMode: 'road' | 'air' | 'sea' | null =
+    rawOrderMode === 'road' || rawOrderMode === 'air' || rawOrderMode === 'sea'
+      ? (rawOrderMode as 'road' | 'air' | 'sea')
+      : null;
+  const savedMode: 'road' | 'air' | 'sea' | null =
+    explicitOrderMode ||
+    (routeMatch
+      ? routeMatch[1].toLowerCase().includes('đường thủy') ||
+        routeMatch[1].toLowerCase().includes('tàu biển') ||
+        routeMatch[1].toLowerCase().includes('sea') ||
+        routeMatch[1].toLowerCase().includes('vessel')
+        ? 'sea'
+        : routeMatch[1].toLowerCase().includes('hàng không') || routeMatch[1].toLowerCase().includes('air')
+          ? 'air'
+          : 'road'
+      : null);
   const savedDistKm = routeMatch ? Number(routeMatch[2].replace(/,/g, '')) : null;
   const savedHours = routeMatch ? Number(routeMatch[3]) : null;
 
@@ -217,7 +229,7 @@ const fetcher = async (url: string) => {
   }
 
   // 6. Build route calculation
-  const preferredMode = (savedMode || (isDomestic ? 'road' : 'air')) as 'air' | 'road';
+  const preferredMode = (savedMode || (isDomestic ? 'road' : 'air')) as 'air' | 'road' | 'sea';
   const routeCalc = buildEquineRoute(
     originStr,
     destStr,
@@ -232,10 +244,12 @@ const fetcher = async (url: string) => {
   const finalDistKm = savedDistKm ?? routeCalc.distanceKm;
   const finalHours = savedHours ?? routeCalc.durationHours;
   const estimatedDistance = data.estimatedDistance || `${finalDistKm.toLocaleString()} km`;
-  const estimatedDuration = data.estimatedDuration || (isDomestic ? `~${finalHours} hours` : `~${finalHours} hours (${preferredMode === 'air' ? 'Air Flight' : 'Road Transit'})`);
+  const modeDisplayLabel =
+    preferredMode === 'air' ? 'Air Flight' : preferredMode === 'sea' ? 'Sea Freight' : 'Road Transit';
+  const estimatedDuration = data.estimatedDuration || (isDomestic ? `~${finalHours} hours` : `~${finalHours} hours (${modeDisplayLabel})`);
   const transitName = isDomestic
-    ? (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'rest')?.name || 'Domestic Quarantine Station')
-    : (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'airport')?.name || 'Border / Transit Checkpoint');
+    ? (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'rest' || w.type === 'seaport')?.name || 'Domestic Quarantine Station')
+    : (routeCalc.waypoints.find((w) => w.type === 'checkpoint' || w.type === 'airport' || w.type === 'seaport')?.name || 'Border / Transit Checkpoint');
 
   return {
     ...data,
@@ -285,6 +299,7 @@ const PAYABLE_SHIPMENT_STATUSES = [
 export default function RequestDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const langContext = useLanguage() || ({} as any);
   const {
     t = (_key: string, fallback?: string) => fallback || _key,
@@ -292,14 +307,11 @@ export default function RequestDetailPage() {
     translateStatus = (s?: string | null) => s || '',
     translateDocType = (s?: string | null) => s || '',
     translateBreed = (s?: string | null) => s || '',
-    translateUrgency = (s?: string | null) => s || '',
     translateTransportType = (s?: string | null) => s || '',
-    translatePaymentStatus = (s?: string | null) => s || '',
     translateCountry = (s?: string | null) => s || '',
-    translateAirportCity = (s?: string | null) => s || '',
-    translateColor = (s?: string | null) => s || '',
     translateRejectionReason = (s?: string | null) => s || '',
   } = langContext;
+  const isEn = language === 'en';
   const requestId = params?.id as string;
 
   const { uploadDocumentForRequest, cancelRequest, refreshHorses } = useCustomerStore();
@@ -314,7 +326,7 @@ export default function RequestDetailPage() {
   );
 
   // Step 11: Fetch live shipment timeline if order has an associated active shipment
-  const isTransitOrBeyondPre = ['ready_to_depart', 'ready', 'in_transit', 'arrived', 'completed'].includes(
+  const isTransitOrBeyondPre = ['ready_to_depart', 'ready', 'in_transit', 'return_pending', 'arrived', 'completed'].includes(
     String(request?.status || '').toLowerCase()
   );
   const targetShipmentId =
@@ -331,18 +343,33 @@ export default function RequestDetailPage() {
     { revalidateOnFocus: false },
   );
 
-  // Tab State: 4 core tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'horses' | 'documents' | 'quotation'>('overview');
+  // Tab State: 4 core lifecycle tabs supporting ?tab= and #sepay-payment
+  const [activeTab, setActiveTab] = useState<'overview' | 'horses' | 'documents' | 'payment'>('overview');
+  const [earlyUploadModal, setEarlyUploadModal] = useState<{
+    isOpen: boolean;
+    horseId: number;
+    documentTypeCode?: string;
+  }>({ isOpen: false, horseId: 0 });
 
-  // Quotation acceptance & negotiation states
-  const [isQuotationAccepted, setIsQuotationAccepted] = useState(false);
-  const [isNegotiateModalOpen, setIsNegotiateModalOpen] = useState(false);
-  const [negotiateNotes, setNegotiateNotes] = useState('');
-  const [isSubmittingNegotiation, setIsSubmittingNegotiation] = useState(false);
+  useEffect(() => {
+    const tabParam = (searchParams?.get('tab') || '').toLowerCase();
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    if (hash === '#sepay-payment' || tabParam === 'payment' || tabParam === 'quotation') {
+      setActiveTab('payment');
+    } else if (tabParam === 'horses' || tabParam === 'handover' || tabParam === 'insurance') {
+      setActiveTab('horses');
+    } else if (tabParam === 'documents' || tabParam === 'docs' || tabParam === 'compliance') {
+      setActiveTab('documents');
+    } else if (tabParam === 'overview') {
+      setActiveTab('overview');
+    }
+  }, [searchParams]);
 
   // Modals
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [isTrackingOpen, setIsTrackingOpen] = useState(false);
+  const [isNegotiateModalOpen, setIsNegotiateModalOpen] = useState(false);
+  const [negotiateNotes, setNegotiateNotes] = useState('');
+  const [isSubmittingNegotiation, setIsSubmittingNegotiation] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<{
     horseId?: number | string;
     regulationId?: number | string;
@@ -433,9 +460,53 @@ export default function RequestDetailPage() {
   }
 
   const statusLower = String(request?.status || '').toLowerCase();
-  const isPendingReview = statusLower === 'requested' || statusLower === 'under_review';
-  const isRejected = statusLower === 'rejected' || statusLower === 'cancelled';
-  const isApproved = ['approved', 'planning', 'confirmed', 'ready_to_depart', 'ready', 'in_transit', 'completed'].includes(statusLower);
+  const isAwaitingPayment = statusLower === 'awaiting_payment';
+  const isPaidPendingReview = statusLower === 'paid_pending_review';
+  const isPendingReview =
+    statusLower === 'requested' ||
+    statusLower === 'under_review' ||
+    statusLower === 'paid_pending_review' ||
+    statusLower === 'change_requested';
+  const isCancelledOrRejected = [
+    'rejected',
+    'cancelled',
+    'cancelled_operational',
+    'refund_requested',
+    'refunded',
+  ].includes(statusLower);
+  const isApproved = [
+    'approved',
+    'planning',
+    'confirmed',
+    'ready_to_depart',
+    'ready',
+    'in_transit',
+    'return_pending',
+    'completed',
+  ].includes(statusLower);
+  const isAlreadyPaid =
+    Boolean(request.paidAt) ||
+    String(request.paymentStatus || '').toLowerCase() === 'succeeded' ||
+    String(request.paymentStatus || '').toLowerCase() === 'paid' ||
+    (request.paymentFlow === 'prepaid' &&
+      [
+        'paid_pending_review',
+        'approved',
+        'planning',
+        'confirmed',
+        'ready_to_depart',
+        'in_transit',
+        'return_pending',
+        'completed',
+      ].includes(statusLower));
+  const needsPaymentNow =
+    !isAlreadyPaid &&
+    Number(request.totalCost) > 0 &&
+    (isAwaitingPayment ||
+      (request.paymentFlow !== 'prepaid' &&
+        ['confirmed', 'ready_to_depart'].includes(statusLower)));
+  const canTrackGps = ['ready_to_depart', 'ready', 'in_transit', 'return_pending', 'completed'].includes(statusLower);
+  const canShowHandoverAndClaims = ['in_transit', 'return_pending', 'completed'].includes(statusLower);
   const requirementsSent = Boolean(checklist?.requirementsSent);
   const totalMissingCount = checklist?.horses?.reduce(
     (acc, h) => acc + (h.missingRegulations?.length || 0),
@@ -445,18 +516,16 @@ export default function RequestDetailPage() {
     (acc, h) => acc + (h.documents?.filter((d: any) => d.status === 'rejected')?.length || 0),
     0
   ) ?? 0;
-  const hasMissingDocs = isApproved && requirementsSent && totalMissingCount > 0;
-  const hasRejectedDocs = isApproved && requirementsSent && totalRejectedCount > 0;
 
-  // Rule: Only allow customer cancellation before approval/planning stages (requested, change_requested)
-  const cancellableStatuses = ['requested', 'change_requested'];
+  // Rule: Only allow customer cancellation before approval/planning stages (requested, change_requested, awaiting_payment)
+  const cancellableStatuses = ['requested', 'change_requested', 'awaiting_payment'];
   const canCancel = cancellableStatuses.includes(statusLower);
 
   // Check if order has quotation available
   const hasQuotation = Number(request.totalCost) > 0 || statusLower === 'quotation_sent' || statusLower === 'approved';
 
   // Step 11: Setup timeline items for request detail
-  const isTransitOrBeyond = ['ready_to_depart', 'ready', 'in_transit', 'arrived', 'completed'].includes(statusLower);
+  const isTransitOrBeyond = ['ready_to_depart', 'ready', 'in_transit', 'return_pending', 'arrived', 'completed'].includes(statusLower);
 
   const fallbackTimelineItems: TimelineItem[] = [
     {
@@ -474,7 +543,7 @@ export default function RequestDetailPage() {
       kind: 'payment',
       title: language === 'en' ? 'Deposit / Fee Payment' : 'Thanh toán cước phí / đặt cọc',
       subtitle: request.totalCost ? `${Number(request.totalCost).toLocaleString()} VND` : undefined,
-      status: ['paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(statusLower)
+      status: ['paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed'].includes(statusLower)
         ? 'done'
         : ['awaiting_payment', 'quotation_sent'].includes(statusLower)
         ? 'current'
@@ -485,7 +554,7 @@ export default function RequestDetailPage() {
       group: 'pre_trip',
       kind: 'approval',
       title: language === 'en' ? 'Logistics Feasibility Approval' : 'Quản lý phê duyệt tính khả thi',
-      status: ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(statusLower)
+      status: ['approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed'].includes(statusLower)
         ? 'done'
         : ['requested', 'under_review', 'in_review'].includes(statusLower)
         ? 'current'
@@ -499,7 +568,7 @@ export default function RequestDetailPage() {
       kind: 'documents',
       title: language === 'en' ? 'Veterinary & Customs Compliance' : 'Hồ sơ kiểm dịch & hải quan',
       subtitle: checklist?.isFullyCompliant ? (language === 'en' ? 'All mandatory documents verified' : 'Đã duyệt đủ hồ sơ') : undefined,
-      status: checklist?.isFullyCompliant || ['confirmed', 'ready_to_depart', 'in_transit', 'completed'].includes(statusLower)
+      status: checklist?.isFullyCompliant || ['confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed'].includes(statusLower)
         ? 'done'
         : statusLower === 'planning'
         ? 'current'
@@ -510,7 +579,7 @@ export default function RequestDetailPage() {
       group: 'outbound',
       kind: 'pickup',
       title: language === 'en' ? 'Route & Fleet Planning' : 'Phân bổ xe & Lập lộ trình di chuyển',
-      status: ['ready_to_depart', 'in_transit', 'completed'].includes(statusLower)
+      status: ['ready_to_depart', 'in_transit', 'return_pending', 'completed'].includes(statusLower)
         ? 'done'
         : statusLower === 'confirmed'
         ? 'current'
@@ -523,7 +592,7 @@ export default function RequestDetailPage() {
       title: language === 'en' ? 'In-Transit Execution' : 'Tiến trình vận chuyển thực địa',
       status: statusLower === 'completed'
         ? 'done'
-        : statusLower === 'in_transit'
+        : statusLower === 'in_transit' || statusLower === 'return_pending'
         ? 'current'
         : 'upcoming',
     },
@@ -538,7 +607,7 @@ export default function RequestDetailPage() {
 
   const activeTimelineItems =
     timelineData?.items && timelineData.items.length > 0
-      ? buildTimeline({ timelineData, viewer: 'customer' })
+      ? buildTimeline({ timelineData, viewer: 'customer', language })
       : fallbackTimelineItems;
 
   // Compute dynamic timeline stepper
@@ -553,7 +622,7 @@ export default function RequestDetailPage() {
     computedStep = 4;
   } else if (statusLower === 'ready_to_depart' || statusLower === 'ready') {
     computedStep = 5;
-  } else if (statusLower === 'in_transit') {
+  } else if (statusLower === 'in_transit' || statusLower === 'return_pending') {
     computedStep = 5;
   } else if (statusLower === 'completed') {
     computedStep = 6;
@@ -795,306 +864,304 @@ export default function RequestDetailPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 pb-10">
-      {/* Editorial Header & Breadcrumbs */}
-      <header className="border-b border-[#E5DDD0] pb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+    <div className="flex flex-col gap-5 pb-10">
+      {/* TIER 1: COMPACT HEADER (no double breadcrumb) */}
+      <header className="border-b border-[#E5DDD0] pb-4 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-xs text-[#747D88] mb-1.5 flex-wrap">
-            <Link href="/customer" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
-              {language === 'en' ? 'Dashboard' : 'Bảng điều khiển'}
-            </Link>
-            <ChevronRight size={12} aria-hidden="true" />
-            <Link href="/customer/requests" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
-              {t('customer.requests.title', language === 'en' ? 'Transport Requests' : 'Yêu cầu vận chuyển')}
-            </Link>
-            <ChevronRight size={12} aria-hidden="true" />
-            <span className="text-[#181A17] font-semibold">{request.requestCode}</span>
-          </div>
+          <Link
+            href="/customer/requests"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5F6977] hover:text-[#181A17] mb-1.5 no-underline transition-colors"
+          >
+            <ArrowLeft size={13} aria-hidden="true" />
+            <span>{isEn ? 'Back to Orders' : 'Quay lại danh sách đơn'}</span>
+          </Link>
 
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
-              {language === 'en' ? `Transport Request ${request.requestCode}` : `Yêu cầu vận chuyển ${request.requestCode}`}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-xl sm:text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
+              {isEn ? `Order ${request.requestCode}` : `Đơn vận chuyển ${request.requestCode}`}
             </h1>
             <span
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold"
               style={{
-                backgroundColor:
-                  request.status === 'CANCELLED' || request.status === 'cancelled' || request.status === 'rejected'
-                    ? '#F8EAEA'
-                    : request.status === 'ready_to_depart' || request.status === 'ready' || request.status === 'completed'
+                backgroundColor: isCancelledOrRejected
+                  ? '#F8EAEA'
+                  : statusLower === 'ready_to_depart' || statusLower === 'ready' || statusLower === 'completed'
                     ? '#E8F2EB'
-                    : request.status === 'in_transit'
-                    ? '#FAF8F4'
-                    : request.status === 'approved' || request.status === 'planning' || request.status === 'confirmed'
-                    ? '#F3EFE4'
-                    : '#F8F0DF',
-                color:
-                  request.status === 'CANCELLED' || request.status === 'cancelled' || request.status === 'rejected'
-                    ? '#B33E3E'
-                    : request.status === 'ready_to_depart' || request.status === 'ready' || request.status === 'completed'
-                    ? '#287653'
-                    : request.status === 'in_transit'
-                    ? '#966516'
-                    : request.status === 'approved' || request.status === 'planning' || request.status === 'confirmed'
-                    ? '#181A17'
-                    : '#966516',
-                border:
-                  request.status === 'CANCELLED' || request.status === 'cancelled' || request.status === 'rejected'
-                    ? '1px solid #E5B8B8'
-                    : request.status === 'ready_to_depart' || request.status === 'ready' || request.status === 'completed'
+                    : statusLower === 'in_transit' || statusLower === 'return_pending'
+                      ? '#FAF8F4'
+                      : isApproved
+                        ? '#F3EFE4'
+                        : '#FFF7E6',
+                color: isCancelledOrRejected
+                  ? '#B33E3E'
+                  : statusLower === 'ready_to_depart' || statusLower === 'ready' || statusLower === 'completed'
+                    ? '#1E563B'
+                    : '#8C6621',
+                border: isCancelledOrRejected
+                  ? '1px solid #E5B8B8'
+                  : statusLower === 'ready_to_depart' || statusLower === 'ready' || statusLower === 'completed'
                     ? '1px solid #B7DBC4'
-                    : request.status === 'in_transit'
-                    ? '1px solid #DFCA9A'
-                    : request.status === 'approved' || request.status === 'planning' || request.status === 'confirmed'
-                    ? '1px solid #D4C5A3'
                     : '1px solid #DFCA9A',
               }}
             >
               <Clock size={12} aria-hidden="true" />
               {translateStatus(request.statusLabel || request.status)}
             </span>
+            {isAwaitingPayment && !isAlreadyPaid && (
+              <PaymentCountdownBadge paymentDueAt={request.paymentDueAt} createdAt={request.createdAt} />
+            )}
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2.5 flex-wrap shrink-0">
-          <Link
-            href={`/customer/requests/${request.id || requestId}/invoice`}
-            className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] inline-flex items-center gap-1.5 cursor-pointer transition-colors no-underline"
-          >
-            <FileText size={14} className="text-[#A67C2E]" aria-hidden="true" />
-            {language === 'en' ? 'E-Invoice' : 'Xem Hóa Đơn'}
-          </Link>
-          <button
-            type="button"
-            onClick={() => router.push('/customer/tracking')}
-            className="px-3.5 py-2 rounded-xl border border-[#D4C5A3] bg-[#FAF8F4] hover:bg-[#F5EFE2] text-xs font-semibold text-[#A67C2E] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-          >
-            <Plane size={14} aria-hidden="true" /> {t('tracking.liveTitle', language === 'en' ? 'Trip Tracking' : 'Theo dõi hành trình')}
-          </button>
+        {/* Contextual Action Buttons */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {canTrackGps && (
+            <Link
+              href={`/customer/tracking?shipmentId=${request.id || requestId}`}
+              className="px-3.5 py-2 rounded-xl bg-[#181A17] hover:bg-[#2C2F2A] text-xs font-bold text-[#FAF8F4] inline-flex items-center gap-1.5 transition-colors no-underline"
+            >
+              <Navigation size={14} className="text-[#D4C5A3]" aria-hidden="true" />
+              <span>{isEn ? 'Live GPS Tracking' : 'Theo dõi GPS'}</span>
+            </Link>
+          )}
+          {(isAlreadyPaid || isAwaitingPayment || statusLower === 'refund_requested' || statusLower === 'refunded') && (
+            <Link
+              href={`/customer/requests/${request.id || requestId}/invoice`}
+              className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-bold text-[#181A17] inline-flex items-center gap-1.5 transition-colors no-underline"
+            >
+              <FileText size={14} className="text-[#A67C2E]" aria-hidden="true" />
+              <span>{isEn ? 'E-Invoice' : 'Hóa đơn điện tử'}</span>
+            </Link>
+          )}
           {canCancel && (
             <button
               type="button"
               onClick={handleOpenCancelModal}
-              className="px-3.5 py-2 rounded-xl border border-[#E5B8B8] bg-[#F8EAEA] hover:bg-[#F3DCDC] text-xs font-semibold text-[#B33E3E] cursor-pointer transition-colors"
+              className="px-3.5 py-2 rounded-xl border border-[#E5B8B8] bg-[#F8EAEA] hover:bg-[#F3DCDC] text-xs font-bold text-[#B33E3E] cursor-pointer transition-colors"
             >
-              {t('requestDetail.cancelRequest', 'Hủy yêu cầu')}
+              {isEn ? 'Cancel Order' : 'Hủy đơn'}
             </button>
           )}
           <button
             type="button"
             onClick={exportQuotation}
-            title={language === 'en' ? 'Download PDF Quotation' : 'Tải báo giá PDF'}
-            className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-semibold text-[#181A17] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+            title={isEn ? 'Download PDF Quotation' : 'Tải báo giá PDF'}
+            className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#B49A68] text-xs font-bold text-[#181A17] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
           >
-            <Download size={14} className="text-[#5F6977]" aria-hidden="true" /> {t('requestDetail.pdfBtn', 'Tải PDF')}
+            <Download size={14} className="text-[#5F6977]" aria-hidden="true" />
+            <span>{isEn ? 'PDF Quote' : 'Báo giá PDF'}</span>
           </button>
         </div>
       </header>
 
-      {/* Change Requested Alert Banner */}
-      {request.status === 'change_requested' && (
-        <div
-          style={{
-            backgroundColor: '#fef2f2',
-            border: '1px solid #fecaca',
-            borderRadius: '12px',
-            padding: '16px 20px',
-            display: 'flex',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '16px',
-          }}
-        >
-          <div style={{ padding: '4px', backgroundColor: '#fee2e2', borderRadius: '50%', color: '#ef4444' }}>
-            <AlertTriangle size={20} aria-hidden="true" />
-          </div>
-          <div style={{ flex: 1, minWidth: '220px' }}>
-            <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700, color: '#991b1b' }}>
-              {language === 'en' ? 'Action Required: Manager Requested Changes' : 'Yêu cầu chỉnh sửa từ Logistics Manager'}
-            </h4>
-            <p style={{ margin: 0, fontSize: '13px', color: '#b91c1c', lineHeight: 1.5 }}>
-              <strong>{language === 'en' ? 'Manager Notes:' : 'Ghi chú từ Quản lý:'}</strong>{' '}
-              {request.changeRequestNotes || (language === 'en' ? 'Please update your request details and resubmit.' : 'Vui lòng cập nhật thông tin yêu cầu và gửi lại.')}
+      {/* TIER 2: SINGLE CONTEXTUAL STATUS BANNER */}
+      {isAwaitingPayment && !isAlreadyPaid && activeTab !== 'payment' ? (
+        <div className="rounded-2xl border border-[#DFCA9A] bg-[#FFF9EB] px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-[#F5E6C4] text-[#8C6621] flex items-center justify-center shrink-0">
+              <CreditCard size={16} aria-hidden="true" />
+            </div>
+            <p className="text-xs sm:text-sm font-bold text-[#181A17] m-0">
+              {isEn
+                ? 'Order reserved — Complete VietQR payment within 12 hours'
+                : 'Đơn đã giữ chỗ — Vui lòng thanh toán VietQR trong 12 giờ'}
             </p>
           </div>
           <button
             type="button"
-            onClick={handleOpenResubmit}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#dc2626',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '8px',
-              fontWeight: 600,
-              fontSize: '13px',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
+            onClick={() => setActiveTab('payment')}
+            className="px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2C2F2A] text-[#FAF8F4] text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
           >
-            {language === 'en' ? 'Edit & Resubmit' : 'Chỉnh sửa & Gửi lại'}
+            <CreditCard size={14} className="text-[#D4C5A3]" aria-hidden="true" />
+            <span>{isEn ? 'Pay via VietQR' : 'Thanh toán VietQR'}</span>
           </button>
         </div>
-      )}
-
-      {/* Prepaid Feasibility & 100% Refund Alerts */}
-      {statusLower === 'refund_requested' && (
-        <div className="bg-[#F8EAEA] border border-[#E5B8B8] rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+      ) : statusLower === 'change_requested' ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#F0D5D5] text-[#B33E3E] flex items-center justify-center shrink-0 mt-0.5">
-              <AlertTriangle size={20} />
+            <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+              <AlertTriangle size={18} aria-hidden="true" />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-[#8C2E2E] m-0">
-                {language === 'en' ? 'Shipment Cannot Be Fulfilled - 100% Refund Guaranteed' : 'Rất tiếc, chuyến xe không thể đáp ứng - Cam kết hoàn tiền 100%'}
-              </h4>
+              <h2 className="text-sm font-extrabold text-rose-900 m-0">
+                {isEn ? 'Action Required: Logistics Manager Requested Changes' : 'Yêu cầu chỉnh sửa từ Quản lý vận hành'}
+              </h2>
+              <p className="text-xs text-rose-800 mt-1 mb-0 leading-relaxed">
+                <strong>{isEn ? 'Notes:' : 'Ghi chú:'}</strong>{' '}
+                {request.changeRequestNotes || (isEn ? 'Please update your request details and resubmit.' : 'Vui lòng cập nhật thông tin yêu cầu và gửi lại.')}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenResubmit}
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shrink-0 cursor-pointer"
+          >
+            {isEn ? 'Edit & Resubmit' : 'Chỉnh sửa & Gửi lại'}
+          </button>
+        </div>
+      ) : statusLower === 'refund_requested' ? (
+        <div className="bg-[#F8EAEA] border border-[#E5B8B8] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#F0D5D5] text-[#B33E3E] flex items-center justify-center shrink-0 mt-0.5">
+              <RotateCcw size={18} aria-hidden="true" />
+            </div>
+            <div>
+              <h2 className="text-sm font-extrabold text-[#8C2E2E] m-0">
+                {isEn ? 'Shipment Cannot Be Fulfilled — 100% Refund Guaranteed' : 'Chuyến đi không thể đáp ứng — Cam kết hoàn tiền 100%'}
+              </h2>
               <p className="text-xs text-[#963232] mt-1 mb-0 leading-relaxed">
-                {language === 'en'
-                  ? 'Due to operational constraints, we cannot fulfill this transport request. Please provide your bank transfer details to receive your 100% refund within 3-5 business days.'
-                  : 'Do hạn chế về năng lực vận tải/kiểm dịch, hệ thống không thể thực hiện chuyến đi. Quý khách vui lòng cung cấp thông tin tài khoản ngân hàng để nhận hoàn trả 100% chi phí trong vòng 3-5 ngày làm việc.'}
+                {isEn
+                  ? 'Please submit your beneficiary bank account to receive your 100% refund within 3–5 business days.'
+                  : 'Vui lòng cung cấp số tài khoản ngân hàng thụ hưởng để nhận hoàn trả 100% chi phí trong vòng 3–5 ngày làm việc.'}
               </p>
             </div>
           </div>
           <Link
             href={`/customer/requests/${request.id || requestId}/refund`}
-            className="no-underline px-4 py-2.5 rounded-xl bg-[#B33E3E] hover:bg-[#963232] text-white text-xs font-bold shrink-0 transition-colors shadow-sm flex items-center gap-1.5"
+            className="no-underline px-4 py-2.5 rounded-xl bg-[#B33E3E] hover:bg-[#963232] text-white text-xs font-bold shrink-0 transition-colors shadow-sm inline-flex items-center gap-1.5"
           >
-            <CreditCard size={15} />
-            <span>{language === 'en' ? 'Submit Refund Form' : 'Điền form nhận hoàn tiền 100%'}</span>
+            <CreditCard size={14} aria-hidden="true" />
+            <span>{isEn ? 'Submit Refund Form' : 'Điền STK hoàn tiền 100%'}</span>
           </Link>
         </div>
-      )}
-
-      {statusLower === 'paid_pending_review' && (
-        <div className="bg-[#E8F2EB] border border-[#B7DBC4] rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+      ) : isPaidPendingReview ? (
+        <div className="bg-[#E8F2EB] border border-[#B7DBC4] rounded-2xl p-4 flex items-center gap-3 shadow-xs">
           <div className="w-8 h-8 rounded-lg bg-[#D3E8D9] text-[#287653] flex items-center justify-center shrink-0">
-            <CheckCircle2 size={18} />
+            <CheckCircle2 size={18} aria-hidden="true" />
           </div>
           <div>
-            <h4 className="text-xs font-bold text-[#287653] m-0">
-              {language === 'en' ? 'Payment Received - Logistics Feasibility Review' : 'Đã nhận thanh toán - Quản lý đang thẩm định tính khả thi'}
-            </h4>
-            <p className="text-xs text-[#3E6B4E] mt-0.5 mb-0">
-              {language === 'en'
-                ? 'Your payment was confirmed. Our Logistics Manager is currently assessing transport vehicle availability and quarantine corridors.'
-                : 'Đơn hàng đã được thanh toán thành công qua SePay VietQR. Logistics Manager đang tiến hành thẩm định khả năng đáp ứng xe chuyên dụng và trạm kiểm dịch.'}
+            <h2 className="text-xs font-extrabold text-[#1E563B] m-0">
+              {isEn ? 'Payment Confirmed — Logistics Feasibility Review' : 'Đã thanh toán thành công — Quản lý vận hành đang thẩm định khả thi'}
+            </h2>
+            <p className="text-xs text-[#2D5A3F] mt-0.5 mb-0">
+              {isEn
+                ? 'Your VietQR payment has been verified. Logistics Manager is finalizing vehicle dispatch and quarantine corridors.'
+                : 'Thanh toán SePay VietQR đã được xác nhận. Quản lý vận hành đang thẩm định năng lực xe chuyên dụng và lộ trình kiểm dịch.'}
             </p>
           </div>
         </div>
-      )}
-
-      {statusLower === 'refunded' && (
-        <div className="bg-[#FAF8F4] border border-[#D4C5A3] rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+      ) : statusLower === 'refunded' ? (
+        <div className="bg-[#FAF8F4] border border-[#D4C5A3] rounded-2xl p-4 flex items-center gap-3 shadow-xs">
           <div className="w-8 h-8 rounded-lg bg-[#EFE9DC] text-[#7A591C] flex items-center justify-center shrink-0">
-            <CheckCircle2 size={18} />
+            <CheckCircle2 size={18} aria-hidden="true" />
           </div>
           <div>
-            <h4 className="text-xs font-bold text-[#7A591C] m-0">
-              {language === 'en' ? '100% Refund Completed' : 'Đã hoàn tất hoàn tiền 100%'}
-            </h4>
+            <h2 className="text-xs font-extrabold text-[#7A591C] m-0">
+              {isEn ? '100% Refund Completed' : 'Đã hoàn tất hoàn tiền 100%'}
+            </h2>
             <p className="text-xs text-[#5C6658] mt-0.5 mb-0">
-              {language === 'en'
-                ? 'The refund payment has been successfully transferred to your declared bank account.'
+              {isEn
+                ? 'The refund has been transferred to your designated bank account.'
                 : 'Tiền cước và bảo hiểm đã được chuyển khoản hoàn trả 100% về tài khoản ngân hàng của quý khách.'}
             </p>
           </div>
         </div>
-      )}
-
-      {/* Refund / 30-Day Credit Summary (if any record exists) */}
-      {Number(request.id || request.shipmentId || requestId) > 0 && (
-        <CustomerRefundSummaryCard shipmentId={Number(request.id || request.shipmentId || requestId)} />
-      )}
-
-      {/* Flow 6 Per-Horse Delivery Handover & Acceptance (optional) */}
-      {Number(request.id || request.shipmentId || requestId) > 0 && (
-        <DeliveryHandoverPanel
-          role="customer"
-          shipmentId={Number(request.id || request.shipmentId || requestId)}
-          shipmentStatus={statusLower}
-        />
-      )}
-
-      {/* Step 5 Round-Trip Information & Management */}
-      <RoundTripPanel
-        order={request}
-        userRole="customer"
-        onRefresh={() => mutate()}
-      />
-
-      {/* Step 6 Insurance Claims Management */}
-      <CustomerClaimsList
-        shipmentId={Number(request.id || request.shipmentId || requestId)}
-        shipmentStatus={statusLower}
-        deliveredAt={request.completedAt || request.updatedAt}
-        horses={request.horses || []}
-      />
-
-      {/* Official Quotation Strip */}
-      {hasQuotation && (
-        <div className="rounded-2xl px-5 py-3.5 border flex flex-wrap items-center justify-between gap-3 bg-[#E8F2EB]/60 border-[#B7DBC4]">
-          <div className="flex flex-wrap items-center gap-3 min-w-0">
-            <span className="text-xs font-semibold text-[#5F6977]">
-              {t('requestDetail.officialQuotation', 'Báo giá vận chuyển')}
-            </span>
-            <strong className="text-base font-extrabold text-[#181A17] tabular-nums">
-              {Number(request.totalCost) > 0
-                ? `${Number(request.totalCost).toLocaleString('vi-VN')} VNĐ`
-                : t('requestDetail.preparingQuotation', 'Đang chuẩn bị báo giá')}
+      ) : isCancelledOrRejected ? (
+        <div className="bg-[#F8EAEA] border border-[#E5B8B8] rounded-2xl p-4 flex items-start gap-3">
+          <AlertTriangle size={18} className="text-[#B33E3E] shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="text-xs text-[#8C2E2E]">
+            <strong className="block mb-0.5">
+              {statusLower === 'rejected'
+                ? isEn ? 'Order Rejected' : 'Đơn hàng bị từ chối'
+                : isEn ? 'Order Cancelled' : 'Đơn hàng đã hủy'}
             </strong>
-            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]">
-              {t('requestDetail.confirmed', 'Đã xác nhận')}
+            <span>
+              {request.rejectionReason ||
+                request.cancellationReason ||
+                (isEn
+                  ? 'Horses and reserved vehicles have been released.'
+                  : 'Ngựa và xe giữ chỗ đã được giải phóng về trạng thái sẵn sàng.')}
             </span>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {Number(request.totalCost) > 0 && PAYABLE_SHIPMENT_STATUSES.includes(statusLower) && (
-              <Link
-                href={`/customer/requests/${request.id || requestId}/payment`}
-                className="no-underline px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold inline-flex items-center gap-1.5 transition-colors shadow-sm"
-              >
-                <CreditCard size={14} className="text-[#C4B38E]" aria-hidden="true" /> {t('requestDetail.payViaSepay', 'Thanh toán SePay VietQR')}
-              </Link>
-            )}
-            <button
-              type="button"
-              onClick={() => setActiveTab('quotation')}
-              className="px-3.5 py-2 rounded-xl border border-[#B7DBC4] bg-white hover:bg-[#FAF8F4] text-xs font-bold text-[#287653] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-            >
-              <CreditCard size={14} aria-hidden="true" /> {t('requestDetail.proceedPaymentBtn', 'Xem báo giá')}
-            </button>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* 1. STATUS TIMELINE (Step 11 Vertical Timeline) */}
-      <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 sm:p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-4 border-b border-[#E5DDD0]">
-          <h3 className="text-sm font-bold text-[#181A17] m-0 flex items-center gap-2">
-            <FileCheck2 size={16} className="text-[#A67C2E]" aria-hidden="true" />
-            {language === 'en' ? 'Journey Progress & Timeline' : 'Tiến trình Xử lý & Lộ trình Vận chuyển'}
-          </h3>
-          <span className="text-xs text-[#747D88]">
-            {isTransitOrBeyond
-              ? (language === 'en' ? 'Live Telemetry Milestones' : 'Mốc hành trình thực tế')
-              : (language === 'en' ? 'Lifecycle Stages' : 'Tiến trình đơn hàng')}
+      {/* TIER 3: COMPACT SUMMARY STRIP */}
+      <div className="bg-white rounded-2xl border border-[#E5DDD0] px-4 py-3.5 shadow-xs grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        <div className="min-w-0">
+          <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#747D88] block">
+            {isEn ? 'Route' : 'Lộ trình'}
+          </span>
+          <span className="font-bold text-[#181A17] truncate block mt-0.5" title={`${request.origin} → ${request.destination}`}>
+            {(request.origin || '').split(',')[0]} → {(request.destination || '').split(',')[0]}
           </span>
         </div>
-        <VerticalTimeline
-          items={activeTimelineItems}
-          viewer="customer"
-          compact={!isTransitOrBeyond}
-        />
+        <div>
+          <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#747D88] block">
+            {isEn ? 'Departure' : 'Khởi hành'}
+          </span>
+          <span className="font-bold text-[#181A17] block mt-0.5">
+            {request.departureDate} · {request.requestedHorseCount || request.horses?.length || 1} {isEn ? 'horse(s)' : 'ngựa'}
+          </span>
+        </div>
+        <div>
+          <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#747D88] block">
+            {isEn ? 'Quarantine Docs' : 'Hồ sơ kiểm dịch'}
+          </span>
+          <span className={`font-bold block mt-0.5 ${checklist?.isFullyCompliant ? 'text-[#287653]' : totalMissingCount > 0 ? 'text-[#B33E3E]' : 'text-[#5F6977]'}`}>
+            {checklist?.isFullyCompliant
+              ? isEn ? '100% Compliant' : 'Đạt chuẩn 100%'
+              : totalMissingCount > 0
+                ? isEn ? `${totalMissingCount} missing` : `Còn thiếu ${totalMissingCount}`
+                : isApproved
+                  ? isEn ? 'In review' : 'Đang rà soát'
+                  : isEn ? 'Pending order approval' : 'Chờ duyệt đơn'}
+          </span>
+        </div>
+        <div>
+          <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#747D88] block">
+            {isEn ? 'Total & Payment' : 'Tổng tiền & Thanh toán'}
+          </span>
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <strong className="font-mono text-[#181A17] whitespace-nowrap">
+              {Number(request.totalCost) > 0
+                ? `${Number(request.totalCost).toLocaleString('vi-VN')}\u00A0đ`
+                : isEn ? 'Pending' : 'Chờ báo giá'}
+            </strong>
+            {isAlreadyPaid && (
+              <span className="px-1.5 py-0.5 rounded bg-[#E8F2EB] text-[#1E563B] text-[10px] font-extrabold">
+                {isEn ? 'PAID' : 'ĐÃ TT'}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* ─── UNDERLINE TAB NAVIGATION BAR ─────────────────────────── */}
-      <div className="flex items-center gap-6 border-b border-[#E5DDD0] overflow-x-auto w-full">
+      {/* ─── 4 CLEAR LIFECYCLE TABS ─────────────────────────── */}
+      <div className="flex items-center gap-5 border-b border-[#E5DDD0] overflow-x-auto w-full">
         {[
-          { id: 'overview', label: t('requestDetail.tabOverview', language === 'en' ? 'Overview & Route' : 'Tổng quan & Lộ trình'), icon: Route, count: null },
-          { id: 'horses', label: t('requestDetail.tabHorses', language === 'en' ? 'Horses' : 'Danh sách ngựa'), icon: ShieldCheck, count: request.horses?.length || request.requestedHorseCount || 1 },
-          { id: 'documents', label: t('requestDetail.tabDocuments', language === 'en' ? 'Quarantine Docs' : 'Hồ sơ kiểm dịch'), icon: FileText, count: totalMissingCount > 0 ? t('requestDetail.missingCount', '{count} thiếu', { count: totalMissingCount }) : null, alert: totalMissingCount > 0 || totalRejectedCount > 0 },
-          { id: 'quotation', label: t('requestDetail.tabQuotation', language === 'en' ? 'Quotation & Payment' : 'Báo giá & Thanh toán'), icon: CreditCard, count: Number(request.totalCost) > 0 ? t('requestDetail.hasQuotation', 'Có báo giá') : null, highlight: Number(request.totalCost) > 0 },
+          {
+            id: 'overview',
+            label: isEn ? 'Overview' : 'Tổng quan',
+            icon: Route,
+            count: null,
+          },
+          {
+            id: 'horses',
+            label: isEn ? 'Horses & Insurance' : 'Ngựa & Bảo hiểm',
+            icon: ShieldCheck,
+            count: request.horses?.length || request.requestedHorseCount || 1,
+          },
+          {
+            id: 'documents',
+            label: isEn ? 'Documents' : 'Hồ sơ',
+            icon: FileText,
+            count: totalMissingCount > 0 ? (isEn ? `${totalMissingCount} missing` : `${totalMissingCount} thiếu`) : null,
+            alert: totalMissingCount > 0 || totalRejectedCount > 0,
+          },
+          {
+            id: 'payment',
+            label: isEn ? 'Payment' : 'Thanh toán',
+            icon: CreditCard,
+            count: isAlreadyPaid
+              ? isEn ? 'Paid' : 'Đã TT'
+              : needsPaymentNow
+                ? isEn ? 'Pay' : 'Cần TT'
+                : null,
+            highlight: isAlreadyPaid,
+            alert: needsPaymentNow,
+          },
         ].map((tab) => {
           const isActive = activeTab === tab.id;
           const IconComp = tab.icon;
@@ -1111,16 +1178,16 @@ export default function RequestDetailPage() {
             >
               <IconComp size={15} className={isActive ? 'text-[#A67C2E]' : ''} aria-hidden="true" />
               <span>{tab.label}</span>
-              {tab.count && (
+              {tab.count !== null && tab.count !== undefined && (
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                  className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold ${
                     tab.alert
                       ? 'bg-[#F8EAEA] text-[#B33E3E]'
                       : tab.highlight
-                      ? 'bg-[#E8F2EB] text-[#287653]'
-                      : isActive
-                      ? 'bg-[#181A17] text-white'
-                      : 'bg-[#F0EEE8] text-[#5F6977]'
+                        ? 'bg-[#E8F2EB] text-[#1E563B]'
+                        : isActive
+                          ? 'bg-[#181A17] text-white'
+                          : 'bg-[#F0EEE8] text-[#5F6977]'
                   }`}
                 >
                   {tab.count}
@@ -1131,165 +1198,74 @@ export default function RequestDetailPage() {
         })}
       </div>
 
-      {/* ─── TAB 1: TỔNG QUAN & LỘ TRÌNH ────────────────────────────── */}
+      {/* ─── TAB 1: TỔNG QUAN ────────────────────────────── */}
       {activeTab === 'overview' && (
         <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6 items-start">
-          <div className="lg:col-span-2 flex flex-col gap-6">
-            {/* Request Summary Card */}
-            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
-              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0]">
-                <h4 className="text-sm font-bold text-[#181A17] m-0">
-                  {t('requestDetail.overviewTitle', 'Thông tin tổng quan đơn hàng')}
-                </h4>
+          <div className="lg:col-span-2 flex flex-col gap-5">
+            {/* Compact Details Card (non-duplicated fields only) */}
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 shadow-sm grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+              <div>
+                <span className="text-[#747D88] block">{t('customer.table.createdDate', 'Ngày tạo')}</span>
+                <strong className="text-[#181A17] mt-0.5 block">{request.createdDate || '—'}</strong>
               </div>
-              <div style={{ padding: '24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '20px' }}>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.requestId', 'Mã đơn')}</span>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                    {request.requestCode}
-                  </p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.createdDate', 'Ngày tạo')}</span>
-                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                    {request.createdDate || '23 Sep 2026, 09:42'}
-                  </p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.transportType', 'Hình thức vận chuyển')}</span>
-                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                    {translateTransportType(request.transportationType)}
-                  </p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.currentStatus', 'Trạng thái hiện tại')}</span>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#d97706', margin: '2px 0 0 0' }}>
-                    {translateStatus(request.statusLabel || request.status)}
-                  </p>
-                </div>
-                <div className="sm:col-span-2">
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.route', 'Lộ trình di chuyển')}</span>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-heading)', margin: '2px 0 0 0', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    {request.origin}, {request.originCountryCode || 'VN'} <ArrowRight size={14} color="#5F6977" aria-hidden="true" /> {request.destination}, {request.destinationCountryCode || 'VN'}
-                  </p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.departure', 'Ngày xuất phát')}</span>
-                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                    {request.departureDate}
-                  </p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.estimatedArrival', 'Dự kiến đến nơi')}</span>
-                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-heading)', margin: '2px 0 0 0' }}>
-                    {request.estimatedArrivalDate}
-                  </p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.horseCount', 'Số lượng ngựa')}</span>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--primary)', margin: '2px 0 0 0' }}>
-                    {request.requestedHorseCount || request.horses?.length || 1} {t('common.horsesUnit', 'con')}
-                  </p>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('customer.table.totalCost', 'Chi phí vận chuyển')}</span>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#287653', margin: '2px 0 0 0' }}>
-                    {Number(request.totalCost) > 0
-                      ? `${Number(request.totalCost).toLocaleString('vi-VN')} VNĐ`
-                      : t('requestDetail.awaitingQuotation', 'Đang chờ báo giá')}
-                  </p>
-                </div>
+              <div>
+                <span className="text-[#747D88] block">{t('customer.table.transportType', 'Phạm vi')}</span>
+                <strong className="text-[#181A17] mt-0.5 block">{translateTransportType(request.transportationType)}</strong>
+              </div>
+              <div>
+                <span className="text-[#747D88] block">{t('customer.table.estimatedArrival', 'Dự kiến đến')}</span>
+                <strong className="text-[#181A17] mt-0.5 block">{request.estimatedArrivalDate || '—'}</strong>
+              </div>
+              <div>
+                <span className="text-[#747D88] block">{isEn ? 'Distance' : 'Quãng đường'}</span>
+                <strong className="text-[#181A17] mt-0.5 block">{request.estimatedDistance || '—'}</strong>
+              </div>
+              <div className="col-span-2 sm:col-span-4 pt-3 border-t border-[#EFEAE0] text-xs text-[#181A17] font-semibold flex items-center gap-2 flex-wrap">
+                <span>{request.origin}</span>
+                <ArrowRight size={13} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
+                <span>{request.destination}</span>
               </div>
             </div>
 
-            {/* Booking & Insurance Policies Summary */}
-            <BookingSummary
-              bookingType={request.bookingType}
-              horseCount={Number(request.requestedHorseCount ?? request.horses?.length ?? 1)}
-              stallUnitPrice={request.stallUnitPrice}
-              status={request.status}
-              departureDate={request.departureDate}
-            />
-            <InsuranceSummary
-              horses={request.insuranceHorses ?? []}
-              transportCost={request.transportCost ?? null}
-              insuranceFee={Number(request.insuranceFee ?? 0)}
-              totalCost={Number(request.totalCost ?? 0)}
+            {/* Step 11 Vertical Journey Timeline */}
+            <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 sm:p-6 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-4 border-b border-[#E5DDD0]">
+                <h4 className="text-sm font-bold text-[#181A17] m-0 flex items-center gap-2">
+                  <FileCheck2 size={16} className="text-[#A67C2E]" aria-hidden="true" />
+                  {isEn ? 'Journey Timeline' : 'Tiến trình vận chuyển'}
+                </h4>
+                {canTrackGps && (
+                  <Link
+                    href={`/customer/tracking?shipmentId=${request.id || requestId}`}
+                    className="px-3 py-1.5 rounded-lg bg-[#FAF8F4] text-[#A67C2E] text-xs font-semibold border border-[#D4C5A3] hover:bg-[#F5EFE2] transition-colors no-underline"
+                  >
+                    {isEn ? 'Live GPS Map →' : 'Bản đồ GPS →'}
+                  </Link>
+                )}
+              </div>
+              <VerticalTimeline
+                items={activeTimelineItems}
+                viewer="customer"
+                compact={!isTransitOrBeyond}
+              />
+            </div>
+
+            {/* Step 5 Round-Trip Management */}
+            <RoundTripPanel
+              order={request}
+              userRole="customer"
+              onRefresh={() => mutate()}
             />
 
-            {/* Transport Route Diagram with robust text truncate/clamp */}
-            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
-              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex justify-between items-center flex-wrap gap-2">
-                <h4 className="text-sm font-bold text-[#181A17] m-0">
-                  {t('requestDetail.routeMapTitle', 'Sơ đồ Lộ trình & Điểm trung chuyển')}
-                </h4>
-                <button
-                  type="button"
-                  onClick={() => setIsTrackingOpen(true)}
-                  className="px-3 py-1.5 rounded-lg bg-[#FAF8F4] text-[#A67C2E] text-xs font-semibold border border-[#D4C5A3] hover:bg-[#F5EFE2] cursor-pointer transition-colors"
-                >
-                  {t('requestDetail.viewTrackingMap', 'Xem Bản đồ Tracking Chi tiết')}
-                </button>
+            {/* Special Requirements (only render when customer actually provided notes) */}
+            {request.specialRequirements && String(request.specialRequirements).trim().length > 0 && (
+              <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 shadow-sm">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#747D88] block mb-2">
+                  {t('requestDetail.specialRequirementsTitle', 'Yêu cầu đặc biệt')}
+                </span>
+                <p className="text-xs text-[#181A17] m-0 leading-relaxed">{request.specialRequirements}</p>
               </div>
-              <div style={{ padding: '28px 20px' }}>
-                <div className="overflow-x-auto pb-2">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: '480px', maxWidth: '640px', margin: '0 auto', position: 'relative' }}>
-                  <div style={{ position: 'absolute', top: '24px', left: '40px', right: '40px', height: '3px', backgroundColor: '#D8CEBE', zIndex: 0 }} />
-
-                  {/* Origin */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1, maxWidth: '160px', textAlign: 'center' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#5F6977', marginBottom: '8px' }}>{language === 'en' ? 'Origin' : 'Điểm đi'}</span>
-                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#181A17', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #D8CEBE' }} />
-                    <span className="max-w-[140px] line-clamp-2 text-center" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '8px' }} title={request.origin}>
-                      {request.origin}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#5F6977' }}>{translateCountry(request.originCountryCode || 'Vietnam')}</span>
-                  </div>
-
-                  {/* Transit Checkpoint */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1, maxWidth: '180px', textAlign: 'center' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#5F6977', marginBottom: '8px' }}>{language === 'en' ? 'Transit' : 'Trung chuyển'}</span>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#ffffff', border: '2px solid #D8CEBE', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5F6977', marginTop: '-6px' }}>
-                      <Building size={14} aria-hidden="true" />
-                    </div>
-                    <span className="max-w-[150px] line-clamp-2 text-center" style={{ fontSize: '12.5px', fontWeight: 600, color: '#475569', marginTop: '8px' }} title={request.transitName}>
-                      {request.transitName || (language === 'en' ? 'Border / Transit Checkpoint' : 'Cửa khẩu / Trạm kiểm dịch')}
-                    </span>
-                  </div>
-
-                  {/* Destination */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1, maxWidth: '160px', textAlign: 'center' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#5F6977', marginBottom: '8px' }}>{language === 'en' ? 'Destination' : 'Điểm đến'}</span>
-                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#A67C2E', border: '3px solid #ffffff', boxShadow: '0 0 0 1px #D8CEBE' }} />
-                    <span className="max-w-[140px] line-clamp-2 text-center" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-heading)', marginTop: '8px' }} title={request.destination}>
-                      {request.destination}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#5F6977' }}>{translateCountry(request.destinationCountry || 'Vietnam')}</span>
-                  </div>
-                </div>
-                </div>
-
-                <div style={{ textAlign: 'center', marginTop: '28px', fontSize: '12px', color: '#64748b', fontWeight: 500 }}>
-                  {t('requestDetail.estimatedDistance', 'Quãng đường ước tính:')} <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDistance || '1,100 km'}</strong> &nbsp;|&nbsp; {language === 'en' ? 'Estimated Duration:' : 'Thời gian vận chuyển:'} <strong style={{ color: 'var(--text-heading)' }}>{request.estimatedDuration || '12 hours'}</strong>
-                </div>
-              </div>
-            </div>
-
-            {/* Request Information Card */}
-            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
-              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0]">
-                <h4 className="text-sm font-bold text-[#181A17] m-0">
-                  {t('requestDetail.specialRequirementsTitle', 'Yêu cầu đặc biệt & Ghi chú lịch trình')}
-                </h4>
-              </div>
-              <div className="p-6 flex flex-col gap-4">
-                <div className="bg-[#FAF8F4] p-4 rounded-xl border border-[#E5DDD0]">
-                  <p className="text-sm text-[#181A17] m-0 italic leading-relaxed">
-                    &ldquo;{request.notes || t('requestDetail.noSpecialRequirements', 'Không có yêu cầu đặc biệt nào được ghi chú.')}&rdquo;
-                  </p>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Right column: Activity / Audit History */}
@@ -1341,8 +1317,8 @@ export default function RequestDetailPage() {
 
       {/* ─── TAB 2: ĐÀN CHIẾN MÃ ───────────────────────────────────── */}
       {activeTab === 'horses' && (
-        <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6 items-start">
-          <div className="lg:col-span-2 flex flex-col gap-6">
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-5">
             <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
               <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex justify-between items-center">
                 <h4 className="text-sm font-bold text-[#181A17] m-0">
@@ -1395,12 +1371,13 @@ export default function RequestDetailPage() {
                                 borderRadius: '6px',
                                 fontSize: '11px',
                                 fontWeight: 700,
-                                textTransform: 'uppercase',
                                 backgroundColor: item.medicalStatus === 'Healthy' ? '#dcfce7' : '#fef3c7',
                                 color: item.medicalStatus === 'Healthy' ? '#15803d' : '#b45309',
                               }}
                             >
-                              {item.medicalStatus || 'Healthy'}
+                              {item.medicalStatus === 'Healthy' || !item.medicalStatus
+                                ? isEn ? 'Healthy' : 'Khỏe mạnh'
+                                : item.medicalStatus}
                             </span>
                           </td>
                           <td style={{ padding: '16px 20px' }}>
@@ -1446,19 +1423,41 @@ export default function RequestDetailPage() {
                 </table>
               </div>
             </div>
-          </div>
 
-          <div className="lg:col-span-1 flex flex-col gap-6">
-            <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 shadow-sm">
-              <h4 className="text-sm font-bold text-[#181A17] m-0 mb-3">
-                {language === 'en' ? 'Equine Inspection Standards' : 'Tiêu chuẩn kiểm định đàn ngựa'}
-              </h4>
-              <p className="text-xs text-[#5F6977] leading-relaxed m-0">
-                {language === 'en'
-                  ? 'All racehorses prior to loading must be fully vaccinated against Equine Influenza within 6 months and possess valid export quarantine certification.'
-                  : 'Tất cả các cá thể ngựa đua trước khi xếp xe đều phải được tiêm phòng cúm Equine Influenza đầy đủ trong vòng 6 tháng và có chứng nhận kiểm dịch xuất khẩu hợp lệ.'}
-              </p>
-            </div>
+            {/* Booking & Insurance Policies Summary */}
+            <BookingSummary
+              bookingType={request.bookingType}
+              horseCount={Number(request.requestedHorseCount ?? request.horses?.length ?? 1)}
+              stallUnitPrice={request.stallUnitPrice}
+              status={request.status}
+              departureDate={request.departureDate}
+            />
+            <InsuranceSummary
+              horses={request.insuranceHorses ?? []}
+              transportCost={request.transportCost ?? null}
+              insuranceFee={Number(request.insuranceFee ?? 0)}
+              totalCost={Number(request.totalCost ?? 0)}
+              showCostSummary={false}
+            />
+
+            {/* Flow 6 Per-Horse Delivery Handover & Acceptance (only when in_transit / return_pending / completed) */}
+            {canShowHandoverAndClaims && Number(request.id || request.shipmentId || requestId) > 0 && (
+              <DeliveryHandoverPanel
+                role="customer"
+                shipmentId={Number(request.id || request.shipmentId || requestId)}
+                shipmentStatus={statusLower}
+              />
+            )}
+
+            {/* Step 6 Insurance Claims Management (only when in_transit / return_pending / completed) */}
+            {canShowHandoverAndClaims && (
+              <CustomerClaimsList
+                shipmentId={Number(request.id || request.shipmentId || requestId)}
+                shipmentStatus={statusLower}
+                deliveredAt={request.actualArrivalDate || request.updatedAt}
+                horses={request.insuranceHorses || []}
+              />
+            )}
           </div>
         </div>
       )}
@@ -1543,59 +1542,79 @@ export default function RequestDetailPage() {
                 </div>
               )}
 
-              {isPendingReview ? (
-                <div style={{ padding: '28px 24px', textAlign: 'center', backgroundColor: '#fcfcfc' }}>
-                  <div
-                    style={{
-                      width: '48px',
-                      height: '48px',
-                      borderRadius: '12px',
-                      backgroundColor: '#fef3c7',
-                      color: '#d97706',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      margin: '0 auto 12px auto',
-                    }}
-                  >
-                    <Clock size={24} />
+              {isAwaitingPayment && !isAlreadyPaid ? (
+                <div className="p-7 text-center bg-[#FFFDF8]">
+                  <div className="w-12 h-12 rounded-xl bg-[#FFF3D6] text-[#8C6621] flex items-center justify-center mx-auto mb-3">
+                    <CreditCard size={22} aria-hidden="true" />
                   </div>
-                  <h5 style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 6px 0' }}>
-                    {language === 'en' ? 'Awaiting Logistics Manager approval' : 'Đang chờ Logistics Manager phê duyệt yêu cầu'}
+                  <h5 className="text-sm font-extrabold text-[#181A17] m-0 mb-1.5">
+                    {isEn
+                      ? 'Complete Payment to Activate Quarantine Checklist'
+                      : 'Hoàn tất thanh toán để khởi tạo danh mục kiểm dịch'}
                   </h5>
-                  <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '480px', margin: '0 auto', lineHeight: 1.5 }}>
-                    {language === 'en'
-                      ? 'Shipment request is being reviewed by management. Once approved, the Quarantine Specialist will issue the required document checklist.'
-                      : 'Yêu cầu vận chuyển đang được quản lý rà soát. Ngay sau khi đơn được duyệt, Chuyên viên kiểm dịch sẽ ban hành danh mục hồ sơ cần nộp.'}
+                  <p className="text-xs text-[#5F6977] max-w-md mx-auto leading-relaxed mb-4">
+                    {isEn
+                      ? 'Your order is currently awaiting payment (12-hour hold). Once payment is confirmed, Logistics Manager will review feasibility and issue the official quarantine checklist.'
+                      : 'Đơn hàng đang chờ thanh toán (giữ chỗ 12 giờ). Ngay khi thanh toán được xác nhận, Quản lý vận hành sẽ thẩm định khả thi và ban hành danh mục hồ sơ kiểm dịch.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('payment')}
+                    className="px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2C2F2A] text-[#FAF8F4] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <CreditCard size={14} className="text-[#D4C5A3]" aria-hidden="true" />
+                    <span>{isEn ? 'Go to Payment Tab' : 'Mở tab Thanh toán'}</span>
+                  </button>
+                </div>
+              ) : isCancelledOrRejected ? (
+                <div className="p-7 text-center bg-[#FAF8F4]">
+                  <div className="w-12 h-12 rounded-xl bg-[#F8EAEA] text-[#B33E3E] flex items-center justify-center mx-auto mb-3">
+                    <AlertTriangle size={22} aria-hidden="true" />
+                  </div>
+                  <h5 className="text-sm font-extrabold text-[#181A17] m-0 mb-1.5">
+                    {isEn ? 'Quarantine Checklist Inactive' : 'Hồ sơ kiểm dịch không còn hiệu lực'}
+                  </h5>
+                  <p className="text-xs text-[#5F6977] max-w-md mx-auto leading-relaxed m-0">
+                    {isEn
+                      ? 'This order has been cancelled, rejected, or moved to refund processing.'
+                      : 'Đơn hàng đã hủy, bị từ chối hoặc đang xử lý hoàn tiền nên không yêu cầu nộp hồ sơ kiểm dịch.'}
+                  </p>
+                </div>
+              ) : isPendingReview || !isApproved ? (
+                <div className="p-7 text-center bg-[#fcfcfc]">
+                  <div className="w-12 h-12 rounded-xl bg-[#fef3c7] text-[#d97706] flex items-center justify-center mx-auto mb-3">
+                    <Clock size={22} aria-hidden="true" />
+                  </div>
+                  <h5 className="text-sm font-extrabold text-[#181A17] m-0 mb-1.5">
+                    {isPaidPendingReview
+                      ? isEn
+                        ? 'Payment Received — Logistics Manager Reviewing Feasibility'
+                        : 'Đã thanh toán — Quản lý vận hành đang thẩm định khả thi'
+                      : isEn
+                        ? 'Awaiting Logistics Manager Approval'
+                        : 'Đang chờ Quản lý vận hành phê duyệt yêu cầu'}
+                  </h5>
+                  <p className="text-xs text-[#5F6977] max-w-md mx-auto leading-relaxed m-0">
+                    {isEn
+                      ? 'Your shipment request is under operational review. Once approved, Logistics Manager will issue the required quarantine document checklist.'
+                      : 'Đơn vận chuyển đang được rà soát. Ngay sau khi được phê duyệt, Quản lý vận hành sẽ ban hành danh mục hồ sơ kiểm dịch cần nộp.'}
                   </p>
                 </div>
               ) : !requirementsSent ? (
                 /* CASE 2: Approved, waiting for checklist establishment */
-                <div style={{ padding: '28px 24px', textAlign: 'center', backgroundColor: '#F0EEE8' }}>
-                  <div
-                    style={{
-                      width: '48px',
-                      height: '48px',
-                      borderRadius: '12px',
-                      backgroundColor: '#F5EFE2',
-                      color: '#8C6621',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      margin: '0 auto 12px auto',
-                    }}
-                  >
-                    <Sparkles size={24} aria-hidden="true" />
+                <div className="p-7 text-center bg-[#F0EEE8]">
+                  <div className="w-12 h-12 rounded-xl bg-[#F5EFE2] text-[#8C6621] flex items-center justify-center mx-auto mb-3">
+                    <Sparkles size={22} aria-hidden="true" />
                   </div>
-                  <h5 style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 6px 0' }}>
-                    {language === 'en'
-                      ? 'Request Approved — Quarantine Specialist is configuring document checklist'
-                      : 'Đơn đã duyệt — Chuyên viên kiểm dịch đang thiết lập danh mục hồ sơ'}
+                  <h5 className="text-sm font-extrabold text-[#181A17] m-0 mb-1.5">
+                    {isEn
+                      ? 'Order Approved — Logistics Manager is configuring document checklist'
+                      : 'Đơn đã duyệt — Quản lý vận hành đang thiết lập danh mục hồ sơ'}
                   </h5>
-                  <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '520px', margin: '0 auto', lineHeight: 1.5 }}>
-                    {language === 'en'
-                      ? `Quarantine specialist is reviewing regulations for ${translateCountry(checklist?.destinationCountry) || request.destination}. You will be notified once the checklist is issued.`
-                      : `Chuyên viên kiểm dịch đang rà soát quy chuẩn điểm đến ${translateCountry(checklist?.destinationCountry) || request.destination}. Bạn sẽ nhận được thông báo ngay khi danh mục được ban hành.`}
+                  <p className="text-xs text-[#5F6977] max-w-lg mx-auto leading-relaxed m-0">
+                    {isEn
+                      ? `Logistics Manager is reviewing quarantine rules for ${translateCountry(checklist?.destinationCountry) || request.destination}. You will be notified once the checklist is issued.`
+                      : `Quản lý vận hành đang rà soát quy chuẩn kiểm dịch tại ${translateCountry(checklist?.destinationCountry) || request.destination}. Bạn sẽ nhận được thông báo ngay khi danh mục được ban hành.`}
                   </p>
                 </div>
               ) : (
@@ -1618,12 +1637,12 @@ export default function RequestDetailPage() {
                       <p style={{ fontSize: '13px', color: '#166534', margin: 0, lineHeight: 1.4 }}>
                         {language === 'en' ? (
                           <>
-                            <strong>Official document checklist mandated by Specialist</strong> for transit to{' '}
+                            <strong>Official document checklist issued by Logistics Manager</strong> for transit to{' '}
                             <strong>{translateCountry(checklist?.destinationCountry) || request.destination}</strong>.
                           </>
                         ) : (
                           <>
-                            <strong>Danh mục hồ sơ chính thức do Chuyên viên yêu cầu</strong> cho hành trình đến{' '}
+                            <strong>Danh mục hồ sơ chính thức do Quản lý vận hành yêu cầu</strong> cho hành trình đến{' '}
                             <strong>{translateCountry(checklist?.destinationCountry) || request.destination}</strong>.
                           </>
                         )}
@@ -1702,7 +1721,20 @@ export default function RequestDetailPage() {
                           </div>
 
                           {/* Missing regulations */}
-                          {horseItem.missingRegulations.map((reg) => (
+                          {horseItem.missingRegulations.map((reg) => {
+                            const deferredMatch = Array.isArray(request.deferredDocuments)
+                              ? request.deferredDocuments.find(
+                                  (d: any) =>
+                                    Number(d.horseId) === Number(horseItem.horseId) &&
+                                    String(d.documentTypeCode || '').toLowerCase() ===
+                                      String(reg.documentType || '').toLowerCase(),
+                                )
+                              : null;
+                            const isDeferredOverdue = Boolean(
+                              deferredMatch?.submitDeadline &&
+                                deferredMatch.submitDeadline < new Date().toISOString().slice(0, 10),
+                            );
+                            return (
                             <div
                               key={`missing-${reg.id}`}
                               className="px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 border-b border-[#F0EEE8] bg-[#fff5f5]"
@@ -1712,9 +1744,26 @@ export default function RequestDetailPage() {
                                   <AlertTriangle size={18} aria-hidden="true" />
                                 </div>
                                 <div className="min-w-0">
-                                  <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
-                                    {translateDocType(reg.documentType, reg.description) || reg.description || reg.documentType}
-                                  </h5>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h5 style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>
+                                      {translateDocType(reg.documentType, reg.description) || reg.description || reg.documentType}
+                                    </h5>
+                                    {deferredMatch && (
+                                      <span
+                                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold border ${
+                                          isDeferredOverdue
+                                            ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                                        }`}
+                                      >
+                                        <Clock size={10} />
+                                        {isEn ? 'Submit later' : 'Nộp sau'}
+                                        {deferredMatch.submitDeadline
+                                          ? ` · ${isEn ? 'Due' : 'Hạn'} ${deferredMatch.submitDeadline}`
+                                          : ''}
+                                      </span>
+                                    )}
+                                  </div>
                                   <p style={{ fontSize: '11.5px', color: '#dc2626', margin: '2px 0 0 0' }}>
                                     {language === 'en'
                                       ? `Mandatory per regulations of ${translateCountry(reg.country)}`
@@ -1743,17 +1792,18 @@ export default function RequestDetailPage() {
                                 <Upload size={13} aria-hidden="true" /> {language === 'en' ? 'Upload Now' : 'Tải lên ngay'}
                               </button>
                             </div>
-                          ))}
+                            );
+                          })}
 
                           {/* Uploaded items */}
-                          {horseItem.documents.map((doc) => {
+                          {horseItem.documents.map((doc, docIdx) => {
                             const isDocApproved = doc.status === 'approved';
                             const isDocSubmitted = doc.status === 'submitted';
                             const isDocRejected = doc.status === 'rejected';
 
                             return (
                               <div
-                                key={`doc-${doc.id}`}
+                                key={`doc-${doc.id}-${doc.regulationId ?? 'none'}-${docIdx}`}
                                 className="px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 border-b border-[#F0EEE8]"
                               >
                                 <div className="flex items-center gap-3.5 flex-1 min-w-[200px]">
@@ -1838,96 +1888,229 @@ export default function RequestDetailPage() {
                   )}
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── TAB 4: BÁO GIÁ & THANH TOÁN ──────────────────────────── */}
-      {activeTab === 'quotation' && (
-        <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6 items-start">
-          <div className="lg:col-span-2 flex flex-col gap-6">
-            {/* Quotation Detail Breakdown Card */}
-            <div className="bg-white rounded-2xl border border-[#E5DDD0] overflow-hidden shadow-sm">
-              <div className="px-6 py-4 bg-white border-b border-[#EFEAE0] flex justify-between items-center flex-wrap gap-2">
-                <h4 className="text-sm font-bold text-[#181A17] m-0">
-                  {t('requestDetail.officialQuotation', 'Bảng chiết tính Báo giá Vận chuyển Chính thức')}
-                </h4>
-                <button
-                  type="button"
-                  onClick={exportQuotation}
-                  className="px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-[#FAF8F4] hover:bg-[#F5EFE2] text-[#A67C2E] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-                >
-                  <Download size={13} aria-hidden="true" /> {t('requestDetail.pdfBtn', 'Xuất Báo giá PDF')}
-                </button>
-              </div>
-
-              <div className="p-6 flex flex-col gap-5">
-                <div className="bg-[#FAF8F4] rounded-xl p-5 border border-[#E5DDD0] flex justify-between items-center flex-wrap gap-4">
-                  <div>
-                    <span style={{ fontSize: '12.5px', color: '#5F6977' }}>{t('requestDetail.allInclusiveCost', 'Tổng chi phí dịch vụ trọn gói')}</span>
-                    <div style={{ fontSize: '24px', fontWeight: 800, color: '#287653', marginTop: '4px' }}>
-                      {Number(request.totalCost) > 0
-                        ? `${Number(request.totalCost).toLocaleString('vi-VN')} VNĐ`
-                        : t('requestDetail.awaitingManagerConfirmation', 'Đang chờ quản lý xác nhận')}
+              {/* Early Supplement Panel: allow uploading deferred / vault documents immediately even while awaiting payment or manager review */}
+              {!isCancelledOrRejected && (isAwaitingPayment || isPendingReview || !isApproved || !requirementsSent) && (
+                <div className="border-t border-[#EFEAE0] bg-[#FAF8F4] px-6 py-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h5 className="text-xs font-extrabold uppercase tracking-wider text-[#181A17] m-0 flex items-center gap-1.5">
+                        <Upload size={14} className="text-[#A67C2E]" aria-hidden="true" />
+                        <span>
+                          {isEn
+                            ? 'Upload Deferred & Horse Documents Early'
+                            : 'Nộp bổ sung hồ sơ sớm (giấy tờ chọn Nộp sau)'}
+                        </span>
+                      </h5>
+                      <p className="text-xs text-[#5F6977] mt-1 mb-0">
+                        {isEn
+                          ? 'Documents uploaded to your horse vault are automatically attached to this order once reviewed — no need to wait.'
+                          : 'Giấy tờ tải lên kho hồ sơ ngựa sẽ tự động khớp vào đơn hàng ngay khi được thẩm định — bạn không cần chờ đến bước sau.'}
+                      </p>
                     </div>
                   </div>
-                </div>
 
-                <div className="overflow-x-auto w-full">
-                  <table style={{ width: '100%', minWidth: '500px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid #D8CEBE', backgroundColor: '#F0EEE8' }}>
-                        <th style={{ padding: '10px 14px', color: '#475569', fontWeight: 700 }}>{t('requestDetail.itemCol', 'Hạng mục dịch vụ')}</th>
-                        <th style={{ padding: '10px 14px', color: '#475569', fontWeight: 700 }}>{t('requestDetail.descCol', 'Mô tả quy chuẩn')}</th>
-                        <th style={{ padding: '10px 14px', color: '#475569', fontWeight: 700, textAlign: 'right' }}>{t('requestDetail.statusCol', 'Trạng thái')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr style={{ borderBottom: '1px solid #F0EEE8' }}>
-                        <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-heading)' }}>{t('requestDetail.itemTransport', 'Vận chuyển chuyên dụng')}</td>
-                        <td style={{ padding: '12px 14px', color: '#64748b' }}>{t('requestDetail.itemTransportDesc', 'Xe đệm khí kiểm soát nhiệt độ hoặc khoang bay hàng không')}</td>
-                        <td style={{ padding: '12px 14px', textAlign: 'right', color: '#16a34a', fontWeight: 600 }}>{t('requestDetail.included', 'Đã bao gồm')}</td>
-                      </tr>
-                      <tr style={{ borderBottom: '1px solid #F0EEE8' }}>
-                        <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-heading)' }}>{t('requestDetail.itemQuarantine', 'Chuồng lưu trú cách ly kiểm dịch')}</td>
-                        <td style={{ padding: '12px 14px', color: '#64748b' }}>{t('requestDetail.itemQuarantineDesc', 'Trạm trung chuyển kiểm dịch thú y đạt chuẩn FEI/WOAH')}</td>
-                        <td style={{ padding: '12px 14px', textAlign: 'right', color: '#16a34a', fontWeight: 600 }}>{t('requestDetail.included', 'Đã bao gồm')}</td>
-                      </tr>
-                      <tr style={{ borderBottom: '1px solid #F0EEE8' }}>
-                        <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--text-heading)' }}>{t('requestDetail.itemCustoms', 'Thủ tục hải quan & Cửa khẩu')}</td>
-                        <td style={{ padding: '12px 14px', color: '#64748b' }}>{t('requestDetail.itemCustomsDesc', 'Khai báo hải quan động vật sống và kiểm dịch xuất/nhập cảnh')}</td>
-                        <td style={{ padding: '12px 14px', textAlign: 'right', color: '#16a34a', fontWeight: 600 }}>{t('requestDetail.included', 'Đã bao gồm')}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+                  {Array.isArray(request.deferredDocuments) && request.deferredDocuments.length > 0 ? (
+                    <div className="rounded-xl border border-[#DFCA9A] bg-white divide-y divide-[#EFEBE4] overflow-hidden">
+                      {request.deferredDocuments.map((def: any, idx: number) => {
+                        const matchedHorse = request.horses?.find(
+                          (item: any) => Number(item.horse?.id || item.horseId) === Number(def.horseId),
+                        );
+                        const horseName = matchedHorse?.horse?.name || `#${def.horseId}`;
+                        const horseChecklist = checklist?.horses?.find(
+                          (h) => Number(h.horseId) === Number(def.horseId),
+                        );
+                        const uploadedDoc = horseChecklist?.documents?.find(
+                          (d: any) =>
+                            String(d.documentTypeCode || d.regulationDocType || d.docType || '').toLowerCase() ===
+                              String(def.documentTypeCode || '').toLowerCase() &&
+                            (d.status === 'approved' || d.status === 'submitted') &&
+                            !d.isExpiredForTrip,
+                        );
+                        const isOverdue = Boolean(
+                          !uploadedDoc &&
+                            def.submitDeadline &&
+                            String(def.submitDeadline).slice(0, 10) < new Date().toISOString().slice(0, 10),
+                        );
 
-            {/* SePay VietQR Payment Gateway */}
-            {(isApproved || PAYABLE_SHIPMENT_STATUSES.includes(statusLower)) && (
-                <SepayPayment
-                  shipmentId={Number(request.id || request.shipmentId || requestId)}
-                  requestCode={request.requestCode}
-                  amount={Number(request.totalCost)}
-                  eligible={PAYABLE_SHIPMENT_STATUSES.includes(statusLower) && Number.isSafeInteger(Number(request.totalCost)) && Number(request.totalCost) > 0}
-                />
+                        return (
+                          <div
+                            key={`${def.horseId}_${def.documentTypeCode}_${idx}`}
+                            className="px-4 py-3 flex flex-wrap items-center justify-between gap-3"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-bold text-[#181A17]">
+                                  {def.documentTypeName || translateDocType(def.documentTypeCode) || def.documentTypeCode}
+                                </span>
+                                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-[#FAF8F4] border border-[#E5DDD0] text-[#5F6977]">
+                                  {horseName}
+                                </span>
+                                {uploadedDoc ? (
+                                  <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                    <CheckCircle2 size={11} />
+                                    {uploadedDoc.status === 'approved'
+                                      ? isEn ? 'Approved' : 'Đã duyệt'
+                                      : isEn ? 'Uploaded · Pending review' : 'Đã nộp · Chờ duyệt'}
+                                  </span>
+                                ) : (
+                                  <span
+                                    className={`inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-full border ${
+                                      isOverdue
+                                        ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                        : 'bg-amber-50 text-amber-800 border-amber-200'
+                                    }`}
+                                  >
+                                    <Clock size={10} />
+                                    {def.submitDeadline
+                                      ? `${isEn ? 'Due' : 'Hạn nộp'}: ${def.submitDeadline}`
+                                      : isEn ? 'Submit later' : 'Nộp bổ sung sau'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {!uploadedDoc && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEarlyUploadModal({
+                                    isOpen: true,
+                                    horseId: Number(def.horseId),
+                                    documentTypeCode: def.documentTypeCode,
+                                  })
+                                }
+                                className="px-3 py-1.5 rounded-lg bg-[#181A17] hover:bg-[#2C2F2A] text-[#FAF8F4] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+                              >
+                                <Upload size={12} className="text-[#D4C5A3]" aria-hidden="true" />
+                                <span>{isEn ? 'Upload Now' : 'Tải lên ngay'}</span>
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {(request.horses || []).map((item: any, idx: number) => {
+                        const h = item.horse || item;
+                        const hId = Number(h.id || h.horseId || 0);
+                        if (!hId) return null;
+                        return (
+                          <button
+                            key={hId || idx}
+                            type="button"
+                            onClick={() => setEarlyUploadModal({ isOpen: true, horseId: hId })}
+                            className="px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white hover:border-[#A67C2E] text-xs font-bold text-[#181A17] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                          >
+                            <Upload size={13} className="text-[#A67C2E]" aria-hidden="true" />
+                            <span>
+                              {isEn ? `Upload docs for ${h.name}` : `Nộp sớm hồ sơ cho ${h.name}`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               )}
-          </div>
-
-          <div className="lg:col-span-1 flex flex-col gap-6">
-            <div className="bg-white rounded-2xl border border-[#E5DDD0] p-6 shadow-sm">
-              <h4 className="text-sm font-bold text-[#181A17] m-0 mb-3">
-                {t('requestDetail.paymentPolicyTitle', 'Chính sách thanh toán an toàn')}
-              </h4>
-              <p className="text-xs text-[#5F6977] leading-relaxed m-0">
-                {t('requestDetail.paymentPolicyDesc', 'Hệ thống hỗ trợ thanh toán trực tuyến tự động qua cổng SePay VietQR / Chuyển khoản ngân hàng 24/7. Tiền cọc được giữ an toàn tại tài khoản ủy thác cho đến khi chuyến đi được xác nhận lịch trình chính thức.')}
-              </p>
             </div>
           </div>
         </div>
       )}
+
+      {/* ─── TAB 4: THANH TOÁN, HÓA ĐƠN & HOÀN TIỀN ──────────────────────────── */}
+      {activeTab === 'payment' && (
+        <div className="flex flex-col gap-5">
+          {/* Inline SePay VietQR Checkout ONLY when awaiting payment / unpaid & payable */}
+          {isAlreadyPaid ? (
+            <div className="rounded-2xl border border-[#B7DBC4] bg-[#E8F2EB] p-5 flex items-center gap-3 shadow-xs">
+              <CheckCircle2 size={20} className="text-[#287653] shrink-0" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-extrabold text-[#1E563B] m-0">
+                  {isEn ? 'Payment Confirmed via SePay VietQR' : 'Đã thanh toán thành công qua SePay VietQR'}
+                </h4>
+                <p className="text-xs text-[#2D5A3F] mt-0.5 mb-0">
+                  {isEn
+                    ? `${Number(request.totalCost || 0).toLocaleString('vi-VN')} VND${request.paidAt ? ` · ${new Date(request.paidAt).toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' })}` : ''}`
+                    : `${Number(request.totalCost || 0).toLocaleString('vi-VN')} VND${request.paidAt ? ` · Lúc ${new Date(request.paidAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` : ''}`}
+                </p>
+              </div>
+            </div>
+          ) : needsPaymentNow ? (
+            <SepayPayment
+              shipmentId={Number(request.id || request.shipmentId || requestId)}
+              requestCode={request.requestCode}
+              amount={Number(request.totalCost)}
+              checkout
+              autoGenerateQr={isAwaitingPayment}
+              eligible
+              onPaid={() => {
+                void mutate();
+                window.dispatchEvent(new CustomEvent('customer-orders-updated'));
+              }}
+            />
+          ) : (
+            <div className="rounded-2xl border border-[#E5DDD0] bg-[#FAF8F4] p-4 text-xs text-[#5F6977]">
+              {isCancelledOrRejected
+                ? isEn
+                  ? 'Payment closed (order cancelled, rejected, or in refund).'
+                  : 'Cổng thanh toán đã đóng (đơn đã hủy, từ chối hoặc đang hoàn tiền).'
+                : isEn
+                  ? 'Payment unlocks automatically once eligible.'
+                  : 'Cổng thanh toán sẽ tự động mở khi đủ điều kiện.'}
+            </div>
+          )}
+
+          {/* Refund / 30-Day Credit Summary (if any record exists) */}
+          {Number(request.id || request.shipmentId || requestId) > 0 && (
+            <CustomerRefundSummaryCard shipmentId={Number(request.id || request.shipmentId || requestId)} />
+          )}
+
+          {/* Compact Cost Breakdown */}
+          <div className="bg-white rounded-2xl border border-[#E5DDD0] p-5 shadow-sm flex justify-between items-center flex-wrap gap-4">
+            <div>
+              <span className="text-xs text-[#5F6977] block">
+                {isEn ? 'Total Order Cost' : 'Tổng chi phí đơn hàng'}
+              </span>
+              <div className="text-xl font-extrabold text-[#1E563B] mt-0.5 font-mono whitespace-nowrap">
+                {Number(request.totalCost) > 0
+                  ? `${Number(request.totalCost).toLocaleString('vi-VN')}\u00A0VNĐ`
+                  : isEn ? 'Awaiting quote' : 'Chờ báo giá'}
+              </div>
+            </div>
+            <div className="text-xs text-[#5F6977] flex flex-wrap gap-5">
+              <div>
+                <span className="block">{isEn ? 'Base Freight' : 'Cước vận chuyển'}</span>
+                <strong className="text-[#181A17] font-mono text-sm">
+                  {request.transportCost != null ? `${Number(request.transportCost).toLocaleString('vi-VN')}\u00A0đ` : '—'}
+                </strong>
+              </div>
+              <div>
+                <span className="block">{isEn ? 'Insurance' : 'Phí bảo hiểm'}</span>
+                <strong className="text-[#181A17] font-mono text-sm">
+                  {Number(request.insuranceFee || 0).toLocaleString('vi-VN')}{'\u00A0'}đ
+                </strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Early Horse Vault Upload Modal (for Submit Later documents before official checklist is active) */}
+      <HorseDocumentUploadModal
+        isOpen={earlyUploadModal.isOpen}
+        horseId={earlyUploadModal.horseId}
+        defaultTypeCode={earlyUploadModal.documentTypeCode}
+        onClose={() => setEarlyUploadModal((prev) => ({ ...prev, isOpen: false }))}
+        onUploaded={() => {
+          setEarlyUploadModal((prev) => ({ ...prev, isOpen: false }));
+          toast.success(
+            isEn ? 'Document uploaded to horse vault!' : 'Đã tải giấy tờ bổ sung lên kho hồ sơ ngựa!',
+          );
+          void mutateChecklist();
+          void mutate();
+        }}
+      />
 
       {/* Upload Modal */}
       <DocumentUploadModal
@@ -1965,13 +2148,6 @@ export default function RequestDetailPage() {
           missingRegulations={batchTarget.missingRegulations}
         />
       )}
-
-      {/* Live Tracking Modal */}
-      <TripTrackingModal
-        isOpen={isTrackingOpen}
-        onClose={() => setIsTrackingOpen(false)}
-        request={request}
-      />
 
       {/* Resubmit Modal */}
       <Modal

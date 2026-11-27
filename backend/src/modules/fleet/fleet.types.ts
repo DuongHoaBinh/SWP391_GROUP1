@@ -26,7 +26,7 @@ export interface VehicleClass {
   mode: TransportMode;
   nameVi: string;
   nameEn: string;
-  /** null = theo xe chở trên phà (ferry_slot) */
+  /** null = sức chứa không cố định */
   horseCapacity: number | null;
   priceCoefficient: number;
   isHeavyTruck: boolean;
@@ -54,6 +54,7 @@ export interface VehicleEntity {
   vehicleType: VehicleType;
   vehicleClassCode?: string | null;
   vehicleClassName?: string | null;
+  vehicleClassNameEn?: string | null;
   isHeavyTruck?: boolean;
   depotId?: number | null;
   depotName?: string | null;
@@ -64,6 +65,8 @@ export interface VehicleEntity {
   currentLocation?: string | null;
   assignedShipmentId?: number | null;
   assignedTripCode?: string | null;
+  assignedShipmentStatus?: string | null;
+  isReservedOnly?: boolean;
 }
 
 export interface ShipmentVehicleAssignment {

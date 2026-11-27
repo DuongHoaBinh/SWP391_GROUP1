@@ -680,11 +680,10 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       await db.execute('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [shipmentId]);
       for (const id of new Set(legs.filter(l => l.legType === 'road' && l.vehicleId).map(l => l.vehicleId!))) {
         await db.execute('INSERT INTO shipment_vehicle (shipment_id, vehicle_id, assigned_date) VALUES (?, ?, NOW())', [shipmentId, id]);
-        await db.execute("UPDATE vehicle SET status = 'in_use' WHERE vehicle_id = ?", [id]);
       }
       for (const id of new Set(oldLegs.filter(l => l.vehicle_id).map(l => Number(l.vehicle_id)))) {
         await db.execute(`UPDATE vehicle v SET status = 'available' WHERE v.vehicle_id = ? AND v.status = 'in_use'
-          AND NOT EXISTS (SELECT 1 FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id WHERE sv.vehicle_id = v.vehicle_id AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected'))`, [id]);
+          AND NOT EXISTS (SELECT 1 FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id WHERE sv.vehicle_id = v.vehicle_id AND s.status IN ('in_transit','return_pending'))`, [id]);
       }
       await db.commit();
     } catch (error) { await db.rollback(); throw error; }
@@ -794,12 +793,12 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     const [legRows] = await db.execute<RowDataPacket[]>(
       `SELECT s.shipment_id,
               CASE
-                WHEN EXISTS (SELECT 1 FROM route_leg rl_f WHERE rl_f.route_id = r.route_id AND rl_f.leg_type = 'flight')
+                WHEN EXISTS (SELECT 1 FROM route_leg rl_f WHERE rl_f.route_id = r.route_id AND rl_f.leg_type IN ('flight', 'sea'))
                 THEN rl.origin_location
                 ELSE s.origin_location
               END AS origin_location,
               CASE
-                WHEN EXISTS (SELECT 1 FROM route_leg rl_f WHERE rl_f.route_id = r.route_id AND rl_f.leg_type = 'flight')
+                WHEN EXISTS (SELECT 1 FROM route_leg rl_f WHERE rl_f.route_id = r.route_id AND rl_f.leg_type IN ('flight', 'sea'))
                 THEN rl.destination_location
                 ELSE s.destination_location
               END AS destination_location,
@@ -1180,8 +1179,27 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       const amount = Number(order.total_cost);
       if (!Number.isSafeInteger(amount) || amount <= 0) throw new BadRequestException('Cần báo giá VND hợp lệ trước khi xác nhận lịch trình và phát hành hóa đơn');
       const [legs] = await db.execute<RowDataPacket[]>('SELECT * FROM route_leg WHERE route_id = ? ORDER BY sequence_no', [route.route_id]);
-      const firstFlightLeg = legs.find(l => l.leg_type === 'flight');
-      const firstFlightSeq = firstFlightLeg ? Number(firstFlightLeg.sequence_no) : null;
+      const firstCrossBorderLeg = legs.find(l => l.leg_type === 'flight' || l.leg_type === 'sea');
+      const firstCrossBorderSeq = firstCrossBorderLeg ? Number(firstCrossBorderLeg.sequence_no) : null;
+
+      // Compute required air jet stalls: 1 stall per private-stall horse + ceil(standardHorses / 3)
+      const [flightHorseRows] = await db.execute<RowDataPacket[]>(
+        `SELECT sh.quantity, h.requires_private_stall
+         FROM shipment_horse sh
+         JOIN horse h ON h.horse_id = sh.horse_id
+         WHERE sh.shipment_id = ?`,
+        [shipmentId],
+      );
+      let privateHorses = 0;
+      let standardHorses = 0;
+      for (const hr of flightHorseRows) {
+        const qty = Math.max(1, Number(hr.quantity ?? 1));
+        if (hr.requires_private_stall) privateHorses += qty;
+        else standardHorses += qty;
+      }
+      const requiredAirStalls = flightHorseRows.length > 0
+        ? Math.max(1, privateHorses + Math.ceil(standardHorses / 3))
+        : Math.max(1, Math.ceil(Number(order.requested_horse_count || 1) / 3));
 
       // Auto-heal legacy flight legs that have flight_number & booking_reference but missed airport/airline foreign keys or stalls_booked
       for (const l of legs) {
@@ -1207,8 +1225,8 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
               needsUpdate = true;
             }
           }
-          if (Number(l.stalls_booked || 0) < Number(order.requested_horse_count || 1)) {
-            l.stalls_booked = Number(order.requested_horse_count || 1);
+          if (Number(l.stalls_booked || 0) < requiredAirStalls) {
+            l.stalls_booked = requiredAirStalls;
             needsUpdate = true;
           }
           if (needsUpdate) {
@@ -1238,13 +1256,13 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
         assertRoadCapacity(requiredSlots, vehicleIds, vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })));
       }
       if (!legs.length || legs.some(l => {
-        const isOverseasPostFlightRoadLeg = l.leg_type === 'road' && firstFlightSeq !== null && Number(l.sequence_no) > firstFlightSeq;
+        const isOverseasPostCrossBorderRoadLeg = l.leg_type === 'road' && firstCrossBorderSeq !== null && Number(l.sequence_no) > firstCrossBorderSeq;
         return (
           !l.planned_departure ||
           !l.planned_arrival ||
           new Date(l.planned_arrival) <= new Date(l.planned_departure) ||
-          (l.leg_type === 'road' && !l.vehicle_id && !isOverseasPostFlightRoadLeg) ||
-          (l.leg_type === 'flight' && (!l.flight_number || !l.booking_reference || !l.airline_id || !l.departure_airport_id || !l.arrival_airport_id || Number(l.stalls_booked) < Number(order.requested_horse_count)))
+          (l.leg_type === 'road' && !l.vehicle_id && !isOverseasPostCrossBorderRoadLeg) ||
+          (l.leg_type === 'flight' && (!l.flight_number || !l.booking_reference || !l.airline_id || !l.departure_airport_id || !l.arrival_airport_id || Number(l.stalls_booked) < requiredAirStalls))
         );
       })) {
         throw new BadRequestException('Cần hoàn thiện xe, chuyến bay và giờ đi/đến của từng chặng trước khi xác nhận');
@@ -1325,11 +1343,14 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
         .filter((p) => p.status === 'succeeded')
         .reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const isPrepaid = order.payment_flow === 'prepaid';
+      const hasUnpaidSupplemental = Boolean(
+        gate.supplementalInvoice && gate.supplementalInvoice.status !== 'paid',
+      );
       const isPaymentSucceeded = isPrepaid
-        ? (payments.some((p) => p.status === 'succeeded') || gate.invoice?.status === 'paid')
-        : (paidAmount >= Number(order.total_cost) && Number(order.total_cost) > 0);
+        ? ((payments.some((p) => p.status === 'succeeded') || gate.invoice?.status === 'paid') && !hasUnpaidSupplemental)
+        : (paidAmount >= Number(order.total_cost) && Number(order.total_cost) > 0 && !hasUnpaidSupplemental);
       const isPlanConfirmed = isPrepaid
-        ? (route?.plan_status === 'confirmed' || gate.paymentUnlocked)
+        ? (['confirmed', 'ready_to_depart'].includes(String(route?.plan_status || '')) || gate.paymentUnlocked)
         : gate.paymentUnlocked;
       const isReadyToDepart = isPlanConfirmed && isPaymentSucceeded && isLegalCompliant && ['confirmed', 'ready_to_depart'].includes(order.status);
       if (order.status === 'in_transit') {

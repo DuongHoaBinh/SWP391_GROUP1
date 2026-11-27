@@ -106,8 +106,10 @@ export interface RoutePlanningMapProps {
   destinationText?: string;
   transportType?: 'International' | 'Domestic';
   mode?: 'air' | 'road' | 'sea';
-  seaMode?: 'ferry' | 'vessel';
+  seaMode?: 'vessel';
+  tripType?: 'one_way' | 'round_trip';
   horseCount?: number;
+  showPricing?: boolean;
   selectedOriginGeo?: GeocodedLocation | null;
   selectedDestGeo?: GeocodedLocation | null;
   onRouteCalculated?: (data: {
@@ -117,8 +119,10 @@ export interface RoutePlanningMapProps {
     isDomestic: boolean;
     estimatedTotalPriceVnd: number;
     legs?: RouteLegPreview[];
+    seaUnavailableNotice?: { vi: string; en: string } | null;
   }) => void;
   onApplyPreset?: (preset: RoutePreset) => void;
+  onRequestModeChange?: (mode: 'air' | 'road' | 'sea') => void;
 }
 
 interface OsrmResult {
@@ -218,11 +222,14 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   transportType,
   mode: controlledMode,
   seaMode = 'vessel',
+  tripType = 'one_way',
   horseCount = 1,
+  showPricing = true,
   selectedOriginGeo,
   selectedDestGeo,
   onRouteCalculated,
   onApplyPreset,
+  onRequestModeChange,
 }) => {
   const { language, t } = useLanguage();
   const originText = originTextProp || (language === 'en' ? 'Cu Chi Horse Farm, HCMC' : 'Trang trại Củ Chi, TP.HCM');
@@ -235,7 +242,8 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   const setMode = setInternalMode;
   const [mapStyle, setMapStyle] = useState<'streets' | 'satellite'>('streets');
   const [selectedWaypoint, setSelectedWaypoint] = useState<Waypoint | null>(null);
-  const [isLegendOpen, setIsLegendOpen] = useState<boolean>(true);
+  const [isLegendOpen, setIsLegendOpen] = useState<boolean>(false);
+  const [showLegDetails, setShowLegDetails] = useState<boolean>(false);
   const [isMapReady, setIsMapReady] = useState<boolean>(false);
   const [osrmDistanceKm, setOsrmDistanceKm] = useState<number | null>(null);
   const [osrmLegMetrics, setOsrmLegMetrics] = useState<Record<number, { distanceKm: number; durationHours: number }>>({});
@@ -368,15 +376,44 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
   }, [effectiveMode, effectiveLegs, osrmDistanceKm, totalDistanceKm]);
 
   const effectiveEstimatedHours = React.useMemo(() => {
-    if (effectiveMode === 'air' || effectiveMode === 'sea') {
-      return Math.max(2, Math.round(effectiveLegs.reduce((sum, leg) => sum + leg.durationHours, 0) * 10) / 10);
+    if (routeResult.seaUnavailableNotice && effectiveLegs.length === 0) {
+      return 0;
+    }
+    if (effectiveLegs.length > 0) {
+      const summed = Math.round(effectiveLegs.reduce((sum, leg) => sum + leg.durationHours, 0) * 10) / 10;
+      return effectiveMode === 'air' || effectiveMode === 'sea' ? Math.max(2, summed) : Math.max(1, summed);
     }
     return estimatedHours;
-  }, [effectiveMode, effectiveLegs, estimatedHours]);
+  }, [routeResult.seaUnavailableNotice, effectiveMode, effectiveLegs, estimatedHours]);
 
-  const effectiveEstimatedTotalPriceVnd = React.useMemo(() => {
+  // Antimeridian longitude alignment for trans-Pacific sea routes so markers, polylines, and bounds align seamlessly
+  const antimeridianMeta = React.useMemo(() => {
+    const seaLeg = routeResult.legs.find((l) => l.type === 'sea' && l.crossesAntimeridian && l.pathCoords && l.pathCoords.length > 1);
+    if (!seaLeg || !seaLeg.pathCoords) {
+      return { seaSeq: null as number | null, postSeaLngShift: 0 };
+    }
+    const endUnwrappedLng = seaLeg.pathCoords[seaLeg.pathCoords.length - 1][1];
+    const shift = Math.round((endUnwrappedLng - seaLeg.toCoords[1]) / 360) * 360;
+    return { seaSeq: seaLeg.sequenceNo, postSeaLngShift: shift };
+  }, [routeResult.legs]);
+
+  const shiftCoord = useCallback(
+    (coord: [number, number], applyShift: boolean): [number, number] => {
+      if (!applyShift || antimeridianMeta.postSeaLngShift === 0) return coord;
+      return [coord[0], coord[1] + antimeridianMeta.postSeaLngShift];
+    },
+    [antimeridianMeta.postSeaLngShift]
+  );
+
+  const outboundEstimatedTotalPriceVnd = React.useMemo(() => {
     return effectiveLegs.reduce((sum, leg) => sum + (leg.estimatedPriceVnd || 0), 0);
   }, [effectiveLegs]);
+
+  const effectiveEstimatedTotalPriceVnd = React.useMemo(() => {
+    if (tripType !== 'round_trip') return outboundEstimatedTotalPriceVnd;
+    const discountedReturnPriceVnd = Math.ceil((outboundEstimatedTotalPriceVnd * 0.9) / 1000) * 1000;
+    return outboundEstimatedTotalPriceVnd + discountedReturnPriceVnd;
+  }, [outboundEstimatedTotalPriceVnd, tripType]);
 
   // Reset OSRM overrides and leg focus when route inputs change
   useEffect(() => {
@@ -394,6 +431,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         isDomestic: routeResult.isDomestic,
         estimatedTotalPriceVnd: effectiveEstimatedTotalPriceVnd,
         legs: effectiveLegs,
+        seaUnavailableNotice: routeResult.seaUnavailableNotice ?? null,
       });
     }
   }, [
@@ -402,6 +440,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
     effectiveEstimatedHours,
     effectiveEstimatedTotalPriceVnd,
     routeResult.isDomestic,
+    routeResult.seaUnavailableNotice,
     effectiveLegs,
   ]);
 
@@ -591,16 +630,29 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         });
       };
 
+      // Determine waypoint index threshold after which coordinates belong to the arrival side of an antimeridian crossing
+      const seaLegForShift =
+        antimeridianMeta.postSeaLngShift !== 0
+          ? routeResult.legs.find((l) => l.sequenceNo === antimeridianMeta.seaSeq)
+          : null;
+      const isArrivalSideCoord = (coord: [number, number]): boolean => {
+        if (!seaLegForShift || antimeridianMeta.postSeaLngShift === 0) return false;
+        const dOrig = calculateHaversine(coord, seaLegForShift.fromCoords);
+        const dDest = calculateHaversine(coord, seaLegForShift.toCoords);
+        return dDest < dOrig;
+      };
+
       // Add Markers with prioritized zIndex (single floating card interaction + hover tooltip)
       wps.forEach((wp) => {
-        bounds.extend(wp.coords);
+        const displayCoords = shiftCoord(wp.coords, isArrivalSideCoord(wp.coords));
+        bounds.extend(displayCoords);
         const zIndex =
           wp.type === 'origin' || wp.type === 'destination'
             ? 2000
             : wp.type === 'checkpoint'
             ? 1500
             : 1000;
-        const marker = L.marker(wp.coords, {
+        const marker = L.marker(displayCoords, {
           icon: createCustomIcon(wp.type),
           zIndexOffset: zIndex,
         }).addTo(group);
@@ -626,13 +678,20 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
             sequenceNo: number;
             polyline: any;
             directKm: number;
+            applyShift: boolean;
             res: OsrmResult | null;
           }>
         > = [];
 
         routeResult.legs.forEach((leg) => {
+          const isPostSea =
+            antimeridianMeta.seaSeq !== null && leg.sequenceNo > antimeridianMeta.seaSeq;
           if (leg.type === 'road') {
-            const roadPolyline = L.polyline([leg.fromCoords, leg.toCoords], {
+            const fromDisp = shiftCoord(leg.fromCoords, isPostSea);
+            const toDisp = shiftCoord(leg.toCoords, isPostSea);
+            bounds.extend(fromDisp);
+            bounds.extend(toDisp);
+            const roadPolyline = L.polyline([fromDisp, toDisp], {
               color: '#A67C2E',
               weight: 4.5,
               opacity: 0.92,
@@ -649,37 +708,53 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                 sequenceNo: leg.sequenceNo,
                 polyline: roadPolyline,
                 directKm: calculateHaversine(leg.fromCoords, leg.toCoords),
+                applyShift: isPostSea,
                 res,
               }))
+            );
+          } else if (leg.type === 'sea') {
+            const seaCoords: [number, number][] =
+              leg.pathCoords && leg.pathCoords.length >= 2
+                ? leg.pathCoords
+                : [leg.fromCoords, leg.toCoords];
+            seaCoords.forEach((pt) => bounds.extend(pt));
+
+            const seaPolyline = L.polyline(seaCoords, {
+              color: '#0E7490',
+              weight: 3.5,
+              dashArray: '6, 8',
+              opacity: 0.95,
+            }).addTo(group);
+            seaPolyline.bindTooltip(
+              language === 'en'
+                ? `Leg ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelEn)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
+                : `Chặng ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelVi)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`,
+              { sticky: true }
             );
           } else {
             const p1 = leg.fromCoords;
             const p2 = leg.toCoords;
-            const isSeaLeg = leg.type === 'sea';
             const arcPoints: [number, number][] = [];
             const steps = 30;
-            const curveFactor = isSeaLeg ? -0.9 : 1.5;
+            const curveFactor = 1.5;
             for (let i = 0; i <= steps; i++) {
               const t = i / steps;
               const lat = p1[0] + (p2[0] - p1[0]) * t + Math.sin(t * Math.PI) * curveFactor;
               const lng = p1[1] + (p2[1] - p1[1]) * t;
               arcPoints.push([lat, lng]);
             }
+            arcPoints.forEach((pt) => bounds.extend(pt));
 
             const transitPolyline = L.polyline(arcPoints, {
-              color: isSeaLeg ? '#0E7490' : '#B49A68',
+              color: '#B49A68',
               weight: 3.5,
-              dashArray: isSeaLeg ? '6, 8' : '8, 8',
+              dashArray: '8, 8',
               opacity: 0.95,
             }).addTo(group);
             transitPolyline.bindTooltip(
-              isSeaLeg
-                ? language === 'en'
-                  ? `Leg ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelEn)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
-                  : `Chặng ${leg.sequenceNo} · ${escapeMapHtml(leg.vehicleLabelVi)}: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
-                : language === 'en'
-                  ? `Leg ${leg.sequenceNo} · Equine Flight: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
-                  : `Chặng ${leg.sequenceNo} · Hàng không: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`,
+              language === 'en'
+                ? `Leg ${leg.sequenceNo} · Equine Flight: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`
+                : `Chặng ${leg.sequenceNo} · Hàng không: ${escapeMapHtml(leg.fromName)} → ${escapeMapHtml(leg.toName)}`,
               { sticky: true }
             );
           }
@@ -693,9 +768,12 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
               setIsNavigating(false);
 
               const nextMetrics: Record<number, { distanceKm: number; durationHours: number }> = {};
-              results.forEach(({ sequenceNo, polyline, directKm, res }) => {
+              results.forEach(({ sequenceNo, polyline, directKm, applyShift, res }) => {
                 if (res && res.coordinates.length > 0 && res.distanceKm <= Math.max(120, directKm * 3.5)) {
-                  polyline.setLatLngs(res.coordinates);
+                  const displayCoords = applyShift
+                    ? res.coordinates.map((pt) => shiftCoord(pt, true))
+                    : res.coordinates;
+                  polyline.setLatLngs(displayCoords);
                   nextMetrics[sequenceNo] = {
                     distanceKm: Math.round(res.distanceKm),
                     durationHours: res.durationHours,
@@ -772,7 +850,7 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         }
       }, 100);
     },
-    [waypoints, effectiveMode, routeResult.legs, language]
+    [waypoints, effectiveMode, routeResult.legs, language, antimeridianMeta, shiftCoord]
   );
 
   // Render initial route & update smoothly when route parameters change
@@ -781,18 +859,27 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
     renderRoute(leafletRef.current, mapInstanceRef.current, layersGroupRef.current);
   }, [isMapReady, renderRoute]);
 
-  const handleFocusLeg = useCallback((leg: RouteLegPreview) => {
-    setFocusedLegSeq(leg.sequenceNo);
-    const map = mapInstanceRef.current;
-    const L = leafletRef.current;
-    if (!map || !L) return;
-    try {
-      const legBounds = L.latLngBounds([leg.fromCoords, leg.toCoords]);
-      map.fitBounds(legBounds, { padding: [55, 55], maxZoom: 13, animate: true });
-    } catch {
-      // ignore
-    }
-  }, []);
+  const handleFocusLeg = useCallback(
+    (leg: RouteLegPreview) => {
+      setFocusedLegSeq(leg.sequenceNo);
+      const map = mapInstanceRef.current;
+      const L = leafletRef.current;
+      if (!map || !L) return;
+      try {
+        const isPostSea =
+          antimeridianMeta.seaSeq !== null && leg.sequenceNo > antimeridianMeta.seaSeq;
+        const points: [number, number][] =
+          leg.pathCoords && leg.pathCoords.length >= 2
+            ? leg.pathCoords
+            : [shiftCoord(leg.fromCoords, isPostSea), shiftCoord(leg.toCoords, isPostSea)];
+        const legBounds = L.latLngBounds(points);
+        map.fitBounds(legBounds, { padding: [55, 55], maxZoom: 13, animate: true });
+      } catch {
+        // ignore
+      }
+    },
+    [antimeridianMeta.seaSeq, shiftCoord]
+  );
 
   const handleResetZoom = useCallback(() => {
     setFocusedLegSeq(null);
@@ -800,12 +887,33 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
     const L = leafletRef.current;
     if (!map || !L || waypoints.length === 0) return;
     try {
-      const fullBounds = L.latLngBounds(waypoints.map((w) => w.coords));
+      const seaLegForShift =
+        antimeridianMeta.postSeaLngShift !== 0
+          ? routeResult.legs.find((l) => l.sequenceNo === antimeridianMeta.seaSeq)
+          : null;
+      const allPts: [number, number][] = [];
+      waypoints.forEach((w) => {
+        const isArrivalSide =
+          seaLegForShift &&
+          calculateHaversine(w.coords, seaLegForShift.toCoords) <
+            calculateHaversine(w.coords, seaLegForShift.fromCoords);
+        allPts.push(shiftCoord(w.coords, Boolean(isArrivalSide)));
+      });
+      routeResult.legs.forEach((leg) => {
+        if (leg.pathCoords && leg.pathCoords.length >= 2) {
+          allPts.push(...leg.pathCoords);
+        } else {
+          const isPostSea =
+            antimeridianMeta.seaSeq !== null && leg.sequenceNo > antimeridianMeta.seaSeq;
+          allPts.push(shiftCoord(leg.fromCoords, isPostSea), shiftCoord(leg.toCoords, isPostSea));
+        }
+      });
+      const fullBounds = L.latLngBounds(allPts);
       map.fitBounds(fullBounds, { padding: [50, 50], maxZoom: 12, animate: true });
     } catch {
       // ignore
     }
-  }, [waypoints]);
+  }, [waypoints, routeResult.legs, antimeridianMeta, shiftCoord]);
 
   const formattedDuration = React.useMemo(() => {
     if (effectiveMode === 'air' || effectiveEstimatedHours < 24) {
@@ -835,166 +943,75 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         flexDirection: 'column',
       }}
     >
-      {/* Top Header & Mode Switcher */}
+      {/* Compact Single Map Toolbar */}
       <div
         style={{
-          padding: '14px 18px',
+          padding: '10px 14px',
           backgroundColor: '#181A17',
           borderBottom: '1px solid #2D312C',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: '12px',
+          gap: '10px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div
-            style={{
-              width: '34px',
-              height: '34px',
-              borderRadius: '9px',
-              backgroundColor: '#242722',
-              border: '1px solid rgba(180, 154, 104, 0.35)',
-              color: '#B49A68',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Navigation size={18} aria-hidden="true" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: '1 1 220px' }}>
+          <MapPin size={15} color="#B49A68" aria-hidden="true" style={{ flexShrink: 0 }} />
+          <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#F7F7F4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {isGeocoding ? (
+              t('routes.map.geocoding', 'Đang tra cứu toạ độ...')
+            ) : (
+              <>
+                <strong>{routeResult.origin.name}</strong>{' '}
+                <span style={{ color: '#B49A68' }}>→</span>{' '}
+                <strong>{routeResult.destination.name}</strong>
+              </>
+            )}
           </div>
-          <div>
-            <div style={{ fontSize: '14px', fontWeight: 700, color: '#F7F7F4' }}>
-              {t('routes.map.title', 'Bản đồ Lộ trình Vận chuyển & Cửa khẩu Hải quan')}
-            </div>
-            <div style={{ fontSize: '12px', color: 'rgba(247, 247, 244, 0.72)' }}>
-              {t('routes.map.subtitle', 'Lộ trình đa phương thức kết hợp xe thùng chuyên dụng và đường bay / trạm kiểm dịch')}
-            </div>
-          </div>
+          {!isGeocoding && (
+            <span
+              style={{
+                fontSize: '10.5px',
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: '999px',
+                backgroundColor: '#242722',
+                border: '1px solid rgba(180, 154, 104, 0.35)',
+                color: '#C4B38E',
+                flexShrink: 0,
+              }}
+            >
+              {routeResult.isDomestic ? (language === 'en' ? 'Domestic' : 'Nội địa') : (language === 'en' ? 'International' : 'Quốc tế')}
+            </span>
+          )}
         </div>
 
         {/* Map Layer Switcher */}
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-          <button
-            type="button"
-            aria-pressed={mapStyle === 'satellite'}
-            aria-label={language === 'en' ? 'Toggle satellite or street map layer' : 'Đổi kiểu bản đồ Vệ tinh hoặc Đường phố'}
-            onClick={() => setMapStyle(mapStyle === 'streets' ? 'satellite' : 'streets')}
-            title={language === 'en' ? 'Toggle Satellite / Street view' : 'Đổi kiểu bản đồ Vệ tinh / Đường phố'}
-            style={{
-              padding: '6px 11px',
-              borderRadius: '9px',
-              border: '1px solid #2D312C',
-              backgroundColor: '#242722',
-              fontSize: '12px',
-              color: '#F7F7F4',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-            }}
-          >
-            <Layers size={13} color="#B49A68" aria-hidden="true" />
-            <span>{mapStyle === 'streets' ? (language === 'en' ? 'Streets' : 'Đường phố') : (language === 'en' ? 'Satellite' : 'Vệ tinh')}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Route Presets Quick Bar */}
-      <div
-        style={{
-          padding: '10px 18px',
-          backgroundColor: '#F0EEE8',
-          borderBottom: '1px solid #D8CEBE',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          flexWrap: 'wrap',
-        }}
-      >
-        <span style={{ fontSize: '12px', fontWeight: 700, color: '#57564E' }}>
-          {t('routes.map.presets', 'Gợi ý tuyến:')}
-        </span>
-        {ROUTE_PRESETS.map((p) => {
-          const isActive =
-            p.id === 'sg'
-              ? normalizedDestText.includes('singapore') || normalizedDestText.includes('kranji')
-              : p.id === 'my'
-              ? normalizedDestText.includes('malaysia') ||
-                normalizedDestText.includes('selangor') ||
-                normalizedDestText.includes('kuala lumpur')
-              : p.id === 'th'
-              ? normalizedDestText.includes('bangkok') ||
-                normalizedDestText.includes('thai lan') ||
-                normalizedDestText.includes('thailand')
-              : normalizedDestText.includes('soc son') ||
-                normalizedDestText.includes('ha noi') ||
-                normalizedDestText.includes('hanoi');
-          return (
-            <button
-              key={p.id}
-              type="button"
-              aria-pressed={isActive}
-              onClick={() => {
-                setMode(p.suggestedMode);
-                if (onApplyPreset) onApplyPreset(p);
-              }}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '4px 11px',
-                borderRadius: '20px',
-                fontSize: '12px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                border: isActive ? '1px solid #A67C2E' : '1px solid #D8CEBE',
-                backgroundColor: isActive ? '#FAF8F4' : '#FFFFFF',
-                color: isActive ? '#A67C2E' : '#181A17',
-                boxShadow: isActive ? '0 1px 3px rgba(166, 124, 46, 0.18)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <span>{p.flag}</span>
-              <span>{language === 'en' ? (p.nameEn || p.name) : p.name}</span>
-            </button>
-          );
-        })}
-
-        {/* Active Detected Route Pill */}
-        <div
+        <button
+          type="button"
+          aria-pressed={mapStyle === 'satellite'}
+          aria-label={language === 'en' ? 'Toggle satellite or street map layer' : 'Đổi kiểu bản đồ Vệ tinh hoặc Đường phố'}
+          onClick={() => setMapStyle(mapStyle === 'streets' ? 'satellite' : 'streets')}
+          title={language === 'en' ? 'Toggle Satellite / Street view' : 'Đổi kiểu bản đồ Vệ tinh / Đường phố'}
           style={{
-            marginLeft: 'auto',
+            padding: '5px 10px',
+            borderRadius: '8px',
+            border: '1px solid #2D312C',
+            backgroundColor: '#242722',
+            fontSize: '11.5px',
+            color: '#F7F7F4',
+            fontWeight: 600,
+            cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            padding: '4px 11px',
-            borderRadius: '20px',
-            backgroundColor: isGeocoding ? '#F8F0DF' : '#FAF8F4',
-            border: isGeocoding ? '1px solid #DFCA9A' : '1px solid #D4C5A3',
-            fontSize: '11.5px',
-            color: isGeocoding ? '#966516' : '#A67C2E',
-            fontWeight: 600,
-            maxWidth: '100%',
-            transition: 'all 0.2s ease',
+            gap: '5px',
+            flexShrink: 0,
           }}
         >
-          <MapPin size={12} color={isGeocoding ? '#966516' : '#A67C2E'} aria-hidden="true" />
-          <span>
-            {isGeocoding ? (
-              t('routes.map.geocoding', 'Đang tra cứu toạ độ thực tế...')
-            ) : (
-              <>
-                {t('routes.map.detected', 'Nhận diện:')}{' '}
-                <strong>{routeResult.origin.name}</strong> ➔ <strong>{routeResult.destination.name}</strong> (
-                {routeResult.isDomestic ? (language === 'en' ? 'Domestic' : 'Nội địa') : (language === 'en' ? 'International' : 'Quốc tế')}
-                {resolvedDestGeo || resolvedOriginGeo ? ' • GPS Dynamic' : ''})
-              </>
-            )}
-          </span>
-        </div>
+          <Layers size={13} color="#B49A68" aria-hidden="true" />
+          <span>{mapStyle === 'streets' ? (language === 'en' ? 'Streets' : 'Đường phố') : (language === 'en' ? 'Satellite' : 'Vệ tinh')}</span>
+        </button>
       </div>
 
       {/* Map Canvas */}
@@ -1059,6 +1076,12 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                 <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#966516', flexShrink: 0 }} />
                 <span>{t('routes.map.legendCustoms', 'Cửa khẩu / Sân bay kiểm dịch')}</span>
               </div>
+              {effectiveMode === 'sea' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#0E7490', flexShrink: 0 }} />
+                  <span>{t('routes.map.legendSeaport', 'Cảng biển kiểm dịch')}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#181A17', flexShrink: 0 }} />
                 <span>{t('routes.map.legendVet', 'Trạm nghỉ & Bác sĩ thú y (Vet Stop)')}</span>
@@ -1075,6 +1098,12 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ width: '16px', height: '0px', borderTop: '2.5px dashed #B49A68', flexShrink: 0 }} />
                   <span style={{ fontWeight: 600 }}>{t('routes.map.flightCorridor', 'Hành lang bay quốc tế')}</span>
+                </div>
+              )}
+              {effectiveMode === 'sea' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '16px', height: '0px', borderTop: '2.5px dashed #0E7490', flexShrink: 0 }} />
+                  <span style={{ fontWeight: 600 }}>{t('routes.map.seaCorridor', 'Tuyến đường thủy (Tàu biển)')}</span>
                 </div>
               )}
             </>
@@ -1132,18 +1161,88 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
         )}
       </div>
 
-      {/* Multimodal Door-to-Door Leg Breakdown */}
-      {(routeResult.airFallbackNotice || effectiveLegs.length > 0) && (
+      {/* Notices (only shown if fallback/warning exists) */}
+      {(routeResult.seaUnavailableNotice || routeResult.airFallbackNotice) && (
         <div
           style={{
-            padding: '14px 18px',
+            padding: '10px 14px',
             backgroundColor: '#FAF8F4',
             borderTop: '1px solid #E5DDD0',
             display: 'flex',
             flexDirection: 'column',
-            gap: '10px',
+            gap: '8px',
           }}
         >
+          {routeResult.seaUnavailableNotice && (
+            <div
+              role="alert"
+              style={{
+                fontSize: '12px',
+                color: '#991B1B',
+                backgroundColor: '#FEF2F2',
+                border: '1px solid #FECACA',
+                borderRadius: '10px',
+                padding: '9px 12px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 260px' }}>
+                <Info size={15} color="#B91C1C" aria-hidden="true" style={{ flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, lineHeight: 1.45 }}>
+                  {language === 'en' ? routeResult.seaUnavailableNotice.en : routeResult.seaUnavailableNotice.vi}
+                </span>
+              </div>
+              {onRequestModeChange && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => onRequestModeChange('air')}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '5px 10px',
+                      borderRadius: '8px',
+                      border: '1px solid #181A17',
+                      backgroundColor: '#181A17',
+                      color: '#FFFFFF',
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Plane size={12} aria-hidden="true" />
+                    <span>{language === 'en' ? 'Switch to Air' : 'Chuyển Hàng không'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRequestModeChange('road')}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '5px 10px',
+                      borderRadius: '8px',
+                      border: '1px solid #D8CEBE',
+                      backgroundColor: '#FFFFFF',
+                      color: '#181A17',
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Truck size={12} aria-hidden="true" />
+                    <span>{language === 'en' ? 'Switch to Road' : 'Chuyển Đường bộ'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {routeResult.airFallbackNotice && (
             <div
               role="status"
@@ -1163,104 +1262,144 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
               <span>{language === 'en' ? routeResult.airFallbackNotice.en : routeResult.airFallbackNotice.vi}</span>
             </div>
           )}
+        </div>
+      )}
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '8px',
-            }}
-          >
-            {(() => {
-              const airLeg = effectiveMode === 'air' ? effectiveLegs.find((l) => l.type === 'air') : null;
-              const seaLeg = effectiveMode === 'sea' ? effectiveLegs.find((l) => l.type === 'sea') : null;
-              const lastLeg = effectiveLegs.length > 0 ? effectiveLegs[effectiveLegs.length - 1] : null;
-              const finalRoadLeg = (effectiveMode === 'air' || effectiveMode === 'sea') && lastLeg?.type === 'road' ? lastLeg : null;
-              return (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#181A17' }}>
-                    {language === 'en' ? 'Door-to-Door Route Legs & Estimated Cost' : 'Lộ trình & giá cước ước tính theo chặng'}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      color: '#57564E',
-                      backgroundColor: '#EFEAE0',
-                      padding: '2px 8px',
-                      borderRadius: '999px',
-                    }}
-                  >
-                    {effectiveMode === 'air'
-                      ? language === 'en'
-                        ? `${effectiveLegs.length} legs · Multimodal Truck + Air`
-                        : `${effectiveLegs.length} chặng · Xe thùng + Hàng không`
-                      : effectiveMode === 'sea'
-                        ? language === 'en'
-                          ? `${effectiveLegs.length} legs · Multimodal Truck + Sea`
-                          : `${effectiveLegs.length} chặng · Xe thùng + Đường thủy`
-                        : language === 'en'
-                          ? `${effectiveLegs.length} leg · Horse Truck`
-                          : `${effectiveLegs.length} chặng · Xe thùng đường bộ`}
-                  </span>
-                  {airLeg && (
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#8C6621' }}>
-                      {finalRoadLeg
-                        ? language === 'en'
-                          ? `Nearest arrival: ${airLeg.toName} · final truck ~${finalRoadLeg.distanceKm} km`
-                          : `Sân bay gần đích nhất: ${airLeg.toName} · xe thùng cuối ~${finalRoadLeg.distanceKm} km`
-                        : language === 'en'
-                          ? `Direct arrival: ${airLeg.toName}`
-                          : `Hạ cánh trực tiếp tại ${airLeg.toName}`}
-                    </span>
-                  )}
-                  {seaLeg && (
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#0E7490' }}>
-                      {finalRoadLeg
-                        ? language === 'en'
-                          ? `Arrival port: ${seaLeg.toName} · final truck ~${finalRoadLeg.distanceKm} km`
-                          : `Cảng đến gần nhất: ${seaLeg.toName} · xe thùng cuối ~${finalRoadLeg.distanceKm} km`
-                        : language === 'en'
-                          ? `Direct port arrival: ${seaLeg.toName}`
-                          : `Cập cảng trực tiếp tại ${seaLeg.toName}`}
-                    </span>
-                  )}
-                </div>
-              );
-            })()}
+      {/* Live Route Metrics Summary Bar (1 clean row + collapsible legs toggle) */}
+      <div
+        style={{
+          padding: '10px 14px',
+          backgroundColor: '#F0EEE8',
+          borderTop: '1px solid #D8CEBE',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '10px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Navigation size={14} color="#A67C2E" aria-hidden="true" />
+            <span style={{ fontSize: '12px', color: '#57564E' }}>{t('routes.map.totalDist', 'Quãng đường:')}</span>
+            <strong style={{ fontSize: '13.5px', color: '#181A17' }}>
+              {routeResult.seaUnavailableNotice ? '—' : `${effectiveTotalDistanceKm.toLocaleString()} km`}
+            </strong>
+            {osrmDistanceKm === null && isNavigating ? (
+              <span style={{ fontSize: '11px', color: '#57564E', fontStyle: 'italic' }}>
+                ({t('routes.map.optimizing', 'Đang tính...')})
+              </span>
+            ) : null}
+          </div>
 
-            {focusedLegSeq !== null && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Clock size={14} color="#A67C2E" aria-hidden="true" />
+            <span style={{ fontSize: '12px', color: '#57564E' }}>{t('routes.map.estDuration', 'Dự kiến:')}</span>
+            <strong style={{ fontSize: '13.5px', color: '#181A17' }}>
+              {routeResult.seaUnavailableNotice ? '—' : formattedDuration}
+            </strong>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {showPricing && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #D8CEBE',
+                borderRadius: '8px',
+                padding: '4px 10px',
+              }}
+            >
+              <span style={{ fontSize: '11.5px', color: '#57564E', fontWeight: 600 }}>
+                {language === 'en' ? 'Est. Fare:' : 'Ước tính:'}
+              </span>
+              <strong
+                style={{
+                  fontSize: '13px',
+                  color: '#8C6621',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                }}
+              >
+                {routeResult.seaUnavailableNotice ? '—' : `${effectiveEstimatedTotalPriceVnd.toLocaleString('vi-VN')} đ`}
+              </strong>
+            </div>
+          )}
+
+          {effectiveLegs.length > 0 && (
+            <button
+              type="button"
+              aria-expanded={showLegDetails}
+              onClick={() => setShowLegDetails((v) => !v)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                border: '1px solid #D8CEBE',
+                backgroundColor: '#FFFFFF',
+                color: '#181A17',
+                fontSize: '11.5px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              <span>
+                {language === 'en' ? `${effectiveLegs.length} legs` : `Chi tiết ${effectiveLegs.length} chặng`}
+              </span>
+              {showLegDetails ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Collapsible Door-to-Door Leg Breakdown */}
+      {showLegDetails && effectiveLegs.length > 0 && (
+        <div
+          style={{
+            padding: '12px 14px',
+            backgroundColor: '#FAF8F4',
+            borderTop: '1px solid #E5DDD0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          {focusedLegSeq !== null && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 type="button"
                 onClick={handleResetZoom}
                 style={{
-                  fontSize: '11.5px',
+                  fontSize: '11px',
                   fontWeight: 600,
                   color: '#A67C2E',
                   backgroundColor: '#FFFFFF',
                   border: '1px solid #D4C5A3',
                   borderRadius: '999px',
-                  padding: '3px 10px',
+                  padding: '2px 10px',
                   cursor: 'pointer',
                 }}
               >
                 {language === 'en' ? 'Show full route' : 'Xem toàn tuyến'}
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           <div
             style={{
               display: 'grid',
               gridTemplateColumns:
                 effectiveLegs.length >= 3
-                  ? 'repeat(auto-fit, minmax(220px, 1fr))'
+                  ? 'repeat(auto-fit, minmax(210px, 1fr))'
                   : effectiveLegs.length === 2
-                    ? 'repeat(auto-fit, minmax(260px, 1fr))'
+                    ? 'repeat(auto-fit, minmax(240px, 1fr))'
                     : '1fr',
-              gap: '10px',
+              gap: '8px',
             }}
           >
             {effectiveLegs.map((leg) => {
@@ -1272,111 +1411,38 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
                   key={`${leg.sequenceNo}-${leg.type}`}
                   type="button"
                   onClick={() => handleFocusLeg(leg)}
-                  title={
-                    language === 'en'
-                      ? 'Click to zoom map to this leg'
-                      : 'Nhấn để phóng to bản đồ tại chặng này'
-                  }
                   style={{
                     textAlign: 'left',
                     backgroundColor: isFocused ? '#F8F0DF' : '#FFFFFF',
                     border: isFocused ? '1.5px solid #A67C2E' : '1px solid #D8CEBE',
                     borderRadius: '10px',
-                    padding: '10px 12px',
+                    padding: '9px 11px',
                     cursor: 'pointer',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '6px',
-                    transition: 'all 0.15s ease',
+                    gap: '4px',
                   }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '6px',
-                      width: '100%',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                      <span
-                        style={{
-                          fontSize: '10.5px',
-                          fontWeight: 800,
-                          color: '#181A17',
-                          backgroundColor: '#EFEAE0',
-                          padding: '2px 7px',
-                          borderRadius: '6px',
-                        }}
-                      >
-                        {language === 'en' ? `Leg ${leg.sequenceNo}` : `Chặng ${leg.sequenceNo}`}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          padding: '2px 8px',
-                          borderRadius: '999px',
-                          backgroundColor: isAir ? '#181A17' : isSea ? '#ECFEFF' : '#FAF8F4',
-                          color: isAir ? '#C4B38E' : isSea ? '#0E7490' : '#8C6621',
-                          border: isAir
-                            ? '1px solid #2D312C'
-                            : isSea
-                              ? '1px solid #A5F3FC'
-                              : '1px solid #DFCA9A',
-                        }}
-                      >
-                        {isAir ? (
-                          <Plane size={11} aria-hidden="true" />
-                        ) : isSea ? (
-                          <Ship size={11} aria-hidden="true" />
-                        ) : (
-                          <Truck size={11} aria-hidden="true" />
-                        )}
-                        <span>{language === 'en' ? leg.vehicleLabelEn : leg.vehicleLabelVi}</span>
-                      </span>
-                    </div>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#57564E', whiteSpace: 'nowrap' }}>
-                      ~{leg.distanceKm.toLocaleString()} km · ~{leg.durationHours}{language === 'en' ? 'h' : 'h'}
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#181A17', lineHeight: 1.35 }}>
-                    {leg.fromName} <span style={{ color: '#A67C2E' }}>→</span> {leg.toName}
-                  </div>
-
-                  <div style={{ fontSize: '11px', color: '#57564E', lineHeight: 1.4 }}>
-                    {language === 'en' ? leg.noteEn : leg.noteVi}
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: '2px',
-                      paddingTop: '6px',
-                      borderTop: '1px dashed #E5DDD0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      width: '100%',
-                    }}
-                  >
-                    <span style={{ fontSize: '11px', color: '#5F6977', fontWeight: 500 }}>
-                      {language === 'en' ? 'Est. leg fare:' : 'Giá chặng ước tính:'}
-                    </span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', width: '100%' }}>
                     <span
                       style={{
-                        fontSize: '12.5px',
-                        fontWeight: 800,
-                        color: '#8C6621',
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        fontSize: '10.5px',
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        color: isAir ? '#181A17' : isSea ? '#0E7490' : '#8C6621',
                       }}
                     >
-                      {Number(leg.estimatedPriceVnd || 0).toLocaleString('vi-VN')} đ
+                      {isAir ? <Plane size={11} aria-hidden="true" /> : isSea ? <Ship size={11} aria-hidden="true" /> : <Truck size={11} aria-hidden="true" />}
+                      <span>{language === 'en' ? `Leg ${leg.sequenceNo}` : `Chặng ${leg.sequenceNo}`} · {language === 'en' ? leg.vehicleLabelEn : leg.vehicleLabelVi}</span>
                     </span>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#57564E', whiteSpace: 'nowrap' }}>
+                      {leg.distanceKm.toLocaleString()} km · ~{leg.durationHours}h
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#181A17', lineHeight: 1.35 }}>
+                    {leg.fromName} <span style={{ color: '#A67C2E' }}>→</span> {leg.toName}
                   </div>
                 </button>
               );
@@ -1384,88 +1450,6 @@ export const RoutePlanningMap: React.FC<RoutePlanningMapProps> = ({
           </div>
         </div>
       )}
-
-      {/* Live Route Metrics Summary Bar */}
-      <div
-        style={{
-          padding: '12px 18px',
-          backgroundColor: '#F0EEE8',
-          borderTop: '1px solid #D8CEBE',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '14px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Navigation size={16} color="#A67C2E" aria-hidden="true" />
-            <span style={{ fontSize: '12.5px', color: '#57564E' }}>{t('routes.map.totalDist', 'Tổng quãng đường:')}</span>
-            <strong style={{ fontSize: '14px', color: '#181A17' }}>
-              {effectiveTotalDistanceKm.toLocaleString()} km
-            </strong>
-            {osrmDistanceKm !== null ? (
-              <span
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  backgroundColor: '#E8F2EB',
-                  color: '#287653',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  border: '1px solid #B7DBC4',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-                title={language === 'en' ? 'Road legs refined via actual highway network (OSRM)' : 'Chặng đường bộ đã tính theo mạng lưới cao tốc & quốc lộ thực tế'}
-              >
-                <span>✨</span>
-                <span>{t('routes.map.actualRoadRoute', 'Lộ trình đường bộ thực tế')}</span>
-              </span>
-            ) : isNavigating ? (
-              <span style={{ fontSize: '11px', color: '#57564E', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span>⏳</span>
-                <span>{t('routes.map.optimizing', 'Đang nắn tuyến cao tốc...')}</span>
-              </span>
-            ) : null}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Clock size={16} color="#A67C2E" aria-hidden="true" />
-            <span style={{ fontSize: '12.5px', color: '#57564E' }}>{t('routes.map.estDuration', 'Thời gian ước tính:')}</span>
-            <strong style={{ fontSize: '14px', color: '#181A17' }}>
-              {formattedDuration}
-            </strong>
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: '#FFFFFF',
-            border: '1px solid #D8CEBE',
-            borderRadius: '10px',
-            padding: '6px 12px',
-          }}
-        >
-          <span style={{ fontSize: '12px', color: '#57564E', fontWeight: 600 }}>
-            {language === 'en' ? 'Map Est. Fare:' : 'Tổng cước ước tính từ bản đồ:'}
-          </span>
-          <strong
-            style={{
-              fontSize: '14.5px',
-              color: '#8C6621',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            }}
-          >
-            {effectiveEstimatedTotalPriceVnd.toLocaleString('vi-VN')} đ
-          </strong>
-        </div>
-      </div>
     </div>
   );
 };

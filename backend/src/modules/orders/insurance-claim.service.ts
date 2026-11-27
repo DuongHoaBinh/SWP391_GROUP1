@@ -51,6 +51,9 @@ export class InsuranceClaimService {
   }
 
   async getShipmentPayoutTable(user: AuthenticatedUser, shipmentId: number) {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem bảng bồi thường bảo hiểm.');
+    }
     const order = await this.ordersStore.findShipmentById(shipmentId);
     if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
 
@@ -112,6 +115,7 @@ export class InsuranceClaimService {
     // Eligibility check
     const isCompleted = info.shipmentStatus === 'completed';
     const hasHandover = Boolean(info.handoverId);
+    const isInTransitOrReturn = ['in_transit', 'return_pending'].includes(info.shipmentStatus);
 
     if (dto.severity !== 'M4') {
       if (!isCompleted && !hasHandover) {
@@ -120,6 +124,11 @@ export class InsuranceClaimService {
           'Yêu cầu bồi thường sự cố M1–M3 chỉ được thực hiện sau khi ngựa đã được bàn giao (hoặc đơn hàng đã hoàn tất).',
         );
       }
+    } else if (!isInTransitOrReturn && !isCompleted && !hasHandover) {
+      this.cleanupFiles(files);
+      throw new ConflictException(
+        'Yêu cầu bồi thường mức M4 chỉ áp dụng khi chuyến đi đang vận chuyển, chờ chặng về hoặc đã bàn giao.',
+      );
     }
 
     // Window check
@@ -138,6 +147,26 @@ export class InsuranceClaimService {
     if (hasActive) {
       this.cleanupFiles(files);
       throw new ConflictException('Cá thể ngựa này đang có yêu cầu bồi thường đang được xử lý');
+    }
+
+    // Anti double-dip check across approved claims + delivery_handover dispute compensation
+    if (typeof this.claimStore.sumPriorCompensationForHorse === 'function') {
+      const prior = await this.claimStore.sumPriorCompensationForHorse(shipmentHorseId);
+      const alreadyCompensated = prior.claimTotal + prior.handoverTotal;
+      const cap = Number((info as any).maxCompensation || 0);
+      if (cap > 0 && alreadyCompensated >= cap) {
+        this.cleanupFiles(files);
+        throw new ConflictException(
+          `Cá thể ngựa này đã nhận đủ hạn mức bồi thường tối đa (${cap.toLocaleString('vi-VN')} VND) từ biên bản bàn giao hoặc hồ sơ bồi thường trước đó.`,
+        );
+      }
+      if (cap > 0 && alreadyCompensated + dto.requestedAmount > cap) {
+        this.cleanupFiles(files);
+        const remaining = Math.max(0, cap - alreadyCompensated);
+        throw new BadRequestException(
+          `Tổng số tiền bồi thường (đã chi ${alreadyCompensated.toLocaleString('vi-VN')} VND + yêu cầu mới) vượt trần tối đa ${cap.toLocaleString('vi-VN')} VND. Mức tối đa còn lại có thể yêu cầu là ${remaining.toLocaleString('vi-VN')} VND.`,
+        );
+      }
     }
 
     // Uploaded files validation
@@ -202,6 +231,9 @@ export class InsuranceClaimService {
   }
 
   async listClaimsByShipment(user: AuthenticatedUser, shipmentId: number): Promise<InsuranceClaimItem[]> {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem danh sách yêu cầu bồi thường bảo hiểm.');
+    }
     const order = await this.ordersStore.findShipmentById(shipmentId);
     if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
 
