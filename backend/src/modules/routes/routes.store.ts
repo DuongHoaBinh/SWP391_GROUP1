@@ -15,11 +15,11 @@ import {
   RouteStopType,
   RouteStopUpdateEntity,
   RouteStopUpdateStatus,
+  StopLocationRefType,
 } from './routes.types';
-import { RouteStopItemDto } from './dto/create-route.dto';
 import { RecordStopProgressDto } from './dto/record-stop-progress.dto';
 import { SetStrategicFrameworkDto } from './dto/set-strategic-framework.dto';
-import { BuildDetailedPlanDto, RouteLegDto } from './dto/build-detailed-plan.dto';
+import { BuildDetailedPlanDto, RouteLegDto, RouteStopItemDto } from './dto/build-detailed-plan.dto';
 import { paymentGate } from '../orders/payment-gate';
 import { computePaymentDueAt } from '../orders/sla-timeline.policy';
 import { assertRoadCapacity, loadRequiredStallSlots } from '../fleet/capacity-policy';
@@ -95,11 +95,17 @@ interface RouteStopRow extends RowDataPacket {
   route_id: number;
   leg_id: number | null;
   sequence_no: number;
+  direction?: 'outbound' | 'return' | null;
   stop_type: RouteStopType;
   location_name: string;
   country: string | null;
   planned_arrival: Date | null;
   planned_departure: Date | null;
+  lat?: number | string | null;
+  lng?: number | string | null;
+  geofence_radius_m?: number | null;
+  location_ref_type?: StopLocationRefType | null;
+  location_ref_id?: number | null;
   status: RouteStopStatus;
 }
 
@@ -526,7 +532,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       const shipmentId = Number(references[0].shipment_id);
       const [orders] = await db.execute<RowDataPacket[]>('SELECT * FROM shipment WHERE shipment_id = ? FOR UPDATE', [shipmentId]);
       const [routes] = await db.execute<RowDataPacket[]>('SELECT plan_status FROM route WHERE route_id = ? FOR UPDATE', [routeId]);
-      if (!orders[0] || !['approved', 'planning', 'in_transit'].includes(orders[0].status) ||
+      if (!orders[0] || !['approved', 'planning', 'in_transit', 'return_pending'].includes(orders[0].status) ||
         !['draft', 'pending_approval', 'in_transit'].includes(routes[0]?.plan_status)) throw new ConflictException('Kế hoạch đã chốt hoặc đơn không còn được lập tuyến');
       const isInTransitReroute = routes[0]?.plan_status === 'in_transit';
       const [oldLegs] = await db.execute<RowDataPacket[]>('SELECT leg_id, sequence_no, status, vehicle_id, road_trip_id FROM route_leg WHERE route_id = ? ORDER BY sequence_no', [routeId]);
@@ -631,24 +637,41 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           'SELECT leg_id, sequence_no FROM route_leg WHERE route_id = ? ORDER BY sequence_no ASC',
           [routeId],
         );
+        const legIdBySeq = new Map<number, number>();
+        for (const lr of activeRouteLegs) {
+          legIdBySeq.set(Number(lr.sequence_no), Number(lr.leg_id));
+        }
         const fallbackLegId = activeRouteLegs[activeRouteLegs.length - 1]?.leg_id ?? null;
         for (const s of stopsToSave) {
           const isPreserved = preservedStops.some(
             (p) => Number(p.sequence_no) === Number(s.sequenceNo) && areSameLocations(p.location_name, s.locationName),
           );
           if (isPreserved) continue;
+          const resolvedLegId =
+            s.legSequenceNo !== undefined && s.legSequenceNo !== null
+              ? (legIdBySeq.get(Number(s.legSequenceNo)) ?? fallbackLegId)
+              : fallbackLegId;
           await db.execute(
-            `INSERT INTO route_stop (route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status, direction)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO route_stop (
+               route_id, leg_id, sequence_no, stop_type, location_name, country,
+               planned_arrival, planned_departure, lat, lng, geofence_radius_m,
+               location_ref_type, location_ref_id, status, direction
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               routeId,
-              fallbackLegId,
+              resolvedLegId,
               nextSeq++,
               s.stopType,
               s.locationName,
               s.country ?? null,
               s.plannedArrival ? new Date(s.plannedArrival) : null,
               s.plannedDeparture ? new Date(s.plannedDeparture) : null,
+              s.lat ?? null,
+              s.lng ?? null,
+              s.geofenceRadiusM ?? null,
+              s.locationRefType ?? null,
+              s.locationRefId ?? null,
               RouteStopStatus.PENDING,
               s.direction ?? 'outbound',
             ],
@@ -743,7 +766,12 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
 
   async findStopsByRouteId(routeId: number): Promise<RouteStopEntity[]> {
     const [rows] = await this.pool.execute<RouteStopRow[]>(
-      'SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status, direction FROM route_stop WHERE route_id = ? ORDER BY sequence_no ASC',
+      `SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country,
+              planned_arrival, planned_departure, lat, lng, geofence_radius_m,
+              location_ref_type, location_ref_id, status, direction
+       FROM route_stop
+       WHERE route_id = ?
+       ORDER BY sequence_no ASC`,
       [routeId],
     );
     return rows.map((r) => this.mapRouteStopRow(r));
@@ -751,7 +779,12 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
 
   async findStopById(stopId: number): Promise<RouteStopEntity | undefined> {
     const [rows] = await this.pool.execute<RouteStopRow[]>(
-      'SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status, direction FROM route_stop WHERE route_stop_id = ? LIMIT 1',
+      `SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country,
+              planned_arrival, planned_departure, lat, lng, geofence_radius_m,
+              location_ref_type, location_ref_id, status, direction
+       FROM route_stop
+       WHERE route_stop_id = ?
+       LIMIT 1`,
       [stopId],
     );
     const r = rows[0];
@@ -775,16 +808,26 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     );
     if (!sourceRoutes.length) return [];
     const [rows] = await db.execute<RouteStopRow[]>(
-      "SELECT sequence_no, stop_type, location_name, country, planned_arrival, planned_departure FROM route_stop WHERE route_id = ? AND stop_type <> 'transfer_hub' ORDER BY sequence_no ASC",
+      `SELECT sequence_no, stop_type, location_name, country, planned_arrival, planned_departure,
+              lat, lng, geofence_radius_m, location_ref_type, location_ref_id, direction
+       FROM route_stop
+       WHERE route_id = ? AND stop_type <> 'transfer_hub'
+       ORDER BY sequence_no ASC`,
       [sourceRoutes[0].route_id],
     );
     return rows.map((r) => ({
       sequenceNo: r.sequence_no,
+      direction: (r.direction as 'outbound' | 'return') ?? 'outbound',
       stopType: r.stop_type,
       locationName: r.location_name,
       country: r.country ?? undefined,
       plannedArrival: r.planned_arrival ? new Date(r.planned_arrival).toISOString() : undefined,
       plannedDeparture: r.planned_departure ? new Date(r.planned_departure).toISOString() : undefined,
+      lat: r.lat !== null && r.lat !== undefined ? Number(r.lat) : undefined,
+      lng: r.lng !== null && r.lng !== undefined ? Number(r.lng) : undefined,
+      geofenceRadiusM: r.geofence_radius_m !== null && r.geofence_radius_m !== undefined ? Number(r.geofence_radius_m) : undefined,
+      locationRefType: r.location_ref_type ?? undefined,
+      locationRefId: r.location_ref_id !== null && r.location_ref_id !== undefined ? Number(r.location_ref_id) : undefined,
     }));
   }
 
@@ -815,7 +858,7 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
        JOIN route r ON r.route_id = rl.route_id
        JOIN shipment s ON s.shipment_id = r.shipment_id
        WHERE rl.road_trip_id = ?
-         AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected')
+         AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded')
        ORDER BY rl.leg_id ASC`,
       [roadTripId],
     );
@@ -825,7 +868,8 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     const placeholders = routeIds.map(() => '?').join(',');
     const [existingStopRows] = await db.execute<RowDataPacket[]>(
       `SELECT route_stop_id, route_id, leg_id, sequence_no, stop_type, location_name, country,
-              planned_arrival, planned_departure, status, actual_arrival, actual_departure, updated_by, notes
+              planned_arrival, planned_departure, lat, lng, geofence_radius_m,
+              location_ref_type, location_ref_id, status, actual_arrival, actual_departure, updated_by, notes
        FROM route_stop
        WHERE route_id IN (${placeholders})
        ORDER BY sequence_no ASC, route_stop_id ASC`,
@@ -904,12 +948,28 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
             !usedIds.has(Number(e.route_stop_id)) &&
             areSameLocations(e.location_name, stop.locationName),
         );
+        const gpsDonor =
+          corridorSourceRows.find(
+            (e) => areSameLocations(e.location_name, stop.locationName) && e.lat != null && e.lng != null,
+          ) ??
+          existingStopRows.find(
+            (e) => areSameLocations(e.location_name, stop.locationName) && e.lat != null && e.lng != null,
+          );
+        const donorLat = gpsDonor?.lat != null ? Number(gpsDonor.lat) : null;
+        const donorLng = gpsDonor?.lng != null ? Number(gpsDonor.lng) : null;
+        const donorRadius = gpsDonor?.geofence_radius_m != null ? Number(gpsDonor.geofence_radius_m) : null;
+        const donorRefType = gpsDonor?.location_ref_type ?? null;
+        const donorRefId = gpsDonor?.location_ref_id != null ? Number(gpsDonor.location_ref_id) : null;
 
         if (match) {
           usedIds.add(Number(match.route_stop_id));
           await db.execute(
             `UPDATE route_stop
              SET sequence_no = ?, stop_type = ?, leg_id = ?, location_name = ?, country = COALESCE(country, ?),
+                 lat = COALESCE(lat, ?), lng = COALESCE(lng, ?),
+                 geofence_radius_m = COALESCE(geofence_radius_m, ?),
+                 location_ref_type = COALESCE(location_ref_type, ?),
+                 location_ref_id = COALESCE(location_ref_id, ?),
                  notes = COALESCE(notes, ?)
              WHERE route_stop_id = ?`,
             [
@@ -918,6 +978,11 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
               legId,
               stop.locationName,
               stop.country ?? null,
+              donorLat,
+              donorLng,
+              donorRadius,
+              donorRefType,
+              donorRefId,
               stop.notes ?? null,
               Number(match.route_stop_id),
             ],
@@ -935,8 +1000,9 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
           await db.execute(
             `INSERT INTO route_stop (
                route_id, leg_id, sequence_no, stop_type, location_name, country,
-               planned_arrival, planned_departure, status, actual_arrival, actual_departure, updated_by, notes
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               planned_arrival, planned_departure, lat, lng, geofence_radius_m,
+               location_ref_type, location_ref_id, status, actual_arrival, actual_departure, updated_by, notes
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               rId,
               legId,
@@ -946,6 +1012,11 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
               stop.country ?? null,
               stop.plannedArrival ? new Date(stop.plannedArrival) : null,
               stop.plannedDeparture ? new Date(stop.plannedDeparture) : null,
+              donorLat,
+              donorLng,
+              donorRadius,
+              donorRefType,
+              donorRefId,
               siblingMatch ? siblingMatch.status : RouteStopStatus.PENDING,
               siblingMatch?.actual_arrival ? new Date(siblingMatch.actual_arrival) : null,
               siblingMatch?.actual_departure ? new Date(siblingMatch.actual_departure) : null,
@@ -997,19 +1068,46 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
 
   async replaceRouteStops(routeId: number, stops: RouteStopItemDto[], db: Pool | PoolConnection = this.pool): Promise<void> {
     await db.execute('DELETE FROM route_stop WHERE route_id = ?', [routeId]);
+    if (!stops.length) return;
+
+    const legIdBySeq = new Map<number, number>();
+    if (stops.some((s) => s.legSequenceNo !== undefined && s.legSequenceNo !== null)) {
+      const [legRows] = await db.execute<RowDataPacket[]>(
+        'SELECT leg_id, sequence_no FROM route_leg WHERE route_id = ? ORDER BY sequence_no ASC',
+        [routeId],
+      );
+      for (const lr of legRows) {
+        legIdBySeq.set(Number(lr.sequence_no), Number(lr.leg_id));
+      }
+    }
 
     for (const s of stops) {
+      const resolvedLegId =
+        s.legSequenceNo !== undefined && s.legSequenceNo !== null
+          ? (legIdBySeq.get(Number(s.legSequenceNo)) ?? null)
+          : null;
       await db.execute(
-        `INSERT INTO route_stop (route_id, sequence_no, stop_type, location_name, country, planned_arrival, planned_departure, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO route_stop (
+           route_id, leg_id, sequence_no, direction, stop_type, location_name, country,
+           planned_arrival, planned_departure, lat, lng, geofence_radius_m,
+           location_ref_type, location_ref_id, status
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           routeId,
+          resolvedLegId,
           s.sequenceNo,
+          s.direction ?? 'outbound',
           s.stopType,
           s.locationName,
           s.country ?? null,
           s.plannedArrival ? new Date(s.plannedArrival) : null,
           s.plannedDeparture ? new Date(s.plannedDeparture) : null,
+          s.lat ?? null,
+          s.lng ?? null,
+          s.geofenceRadiusM ?? null,
+          s.locationRefType ?? null,
+          s.locationRefId ?? null,
           RouteStopStatus.PENDING,
         ],
       );
@@ -1258,14 +1356,29 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
         const requiredSlots = await loadRequiredStallSlots(db, Number(order.shipment_id), Number(order.requested_horse_count));
         assertRoadCapacity(requiredSlots, vehicleIds, vehicles.map(v => ({ id: Number(v.vehicle_id), capacity: Number(v.capacity) })));
       }
+      const outboundCrossBorderSeqs = legs
+        .filter((l) => (l.direction || 'outbound') === 'outbound' && (l.leg_type === 'flight' || l.leg_type === 'sea'))
+        .map((l) => Number(l.sequence_no));
+      const firstOutboundCrossBorderSeq = outboundCrossBorderSeqs.length > 0 ? Math.min(...outboundCrossBorderSeqs) : null;
+      const returnCrossBorderSeqs = legs
+        .filter((l) => l.direction === 'return' && (l.leg_type === 'flight' || l.leg_type === 'sea'))
+        .map((l) => Number(l.sequence_no));
+      const firstReturnCrossBorderSeq = returnCrossBorderSeqs.length > 0 ? Math.min(...returnCrossBorderSeqs) : null;
+      const requiredSeaStalls = Math.max(1, Number(order.requested_horse_count || 1));
+
       if (!legs.length || legs.some(l => {
-        const isOverseasPostCrossBorderRoadLeg = l.leg_type === 'road' && firstCrossBorderSeq !== null && Number(l.sequence_no) > firstCrossBorderSeq;
+        const dir = l.direction || 'outbound';
+        const isOverseasRoadLeg =
+          l.leg_type === 'road' &&
+          ((dir === 'outbound' && firstOutboundCrossBorderSeq !== null && Number(l.sequence_no) > firstOutboundCrossBorderSeq) ||
+            (dir === 'return' && firstReturnCrossBorderSeq !== null && Number(l.sequence_no) < firstReturnCrossBorderSeq));
         return (
           !l.planned_departure ||
           !l.planned_arrival ||
           new Date(l.planned_arrival) <= new Date(l.planned_departure) ||
-          (l.leg_type === 'road' && !l.vehicle_id && !isOverseasPostCrossBorderRoadLeg) ||
-          (l.leg_type === 'flight' && (!l.flight_number || !l.booking_reference || !l.airline_id || !l.departure_airport_id || !l.arrival_airport_id || Number(l.stalls_booked) < requiredAirStalls))
+          (l.leg_type === 'road' && !l.vehicle_id && !isOverseasRoadLeg) ||
+          (l.leg_type === 'flight' && (!l.flight_number || !l.booking_reference || !l.airline_id || !l.departure_airport_id || !l.arrival_airport_id || Number(l.stalls_booked) < requiredAirStalls)) ||
+          (l.leg_type === 'sea' && Number(l.stalls_booked) < requiredSeaStalls)
         );
       })) {
         throw new BadRequestException('Cần hoàn thiện xe, chuyến bay và giờ đi/đến của từng chặng trước khi xác nhận');
@@ -1356,8 +1469,8 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
         ? (['confirmed', 'ready_to_depart'].includes(String(route?.plan_status || '')) || gate.paymentUnlocked)
         : gate.paymentUnlocked;
       const isReadyToDepart = isPlanConfirmed && isPaymentSucceeded && isLegalCompliant && ['confirmed', 'ready_to_depart'].includes(order.status);
-      if (order.status === 'in_transit') {
-        // BR-F2-06 / AC-F2-03: Never rollback an in_transit shipment; flag compliance alert only.
+      if (order.status === 'in_transit' || order.status === 'return_pending') {
+        // BR-F2-06 / AC-F2-03: Never rollback an in_transit/return_pending shipment; flag compliance alert only.
         await db.execute('UPDATE shipment SET in_transit_compliance_alert = ? WHERE shipment_id = ?', [
           isLegalCompliant ? 0 : 1,
           shipmentId,
@@ -1490,6 +1603,140 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
     return total > 0 && total === confirmed;
   }
 
+  async findDraftSuggestionContext(shipmentId: number): Promise<{
+    shipment: {
+      shipmentId: number;
+      requestCode: string;
+      originLocation: string;
+      destinationLocation: string;
+      originLat: number | null;
+      originLng: number | null;
+      destinationLat: number | null;
+      destinationLng: number | null;
+      transportationType: string | null;
+      transportMode: 'road' | 'air' | 'sea' | null;
+      seaMode: string | null;
+      tripType: 'one_way' | 'round_trip';
+      departureDate: string | null;
+      pickupAt: string | null;
+      returnDepartureAt: string | null;
+      requestedHorseCount: number;
+      quoteId: number | null;
+      allocationSnapshot: any | null;
+    };
+    quote: {
+      quoteId: number;
+      transportMode: 'road' | 'air' | 'sea';
+      seaMode: string | null;
+      tripType: 'one_way' | 'round_trip';
+      inputJson: any | null;
+      resultJson: any | null;
+    } | null;
+    reservations: Array<{
+      vehicleId: number;
+      plateOrCode: string | null;
+      capacity: number;
+      direction: 'outbound' | 'return';
+      reservedFrom: string | null;
+      reservedTo: string | null;
+    }>;
+  } | null> {
+    const [shipRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT shipment_id, origin_location, destination_location,
+              origin_lat, origin_lng, destination_lat, destination_lng,
+              transportation_type, transport_mode, sea_mode, trip_type,
+              departure_date, pickup_at, return_departure_at,
+              requested_horse_count, quote_id, allocation_snapshot
+       FROM shipment
+       WHERE shipment_id = ?
+       LIMIT 1`,
+      [shipmentId],
+    );
+    const s = shipRows[0];
+    if (!s) return null;
+
+    const parseJsonSafe = (val: unknown) => {
+      if (val === null || val === undefined) return null;
+      if (typeof val === 'object') return val;
+      try {
+        return JSON.parse(String(val));
+      } catch {
+        return null;
+      }
+    };
+
+    let quote: {
+      quoteId: number;
+      transportMode: 'road' | 'air' | 'sea';
+      seaMode: string | null;
+      tripType: 'one_way' | 'round_trip';
+      inputJson: any | null;
+      resultJson: any | null;
+    } | null = null;
+
+    if (s.quote_id) {
+      const [qRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT quote_id, transport_mode, sea_mode, trip_type, input_json, result_json
+         FROM shipment_quote
+         WHERE quote_id = ?
+         LIMIT 1`,
+        [Number(s.quote_id)],
+      );
+      if (qRows[0]) {
+        quote = {
+          quoteId: Number(qRows[0].quote_id),
+          transportMode: qRows[0].transport_mode,
+          seaMode: qRows[0].sea_mode ?? null,
+          tripType: qRows[0].trip_type === 'round_trip' ? 'round_trip' : 'one_way',
+          inputJson: parseJsonSafe(qRows[0].input_json),
+          resultJson: parseJsonSafe(qRows[0].result_json),
+        };
+      }
+    }
+
+    const [resRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT vr.vehicle_id, vr.direction, vr.start_at, vr.end_at,
+              v.plate_or_code, v.capacity
+       FROM vehicle_reservation vr
+       LEFT JOIN vehicle v ON v.vehicle_id = vr.vehicle_id
+       WHERE vr.shipment_id = ? AND vr.status IN ('active', 'consumed')
+       ORDER BY vr.reservation_id ASC`,
+      [shipmentId],
+    );
+
+    return {
+      shipment: {
+        shipmentId: Number(s.shipment_id),
+        requestCode: `REQ-${String(s.shipment_id).padStart(3, '0')}`,
+        originLocation: s.origin_location || '',
+        destinationLocation: s.destination_location || '',
+        originLat: s.origin_lat !== null && s.origin_lat !== undefined ? Number(s.origin_lat) : null,
+        originLng: s.origin_lng !== null && s.origin_lng !== undefined ? Number(s.origin_lng) : null,
+        destinationLat: s.destination_lat !== null && s.destination_lat !== undefined ? Number(s.destination_lat) : null,
+        destinationLng: s.destination_lng !== null && s.destination_lng !== undefined ? Number(s.destination_lng) : null,
+        transportationType: s.transportation_type ?? null,
+        transportMode: s.transport_mode ?? null,
+        seaMode: s.sea_mode ?? null,
+        tripType: s.trip_type === 'round_trip' ? 'round_trip' : 'one_way',
+        departureDate: s.departure_date ? new Date(s.departure_date).toISOString() : null,
+        pickupAt: s.pickup_at ? new Date(s.pickup_at).toISOString() : null,
+        returnDepartureAt: s.return_departure_at ? new Date(s.return_departure_at).toISOString() : null,
+        requestedHorseCount: Math.max(1, Number(s.requested_horse_count || 1)),
+        quoteId: s.quote_id ? Number(s.quote_id) : null,
+        allocationSnapshot: parseJsonSafe(s.allocation_snapshot),
+      },
+      quote,
+      reservations: resRows.map((r) => ({
+        vehicleId: Number(r.vehicle_id),
+        plateOrCode: r.plate_or_code ?? null,
+        capacity: Number(r.capacity || 0),
+        direction: r.direction === 'return' ? 'return' : 'outbound',
+        reservedFrom: r.start_at ? new Date(r.start_at).toISOString() : null,
+        reservedTo: r.end_at ? new Date(r.end_at).toISOString() : null,
+      })),
+    };
+  }
+
   private mapRouteRow(r: RouteRow): RouteEntity {
     return {
       id: r.route_id,
@@ -1523,12 +1770,23 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       routeId: r.route_id,
       legId: r.leg_id,
       sequenceNo: Number(r.sequence_no),
-      direction: (r as any).direction ?? 'outbound',
+      direction: (r.direction as 'outbound' | 'return') ?? 'outbound',
       stopType: r.stop_type,
       locationName: r.location_name,
       country: r.country,
       plannedArrival: r.planned_arrival ? new Date(r.planned_arrival).toISOString() : null,
       plannedDeparture: r.planned_departure ? new Date(r.planned_departure).toISOString() : null,
+      lat: r.lat !== null && r.lat !== undefined ? Number(r.lat) : null,
+      lng: r.lng !== null && r.lng !== undefined ? Number(r.lng) : null,
+      geofenceRadiusM:
+        r.geofence_radius_m !== null && r.geofence_radius_m !== undefined
+          ? Number(r.geofence_radius_m)
+          : null,
+      locationRefType: r.location_ref_type ?? null,
+      locationRefId:
+        r.location_ref_id !== null && r.location_ref_id !== undefined
+          ? Number(r.location_ref_id)
+          : null,
       status: r.status,
     };
   }

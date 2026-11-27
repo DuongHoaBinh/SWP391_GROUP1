@@ -937,14 +937,14 @@ export default function ManagerRequestDetailPage() {
                   href="/manager/planning"
                   className="no-underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:bg-[#FAF8F4] text-xs font-bold text-[#181A17] whitespace-nowrap"
                 >
-                  <span>{isEn ? 'Planning Queue' : 'Kế hoạch chuyến đi'}</span>
+                  <span>{isEn ? 'Dispatch & Crew' : 'Điều phối & Phân công'}</span>
                 </Link>
                 <Link
                   href={`/manager/dispatch/routes?shipmentId=${order.id}`}
                   className="no-underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#181A17] hover:bg-[#2A2D28] text-xs font-bold text-[#FAF8F4] whitespace-nowrap"
                 >
                   <RouteIcon size={13} />
-                  <span>{isEn ? 'Edit Route Legs' : 'Dựng / Sửa lộ trình'}</span>
+                  <span>{isEn ? 'Confirm / Edit Route' : 'Xác nhận / Sửa lộ trình'}</span>
                 </Link>
               </div>
             </div>
@@ -974,8 +974,8 @@ export default function ManagerRequestDetailPage() {
               ) : (
                 <div className="text-center py-8 text-sm text-[#5C6658] bg-[#FAF9F5] rounded-xl border border-dashed border-[#D8CEBE]">
                   {isEn
-                    ? 'Click "Edit Route Legs" above to build legs, assign vehicles and confirm the dispatch plan.'
-                    : 'Nhấn "Dựng / Sửa lộ trình" ở trên để thiết lập các chặng, trạm dừng và xác nhận kế hoạch xuất phát.'}
+                    ? 'Click "Confirm / Edit Route" above to review quote-suggested legs, assign vehicles and lock the dispatch plan.'
+                    : 'Nhấn "Xác nhận / Sửa lộ trình" ở trên để kiểm tra chặng từ báo giá, gán phương tiện và chốt kế hoạch xuất phát.'}
                 </div>
               )}
             </div>

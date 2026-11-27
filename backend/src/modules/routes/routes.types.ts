@@ -84,6 +84,14 @@ export interface MasterStopEntity {
   lng: number | null;
 }
 
+export type StopLocationRefType =
+  | 'master_stop'
+  | 'airport'
+  | 'seaport'
+  | 'depot'
+  | 'address'
+  | 'manual';
+
 export interface RouteStopEntity {
   id: number;
   routeId: number;
@@ -95,6 +103,11 @@ export interface RouteStopEntity {
   country: string | null;
   plannedArrival: string | null;
   plannedDeparture: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  geofenceRadiusM?: number | null;
+  locationRefType?: StopLocationRefType | null;
+  locationRefId?: number | null;
   status: RouteStopStatus;
 }
 

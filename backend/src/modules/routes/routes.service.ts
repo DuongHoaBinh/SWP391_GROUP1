@@ -24,8 +24,11 @@ import {
   RouteStatus,
   RouteStopEntity,
   RouteStopType,
+  StopLocationRefType,
   TripPlanReadiness,
 } from './routes.types';
+import { haversine, toCountryCode } from './route-network.geo';
+import { resolveLocationCoords } from '../../common/road-trip-sequencing';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { RecordStopProgressDto } from './dto/record-stop-progress.dto';
@@ -66,6 +69,714 @@ export class RoutesService implements OnModuleInit {
       this.routesStore.findAllMasterStops(),
     ]);
     return { airlines, airports, masterStops };
+  }
+
+  /**
+   * Tự dựng đề xuất lộ trình chi tiết cho Flow 3 từ dữ liệu khách hàng đã đặt
+   * (shipment_quote.result_json.routePlan / legs + vehicle_reservation + pickup_at + trip_type).
+   */
+  async getDraftSuggestion(user: AuthenticatedUser, shipmentId: number): Promise<{
+    shipmentId: number;
+    source: 'quote_route_plan' | 'quote_legs' | 'shipment_fallback';
+    transportMode: 'road' | 'air' | 'sea';
+    tripType: 'one_way' | 'round_trip';
+    routeName: string;
+    totalDistanceKm: number;
+    pickupAt: string;
+    returnDepartureAt: string | null;
+    reservedOutboundVehicleIds: number[];
+    reservedReturnVehicleIds: number[];
+    legs: Array<{
+      sequenceNo: number;
+      direction: 'outbound' | 'return';
+      legType: 'road' | 'flight' | 'sea';
+      originLocation: string;
+      destinationLocation: string;
+      distanceKm: number;
+      durationHours: number;
+      plannedDeparture: string;
+      plannedArrival: string;
+      vehicleId: number | null;
+      departureAirportId: number | null;
+      departureAirportCode: string | null;
+      arrivalAirportId: number | null;
+      arrivalAirportCode: string | null;
+      stallsBooked: number;
+    }>;
+    stops: Array<{
+      sequenceNo: number;
+      direction: 'outbound' | 'return';
+      legSequenceNo: number;
+      stopType: 'rest' | 'quarantine' | 'border_check' | 'refuel';
+      locationName: string;
+      country: string | null;
+      plannedArrival: string;
+      plannedDeparture: string;
+      lat: number | null;
+      lng: number | null;
+      geofenceRadiusM: number | null;
+      locationRefType: StopLocationRefType | null;
+      locationRefId: number | null;
+    }>;
+  }> {
+    if (user.role !== UserRole.LOGISTICS_MANAGER && user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Chỉ Logistics Manager hoặc Admin mới được lấy gợi ý lập lộ trình');
+    }
+    const ctx = await this.routesStore.findDraftSuggestionContext(shipmentId);
+    if (!ctx) {
+      throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
+    }
+    const [airports, masterStops] = await Promise.all([
+      typeof this.routesStore.findAllAirports === 'function' ? this.routesStore.findAllAirports() : Promise.resolve([]),
+      typeof this.routesStore.findAllMasterStops === 'function' ? this.routesStore.findAllMasterStops() : Promise.resolve([]),
+    ]);
+    return RoutesService.composeDraftSuggestion(ctx, airports, masterStops);
+  }
+
+  private static foldText(value?: string | null): string {
+    return String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9 ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private static readonly LOCATION_COUNTRY_HINTS: ReadonlyArray<[string, readonly string[]]> = [
+    ['KH', ['cambodia', 'campuchia', 'phnom penh', 'siem reap', 'sihanoukville', 'bavet', 'poipet', 'takeo']],
+    ['LA', ['laos', 'lao', 'vientiane', 'luang prabang', 'pakse', 'savannakhet']],
+    ['TH', ['thailand', 'thai lan', 'bangkok', 'chiang mai', 'pattaya', 'phuket', 'aranyaprathet']],
+    ['SG', ['singapore', 'changi', 'kranji', 'tuas', 'pasir panjang']],
+    ['MY', ['malaysia', 'kuala lumpur', 'penang', 'johor', 'selangor', 'klia']],
+    ['CN', ['china', 'trung quoc', 'beijing', 'bac kinh', 'shanghai', 'thuong hai', 'guangzhou', 'quang chau', 'conghua', 'nanning', 'nam ninh']],
+    ['HK', ['hong kong', 'hongkong']],
+    ['ID', ['indonesia', 'jakarta', 'bali', 'surabaya']],
+    ['PH', ['philippines', 'manila', 'cebu']],
+    ['MM', ['myanmar', 'yangon', 'mandalay']],
+    ['AU', ['australia', 'sydney', 'melbourne', 'eastern creek']],
+    ['JP', ['japan', 'nhat ban', 'tokyo', 'osaka']],
+    ['KR', ['korea', 'han quoc', 'seoul', 'incheon']],
+    ['AE', ['uae', 'dubai', 'abu dhabi']],
+    ['QA', ['qatar', 'doha']],
+    ['VN', [
+      'vietnam', 'viet nam', 'tp hcm', 'tphcm', 'ho chi minh', 'sai gon', 'saigon',
+      'thu duc', 'cu chi', 'tan son nhat', 'ha noi', 'hanoi', 'noi bai', 'da nang',
+      'da lat', 'lam dong', 'binh duong', 'dong nai', 'tay ninh', 'long an',
+      'can tho', 'hai phong', 'nha trang', 'khanh hoa', 'vung tau', 'hue', 'phu quoc', 'cat lai',
+    ]],
+  ];
+
+  static inferCountryCodeFromLocation(location?: string | null): string {
+    const raw = String(location || '').trim();
+    if (!raw) return '';
+    const direct = toCountryCode(raw);
+    if (direct) return direct;
+
+    // Check parenthesized fragments & comma-separated tokens first (e.g. "Phnom Penh (Campuchia)")
+    const parenMatches = raw.match(/\(([^)]+)\)/g) || [];
+    for (const pm of parenMatches) {
+      const inner = pm.slice(1, -1).trim();
+      const cc = toCountryCode(inner);
+      if (cc) return cc;
+    }
+    const commaParts = raw.split(',').map((p) => p.trim()).reverse();
+    for (const part of commaParts) {
+      const cc = toCountryCode(part);
+      if (cc) return cc;
+    }
+
+    const folded = RoutesService.foldText(raw);
+    if (!folded) return '';
+    for (const [cc, tokens] of RoutesService.LOCATION_COUNTRY_HINTS) {
+      if (tokens.some((tok) => folded === tok || folded.includes(` ${tok} `) || folded.startsWith(`${tok} `) || folded.endsWith(` ${tok}`))) {
+        return cc;
+      }
+    }
+    return '';
+  }
+
+  static pickBestCrossBorderStop(
+    masterStops: MasterStopEntity[],
+    originCoords: [number, number] | null,
+    destCoords: [number, number] | null,
+    originCC: string,
+    destCC: string,
+  ): MasterStopEntity | null {
+    const eligible = masterStops.filter(
+      (ms) => ms.stopType === 'border_check' || ms.stopType === 'quarantine',
+    );
+    if (eligible.length === 0) return null;
+
+    const isLandBorderStop = (ms: MasterStopEntity): boolean => {
+      if (ms.stopType === 'border_check') return true;
+      const f = RoutesService.foldText(ms.name);
+      return f.includes('cua khau') || f.includes('border') || f.includes('checkpoint');
+    };
+
+    const landBorderPool = eligible.filter(isLandBorderStop);
+    const pool = landBorderPool.length > 0 ? landBorderPool : eligible;
+
+    // 1. If we have origin & destination coordinates, pick the checkpoint with shortest corridor detour
+    if (originCoords && destCoords) {
+      let best: MasterStopEntity | null = null;
+      let bestTotalKm = Infinity;
+      for (const ms of pool) {
+        if (ms.lat === null || ms.lat === undefined || ms.lng === null || ms.lng === undefined) continue;
+        const lat = Number(ms.lat);
+        const lng = Number(ms.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const totalKm = haversine(originCoords, [lat, lng]) + haversine([lat, lng], destCoords);
+        if (totalKm < bestTotalKm) {
+          bestTotalKm = totalKm;
+          best = ms;
+        }
+      }
+      if (best) return best;
+    }
+
+    // 2. Corridor heuristics by country pair when coordinates aren't available
+    const pair = new Set([originCC, destCC].filter(Boolean));
+    if (pair.has('VN') && (pair.has('KH') || pair.has('TH'))) {
+      const mocBai = pool.find((ms) => {
+        const f = RoutesService.foldText(ms.name);
+        return f.includes('moc bai') || f.includes('tinh bien');
+      });
+      if (mocBai) return mocBai;
+    }
+    if (pair.has('VN') && pair.has('CN')) {
+      const huuNghi = pool.find((ms) => RoutesService.foldText(ms.name).includes('huu nghi'));
+      if (huuNghi) return huuNghi;
+    }
+    if (pair.has('SG') || pair.has('MY')) {
+      const tuas = pool.find((ms) => RoutesService.foldText(ms.name).includes('tuas'));
+      if (tuas) return tuas;
+    }
+
+    // 3. Fallback: prefer stop in origin or destination country, else first in pool
+    const byCountry = pool.find((ms) => {
+      const msCC = RoutesService.inferCountryCodeFromLocation(ms.country);
+      return Boolean(msCC) && pair.has(msCC);
+    });
+    return byCountry ?? pool[0] ?? null;
+  }
+
+  static composeDraftSuggestion(
+    ctx: NonNullable<Awaited<ReturnType<RoutesStore['findDraftSuggestionContext']>>>,
+    airports: AirportEntity[],
+    masterStops: MasterStopEntity[],
+  ) {
+    const { shipment, quote, reservations } = ctx;
+    const horseCount = Math.max(1, shipment.requestedHorseCount || 1);
+    const airStalls = Math.max(1, Math.ceil(horseCount / 3));
+
+    const inferMode = (): 'road' | 'air' | 'sea' => {
+      if (quote?.transportMode) return quote.transportMode;
+      if (shipment.transportMode) return shipment.transportMode;
+      const t = String(shipment.transportationType || '').toLowerCase();
+      if (t.includes('sea') || t.includes('thủy') || t.includes('biển') || t.includes('vessel')) return 'sea';
+      if (t.includes('air') || t.includes('bay') || t.includes('hàng không') || t.includes('flight')) return 'air';
+      return 'road';
+    };
+    const transportMode = inferMode();
+    const tripType = quote?.tripType || shipment.tripType || 'one_way';
+
+    const reservedOutboundVehicleIds = reservations
+      .filter((r) => r.direction === 'outbound')
+      .map((r) => r.vehicleId);
+    const reservedReturnVehicleIds = reservations
+      .filter((r) => r.direction === 'return')
+      .map((r) => r.vehicleId);
+
+    // Fallback to allocationSnapshot selected vehicles if reservation rows aren't present
+    if (reservedOutboundVehicleIds.length === 0 && shipment.allocationSnapshot) {
+      const snapIds =
+        shipment.allocationSnapshot.vehicleIds ||
+        shipment.allocationSnapshot.vehicles?.map((v: any) => Number(v.vehicleId)).filter((n: number) => Number.isFinite(n));
+      if (Array.isArray(snapIds)) {
+        for (const id of snapIds) {
+          if (Number.isFinite(Number(id)) && Number(id) > 0) reservedOutboundVehicleIds.push(Number(id));
+        }
+      }
+    }
+
+    const outboundVehicleId = reservedOutboundVehicleIds[0] ?? null;
+    const returnVehicleId = reservedReturnVehicleIds[0] ?? outboundVehicleId;
+
+    const resolveStartIso = (): string => {
+      if (shipment.pickupAt) return new Date(shipment.pickupAt).toISOString();
+      if (quote?.inputJson?.pickupAt) return new Date(quote.inputJson.pickupAt).toISOString();
+      if (shipment.departureDate) {
+        const d = new Date(shipment.departureDate);
+        if (!Number.isNaN(d.getTime())) {
+          // Default 08:00 local (+07:00) = 01:00 UTC if date-only
+          if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) {
+            d.setUTCHours(1, 0, 0, 0);
+          }
+          return d.toISOString();
+        }
+      }
+      const tomorrow = new Date(Date.now() + 2 * 24 * 3600 * 1000);
+      tomorrow.setUTCHours(1, 0, 0, 0);
+      return tomorrow.toISOString();
+    };
+    const pickupAtIso = resolveStartIso();
+
+    const findAirport = (code?: string | null, name?: string | null): AirportEntity | null => {
+      if (code) {
+        const upper = String(code).trim().toUpperCase();
+        const byCode = airports.find((a) => String(a.iataCode).toUpperCase() === upper);
+        if (byCode) return byCode;
+      }
+      if (name) {
+        const raw = String(name);
+        const codeMatch = raw.match(/\(([A-Z]{3})\)/);
+        if (codeMatch) {
+          const byParen = airports.find((a) => String(a.iataCode).toUpperCase() === codeMatch[1]);
+          if (byParen) return byParen;
+        }
+        const lower = raw.toLowerCase();
+        const byName = airports.find(
+          (a) =>
+            lower.includes(String(a.name).toLowerCase()) ||
+            lower.includes(String(a.city).toLowerCase()),
+        );
+        if (byName) return byName;
+      }
+      return null;
+    };
+
+    const haversineEstimateKm = (): number => {
+      if (
+        shipment.originLat !== null &&
+        shipment.originLng !== null &&
+        shipment.destinationLat !== null &&
+        shipment.destinationLng !== null
+      ) {
+        const toRad = (deg: number) => (deg * Math.PI) / 180;
+        const R = 6371;
+        const dLat = toRad(shipment.destinationLat - shipment.originLat);
+        const dLng = toRad(shipment.destinationLng - shipment.originLng);
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(toRad(shipment.originLat)) * Math.cos(toRad(shipment.destinationLat)) * Math.sin(dLng / 2) ** 2;
+        const direct = 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return Math.max(20, Math.round(direct * (transportMode === 'air' ? 1.05 : 1.25)));
+      }
+      return transportMode === 'road' ? 240 : 1150;
+    };
+
+    type RawStopDraft = {
+      stopType?: string;
+      type?: string;
+      name: string;
+      countryCode?: string | null;
+      country?: string | null;
+      coords?: [number, number] | null;
+      lat?: number | null;
+      lng?: number | null;
+    };
+
+    type RawLegDraft = {
+      legType: 'road' | 'flight' | 'sea';
+      originLocation: string;
+      destinationLocation: string;
+      distanceKm: number;
+      durationHours: number;
+      fromCode?: string | null;
+      toCode?: string | null;
+      stops?: RawStopDraft[];
+    };
+
+    let source: 'quote_route_plan' | 'quote_legs' | 'shipment_fallback' = 'shipment_fallback';
+    const rawOutbound: RawLegDraft[] = [];
+    const routePlanLegs: any[] | null = Array.isArray(quote?.resultJson?.routePlan?.legs) && quote.resultJson.routePlan.legs.length > 0
+      ? quote.resultJson.routePlan.legs
+      : null;
+    const quoteLegs: any[] | null = Array.isArray(quote?.resultJson?.legs) && quote.resultJson.legs.length > 0
+      ? quote.resultJson.legs
+      : null;
+
+    if (routePlanLegs) {
+      source = 'quote_route_plan';
+      for (const rl of routePlanLegs) {
+        const mappedType: 'road' | 'flight' | 'sea' =
+          rl.type === 'air' ? 'flight' : rl.type === 'sea' ? 'sea' : 'road';
+        rawOutbound.push({
+          legType: mappedType,
+          originLocation: rl.fromName || shipment.originLocation,
+          destinationLocation: rl.toName || shipment.destinationLocation,
+          distanceKm: Math.max(1, Math.round(Number(rl.distanceKm || 0))),
+          durationHours: Math.max(0.5, Number(Number(rl.durationHours || 1).toFixed(2))),
+          fromCode: rl.fromCode ?? null,
+          toCode: rl.toCode ?? null,
+          stops: Array.isArray(rl.stops) ? rl.stops : [],
+        });
+      }
+    } else if (quoteLegs) {
+      source = 'quote_legs';
+      for (const ql of quoteLegs) {
+        const key = String(ql.key || '').toLowerCase();
+        const mappedType: 'road' | 'flight' | 'sea' =
+          key === 'flight' || key === 'air' ? 'flight' : key === 'sea' ? 'sea' : 'road';
+        rawOutbound.push({
+          legType: mappedType,
+          originLocation: ql.from || shipment.originLocation,
+          destinationLocation: ql.to || shipment.destinationLocation,
+          distanceKm: Math.max(1, Math.round(Number(ql.distanceKm || 0))),
+          durationHours: Math.max(0.5, Number(Number(ql.durationHours || 1).toFixed(2))),
+        });
+      }
+    } else {
+      source = 'shipment_fallback';
+      const estKm = haversineEstimateKm();
+      if (transportMode === 'road') {
+        rawOutbound.push({
+          legType: 'road',
+          originLocation: shipment.originLocation,
+          destinationLocation: shipment.destinationLocation,
+          distanceKm: estKm,
+          durationHours: Math.max(1, Number((estKm / 50).toFixed(1))),
+        });
+      } else if (transportMode === 'air') {
+        const depApt = findAirport(null, shipment.originLocation) || airports.find((a) => a.iataCode === 'SGN') || null;
+        const arrApt = findAirport(null, shipment.destinationLocation) || airports.find((a) => a.iataCode === 'SIN') || null;
+        const depName = depApt ? `${depApt.name} (${depApt.iataCode})` : 'Sân bay xuất phát';
+        const arrName = arrApt ? `${arrApt.name} (${arrApt.iataCode})` : 'Sân bay đến';
+        rawOutbound.push(
+          { legType: 'road', originLocation: shipment.originLocation, destinationLocation: depName, distanceKm: 35, durationHours: 1.5 },
+          {
+            legType: 'flight',
+            originLocation: depName,
+            destinationLocation: arrName,
+            distanceKm: Math.max(200, estKm - 70),
+            durationHours: Math.max(4, Number(((estKm / 700) + 6.5).toFixed(1))),
+            fromCode: depApt?.iataCode ?? null,
+            toCode: arrApt?.iataCode ?? null,
+          },
+          { legType: 'road', originLocation: arrName, destinationLocation: shipment.destinationLocation, distanceKm: 35, durationHours: 1.5 },
+        );
+      } else {
+        rawOutbound.push(
+          { legType: 'road', originLocation: shipment.originLocation, destinationLocation: 'Cảng biển xuất phát', distanceKm: 35, durationHours: 1.5 },
+          { legType: 'sea', originLocation: 'Cảng biển xuất phát', destinationLocation: 'Cảng biển đích', distanceKm: Math.max(150, estKm), durationHours: Math.max(12, Number((estKm / 25 + 4.5).toFixed(1))) },
+          { legType: 'road', originLocation: 'Cảng biển đích', destinationLocation: shipment.destinationLocation, distanceKm: 35, durationHours: 1.5 },
+        );
+      }
+    }
+
+    const legs: Array<{
+      sequenceNo: number;
+      direction: 'outbound' | 'return';
+      legType: 'road' | 'flight' | 'sea';
+      originLocation: string;
+      destinationLocation: string;
+      distanceKm: number;
+      durationHours: number;
+      plannedDeparture: string;
+      plannedArrival: string;
+      vehicleId: number | null;
+      departureAirportId: number | null;
+      departureAirportCode: string | null;
+      arrivalAirportId: number | null;
+      arrivalAirportCode: string | null;
+      stallsBooked: number;
+    }> = [];
+
+    const stops: Array<{
+      sequenceNo: number;
+      direction: 'outbound' | 'return';
+      legSequenceNo: number;
+      stopType: 'rest' | 'quarantine' | 'border_check' | 'refuel';
+      locationName: string;
+      country: string | null;
+      plannedArrival: string;
+      plannedDeparture: string;
+      lat: number | null;
+      lng: number | null;
+      geofenceRadiusM: number | null;
+      locationRefType: StopLocationRefType | null;
+      locationRefId: number | null;
+    }> = [];
+
+    const originCC =
+      toCountryCode(null, quote?.inputJson?.originCountryCode) ||
+      RoutesService.inferCountryCodeFromLocation(shipment.originLocation);
+    const destCC =
+      toCountryCode(null, quote?.inputJson?.destinationCountryCode) ||
+      RoutesService.inferCountryCodeFromLocation(shipment.destinationLocation);
+    const tTypeLower = String(shipment.transportationType || '').toLowerCase();
+    const explicitInternational =
+      tTypeLower.includes('international') ||
+      tTypeLower.includes('liên vận') ||
+      tTypeLower.includes('quốc tế') ||
+      quote?.resultJson?.routePlan?.isDomestic === false ||
+      quote?.resultJson?.isInternational === true;
+    const explicitDomestic = tTypeLower.includes('domestic') || tTypeLower.includes('nội địa');
+    const inferredCrossBorder =
+      (Boolean(originCC) && Boolean(destCC) && originCC !== destCC) ||
+      (!explicitDomestic && Boolean(destCC) && destCC !== 'VN');
+    const isCrossBorderShipment = explicitInternational || inferredCrossBorder;
+
+    const originCoords: [number, number] | null =
+      shipment.originLat !== null && shipment.originLng !== null
+        ? [Number(shipment.originLat), Number(shipment.originLng)]
+        : resolveLocationCoords(shipment.originLocation).coords;
+    const destCoords: [number, number] | null =
+      shipment.destinationLat !== null && shipment.destinationLng !== null
+        ? [Number(shipment.destinationLat), Number(shipment.destinationLng)]
+        : resolveLocationCoords(shipment.destinationLocation).coords;
+
+    const matchMasterStopByName = (name?: string | null): MasterStopEntity | null => {
+      const target = String(name || '').trim().toLowerCase();
+      if (!target) return null;
+      return masterStops.find((ms) => String(ms.name || '').trim().toLowerCase() === target) ?? null;
+    };
+
+    const routePlanCheckpoints: Array<{
+      name: string;
+      countryCode: string | null;
+      lat: number | null;
+      lng: number | null;
+    }> = Array.isArray(quote?.resultJson?.routePlan?.waypoints)
+      ? quote.resultJson.routePlan.waypoints
+          .filter((wp: any) => wp && wp.type === 'checkpoint' && wp.name)
+          .map((wp: any) => ({
+            name: String(wp.name),
+            countryCode: wp.countryCode ? String(wp.countryCode) : null,
+            lat: Array.isArray(wp.coords) && Number.isFinite(Number(wp.coords[0])) ? Number(wp.coords[0]) : null,
+            lng: Array.isArray(wp.coords) && Number.isFinite(Number(wp.coords[1])) ? Number(wp.coords[1]) : null,
+          }))
+      : [];
+
+    const appendDirectionLegs = (
+      rawList: RawLegDraft[],
+      direction: 'outbound' | 'return',
+      startMs: number,
+      companyVehicleId: number | null,
+    ): number => {
+      let cursorMs = startMs;
+      const firstCrossBorderIdx = rawList.findIndex((l) => l.legType === 'flight' || l.legType === 'sea');
+      const isInternationalRoadOnly = firstCrossBorderIdx < 0 && isCrossBorderShipment;
+      const directionStartStopCount = stops.length;
+
+      rawList.forEach((raw, idx) => {
+        const seq = legs.length + 1;
+        const depMs = cursorMs;
+        const durMs = Math.max(0.5, raw.durationHours) * 3600 * 1000;
+        const arrMs = depMs + durMs;
+
+        const isOverseasPartnerRoad =
+          raw.legType === 'road' &&
+          firstCrossBorderIdx >= 0 &&
+          (direction === 'outbound' ? idx > firstCrossBorderIdx : idx < firstCrossBorderIdx);
+
+        let departureAirportId: number | null = null;
+        let departureAirportCode: string | null = null;
+        let arrivalAirportId: number | null = null;
+        let arrivalAirportCode: string | null = null;
+
+        if (raw.legType === 'flight') {
+          const depApt = findAirport(raw.fromCode, raw.originLocation);
+          const arrApt = findAirport(raw.toCode, raw.destinationLocation);
+          departureAirportId = depApt?.id ?? null;
+          departureAirportCode = depApt?.iataCode ?? raw.fromCode ?? null;
+          arrivalAirportId = arrApt?.id ?? null;
+          arrivalAirportCode = arrApt?.iataCode ?? raw.toCode ?? null;
+        }
+
+        legs.push({
+          sequenceNo: seq,
+          direction,
+          legType: raw.legType,
+          originLocation: raw.originLocation,
+          destinationLocation: raw.destinationLocation,
+          distanceKm: raw.distanceKm,
+          durationHours: raw.durationHours,
+          plannedDeparture: new Date(depMs).toISOString(),
+          plannedArrival: new Date(arrMs).toISOString(),
+          vehicleId: raw.legType === 'road' && !isOverseasPartnerRoad ? companyVehicleId : null,
+          departureAirportId,
+          departureAirportCode,
+          arrivalAirportId,
+          arrivalAirportCode,
+          stallsBooked: raw.legType === 'flight' ? airStalls : horseCount,
+        });
+
+        // Map stops from routePlan (if any)
+        const legStops = Array.isArray(raw.stops) ? raw.stops : [];
+        if (legStops.length > 0) {
+          legStops.forEach((st, sIdx) => {
+            const frac = (sIdx + 1) / (legStops.length + 1);
+            const stArrMs = depMs + durMs * frac;
+            const rawStopType = String(st.stopType || st.type || '').toLowerCase();
+            const stopTypeNorm =
+              rawStopType === 'quarantine'
+                ? 'quarantine'
+                : rawStopType === 'border_check'
+                  ? 'border_check'
+                  : rawStopType === 'refuel'
+                    ? 'refuel'
+                    : 'rest';
+            const matchedMs = matchMasterStopByName(st.name);
+            const coordLat =
+              Array.isArray(st.coords) && Number.isFinite(Number(st.coords[0]))
+                ? Number(st.coords[0])
+                : st.lat !== null && st.lat !== undefined && Number.isFinite(Number(st.lat))
+                  ? Number(st.lat)
+                  : matchedMs?.lat ?? null;
+            const coordLng =
+              Array.isArray(st.coords) && Number.isFinite(Number(st.coords[1]))
+                ? Number(st.coords[1])
+                : st.lng !== null && st.lng !== undefined && Number.isFinite(Number(st.lng))
+                  ? Number(st.lng)
+                  : matchedMs?.lng ?? null;
+            stops.push({
+              sequenceNo: stops.length + 1,
+              direction,
+              legSequenceNo: seq,
+              stopType: stopTypeNorm,
+              locationName: st.name,
+              country: st.country ?? matchedMs?.country ?? st.countryCode ?? null,
+              plannedArrival: new Date(stArrMs).toISOString(),
+              plannedDeparture: new Date(stArrMs + 45 * 60 * 1000).toISOString(),
+              lat: coordLat,
+              lng: coordLng,
+              geofenceRadiusM: stopTypeNorm === 'border_check' || stopTypeNorm === 'quarantine' ? 1000 : 300,
+              locationRefType: matchedMs ? 'master_stop' : coordLat !== null && coordLng !== null ? 'address' : null,
+              locationRefId: matchedMs?.id ?? null,
+            });
+          });
+        }
+
+        // Advance cursor with sensible handoff buffer (1h before flight/sea or 30m between legs)
+        const bufferMs = raw.legType === 'road' && firstCrossBorderIdx === idx + 1 ? 60 * 60 * 1000 : 30 * 60 * 1000;
+        cursorMs = arrMs + bufferMs;
+      });
+
+      // Ensure international road-only shipments include a border/quarantine checkpoint with GPS coordinates (BR-F3-03)
+      if (isInternationalRoadOnly) {
+        const directionStops = stops.slice(directionStartStopCount);
+        const hasBorderOrQuarantine = directionStops.some(
+          (s) => s.stopType === 'border_check' || s.stopType === 'quarantine',
+        );
+        if (!hasBorderOrQuarantine && rawList.length > 0) {
+          const firstDirLegIdx = legs.length - rawList.length;
+          const anchorLeg = legs[firstDirLegIdx];
+          const depMs = new Date(anchorLeg.plannedDeparture).getTime();
+          const arrMs = new Date(anchorLeg.plannedArrival).getTime();
+          const midMs = depMs + (arrMs - depMs) * 0.5;
+
+          const planCp = routePlanCheckpoints[0] ?? null;
+          if (planCp) {
+            const matchedMs = matchMasterStopByName(planCp.name);
+            stops.push({
+              sequenceNo: stops.length + 1,
+              direction,
+              legSequenceNo: anchorLeg.sequenceNo,
+              stopType: 'border_check',
+              locationName: planCp.name,
+              country: matchedMs?.country ?? planCp.countryCode ?? null,
+              plannedArrival: new Date(midMs).toISOString(),
+              plannedDeparture: new Date(midMs + 60 * 60 * 1000).toISOString(),
+              lat: planCp.lat ?? matchedMs?.lat ?? null,
+              lng: planCp.lng ?? matchedMs?.lng ?? null,
+              geofenceRadiusM: 1000,
+              locationRefType: matchedMs ? 'master_stop' : planCp.lat !== null && planCp.lng !== null ? 'address' : null,
+              locationRefId: matchedMs?.id ?? null,
+            });
+          } else {
+            const borderCandidate = RoutesService.pickBestCrossBorderStop(
+              masterStops,
+              direction === 'outbound' ? originCoords : destCoords,
+              direction === 'outbound' ? destCoords : originCoords,
+              direction === 'outbound' ? originCC : destCC,
+              direction === 'outbound' ? destCC : originCC,
+            );
+            if (borderCandidate) {
+              stops.push({
+                sequenceNo: stops.length + 1,
+                direction,
+                legSequenceNo: anchorLeg.sequenceNo,
+                stopType: borderCandidate.stopType === 'quarantine' ? 'quarantine' : 'border_check',
+                locationName: borderCandidate.name,
+                country: borderCandidate.country,
+                plannedArrival: new Date(midMs).toISOString(),
+                plannedDeparture: new Date(midMs + 60 * 60 * 1000).toISOString(),
+                lat: borderCandidate.lat ?? null,
+                lng: borderCandidate.lng ?? null,
+                geofenceRadiusM: 1000,
+                locationRefType: 'master_stop',
+                locationRefId: borderCandidate.id,
+              });
+            }
+          }
+        }
+      }
+
+      return cursorMs;
+    };
+
+    const outboundEndMs = appendDirectionLegs(rawOutbound, 'outbound', new Date(pickupAtIso).getTime(), outboundVehicleId);
+
+    let returnDepartureAtIso: string | null = null;
+    if (tripType === 'round_trip') {
+      const retStartMs = shipment.returnDepartureAt
+        ? new Date(shipment.returnDepartureAt).getTime()
+        : quote?.inputJson?.returnDepartureAt
+          ? new Date(quote.inputJson.returnDepartureAt).getTime()
+          : outboundEndMs + 48 * 3600 * 1000;
+      returnDepartureAtIso = new Date(retStartMs).toISOString();
+
+      const quoteReturnLegs: any[] | null =
+        Array.isArray(quote?.resultJson?.return?.legs) && quote.resultJson.return.legs.length > 0
+          ? quote.resultJson.return.legs
+          : null;
+
+      const rawReturn: RawLegDraft[] = quoteReturnLegs
+        ? quoteReturnLegs.map((ql) => {
+            const key = String(ql.key || '').toLowerCase();
+            return {
+              legType: key === 'flight' || key === 'air' ? 'flight' : key === 'sea' ? 'sea' : 'road',
+              originLocation: ql.from || shipment.destinationLocation,
+              destinationLocation: ql.to || shipment.originLocation,
+              distanceKm: Math.max(1, Math.round(Number(ql.distanceKm || 0))),
+              durationHours: Math.max(0.5, Number(Number(ql.durationHours || 1).toFixed(2))),
+            };
+          })
+        : [...rawOutbound].reverse().map((l) => ({
+            legType: l.legType,
+            originLocation: l.destinationLocation,
+            destinationLocation: l.originLocation,
+            distanceKm: l.distanceKm,
+            durationHours: l.durationHours,
+            fromCode: l.toCode ?? null,
+            toCode: l.fromCode ?? null,
+            stops: l.stops ? [...l.stops].reverse() : [],
+          }));
+
+      appendDirectionLegs(rawReturn, 'return', retStartMs, returnVehicleId);
+    }
+
+    const totalDistanceKm = Math.round(legs.reduce((sum, l) => sum + Number(l.distanceKm || 0), 0));
+    const modeLabel = transportMode === 'air' ? 'Hàng không' : transportMode === 'sea' ? 'Đường thủy' : 'Đường bộ';
+    const routeName = `Tuyến ${modeLabel}${tripType === 'round_trip' ? ' (Khứ hồi)' : ''}: ${shipment.originLocation} → ${shipment.destinationLocation}`.slice(0, 200);
+
+    return {
+      shipmentId: shipment.shipmentId,
+      source,
+      transportMode,
+      tripType,
+      routeName,
+      totalDistanceKm,
+      pickupAt: pickupAtIso,
+      returnDepartureAt: returnDepartureAtIso,
+      reservedOutboundVehicleIds,
+      reservedReturnVehicleIds,
+      legs,
+      stops,
+    };
   }
 
   private redactRouteForCustomer(route: RouteEntity, order: { originLocation: string; destinationLocation: string }): RouteEntity {
@@ -454,9 +1165,84 @@ export class RoutesService implements OnModuleInit {
       }
     }
 
+    if (Array.isArray(dto.stops) && dto.stops.length > 0) {
+      dto = {
+        ...dto,
+        stops: await this.enrichStopsWithMasterData(dto.stops),
+      };
+    }
+
     await this.routesStore.saveDetailedPlan(routeId, dto, Number(user.id));
 
     return (await this.routesStore.findRouteById(routeId))!;
+  }
+
+  private async enrichStopsWithMasterData<
+    T extends {
+      locationName: string;
+      country?: string;
+      lat?: number;
+      lng?: number;
+      geofenceRadiusM?: number;
+      locationRefType?: StopLocationRefType;
+      locationRefId?: number;
+    },
+  >(stops: T[]): Promise<T[]> {
+    const needsMasterLookup = stops.some(
+      (s) =>
+        s.lat === undefined ||
+        s.lat === null ||
+        s.lng === undefined ||
+        s.lng === null ||
+        (s.locationRefType === 'master_stop' && s.locationRefId),
+    );
+    const masterStops =
+      needsMasterLookup && typeof (this.routesStore as any).findAllMasterStops === 'function'
+        ? await this.routesStore.findAllMasterStops()
+        : [];
+
+    return stops.map((stop) => {
+      const matchedById =
+        stop.locationRefType === 'master_stop' && stop.locationRefId
+          ? masterStops.find((ms) => ms.id === Number(stop.locationRefId))
+          : undefined;
+      const normName = String(stop.locationName || '').trim().toLowerCase();
+      const matchedByName =
+        !matchedById && normName
+          ? masterStops.find((ms) => String(ms.name || '').trim().toLowerCase() === normName)
+          : undefined;
+      const matched = matchedById ?? matchedByName;
+
+      const rawLat = stop.lat !== undefined && stop.lat !== null ? Number(stop.lat) : matched?.lat ?? null;
+      const rawLng = stop.lng !== undefined && stop.lng !== null ? Number(stop.lng) : matched?.lng ?? null;
+      const validCoords =
+        rawLat !== null &&
+        rawLng !== null &&
+        Number.isFinite(rawLat) &&
+        Number.isFinite(rawLng) &&
+        rawLat >= -90 &&
+        rawLat <= 90 &&
+        rawLng >= -180 &&
+        rawLng <= 180;
+
+      const resolvedRefType: StopLocationRefType | undefined =
+        stop.locationRefType ?? (matched ? 'master_stop' : validCoords ? 'address' : undefined);
+      const resolvedRefId =
+        stop.locationRefId ?? (resolvedRefType === 'master_stop' && matched ? matched.id : undefined);
+
+      return {
+        ...stop,
+        country: stop.country?.trim() || matched?.country || undefined,
+        lat: validCoords ? rawLat : undefined,
+        lng: validCoords ? rawLng : undefined,
+        geofenceRadiusM:
+          stop.geofenceRadiusM !== undefined && stop.geofenceRadiusM !== null && Number(stop.geofenceRadiusM) >= 50
+            ? Math.round(Number(stop.geofenceRadiusM))
+            : undefined,
+        locationRefType: resolvedRefType,
+        locationRefId: resolvedRefId,
+      };
+    });
   }
 
   private isInternationalOrder(order: {
@@ -553,7 +1339,7 @@ export class RoutesService implements OnModuleInit {
           const isPaidPrepaid =
             order.paymentFlow === 'prepaid' &&
             (order.paymentStatus === 'succeeded' ||
-              ['paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit'].includes(order.status));
+              ['paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending'].includes(order.status));
           if (isPaidPrepaid) {
             throw new ConflictException(
               'Đơn hàng trả trước đã thanh toán — không thể chỉnh sửa giá cước gốc. Nếu phát sinh chi phí, vui lòng tạo hóa đơn phụ phí.',
@@ -769,7 +1555,8 @@ export class RoutesService implements OnModuleInit {
       routeId = await this.routesStore.createRoute(shipmentId, dto.routeName, dto.totalDistanceKm);
     }
 
-    await this.routesStore.replaceRouteStops(routeId, dto.stops);
+    const enrichedStops = await this.enrichStopsWithMasterData(dto.stops);
+    await this.routesStore.replaceRouteStops(routeId, enrichedStops);
 
     if (order.status === ShipmentStatus.APPROVED) {
       await this.ordersStore.updateStatus(shipmentId, ShipmentStatus.PLANNING);

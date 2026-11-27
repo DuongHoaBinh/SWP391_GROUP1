@@ -100,7 +100,12 @@ export function DriverTripConsole({
   const [evidencePreview, setEvidencePreview] = useState<string | null>(null);
   const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
   const [isGettingGps, setIsGettingGps] = useState(false);
-  const [geofenceError, setGeofenceError] = useState<{ distanceM: number; radiusM: number; message: string } | null>(null);
+  const [geofenceError, setGeofenceError] = useState<{
+    code?: 'OUTSIDE_GEOFENCE' | 'LOW_GPS_ACCURACY';
+    distanceM?: number;
+    radiusM?: number;
+    message: string;
+  } | null>(null);
   const [vitalsMissingError, setVitalsMissingError] = useState<{ missingHorses: Array<{ id: number; name: string }>; message: string } | null>(null);
 
   // GPS Simulation state (only active when backend simulationEnabled === true)
@@ -602,6 +607,7 @@ export function DriverTripConsole({
       const errCode = payload?.code;
       if (errCode === 'OUTSIDE_GEOFENCE') {
         setGeofenceError({
+          code: 'OUTSIDE_GEOFENCE',
           distanceM: Number(payload?.distanceM ?? 0),
           radiusM: Number(payload?.radiusM ?? 300),
           message:
@@ -609,6 +615,17 @@ export function DriverTripConsole({
             (isEn
               ? 'Current GPS position is outside the allowed geofence radius.'
               : 'Vị trí GPS hiện tại nằm ngoài bán kính cho phép của điểm mốc.'),
+        });
+        return;
+      }
+      if (errCode === 'LOW_GPS_ACCURACY') {
+        setGeofenceError({
+          code: 'LOW_GPS_ACCURACY',
+          message:
+            payload?.message ||
+            (isEn
+              ? 'Device GPS accuracy is too low (> 200m). Please move to an open area and retry GPS, or use Manual Check-in with a photo.'
+              : 'Độ chính xác GPS thiết bị quá thấp (> 200m). Vui lòng thử lại ở nơi thoáng sóng hoặc chuyển sang Check-in thủ công kèm ảnh.'),
         });
         return;
       }
@@ -1468,6 +1485,33 @@ export function DriverTripConsole({
                 {activeMilestone.location} ·{' '}
                 {currentUser?.fullName || currentUser?.name || ''} ({translateRole(isEscort ? 'escort' : 'driver')})
               </p>
+              {activeMilestone.itemType === 'stop' && activeMilestone.stopId && (() => {
+                const liveStop = liveData?.stops?.find(
+                  (s) => Number(s.routeStopId ?? s.stopId) === Number(activeMilestone.stopId),
+                );
+                if (!liveStop) return null;
+                const hasStopCoords = liveStop.lat != null && liveStop.lng != null;
+                const radiusM = liveStop.geofenceRadiusM || 300;
+                return (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {hasStopCoords ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold">
+                        <MapPin size={11} aria-hidden="true" />
+                        {isEn
+                          ? `GPS Geofence active (${radiusM}m radius)`
+                          : `Đối chiếu GPS Geofence (bán kính ${radiusM}m)`}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-semibold">
+                        <AlertTriangle size={11} aria-hidden="true" />
+                        {isEn
+                          ? 'Stop has no GPS coordinates — check-in will be flagged for verification'
+                          : 'Trạm chưa có tọa độ GPS — check-in sẽ được gắn cờ xác minh'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {activeMilestone.itemType === 'stop' && activeMilestone.allowedActions.length > 1 && (
@@ -1521,7 +1565,11 @@ export function DriverTripConsole({
               <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex flex-col gap-2 text-amber-900">
                 <div className="flex items-start gap-2 font-bold">
                   <AlertTriangle size={15} className="text-amber-600 shrink-0 mt-0.5" />
-                  <span>{isEn ? 'Outside Geofence Radius' : 'Ngoài bán kính định vị (Geofence)'}</span>
+                  <span>
+                    {geofenceError.code === 'LOW_GPS_ACCURACY'
+                      ? isEn ? 'Low GPS Accuracy' : 'Tín hiệu GPS kém chính xác'
+                      : isEn ? 'Outside Geofence Radius' : 'Ngoài bán kính định vị (Geofence)'}
+                  </span>
                 </div>
                 <p className="m-0">{geofenceError.message}</p>
                 <div className="flex flex-wrap gap-2">

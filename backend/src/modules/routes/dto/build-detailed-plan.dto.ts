@@ -3,14 +3,16 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { LegType, RouteStopType } from '../routes.types';
+import { LegType, RouteStopType, StopLocationRefType } from '../routes.types';
 
 export class RouteLegDto {
   @ApiPropertyOptional({ enum: ['outbound', 'return'], default: 'outbound', description: 'Hướng chặng: outbound (chặng đi) hoặc return (chặng về)' })
@@ -164,6 +166,37 @@ export class RouteStopItemDto {
   @IsOptional()
   @IsString()
   plannedDeparture?: string;
+
+  @ApiPropertyOptional({ description: 'Vĩ độ GPS của trạm dừng để đối chiếu geofence check-in' })
+  @IsOptional()
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat?: number;
+
+  @ApiPropertyOptional({ description: 'Kinh độ GPS của trạm dừng để đối chiếu geofence check-in' })
+  @IsOptional()
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lng?: number;
+
+  @ApiPropertyOptional({ description: 'Bán kính geofence tùy chỉnh (mét, mặc định 300m cho trạm nghỉ / 1000m cho cửa khẩu & kiểm dịch)' })
+  @IsOptional()
+  @IsInt()
+  @Min(50)
+  geofenceRadiusM?: number;
+
+  @ApiPropertyOptional({ enum: ['master_stop', 'airport', 'seaport', 'depot', 'address', 'manual'], description: 'Nguồn tham chiếu tọa độ của điểm dừng' })
+  @IsOptional()
+  @IsIn(['master_stop', 'airport', 'seaport', 'depot', 'address', 'manual'])
+  locationRefType?: StopLocationRefType;
+
+  @ApiPropertyOptional({ description: 'ID bản ghi nguồn tham chiếu (VD: master_stop.stop_id)' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  locationRefId?: number;
 }
 
 export class BuildDetailedPlanDto {

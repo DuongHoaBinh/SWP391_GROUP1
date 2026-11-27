@@ -101,6 +101,19 @@ export class RoutesController {
     return this.routesService.getFullTripPlan(shipmentId, user);
   }
 
+  @Get('shipment/:shipmentId/draft-suggestion')
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({
+    summary:
+      'Tự dựng đề xuất lộ trình chi tiết (chặng road/flight/sea, chặng về khứ hồi, xe đã giữ chỗ, giờ đón và trạm dừng) từ báo giá của khách hàng',
+  })
+  getDraftSuggestion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('shipmentId', ParseIntPipe) shipmentId: number,
+  ) {
+    return this.routesService.getDraftSuggestion(user, shipmentId);
+  }
+
   // --- Step 1a: Manager Sets Strategic Framework ---
   @Post('plan/:shipmentId/strategic-framework')
   @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)

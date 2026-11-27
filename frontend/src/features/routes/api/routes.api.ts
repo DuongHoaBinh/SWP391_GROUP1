@@ -77,8 +77,17 @@ export interface RouteLegItem {
   allocationOverrideReason?: string | null;
 }
 
+export type StopLocationRefType =
+  | 'master_stop'
+  | 'airport'
+  | 'seaport'
+  | 'depot'
+  | 'address'
+  | 'manual';
+
 export interface RouteStopItem {
   id?: number;
+  legId?: number | null;
   sequenceNo: number;
   direction?: 'outbound' | 'return';
   legSequenceNo?: number;
@@ -87,6 +96,11 @@ export interface RouteStopItem {
   country?: string | null;
   plannedArrival?: string | null;
   plannedDeparture?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  geofenceRadiusM?: number | null;
+  locationRefType?: StopLocationRefType | null;
+  locationRefId?: number | null;
   status?: string;
 }
 
@@ -137,6 +151,55 @@ export interface TripPlanReadiness {
   pendingConditions: string[];
 }
 
+export interface DraftSuggestionLeg {
+  sequenceNo: number;
+  direction: 'outbound' | 'return';
+  legType: 'road' | 'flight' | 'sea';
+  originLocation: string;
+  destinationLocation: string;
+  distanceKm: number;
+  durationHours: number;
+  plannedDeparture: string;
+  plannedArrival: string;
+  vehicleId: number | null;
+  departureAirportId: number | null;
+  departureAirportCode: string | null;
+  arrivalAirportId: number | null;
+  arrivalAirportCode: string | null;
+  stallsBooked: number;
+}
+
+export interface DraftSuggestionStop {
+  sequenceNo: number;
+  direction: 'outbound' | 'return';
+  legSequenceNo: number;
+  stopType: 'rest' | 'quarantine' | 'border_check' | 'refuel';
+  locationName: string;
+  country: string | null;
+  plannedArrival: string;
+  plannedDeparture: string;
+  lat?: number | null;
+  lng?: number | null;
+  geofenceRadiusM?: number | null;
+  locationRefType?: StopLocationRefType | null;
+  locationRefId?: number | null;
+}
+
+export interface DraftSuggestionResult {
+  shipmentId: number;
+  source: 'quote_route_plan' | 'quote_legs' | 'shipment_fallback';
+  transportMode: 'road' | 'air' | 'sea';
+  tripType: 'one_way' | 'round_trip';
+  routeName: string;
+  totalDistanceKm: number;
+  pickupAt: string;
+  returnDepartureAt: string | null;
+  reservedOutboundVehicleIds: number[];
+  reservedReturnVehicleIds: number[];
+  legs: DraftSuggestionLeg[];
+  stops: DraftSuggestionStop[];
+}
+
 export const routesApi = {
   getMasterData: async (): Promise<{
     airlines: AirlineItem[];
@@ -144,6 +207,10 @@ export const routesApi = {
     masterStops: MasterStopItem[];
   }> => {
     return apiClient('/routes/master-data');
+  },
+
+  getDraftSuggestion: async (shipmentId: number): Promise<DraftSuggestionResult> => {
+    return apiClient(`/routes/shipment/${shipmentId}/draft-suggestion`);
   },
 
   getRouteByShipmentId: async (shipmentId: number): Promise<RouteDetail> => {

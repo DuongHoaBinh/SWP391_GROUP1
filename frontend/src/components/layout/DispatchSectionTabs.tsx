@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { MapPin, Map as MapIcon, CalendarDays } from 'lucide-react';
+import { MapPin, Map as MapIcon } from 'lucide-react';
 import { ManagerSectionTabs } from '@/components/layout/ManagerSectionTabs';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 
@@ -11,25 +11,19 @@ export function DispatchSectionTabs() {
 
   return (
     <ManagerSectionTabs
-      ariaLabel={isEn ? 'Planning & Dispatch sections' : 'Các mục Lập tuyến & Điều phối'}
+      ariaLabel={isEn ? 'Planning & Dispatch sections' : 'Các mục Điều phối & Lộ trình'}
       tabs={[
         {
           key: 'planning',
-          label: isEn ? 'Trip Planning' : 'Kế Hoạch & Phân Công',
+          label: isEn ? 'Dispatch & Crew' : 'Điều Phối & Phân Công',
           href: '/manager/planning',
           icon: <MapPin size={14} />,
         },
         {
           key: 'routes',
-          label: isEn ? 'Route Builder' : 'Dựng Lộ Trình Chi Tiết',
+          label: isEn ? 'Confirm Route' : 'Xác Nhận Lộ Trình',
           href: '/manager/dispatch/routes',
           icon: <MapIcon size={14} />,
-        },
-        {
-          key: 'schedule',
-          label: isEn ? 'Departure Schedule' : 'Lịch Xuất Phát',
-          href: '/manager/dispatch/schedule',
-          icon: <CalendarDays size={14} />,
         },
       ]}
     />

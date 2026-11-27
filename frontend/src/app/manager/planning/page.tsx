@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Plane,
   Truck,
+  Ship,
   ShieldCheck,
   CheckCircle2,
   Clock,
@@ -17,15 +18,12 @@ import {
   X,
   RefreshCw,
   Loader2,
-  ArrowRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { DispatchSectionTabs } from '@/components/layout/DispatchSectionTabs';
 import {
   routesApi,
-  AirlineItem,
-  AirportItem,
   RouteDetail,
   TripPlanReadiness,
 } from '@/features/routes/api/routes.api';
@@ -44,6 +42,10 @@ interface OrderItem {
   requestedDate: string;
   status: string;
   transportType?: string;
+  transportMode?: 'road' | 'air' | 'sea' | null;
+  tripType?: 'one_way' | 'round_trip' | string;
+  paymentFlow?: 'prepaid' | 'postpaid' | string;
+  paymentStatus?: string;
   specialRequirements?: string;
   routePlan?: RouteDetail | null;
   readiness?: TripPlanReadiness | null;
@@ -54,28 +56,9 @@ interface OrderItem {
   stallUnitPrice?: number;
 }
 
-const CANONICAL_VEHICLE_TYPES = [
-  'Xe thùng chuyên dụng điều hòa 18°C',
-  'Xe van chuyên dụng 2-4 Stall',
-  'Xe tải hạng nặng điều hòa 6-8 Stall',
-  'Thùng container chuyên dụng cho ngựa',
-] as const;
-
-function normalizeVehicleTypeOption(raw?: string | null): string {
-  const val = (raw || '').trim();
-  if ((CANONICAL_VEHICLE_TYPES as readonly string[]).includes(val)) return val;
-  const lower = val.toLowerCase();
-  if (lower.includes('van') || lower.includes('2-4')) return 'Xe van chuyên dụng 2-4 Stall';
-  if (lower.includes('heavy') || lower.includes('6-8') || lower.includes('hạng nặng')) {
-    return 'Xe tải hạng nặng điều hòa 6-8 Stall';
-  }
-  if (lower.includes('container')) return 'Thùng container chuyên dụng cho ngựa';
-  return 'Xe thùng chuyên dụng điều hòa 18°C';
-}
-
 export default function ManagerPlanningPage() {
   const router = useRouter();
-  const { t, language, translateVehicleType, translateStopType, translateCountry } = useLanguage();
+  const { t, language, translateStopType, translateCountry } = useLanguage();
   const isEn = language === 'en';
 
   const [orders, setOrders] = useState<OrderItem[]>([]);
@@ -85,59 +68,6 @@ export default function ManagerPlanningPage() {
     'ALL' | 'NEED_FRAMEWORK' | 'PENDING_APPROVAL' | 'APPROVED' | 'READY' | 'IN_TRANSIT'
   >('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Master Data
-  const [airlines, setAirlines] = useState<AirlineItem[]>([]);
-  const [airports, setAirports] = useState<AirportItem[]>([]);
-  const [coordinators, setCoordinators] = useState<any[]>([]);
-
-  // Modal 1: Step 1a - Strategic Framework Modal
-  const [isFrameworkModalOpen, setIsFrameworkModalOpen] = useState(false);
-  const [selectedOrderForFramework, setSelectedOrderForFramework] = useState<OrderItem | null>(null);
-  const [enableAirCargo, setEnableAirCargo] = useState(false);
-  const [frameworkForm, setFrameworkForm] = useState({
-    managerVehicleType: 'Xe thùng chuyên dụng điều hòa 18°C',
-    managerAirlineId: '',
-    managerDepartureAirportId: '',
-    managerArrivalAirportId: '',
-    managerMainCorridor: '',
-    assignedCoordinatorId: '',
-    strategicNotes: '',
-  });
-  const [isSubmittingFramework, setIsSubmittingFramework] = useState(false);
-
-  const getAirlineDescription = (code: string) => {
-    if (isEn) {
-      switch (code) {
-        case 'CX':
-          return 'International Live Animal & Competition Horse Transport';
-        case 'EK':
-          return 'First-Class In-Flight Equine Stalls & Transport';
-        case 'QR':
-          return 'Specialized Air Cargo for Live Animals & Breeding Horses';
-        case 'SQ':
-          return 'Premier Asian Racehorse Transit Service';
-        case 'VN':
-          return 'National Flag Carrier - Dedicated Care & Domestic Routes';
-        default:
-          return 'Specialized Equine Air Cargo Service';
-      }
-    }
-    switch (code) {
-      case 'CX':
-        return 'Dịch vụ Chuyên chở Động vật sống & Ngựa thi đấu quốc tế';
-      case 'EK':
-        return 'Dịch vụ Khoang bay Đẳng cấp cho Ngựa đua Quốc tế';
-      case 'QR':
-        return 'Dịch vụ Hàng không Đặc biệt cho Động vật sống & Ngựa giống';
-      case 'SQ':
-        return 'Dịch vụ Vận chuyển Ngựa đua Chuyên nghiệp Hàng đầu Châu Á';
-      case 'VN':
-        return 'Hãng Hàng không Quốc gia - Chăm sóc Đặc biệt & Tuyến Nội địa';
-      default:
-        return 'Dịch vụ Hàng không Vận chuyển Ngựa Chuyên dụng';
-    }
-  };
 
   // Modal 2: Step 2 - Review Detailed Plan Modal
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
@@ -170,37 +100,22 @@ export default function ManagerPlanningPage() {
     setLoading(true);
     setLoadError('');
     try {
-      // 1. Load Master Data
-      try {
-        const master = await routesApi.getMasterData();
-        if (master) {
-          setAirlines(master.airlines || []);
-          setAirports(master.airports || []);
-        }
-      } catch (masterErr) {
-        console.warn('Failed to load master data:', masterErr);
-      }
-
-      // 2. Load Staff list
+      // 1. Load Staff list (drivers & veterinary escorts)
       try {
         const staffList = await apiClient<any[]>('/fleet/staff');
         if (Array.isArray(staffList)) {
-          const coords = staffList.filter((s) =>
-            (s.roleName || '').toLowerCase().includes('coordinator')
-          );
           const drivers = staffList.filter(
             (s) =>
               (s.roleName || '').toLowerCase().includes('driver') ||
               (s.roleName || '').toLowerCase().includes('escort')
           );
-          setCoordinators(coords);
           setAvailableDrivers(drivers);
         }
       } catch (staffErr) {
         console.warn('Failed to load staff list from backend:', staffErr);
       }
 
-      // 3. Load Orders that are approved or planning
+      // 2. Load Orders eligible for dispatch & planning (consistent with /manager/dispatch/routes)
       const rawRes = await apiClient<any>('/orders');
       const rawOrders: any[] = Array.isArray(rawRes)
         ? rawRes
@@ -215,6 +130,7 @@ export default function ManagerPlanningPage() {
           o.status === 'confirmed' ||
           o.status === 'ready_to_depart' ||
           o.status === 'in_transit' ||
+          o.status === 'return_pending' ||
           o.status === 'completed'
       );
 
@@ -225,7 +141,7 @@ export default function ManagerPlanningPage() {
         try {
           routePlan = await routesApi.findRouteByShipmentId(o.id);
         } catch {
-          // Order may not have a route framework yet
+          // Order may not have a route yet
         }
         try {
           readiness = await routesApi.getTripPlanReadiness(o.id);
@@ -244,6 +160,10 @@ export default function ManagerPlanningPage() {
           requestedDate: o.requestedDate || o.departureDate || '',
           status: o.status,
           transportType: o.transportType || o.transportationType,
+          transportMode: o.transportMode || o.transport_mode || null,
+          tripType: o.tripType || o.trip_type || 'one_way',
+          paymentFlow: o.paymentFlow || o.payment_flow,
+          paymentStatus: o.paymentStatus || o.payment_status,
           specialRequirements: o.specialRequirements || o.special_requirements,
           totalCost: o.totalCost !== undefined && o.totalCost !== null ? Number(o.totalCost) : undefined,
           transportCost:
@@ -296,8 +216,7 @@ export default function ManagerPlanningPage() {
       if (filterTab === 'NEED_FRAMEWORK') {
         return (
           (!o.routePlan || o.routePlan.planStatus === 'draft') &&
-          o.status !== 'in_transit' &&
-          o.status !== 'completed'
+          !['in_transit', 'return_pending', 'completed'].includes(o.status)
         );
       }
       if (filterTab === 'PENDING_APPROVAL') {
@@ -306,19 +225,17 @@ export default function ManagerPlanningPage() {
       if (filterTab === 'APPROVED') {
         return (
           (o.routePlan?.planStatus === 'approved' || o.routePlan?.planStatus === 'confirmed') &&
-          o.status !== 'in_transit' &&
-          o.status !== 'completed'
+          !['in_transit', 'return_pending', 'completed'].includes(o.status)
         );
       }
       if (filterTab === 'READY') {
         return (
           (o.routePlan?.planStatus === 'ready_to_depart' || o.status === 'ready_to_depart') &&
-          o.status !== 'in_transit' &&
-          o.status !== 'completed'
+          !['in_transit', 'return_pending', 'completed'].includes(o.status)
         );
       }
       if (filterTab === 'IN_TRANSIT') {
-        return o.status === 'in_transit' || o.routePlan?.planStatus === 'in_transit';
+        return o.status === 'in_transit' || o.status === 'return_pending' || o.routePlan?.planStatus === 'in_transit';
       }
       return true;
     });
@@ -328,8 +245,7 @@ export default function ManagerPlanningPage() {
   const needFrameworkCount = orders.filter(
     (o) =>
       (!o.routePlan || o.routePlan.planStatus === 'draft') &&
-      o.status !== 'in_transit' &&
-      o.status !== 'completed'
+      !['in_transit', 'return_pending', 'completed'].includes(o.status)
   ).length;
   const pendingApprovalCount = orders.filter(
     (o) => o.routePlan?.planStatus === 'pending_approval'
@@ -337,17 +253,15 @@ export default function ManagerPlanningPage() {
   const approvedCount = orders.filter(
     (o) =>
       (o.routePlan?.planStatus === 'approved' || o.routePlan?.planStatus === 'confirmed') &&
-      o.status !== 'in_transit' &&
-      o.status !== 'completed'
+      !['in_transit', 'return_pending', 'completed'].includes(o.status)
   ).length;
   const readyToDepartCount = orders.filter(
     (o) =>
       (o.routePlan?.planStatus === 'ready_to_depart' || o.status === 'ready_to_depart') &&
-      o.status !== 'in_transit' &&
-      o.status !== 'completed'
+      !['in_transit', 'return_pending', 'completed'].includes(o.status)
   ).length;
   const inTransitCount = orders.filter(
-    (o) => o.status === 'in_transit' || o.routePlan?.planStatus === 'in_transit'
+    (o) => o.status === 'in_transit' || o.status === 'return_pending' || o.routePlan?.planStatus === 'in_transit'
   ).length;
 
   // Helper: Detect whether an order is international multi-modal
@@ -438,195 +352,12 @@ export default function ManagerPlanningPage() {
     return false;
   };
 
-  // --- Handlers for Step 1a: Strategic Framework ---
-  const handleOpenFrameworkModal = (order: OrderItem) => {
-    setSelectedOrderForFramework(order);
-    const existing = order.routePlan;
-    const isIntl = isInternational(order);
-
-    const isExistingAir = Boolean(
-      existing?.managerAirlineId ||
-        existing?.managerDepartureAirportId ||
-        order.transportType === 'air' ||
-        (order.specialRequirements || '').toLowerCase().includes('bay') ||
-        (order.specialRequirements || '').toLowerCase().includes('hàng không')
-    );
-    const initialAirEnabled = isIntl || isExistingAir;
-    setEnableAirCargo(initialAirEnabled);
-
-    const oLower = (order.originLocation || '').toLowerCase();
-    const dLower = (order.destinationLocation || '').toLowerCase();
-
-    let bestDepAirport = airports.find((a) => a.iataCode === 'SGN');
-    if (oLower.includes('hà nội') || oLower.includes('ha noi') || oLower.includes('nội bài')) {
-      bestDepAirport = airports.find((a) => a.iataCode === 'HAN') || bestDepAirport;
-    } else if (oLower.includes('đà nẵng') || oLower.includes('da nang')) {
-      bestDepAirport = airports.find((a) => a.iataCode === 'DAD') || bestDepAirport;
-    } else if (oLower.includes('cần thơ') || oLower.includes('can tho')) {
-      bestDepAirport = airports.find((a) => a.iataCode === 'VCA') || bestDepAirport;
-    }
-    const defaultDepId = bestDepAirport?.id
-      ? String(bestDepAirport.id)
-      : airports[0]?.id
-      ? String(airports[0].id)
-      : '';
-
-    let bestArrAirport: AirportItem | undefined = undefined;
-    if (isIntl) {
-      if (dLower.includes('kalimantan') || dLower.includes('borneo')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'BDJ') || airports.find((a) => a.iataCode === 'CGK');
-      } else if (dLower.includes('indonesia') || dLower.includes('jakarta')) {
-        bestArrAirport =
-          airports.find((a) => a.iataCode === 'CGK') ||
-          airports.find((a) => a.iataCode === 'SUB') ||
-          airports.find((a) => a.iataCode === 'DPS') ||
-          airports.find((a) => (a.country || '').toLowerCase().includes('indonesia'));
-      } else if (dLower.includes('campuchia') || dLower.includes('cambodia') || dLower.includes('phnom penh')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'PNH');
-      } else if (dLower.includes('singapore')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'SIN');
-      } else if (dLower.includes('malaysia') || dLower.includes('kuala lumpur')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'KUL');
-      } else if (dLower.includes('thailand') || dLower.includes('thái') || dLower.includes('bangkok')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'BKK');
-      } else if (dLower.includes('japan') || dLower.includes('nhật') || dLower.includes('tokyo')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'NRT');
-      } else if (dLower.includes('australia') || dLower.includes('úc') || dLower.includes('melbourne')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'MEL' || a.iataCode === 'SYD');
-      } else if (dLower.includes('hong kong')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'HKG');
-      } else if (dLower.includes('uae') || dLower.includes('dubai')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'DXB');
-      } else if (dLower.includes('đức') || dLower.includes('germany') || dLower.includes('frankfurt')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'FRA');
-      } else if (dLower.includes('pháp') || dLower.includes('france') || dLower.includes('paris')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'CDG');
-      } else if (dLower.includes('mỹ') || dLower.includes('usa') || dLower.includes('new york')) {
-        bestArrAirport = airports.find((a) => a.iataCode === 'JFK');
-      }
-    } else {
-      if (bestDepAirport?.iataCode === 'SGN' || bestDepAirport?.iataCode === 'VCA') {
-        bestArrAirport = airports.find((a) => a.iataCode === 'HAN') || airports.find((a) => a.iataCode === 'DAD');
-      } else {
-        bestArrAirport = airports.find((a) => a.iataCode === 'SGN') || airports.find((a) => a.iataCode === 'VCA');
-      }
-    }
-
-    const intlFallback = airports.find((a) => !(a.country || '').toLowerCase().includes('vietnam'));
-    const defaultArrId = bestArrAirport?.id
-      ? String(bestArrAirport.id)
-      : intlFallback?.id
-      ? String(intlFallback.id)
-      : airports[1]?.id
-      ? String(airports[1].id)
-      : '';
-
-    const depCode =
-      airports.find(
-        (a) =>
-          String(a.id) ===
-          (existing?.managerDepartureAirportId ? String(existing.managerDepartureAirportId) : defaultDepId)
-      )?.iataCode || 'SGN';
-    const arrCode =
-      airports.find(
-        (a) =>
-          String(a.id) ===
-          (existing?.managerArrivalAirportId ? String(existing.managerArrivalAirportId) : defaultArrId)
-      )?.iataCode || (isIntl ? 'DEST' : 'HAN');
-
-    const defaultCorridor = initialAirEnabled
-      ? isEn
-        ? `Air Cargo Corridor (${isIntl ? 'International' : 'Domestic'}): Airport ${depCode} -> Airport ${arrCode}`
-        : `Hành lang Hàng không ${isIntl ? 'Quốc tế' : 'Nội địa'}: Sân bay ${depCode} -> Sân bay ${arrCode}`
-      : isEn
-      ? 'Highway road corridor with mandatory rest stops'
-      : 'Tuyến đường bộ cao tốc kết hợp trạm nghỉ';
-
-    const defaultAirline = isIntl
-      ? airlines[0]?.id
-        ? String(airlines[0].id)
-        : ''
-      : airlines.find((a) => a.code === 'VN')?.id
-      ? String(airlines.find((a) => a.code === 'VN')!.id)
-      : airlines[0]?.id
-      ? String(airlines[0].id)
-      : '';
-
-    setFrameworkForm({
-      managerVehicleType: normalizeVehicleTypeOption(existing?.managerVehicleType),
-      managerAirlineId:
-        initialAirEnabled && existing?.managerAirlineId
-          ? String(existing.managerAirlineId)
-          : initialAirEnabled
-          ? defaultAirline
-          : '',
-      managerDepartureAirportId:
-        initialAirEnabled && existing?.managerDepartureAirportId
-          ? String(existing.managerDepartureAirportId)
-          : initialAirEnabled
-          ? defaultDepId
-          : '',
-      managerArrivalAirportId:
-        initialAirEnabled && existing?.managerArrivalAirportId
-          ? String(existing.managerArrivalAirportId)
-          : initialAirEnabled
-          ? defaultArrId
-          : '',
-      managerMainCorridor: existing?.managerMainCorridor || defaultCorridor,
-      assignedCoordinatorId: existing?.assignedCoordinatorId
-        ? String(existing.assignedCoordinatorId)
-        : coordinators[0]?.id
-        ? String(coordinators[0].id)
-        : '',
-      strategicNotes: existing?.strategicNotes || '',
-    });
-    setIsFrameworkModalOpen(true);
-  };
-
-  const handleSaveFramework = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedOrderForFramework || isSubmittingFramework) return;
-    setIsSubmittingFramework(true);
-    const isIntl = isInternational(selectedOrderForFramework);
-    const hasAir = isIntl || enableAirCargo;
-    try {
-      await routesApi.setStrategicFramework(selectedOrderForFramework.id, {
-        managerVehicleType: frameworkForm.managerVehicleType,
-        managerAirlineId:
-          hasAir && frameworkForm.managerAirlineId ? Number(frameworkForm.managerAirlineId) : undefined,
-        managerDepartureAirportId:
-          hasAir && frameworkForm.managerDepartureAirportId
-            ? Number(frameworkForm.managerDepartureAirportId)
-            : undefined,
-        managerArrivalAirportId:
-          hasAir && frameworkForm.managerArrivalAirportId
-            ? Number(frameworkForm.managerArrivalAirportId)
-            : undefined,
-        managerMainCorridor: frameworkForm.managerMainCorridor,
-        assignedCoordinatorId: frameworkForm.assignedCoordinatorId
-          ? Number(frameworkForm.assignedCoordinatorId)
-          : undefined,
-        strategicNotes: frameworkForm.strategicNotes,
-      });
-
-      toast.success(
-        t(
-          'manager.planning.toastSaveFrameworkSuccess',
-          `Đã thiết lập khung chiến lược và giao nhiệm vụ cho Coordinator cho đơn ${selectedOrderForFramework.requestCode}!`,
-          { code: selectedOrderForFramework.requestCode }
-        )
-      );
-      setIsFrameworkModalOpen(false);
-      loadData();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '';
-      toast.error(msg || (isEn ? 'Failed to save framework plan' : 'Không thể lưu khung kế hoạch'));
-    } finally {
-      setIsSubmittingFramework(false);
-    }
-  };
-
   // --- Handlers for Step 2: Manager Review ---
+  const isReviewCostLocked = Boolean(
+    selectedOrderForReview &&
+      (selectedOrderForReview.paymentFlow === 'prepaid' || selectedOrderForReview.paymentStatus === 'succeeded')
+  );
+
   const handleOpenReviewModal = async (order: OrderItem) => {
     setSelectedOrderForReview(order);
     setIsReviewModalOpen(true);
@@ -659,11 +390,10 @@ export default function ManagerPlanningPage() {
     setIsSubmittingReview(true);
     try {
       const parsedCost = Number(reviewTransportCost);
+      const shouldSendCost = !isReviewCostLocked && Number.isFinite(parsedCost) && parsedCost >= 0;
       await routesApi.reviewTripPlan(selectedOrderForReview.id, {
         status: 'approved',
-        ...(Number.isFinite(parsedCost) && parsedCost >= 0
-          ? { transportCost: Math.round(parsedCost) }
-          : {}),
+        ...(shouldSendCost ? { transportCost: Math.round(parsedCost) } : {}),
       });
       toast.success(
         t(
@@ -786,7 +516,7 @@ export default function ManagerPlanningPage() {
 
   const isAssignReadOnly = Boolean(
     selectedOrderForAssign &&
-      (['in_transit', 'completed'].includes(selectedOrderForAssign.status) ||
+      (['in_transit', 'return_pending', 'completed'].includes(selectedOrderForAssign.status) ||
         ['in_transit', 'completed'].includes(selectedOrderForAssign.routePlan?.planStatus || '') ||
         (['confirmed', 'ready_to_depart'].includes(selectedOrderForAssign.status) && !hasPendingOrDeclinedStaff))
   );
@@ -799,11 +529,18 @@ export default function ManagerPlanningPage() {
     return p.includes('đến đón') || p.includes('đến rước') || p.includes('bên nhận') || p.includes('consignee');
   };
 
+  const isAssignSeaShipment = Boolean(
+    assignEffectiveLegs.some((l: any) => l.legType === 'sea' || l.mode === 'sea') ||
+      (selectedOrderForAssign as any)?.transportMode === 'sea'
+  );
+
   const isAssignAirShipment = Boolean(
-    assignEffectiveLegs.some((l: any) => l.legType === 'flight' || l.mode === 'air') ||
-      selectedOrderForAssign?.routePlan?.managerAirlineId ||
-      selectedOrderForAssign?.routePlan?.managerDepartureAirportId ||
-      (selectedOrderForAssign && isInternational(selectedOrderForAssign))
+    !isAssignSeaShipment &&
+      (assignEffectiveLegs.some((l: any) => l.legType === 'flight' || l.mode === 'air') ||
+        selectedOrderForAssign?.routePlan?.managerAirlineId ||
+        selectedOrderForAssign?.routePlan?.managerDepartureAirportId ||
+        (selectedOrderForAssign as any)?.transportMode === 'air' ||
+        (selectedOrderForAssign && isInternational(selectedOrderForAssign)))
   );
 
   const hasCompanyRoadLegForAssign =
@@ -818,7 +555,7 @@ export default function ManagerPlanningPage() {
         );
 
   const isDriverRequiredForAssign = hasCompanyRoadLegForAssign;
-  const isEscortRequiredForAssign = isAssignAirShipment;
+  const isEscortRequiredForAssign = isAssignAirShipment || isAssignSeaShipment;
 
   const handleSaveStaffAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -826,20 +563,28 @@ export default function ManagerPlanningPage() {
 
     if (isDriverRequiredForAssign && !selectedDriverId) {
       toast.error(
-        isAssignAirShipment
+        isAssignSeaShipment
           ? isEn
-            ? 'Please select an available Truck Driver for the departure airport transfer leg!'
-            : 'Vui lòng chọn Tài xế phụ trách chặng xe thùng trung chuyển ra sân bay xuất cảnh!'
-          : t('manager.planning.toastSelectDriver', 'Vui lòng chọn 1 tài xế chính đang rảnh!')
+            ? 'Please select an available Truck Driver for the departure seaport transfer leg!'
+            : 'Vui lòng chọn Tài xế phụ trách chặng xe thùng trung chuyển ra cảng biển xuất cảnh!'
+          : isAssignAirShipment
+            ? isEn
+              ? 'Please select an available Truck Driver for the departure airport transfer leg!'
+              : 'Vui lòng chọn Tài xế phụ trách chặng xe thùng trung chuyển ra sân bay xuất cảnh!'
+            : t('manager.planning.toastSelectDriver', 'Vui lòng chọn 1 tài xế chính đang rảnh!')
       );
       return;
     }
 
     if (isEscortRequiredForAssign && !selectedEscortId) {
       toast.error(
-        isEn
-          ? 'Air transport shipments require an Equine Vet / Medical Escort to accompany the flight and destination customs clearance!'
-          : 'Đơn vận chuyển hàng không bắt buộc phải phân công Bác sĩ thú y / Chuyên viên hộ tống đi cùng chuyến bay và thông quan đích!'
+        isAssignSeaShipment
+          ? isEn
+            ? 'Sea transport shipments require an Equine Vet / Medical Escort to accompany the vessel and port customs clearance!'
+            : 'Đơn vận chuyển đường thủy bắt buộc phải phân công Bác sĩ thú y / Chuyên viên hộ tống đi cùng tàu và thông quan cảng!'
+          : isEn
+            ? 'Air transport shipments require an Equine Vet / Medical Escort to accompany the flight and destination customs clearance!'
+            : 'Đơn vận chuyển hàng không bắt buộc phải phân công Bác sĩ thú y / Chuyên viên hộ tống đi cùng chuyến bay và thông quan đích!'
       );
       return;
     }
@@ -942,8 +687,8 @@ export default function ManagerPlanningPage() {
 
       toast.success(
         isEn
-          ? `Assigned staff for order ${selectedOrderForAssign.requestCode} (and auto-synced across shared-stall orders)!`
-          : `Đã phân công nhân sự cho đơn ${selectedOrderForAssign.requestCode} (và tự động đồng bộ cho các đơn ghép chung chuyến)!`
+          ? `Assigned personnel for order ${selectedOrderForAssign.requestCode} successfully!`
+          : `Đã phân công nhân sự cho đơn ${selectedOrderForAssign.requestCode} thành công!`
       );
       setIsAssignModalOpen(false);
       setSelectedOrderForAssign(null);
@@ -1004,13 +749,6 @@ export default function ManagerPlanningPage() {
     },
   ];
 
-  const renderCorridorSubtitle = (isIntl: boolean) =>
-    t(
-      'manager.planning.airSectionTitle',
-      `2. Định hướng Chặng bay ${isIntl ? (isEn ? 'International' : 'Quốc tế') : isEn ? 'Domestic' : 'Nội địa'}`,
-      { type: isIntl ? (isEn ? 'International' : 'Quốc tế') : isEn ? 'Domestic' : 'Nội địa' }
-    );
-
   return (
     <div className="flex flex-col gap-5 pb-12">
       <DispatchSectionTabs />
@@ -1018,7 +756,7 @@ export default function ManagerPlanningPage() {
       {/* Compact Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-[#181A17] m-0">
-          {t('manager.planning.pageTitle', 'Kế Hoạch Chuyến Đi & Điều Phối')}
+          {t('manager.planning.pageTitle', 'Điều Phối Chuyến Đi & Phân Công')}
         </h1>
         <button
           type="button"
@@ -1074,7 +812,7 @@ export default function ManagerPlanningPage() {
             ))}
           </div>
 
-          <div className="flex items-center bg-white border border-[#D8CEBE] rounded-lg px-3 py-1.5 w-full md:w-64 focus-within:border-[#181A17]">
+          <div className="flex items-center bg-white border border-[#D8CEBE] rounded-lg px-3 py-1.5 w-full md:w-60 focus-within:border-[#181A17]">
             <Search size={15} className="text-[#7E867B] mr-2 shrink-0" />
             <input
               type="text"
@@ -1094,7 +832,7 @@ export default function ManagerPlanningPage() {
               <tr className="bg-[#FAF9F5] border-b border-[#D8CEBE] text-[11px] font-bold text-[#5C6658] uppercase tracking-wider">
                 <th className="py-3 px-3 whitespace-nowrap">{t('manager.planning.colOrder', 'Đơn vận chuyển')}</th>
                 <th className="py-3 px-3 whitespace-nowrap">{t('manager.planning.colRoute', 'Hành trình')}</th>
-                <th className="py-3 px-3 whitespace-nowrap">{t('manager.planning.colFramework', 'Khung chiến lược')}</th>
+                <th className="py-3 px-3 whitespace-nowrap">{isEn ? 'Route Plan' : 'Lộ trình chi tiết'}</th>
                 <th className="py-3 px-3 whitespace-nowrap">{isEn ? 'Status & Gate' : 'Trạng thái & Cổng'}</th>
                 <th className="py-3 px-3 text-right whitespace-nowrap">{t('manager.planning.colActions', 'Thao tác')}</th>
               </tr>
@@ -1111,7 +849,17 @@ export default function ManagerPlanningPage() {
                 filteredOrders.map((order) => {
                   const plan = order.routePlan;
                   const isIntl = isInternational(order);
-                  const planStatus = plan?.planStatus || 'draft';
+                  const planStatus = plan?.planStatus;
+                  const effectiveMode: 'road' | 'air' | 'sea' =
+                    order.transportMode === 'sea' || plan?.legs?.some((l) => l.legType === 'sea')
+                      ? 'sea'
+                      : order.transportMode === 'air' || plan?.legs?.some((l) => l.legType === 'flight')
+                      ? 'air'
+                      : order.transportMode === 'road'
+                      ? 'road'
+                      : isIntl
+                      ? 'air'
+                      : 'road';
 
                   return (
                     <tr key={order.id} className="hover:bg-[#FAF9F5] transition-colors">
@@ -1123,7 +871,7 @@ export default function ManagerPlanningPage() {
                             ({t('manager.planning.customerCode', 'Mã khách: {code}', { code: order.customerRequestCode })})
                           </span>
                         )}
-                        <p className="text-xs text-[#181A17] font-semibold m-0 mt-0.5 max-w-[155px] truncate" title={order.customerName || ''}>
+                        <p className="text-xs text-[#181A17] font-semibold m-0 mt-0.5 max-w-[135px] truncate" title={order.customerName || ''}>
                           {order.customerName || (isEn ? 'Customer' : 'Khách hàng')}
                         </p>
                         <p className="text-[11px] text-[#7E867B] m-0">
@@ -1132,71 +880,80 @@ export default function ManagerPlanningPage() {
                       </td>
 
                       {/* Route Corridor */}
-                      <td className="py-3 px-3 align-middle max-w-[260px]">
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#181A17] leading-normal">
-                          <span className="truncate max-w-[115px]" title={order.originLocation}>
+                      <td className="py-3 px-3 align-middle max-w-[230px]">
+                        <div className="flex items-center gap-1 text-xs font-semibold text-[#181A17] leading-normal">
+                          <span className="truncate max-w-[100px]" title={order.originLocation}>
                             {order.originLocation}
                           </span>
                           <span className="text-[#7E867B] font-bold shrink-0">→</span>
-                          <span className="truncate max-w-[115px] text-[#181A17]" title={order.destinationLocation}>
+                          <span className="truncate max-w-[100px] text-[#181A17]" title={order.destinationLocation}>
                             {order.destinationLocation}
                           </span>
                         </div>
-                        {(() => {
-                          const isAir = Boolean(
-                            order.routePlan?.managerAirlineId ||
-                              order.routePlan?.managerAirlineName ||
-                              (order.transportType || '').toLowerCase().includes('air') ||
-                              (order.specialRequirements || '').toLowerCase().includes('hàng không') ||
-                              (order.specialRequirements || '').toLowerCase().includes('air flight') ||
-                              (order.specialRequirements || '').toLowerCase().includes('bay')
-                          );
-                          return (
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold mt-1.5 whitespace-nowrap ${
-                                isIntl
-                                  ? 'bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE]'
-                                  : isAir
-                                  ? 'bg-[#F8F0DF] text-[#7A591C] border border-[#DFCA9A]'
-                                  : 'bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]'
-                              }`}
-                            >
-                              {isIntl || isAir ? <Plane size={10} /> : <Truck size={10} />}
-                              {isIntl
-                                ? t('manager.planning.intlMultimodal', 'Quốc tế')
-                                : isAir
-                                ? t('manager.planning.domesticAir', 'Nội địa (Bay)')
-                                : t('manager.planning.domesticRoad', 'Nội địa (Đường bộ)')}
+                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${
+                              effectiveMode === 'sea'
+                                ? 'bg-cyan-50 text-cyan-800 border border-cyan-200'
+                                : effectiveMode === 'air'
+                                ? 'bg-[#F8F0DF] text-[#7A591C] border border-[#DFCA9A]'
+                                : 'bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]'
+                            }`}
+                          >
+                            {effectiveMode === 'sea' ? (
+                              <Ship size={10} />
+                            ) : effectiveMode === 'air' ? (
+                              <Plane size={10} />
+                            ) : (
+                              <Truck size={10} />
+                            )}
+                            {effectiveMode === 'sea'
+                              ? isEn
+                                ? 'Sea Freight'
+                                : 'Đường thủy'
+                              : effectiveMode === 'air'
+                              ? isIntl
+                                ? isEn
+                                  ? 'Intl Air'
+                                  : 'Hàng không QT'
+                                : isEn
+                                ? 'Domestic Air'
+                                : 'Hàng không NĐ'
+                              : isIntl
+                              ? isEn
+                                ? 'Cross-border Road'
+                                : 'Đường bộ QT'
+                              : isEn
+                              ? 'Domestic Road'
+                              : 'Đường bộ NĐ'}
+                          </span>
+                          {order.tripType === 'round_trip' && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap">
+                              {isEn ? 'Round-trip' : 'Khứ hồi'}
                             </span>
-                          );
-                        })()}
+                          )}
+                        </div>
                       </td>
 
-                      {/* Strategic Framework */}
-                      <td className="py-3 px-3 align-middle max-w-[200px]">
-                        {plan?.managerVehicleType ? (
+                      {/* Detailed Route Plan Summary */}
+                      <td className="py-3 px-3 align-middle max-w-[205px]">
+                        {plan && plan.legs && plan.legs.length > 0 ? (
                           <div className="text-xs">
-                            <p className="font-semibold text-[#181A17] m-0 line-clamp-2" title={translateVehicleType(plan.managerVehicleType)}>
-                              {translateVehicleType(plan.managerVehicleType)}
+                            <p className="font-semibold text-[#181A17] m-0 line-clamp-1" title={plan.routeName || ''}>
+                              {plan.routeName || (isEn ? 'Configured route' : 'Lộ trình đã dựng')}
                             </p>
-                            {plan.managerAirlineName && isIntl && (
-                              <p className="text-[11px] text-[#A67C2E] font-medium m-0 flex items-center gap-1 mt-0.5 whitespace-nowrap">
-                                <Plane size={11} className="shrink-0" />
-                                <span className="truncate">
-                                  {plan.managerAirlineName} ({plan.managerDepartureAirportCode} → {plan.managerArrivalAirportCode})
-                                </span>
-                              </p>
-                            )}
-                            {plan.assignedCoordinatorName && (
-                              <p className="text-[10.5px] text-[#5C6658] m-0 mt-0.5 truncate">
-                                {plan.assignedCoordinatorName}
-                              </p>
-                            )}
+                            <p className="text-[11px] text-[#5C6658] m-0 mt-0.5 whitespace-nowrap">
+                              {plan.legs.length} {isEn ? 'legs' : 'chặng'}
+                              {plan.totalDistanceKm ? ` · ${plan.totalDistanceKm.toLocaleString('vi-VN')} km` : ''}
+                              {plan.stops && plan.stops.length > 0
+                                ? ` · ${plan.stops.length} ${isEn ? 'stops' : 'trạm'}`
+                                : ''}
+                            </p>
                           </div>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[#966516] font-semibold bg-[#F8F0DF] px-2.5 py-1 rounded-full border border-[#DFCA9A] whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1.5 text-[11px] text-[#966516] font-semibold bg-[#F8F0DF] px-2.5 py-1 rounded-full border border-[#DFCA9A] whitespace-nowrap">
                             <Clock size={11} className="shrink-0" />
-                            <span>{isEn ? 'Not configured' : 'Chưa lập khung'}</span>
+                            <span>{isEn ? 'Awaiting confirmation' : 'Chưa xác nhận tuyến'}</span>
                           </span>
                         )}
                       </td>
@@ -1214,6 +971,11 @@ export default function ManagerPlanningPage() {
                               <CheckCircle2 size={11} className="shrink-0" />
                               {t('manager.planning.statusCompleted', 'Đã hoàn thành')}
                             </span>
+                          ) : !plan ? (
+                            <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A]">
+                              <Clock size={11} className="shrink-0" />
+                              {isEn ? 'Not planned' : 'Chưa lập tuyến'}
+                            </span>
                           ) : planStatus === 'draft' ? (
                             <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A]">
                               <Clock size={11} className="shrink-0" />
@@ -1227,7 +989,7 @@ export default function ManagerPlanningPage() {
                           ) : planStatus === 'approved' ? (
                             <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE]">
                               <Check size={11} className="text-[#287653] shrink-0" />
-                              {t('manager.planning.statusApproved', 'Đã duyệt')}
+                              {isEn ? 'Route Locked' : 'Đã chốt tuyến'}
                             </span>
                           ) : planStatus === 'confirmed' ? (
                             <span className="inline-flex items-center px-2.5 py-1 whitespace-nowrap gap-1.5 rounded-full text-[11px] font-bold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]">
@@ -1282,7 +1044,7 @@ export default function ManagerPlanningPage() {
                       {/* Actions */}
                       <td className="py-3 px-3 align-middle text-right whitespace-nowrap">
                         <div className="inline-flex items-center justify-end gap-1.5">
-                          {/* Strategic Plan Button */}
+                          {/* Confirm Route Button */}
                           {(() => {
                             const isCompleted = order.status === 'completed' || planStatus === 'completed';
                             const isPlanApproved =
@@ -1304,18 +1066,18 @@ export default function ManagerPlanningPage() {
                                 className={`px-2.5 py-1.5 text-xs font-bold rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer border ${
                                   hasActiveIncident
                                     ? 'bg-rose-100 hover:bg-rose-200 text-[#B33E3E] border-rose-300 animate-pulse'
-                                    : plan?.managerVehicleType
+                                    : plan && plan.legs && plan.legs.length > 0
                                     ? 'bg-[#FAF9F5] hover:bg-[#F0EEE8] text-[#242722] border-[#D8CEBE]'
                                     : 'bg-[#181A17] hover:bg-[#242722] text-white border-transparent'
                                 }`}
                                 title={
                                   hasActiveIncident
                                     ? isEn
-                                      ? 'Route incident reported - Open route planning'
-                                      : 'Lộ trình gặp sự cố - Chuyển sang trang lập lộ trình tuyến'
+                                      ? 'Route incident reported - Open route editor'
+                                      : 'Lộ trình gặp sự cố - Mở trình hiệu chỉnh lộ trình'
                                     : isEn
-                                    ? 'Go to detailed route planning'
-                                    : 'Chuyển sang trang lập lộ trình tuyến chi tiết'
+                                    ? 'Review quote-suggested route legs and confirm plan'
+                                    : 'Kiểm tra lộ trình từ báo giá và chốt kế hoạch'
                                 }
                               >
                                 {hasActiveIncident ? (
@@ -1327,8 +1089,8 @@ export default function ManagerPlanningPage() {
                                   {hasActiveIncident
                                     ? t('manager.planning.btnEditFrameworkIncident', 'Sửa do sự cố')
                                     : isEn
-                                    ? 'Plan Route'
-                                    : 'Lập kế hoạch'}
+                                    ? 'Confirm Route'
+                                    : 'Xác nhận tuyến'}
                                 </span>
                               </button>
                             );
@@ -1457,392 +1219,6 @@ export default function ManagerPlanningPage() {
           </table>
         </div>
       </div>
-
-      {/* MODAL 1: LẬP KHUNG KẾ HOẠCH TỔNG THỂ (MANAGER) */}
-      <Modal
-        isOpen={isFrameworkModalOpen}
-        onClose={() => { if (!isSubmittingFramework) setIsFrameworkModalOpen(false); }}
-        closeDisabled={isSubmittingFramework}
-        title={t(
-          'manager.planning.modalFrameworkTitle',
-          `Thiết lập khung kế hoạch vận chuyển - ${selectedOrderForFramework?.requestCode}`,
-          { code: selectedOrderForFramework?.requestCode || '' }
-        )}
-      >
-        <form onSubmit={handleSaveFramework} className="flex flex-col gap-4 text-xs">
-          {/* Customer Request Summary Card */}
-          {selectedOrderForFramework && (
-            <div className="bg-[#FAF9F5] border border-[#D8CEBE] p-3.5 rounded-xl flex flex-col gap-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-bold text-[#181A17] text-xs flex items-center gap-1.5">
-                  <span className="px-1.5 py-0.5 rounded bg-[#F3EFE4] text-[#181A17] font-extrabold text-[11px]">
-                    {selectedOrderForFramework.customerRequestCode || selectedOrderForFramework.requestCode}
-                  </span>
-                  <span>
-                    {t('manager.common.customer', 'Khách hàng')}:{' '}
-                    <strong>{selectedOrderForFramework.customerName || '—'}</strong>
-                  </span>
-                </span>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                    isInternational(selectedOrderForFramework)
-                      ? 'bg-[#F3EFE4] text-[#181A17]'
-                      : 'bg-[#E8F2EB] text-[#287653]'
-                  }`}
-                >
-                  {isInternational(selectedOrderForFramework)
-                    ? t('manager.planning.intlMultimodal', 'Vận chuyển Quốc tế')
-                    : t('manager.planning.domesticRoad', 'Vận chuyển Nội địa')}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-xs font-semibold text-[#181A17] bg-white p-2.5 rounded-lg border border-[#EAE5DA]">
-                <span className="text-[#5C6658] truncate">{selectedOrderForFramework.originLocation}</span>
-                <ArrowRight size={14} className="text-[#7E867B] shrink-0" />
-                <span className="text-[#181A17] font-bold truncate">
-                  {selectedOrderForFramework.destinationLocation}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#5C6658] pt-0.5">
-                <span>
-                  {isEn ? 'Horses count:' : 'Số lượng ngựa:'}{' '}
-                  <strong className="text-[#181A17]">
-                    {selectedOrderForFramework.requestedHorseCount}{' '}
-                    {t('manager.common.horses', 'chiến mã')}
-                  </strong>
-                </span>
-                <span>
-                  {t('manager.common.departureDate', 'Ngày xuất phát')}:{' '}
-                  <strong className="text-[#181A17]">
-                    {selectedOrderForFramework.requestedDate
-                      ? new Date(selectedOrderForFramework.requestedDate).toLocaleDateString(
-                          isEn ? 'en-US' : 'vi-VN'
-                        )
-                      : '—'}
-                  </strong>
-                </span>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <label htmlFor="planning-vehicle-type" className="font-bold text-[#242722] block mb-1">
-              {t('manager.planning.fieldVehicleType', '1. Loại phương tiện đường bộ yêu cầu *')}
-            </label>
-            <select
-              id="planning-vehicle-type"
-              value={frameworkForm.managerVehicleType}
-              onChange={(e) => setFrameworkForm({ ...frameworkForm, managerVehicleType: e.target.value })}
-              className="w-full p-2 border border-[#D8CEBE] rounded-lg outline-none font-medium text-xs bg-white text-[#181A17]"
-              required
-            >
-              <option value="Xe thùng chuyên dụng điều hòa 18°C">
-                {t('manager.planning.optTruckClimate', 'Xe thùng chuyên dụng điều hòa nhiệt độ (18°C - 20°C)')}
-              </option>
-              <option value="Xe van chuyên dụng 2-4 Stall">
-                {t('manager.planning.optVanSpecial', 'Xe van chuyên dụng vận tải ngựa thể thao (2 - 4 khoang)')}
-              </option>
-              <option value="Xe tải hạng nặng điều hòa 6-8 Stall">
-                {t('manager.planning.optHeavyTruck', 'Xe tải hạng nặng điều hòa (6 - 8 khoang)')}
-              </option>
-              <option value="Thùng container chuyên dụng cho ngựa">
-                {t('manager.planning.optContainer', 'Thùng container đường bộ chuyên dụng')}
-              </option>
-            </select>
-          </div>
-
-          {/* Toggle Air Cargo cho đơn nội địa */}
-          {selectedOrderForFramework && !isInternational(selectedOrderForFramework) && (
-            <div className="flex items-center justify-between p-2.5 bg-[#FAF8F4] border border-[#D8CEBE] rounded-lg gap-3">
-              <div className="flex items-center gap-2">
-                <Plane size={15} className="text-[#A67C2E] shrink-0" />
-                <div>
-                  <label htmlFor="planning-air-toggle" className="font-bold text-[#181A17] text-xs cursor-pointer block">
-                    {t('manager.planning.domesticAirCargoToggle', 'Vận chuyển Hàng không Nội địa')}
-                  </label>
-                  <div className="text-[11px] text-[#5C6658]">
-                    {t(
-                      'manager.planning.domesticAirCargoDesc',
-                      'Tích chọn nếu chuyến đi kết hợp chặng bay nội địa (VD: SGN -> HAN, DAD)'
-                    )}
-                  </div>
-                </div>
-              </div>
-              <input
-                id="planning-air-toggle"
-                type="checkbox"
-                checked={enableAirCargo}
-                onChange={(e) => {
-                  const enabled = e.target.checked;
-                  setEnableAirCargo(enabled);
-                  if (enabled) {
-                    const oLower = (selectedOrderForFramework.originLocation || '').toLowerCase();
-                    let dep = airports.find((a) => a.iataCode === 'SGN');
-                    let arr = airports.find((a) => a.iataCode === 'HAN');
-                    if (oLower.includes('hà nội') || oLower.includes('ha noi')) {
-                      dep = airports.find((a) => a.iataCode === 'HAN');
-                      arr = airports.find((a) => a.iataCode === 'SGN');
-                    }
-                    const depId = dep ? String(dep.id) : airports[0]?.id ? String(airports[0].id) : '';
-                    const arrId = arr ? String(arr.id) : airports[1]?.id ? String(airports[1].id) : '';
-                    const vnAirline = airlines.find((a) => a.code === 'VN') || airlines[0];
-                    setFrameworkForm((prev) => ({
-                      ...prev,
-                      managerAirlineId: prev.managerAirlineId || (vnAirline ? String(vnAirline.id) : ''),
-                      managerDepartureAirportId: depId,
-                      managerArrivalAirportId: arrId,
-                      managerMainCorridor: isEn
-                        ? `Domestic Air Corridor: Airport ${dep?.iataCode || 'SGN'} -> Airport ${arr?.iataCode || 'HAN'}`
-                        : `Hành lang Hàng không Nội địa: Sân bay ${dep?.iataCode || 'SGN'} -> Sân bay ${arr?.iataCode || 'HAN'}`,
-                    }));
-                  } else {
-                    setFrameworkForm((prev) => ({
-                      ...prev,
-                      managerAirlineId: '',
-                      managerDepartureAirportId: '',
-                      managerArrivalAirportId: '',
-                      managerMainCorridor: isEn
-                        ? 'Highway road corridor with mandatory rest stops'
-                        : 'Tuyến đường bộ cao tốc / Quốc lộ kết hợp trạm nghỉ',
-                    }));
-                  }
-                }}
-                className="w-4 h-4 text-[#A67C2E] rounded border-[#D8CEBE] focus:ring-[#C4B38E] cursor-pointer shrink-0"
-              />
-            </div>
-          )}
-
-          {selectedOrderForFramework && (isInternational(selectedOrderForFramework) || enableAirCargo) && (
-            <div className="p-3 bg-[#FAF8F4] border border-[#D8CEBE] rounded-lg flex flex-col gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-bold text-[#181A17] flex items-center gap-1.5 text-xs">
-                  <Plane size={14} className="text-[#A67C2E]" />{' '}
-                  {renderCorridorSubtitle(isInternational(selectedOrderForFramework))}
-                </span>
-                <span className="text-[10px] bg-[#F3EFE4] text-[#181A17] font-bold px-2 py-0.5 rounded-full">
-                  IATA Live Animals Regulations (LAR)
-                </span>
-              </div>
-
-              <div>
-                <label htmlFor="planning-airline" className="font-bold text-[#242722] block mb-1">
-                  {t('manager.planning.airAirlineLabel', 'Hãng hàng không vận chuyển ngựa *')}
-                </label>
-                <select
-                  id="planning-airline"
-                  value={frameworkForm.managerAirlineId}
-                  onChange={(e) => setFrameworkForm({ ...frameworkForm, managerAirlineId: e.target.value })}
-                  className="w-full p-2 border border-[#D8CEBE] rounded-lg outline-none font-medium text-xs bg-white text-[#181A17]"
-                >
-                  {airlines.map((al) => (
-                    <option key={al.id} value={al.id}>
-                      {al.name} ({al.code}) — {al.cargoServiceName} [{getAirlineDescription(al.code)}]
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor="planning-dep-airport" className="font-bold text-[#242722] block mb-1">
-                    {t('manager.planning.airDepAirport', 'Sân bay xuất phát *')}
-                  </label>
-                  <select
-                    id="planning-dep-airport"
-                    value={frameworkForm.managerDepartureAirportId}
-                    onChange={(e) => {
-                      const newDepId = e.target.value;
-                      const depAp = airports.find((a) => String(a.id) === newDepId);
-                      const arrAp = airports.find((a) => String(a.id) === frameworkForm.managerArrivalAirportId);
-                      const intlFlag = isInternational(selectedOrderForFramework);
-                      setFrameworkForm({
-                        ...frameworkForm,
-                        managerDepartureAirportId: newDepId,
-                        managerMainCorridor: isEn
-                          ? `Air Cargo Corridor (${intlFlag ? 'International' : 'Domestic'}): Airport ${
-                              depAp?.iataCode || 'DEP'
-                            } -> Airport ${arrAp?.iataCode || 'ARR'}`
-                          : `Hành lang Hàng không ${intlFlag ? 'Quốc tế' : 'Nội địa'}: Sân bay ${
-                              depAp?.iataCode || 'DEP'
-                            } -> Sân bay ${arrAp?.iataCode || 'ARR'}`,
-                      });
-                    }}
-                    className="w-full p-2 border border-[#D8CEBE] rounded-lg outline-none font-medium text-xs bg-white text-[#181A17]"
-                  >
-                    <optgroup label={t('manager.planning.airHubGroupVn', 'Sân bay Việt Nam (Xuất phát)')}>
-                      {airports
-                        .filter(
-                          (ap) =>
-                            (ap.country || '').toLowerCase().includes('vietnam') ||
-                            (ap.country || '').toLowerCase().includes('việt nam') ||
-                            ['SGN', 'HAN', 'DAD', 'VCA'].includes(ap.iataCode)
-                        )
-                        .map((ap) => (
-                          <option key={ap.id} value={ap.id}>
-                            {ap.iataCode} - {ap.name}
-                          </option>
-                        ))}
-                    </optgroup>
-                    <optgroup label={t('manager.planning.airHubGroupIntl', 'Sân bay Quốc tế')}>
-                      {airports
-                        .filter(
-                          (ap) =>
-                            !(
-                              (ap.country || '').toLowerCase().includes('vietnam') ||
-                              (ap.country || '').toLowerCase().includes('việt nam')
-                            ) && !['SGN', 'HAN', 'DAD', 'VCA'].includes(ap.iataCode)
-                        )
-                        .map((ap) => (
-                          <option key={ap.id} value={ap.id}>
-                            {ap.iataCode} - {ap.name} ({ap.country})
-                          </option>
-                        ))}
-                    </optgroup>
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="planning-arr-airport" className="font-bold text-[#242722] block mb-1">
-                    {t('manager.planning.airArrAirport', 'Sân bay hạ cánh *')}
-                  </label>
-                  <select
-                    id="planning-arr-airport"
-                    value={frameworkForm.managerArrivalAirportId}
-                    onChange={(e) => {
-                      const newArrId = e.target.value;
-                      const depAp = airports.find((a) => String(a.id) === frameworkForm.managerDepartureAirportId);
-                      const arrAp = airports.find((a) => String(a.id) === newArrId);
-                      const intlFlag = isInternational(selectedOrderForFramework);
-                      setFrameworkForm({
-                        ...frameworkForm,
-                        managerArrivalAirportId: newArrId,
-                        managerMainCorridor: isEn
-                          ? `Air Cargo Corridor (${intlFlag ? 'International' : 'Domestic'}): Airport ${
-                              depAp?.iataCode || 'DEP'
-                            } -> Airport ${arrAp?.iataCode || 'ARR'}`
-                          : `Hành lang Hàng không ${intlFlag ? 'Quốc tế' : 'Nội địa'}: Sân bay ${
-                              depAp?.iataCode || 'DEP'
-                            } -> Sân bay ${arrAp?.iataCode || 'ARR'}`,
-                      });
-                    }}
-                    className="w-full p-2 border border-[#D8CEBE] rounded-lg outline-none font-medium text-xs bg-white text-[#181A17]"
-                  >
-                    <optgroup
-                      label={t('manager.planning.airHubGroupVnArrival', 'Sân bay Việt Nam (Hạ cánh Nội địa)')}
-                    >
-                      {airports
-                        .filter(
-                          (ap) =>
-                            (ap.country || '').toLowerCase().includes('vietnam') ||
-                            (ap.country || '').toLowerCase().includes('việt nam') ||
-                            ['SGN', 'HAN', 'DAD', 'VCA'].includes(ap.iataCode)
-                        )
-                        .map((ap) => (
-                          <option key={ap.id} value={ap.id}>
-                            {ap.iataCode} - {ap.name}
-                          </option>
-                        ))}
-                    </optgroup>
-                    <optgroup label={t('manager.planning.airHubGroupIntl', 'Sân bay Quốc tế')}>
-                      {airports
-                        .filter(
-                          (ap) =>
-                            !(
-                              (ap.country || '').toLowerCase().includes('vietnam') ||
-                              (ap.country || '').toLowerCase().includes('việt nam')
-                            ) && !['SGN', 'HAN', 'DAD', 'VCA'].includes(ap.iataCode)
-                        )
-                        .map((ap) => (
-                          <option key={ap.id} value={ap.id}>
-                            {ap.iataCode} - {ap.name} ({ap.country})
-                          </option>
-                        ))}
-                    </optgroup>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <label htmlFor="planning-corridor" className="font-bold text-[#242722] block mb-1">
-              {t('manager.planning.fieldCorridor', '3. Tuyến đường chính định hướng')}
-            </label>
-            <input
-              id="planning-corridor"
-              type="text"
-              placeholder={t(
-                'manager.planning.fieldCorridorPlaceholder',
-                'VD: Tuyến cao tốc Trung Lương - Cảng SGN Cargo'
-              )}
-              value={frameworkForm.managerMainCorridor}
-              onChange={(e) => setFrameworkForm({ ...frameworkForm, managerMainCorridor: e.target.value })}
-              className="w-full p-2 border border-[#D8CEBE] rounded-lg outline-none text-xs text-[#181A17]"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="planning-coordinator" className="font-bold text-[#242722] block mb-1">
-              {t('manager.planning.fieldCoordinator', '4. Chỉ định Fleet & Route Coordinator phụ trách *')}
-            </label>
-            <select
-              id="planning-coordinator"
-              value={frameworkForm.assignedCoordinatorId}
-              onChange={(e) => setFrameworkForm({ ...frameworkForm, assignedCoordinatorId: e.target.value })}
-              className="w-full p-2 border border-[#D8CEBE] rounded-lg outline-none font-medium text-xs bg-white text-[#181A17]"
-              required
-            >
-              <option value="">
-                {t('manager.planning.coordinatorPlaceholder', '-- Chọn điều phối viên --')}
-              </option>
-              {coordinators.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.fullName} ({c.email})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label htmlFor="planning-notes" className="font-bold text-[#242722] block mb-1">
-              {t('manager.planning.fieldNotes', '5. Ghi chú & Yêu cầu đặc biệt cho Coordinator')}
-            </label>
-            <textarea
-              id="planning-notes"
-              rows={3}
-              value={frameworkForm.strategicNotes}
-              onChange={(e) => setFrameworkForm({ ...frameworkForm, strategicNotes: e.target.value })}
-              className="w-full p-2 border border-[#D8CEBE] rounded-lg outline-none text-xs text-[#181A17]"
-              placeholder={t(
-                'manager.planning.notesPlaceholder',
-                'Ghi chú về chăm sóc y tế, nhiệt độ xe, trạm dừng chân...'
-              )}
-            />
-          </div>
-
-          <div className="flex flex-wrap justify-end gap-2 border-t border-[#EAE5DA] pt-3 mt-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isSubmittingFramework}
-              onClick={() => setIsFrameworkModalOpen(false)}
-            >
-              {t('manager.common.cancel', 'Hủy')}
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              className="bg-[#181A17] hover:bg-[#242722] text-white font-bold px-4 py-2"
-              disabled={isSubmittingFramework}
-            >
-              {isSubmittingFramework ? (
-                <Loader2 size={14} className="animate-spin mr-1.5" />
-              ) : (
-                <Send size={14} className="mr-1.5" />
-              )}
-              {t('manager.planning.assignFrameworkBtn', 'Giao kế hoạch cho Coordinator')}
-            </Button>
-          </div>
-        </form>
-      </Modal>
 
       {/* MODAL 2: DUYỆT KẾ HOẠCH CHI TIẾT (MANAGER REVIEW) */}
       <Modal
@@ -2065,13 +1441,25 @@ export default function ManagerPlanningPage() {
                           type="number"
                           min={0}
                           value={reviewTransportCost}
-                          onChange={(e) => setReviewTransportCost(e.target.value)}
-                          className="w-full px-3 py-1.5 text-xs font-bold text-[#181A17] bg-white border border-[#D8CEBE] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#287653]/30 focus:border-[#287653]"
+                          readOnly={isReviewCostLocked}
+                          disabled={isReviewCostLocked}
+                          onChange={(e) => {
+                            if (!isReviewCostLocked) setReviewTransportCost(e.target.value);
+                          }}
+                          className="w-full px-3 py-1.5 text-xs font-bold text-[#181A17] bg-white border border-[#D8CEBE] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#287653]/30 focus:border-[#287653] disabled:bg-[#F3EFE4] disabled:text-[#5C6658] disabled:cursor-not-allowed"
                         />
-                        <span className="text-[10px] text-[#5C6658] mt-0.5 block">
-                          {isEn ? 'Actual distance:' : 'Quãng đường thực tế:'}{' '}
-                          {detailedRoute.totalDistanceKm || 0} km
-                        </span>
+                        {isReviewCostLocked ? (
+                          <span className="text-[10px] text-[#287653] font-semibold mt-0.5 block">
+                            {isEn
+                              ? 'Prepaid order paid — freight is locked to the original quote.'
+                              : 'Đơn trả trước đã thanh toán — cước phí được khóa theo báo giá gốc.'}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-[#5C6658] mt-0.5 block">
+                            {isEn ? 'Actual distance:' : 'Quãng đường thực tế:'}{' '}
+                            {detailedRoute.totalDistanceKm || 0} km
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-[#5C6658] space-y-1">
                         <div className="flex justify-between">
@@ -2243,8 +1631,10 @@ export default function ManagerPlanningPage() {
                   <div className="flex flex-col gap-1.5">
                     {assignEffectiveLegs.map((leg: any, idx: number) => {
                       const isFlight = leg.legType === 'flight' || leg.mode === 'air';
+                      const isSea = leg.legType === 'sea' || leg.mode === 'sea';
                       const isConsigneeRoad =
                         !isFlight &&
+                        !isSea &&
                         (isConsigneePickupPlate(leg.vehiclePlate) ||
                           (!leg.vehicleId && !leg.vehiclePlate && idx > 0 && isAssignAirShipment));
                       return (
@@ -2255,6 +1645,8 @@ export default function ManagerPlanningPage() {
                           <div className="flex items-center gap-2 min-w-0">
                             {isFlight ? (
                               <Plane size={13} className="text-[#966516] shrink-0" />
+                            ) : isSea ? (
+                              <Ship size={13} className="text-cyan-700 shrink-0" />
                             ) : (
                               <Truck size={13} className="text-[#181A17] shrink-0" />
                             )}
@@ -2267,6 +1659,8 @@ export default function ManagerPlanningPage() {
                             className={`px-2 py-0.5 rounded text-[10.5px] font-bold shrink-0 ${
                               isFlight
                                 ? 'bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]'
+                                : isSea
+                                ? 'bg-cyan-50 text-cyan-800 border border-cyan-200'
                                 : isConsigneeRoad
                                 ? 'bg-[#F3EFE4] text-[#7A591C] border border-[#DFCA9A]'
                                 : 'bg-white text-[#181A17] border border-[#D8CEBE]'
@@ -2276,6 +1670,10 @@ export default function ManagerPlanningPage() {
                               ? isEn
                                 ? 'Vet / Flight Escort (In-Flight)'
                                 : 'Bác sĩ thú y / Hộ tống bay'
+                              : isSea
+                              ? isEn
+                                ? 'Vet / Sea Voyage Escort'
+                                : 'Bác sĩ thú y / Hộ tống tàu biển'
                               : isConsigneeRoad
                               ? isEn
                                 ? 'Escort Handover & Consignee Vehicle'

@@ -5,15 +5,17 @@ import {
   ArrayNotEmpty,
   IsArray,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { RouteStopType } from '../routes.types';
+import { RouteStopType, StopLocationRefType } from '../routes.types';
 
 export class RouteStopItemDto {
   @ApiProperty({ description: 'Thứ tự chặng/điểm dừng (bắt đầu từ 1)', example: 1 })
@@ -48,6 +50,37 @@ export class RouteStopItemDto {
   @IsString()
   @IsOptional()
   plannedDeparture?: string;
+
+  @ApiPropertyOptional({ description: 'Vĩ độ GPS của điểm dừng' })
+  @IsOptional()
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat?: number;
+
+  @ApiPropertyOptional({ description: 'Kinh độ GPS của điểm dừng' })
+  @IsOptional()
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lng?: number;
+
+  @ApiPropertyOptional({ description: 'Bán kính geofence (mét)' })
+  @IsOptional()
+  @IsInt()
+  @Min(50)
+  geofenceRadiusM?: number;
+
+  @ApiPropertyOptional({ enum: ['master_stop', 'airport', 'seaport', 'depot', 'address', 'manual'] })
+  @IsOptional()
+  @IsIn(['master_stop', 'airport', 'seaport', 'depot', 'address', 'manual'])
+  locationRefType?: StopLocationRefType;
+
+  @ApiPropertyOptional({ description: 'ID bản ghi tham chiếu (VD: master_stop.stop_id)' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  locationRefId?: number;
 }
 
 export class CreateRouteDto {

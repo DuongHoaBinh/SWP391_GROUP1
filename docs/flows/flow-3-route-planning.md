@@ -247,3 +247,22 @@ Hệ thống hỗ trợ 2 dạng vận chuyển đường thủy (`sea`) với c
 - Trong màn dựng kế hoạch, chặng bộ dùng xe **khác** nhóm đã giữ phải nhập `allocationOverrideReason`, nếu không backend trả `400`.
 
 **Chặng bay**: `route_leg.jet_stall_count` = ⌈tổng số ngựa / 3⌉; `stalls_booked` giữ nghĩa cũ (số chỗ ngựa).
+
+## 11. Tinh gọn & Đồng bộ Điều phối từ Báo giá (Flow 3 Consolidation — 11/2026)
+
+Sau khi gộp vai trò Coordinator vào Logistics Manager (G1) và mở rộng báo giá tự động (`shipment_quote` + `vehicle_reservation`), Flow 3 được tinh gọn thành luồng **Xác nhận lộ trình từ báo giá → Chốt 1 bước → Phân công Tài xế/Bác sĩ**:
+
+1. **Tự nạp lộ trình từ dữ liệu khách đặt (`GET /routes/shipment/:shipmentId/draft-suggestion`):**
+   - Khi mở đơn chưa có `route` trên `/manager/dispatch/routes`, hệ thống tự đọc `shipment_quote` (`routePlan.legs`, `legs`), `vehicle_reservation` (phân biệt rõ `outbound` và `return`), `pickup_at` (giữ nguyên giờ đón đã né giờ cấm tải đô thị) và `trip_type` để nạp sẵn `legs[]` (`road` / `flight` / `sea` + chặng `return`) và `stops[]` (kể cả cửa khẩu cho đường bộ xuyên biên giới).
+   - Đơn cũ không có `quote_id` fallback theo đúng `shipment.transport_mode` (`road` / `air` / `sea`), không bao giờ ép đơn đường bộ sang mẫu Hàng không.
+2. **Chốt kế hoạch 1 bước (bỏ vòng tự gửi duyệt cho chính mình):**
+   - Nút chính **"Lưu & Chốt Kế Hoạch"** gọi `POST /routes/plan/:id/build-detail` và phê duyệt trực tiếp qua `POST /routes/plan/:id/review` (`status = 'approved'`, tận dụng `canApproveDirectly` ở backend), sẵn sàng phân công Tài xế/Bác sĩ ngay trên `/manager/planning`.
+3. **Tinh gọn giao diện Điều phối còn 2 tab rõ vai trò:**
+   - Tab 1: **Điều Phối & Phân Công** (`/manager/planning`) — danh sách đơn đã duyệt khả thi, hiển thị trạng thái thực của `route.planStatus`, khóa read-only `transportCost` cho đơn trả trước đã thanh toán, phân công nhân sự và kiểm tra Gate 2.
+   - Tab 2: **Xác Nhận Lộ Trình** (`/manager/dispatch/routes`) — bỏ Tab 2 `localStorage` trùng lặp và banner Khung chiến lược cũ, hỗ trợ đầy đủ giao diện chặng **Đường thủy (`sea`)** (`Cảng đi/đến`, `bookingReference` B/L tùy chọn, `stallsBooked` = số `vessel_pen`) và chặng **Khứ hồi (`return`)**.
+   - Route `/manager/dispatch/schedule` chuyển hướng sạch sang `/manager/monitoring`.
+4. **Đồng bộ Đường thủy (`sea`) toàn tuyến & Vá lỗi Flow 5 Emergency Reroute:**
+   - `fleet.store` (`validateStaffAssignment`, `findAvailableStaff`) và `tracking.service` (`checkInLegEnd`) xử lý chặng `sea` đồng nhất với `flight`: không khóa tài xế xe tải chặng 1 xuyên hải trình nhiều ngày và tự giải phóng xe tải VN về `available` ngay khi hoàn tất chặng 1 tới cảng đi.
+   - `routes.store` (`confirmAndInvoice`) xác thực tối thiểu cho chặng `sea` (`planned_departure`, `planned_arrival > planned_departure`, `stalls_booked >= 1`).
+   - Khi reroute khẩn cấp trên chuyến đang `in_transit` (Flow 5), giao diện lưu trực tiếp chặng thay thế và đóng sự cố mà **không** gọi `POST /routes/plan/:id/submit`.
+
