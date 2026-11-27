@@ -23,11 +23,6 @@ const {
   classifyHeartRate,
   evaluateEquineHealthAlert,
 } = require('../../dist/modules/tracking/vitals-policy');
-const {
-  computeOtdMetrics,
-  isExcusedDelayWindowOpen,
-  computeExecutiveFinancialMetrics,
-} = require('../../dist/modules/reports/reports-calculator');
 const { DocumentsService } = require('../../dist/modules/documents/documents.service');
 const { UserRole } = require('../../dist/modules/auth/auth.types');
 
@@ -579,92 +574,4 @@ test('BR-F2-02 & BR-F2-05: Dynamic Tier-A deadline, Order Cutoff & exact minute 
     [{ id: 11, horseId: 1, regulationId: 3, status: 'approved', expiryDate: '2026-12-12T09:59:00.000Z' }],
   ).getOrderComplianceChecklist({ id: 6, role: UserRole.CUSTOMER }, 300);
   assert.equal(expiredByOneMinute.horses[0].documents[0].isExpiredForTrip, true);
-});
-
-test('AC-RPT-01 & AC-RPT-02 & DEC-02: OTD math, 48h excused_delay lock, financial reconciliation & zero 98.6 hardcode', () => {
-  // Domestic road tolerance <= 60m; international/air <= 120m
-  const now = new Date('2026-12-10T12:00:00.000Z');
-  const otd = computeOtdMetrics(
-    [
-      {
-        shipmentId: 1,
-        transportMode: 'road',
-        transportationType: 'Domestic',
-        plannedArrival: '2026-12-09T10:00:00.000Z',
-        actualArrival: '2026-12-09T10:00:00.000Z',
-      },
-      {
-        shipmentId: 2,
-        transportMode: 'road',
-        transportationType: 'Domestic',
-        plannedArrival: '2026-12-09T10:00:00.000Z',
-        actualArrival: '2026-12-09T11:00:00.000Z', // exact +60m -> on time
-      },
-      {
-        shipmentId: 3,
-        transportMode: 'road',
-        transportationType: 'Domestic',
-        plannedArrival: '2026-12-09T10:00:00.000Z',
-        actualArrival: '2026-12-09T10:30:00.000Z',
-      },
-      {
-        shipmentId: 4,
-        transportMode: 'road',
-        transportationType: 'Domestic',
-        plannedArrival: '2026-12-09T10:00:00.000Z',
-        actualArrival: '2026-12-09T11:35:00.000Z', // +95m -> late
-        excusedDelay: true,
-      },
-    ],
-    now,
-  );
-  assert.equal(otd.grossOnTimeDeliveryRate, 75);
-  assert.equal(otd.adjustedOnTimeDeliveryRate, 100);
-
-  const intlOtd = computeOtdMetrics([
-    {
-      shipmentId: 5,
-      transportMode: 'air',
-      transportationType: 'International',
-      plannedArrival: '2026-12-09T10:00:00.000Z',
-      actualArrival: '2026-12-09T12:00:00.000Z', // +120m -> on time
-    },
-    {
-      shipmentId: 6,
-      transportMode: 'air',
-      transportationType: 'International',
-      plannedArrival: '2026-12-09T10:00:00.000Z',
-      actualArrival: '2026-12-09T12:01:00.000Z', // +121m -> late
-    },
-  ]);
-  assert.equal(intlOtd.grossOnTimeDeliveryRate, 50);
-
-  // 48h excused_delay window boundary
-  assert.equal(isExcusedDelayWindowOpen('2026-12-08T12:00:00.000Z', now), true); // exact 48h
-  assert.equal(isExcusedDelayWindowOpen('2026-12-08T11:59:00.000Z', now), false); // 48h01m
-
-  // AC-RPT-01 exact financial reconciliation
-  const fin = computeExecutiveFinancialMetrics({
-    quotedTransportRevenue: 90_000_000,
-    quotedInsuranceRevenue: 10_000_000,
-    sepaySucceededTotal: 115_000_000,
-    cancelledSepaySucceeded: 15_000_000,
-    refundTransferred: 8_000_000,
-    creditLiabilityBalance: 5_000_000,
-    disbursementOffset: 0,
-    operatingCost: 62_000_000,
-  });
-  assert.equal(fin.quotedActiveRevenue, 100_000_000);
-  assert.equal(fin.retainedCancellationRevenue, 2_000_000);
-  assert.equal(fin.creditLiabilityBalance, 5_000_000);
-  assert.equal(fin.netRealizedCashRevenue, 102_000_000);
-  assert.equal(fin.operatingCost, 62_000_000);
-  assert.equal(fin.grossProfit, 40_000_000);
-
-  // Zero 98.6 hardcode in reports module
-  const reportsDir = path.resolve(__dirname, '../../src/modules/reports');
-  for (const f of fs.readdirSync(reportsDir).filter((x) => x.endsWith('.ts'))) {
-    const txt = fs.readFileSync(path.join(reportsDir, f), 'utf8');
-    assert.doesNotMatch(txt, /98\.6/, `${f} must not hardcode 98.6`);
-  }
 });

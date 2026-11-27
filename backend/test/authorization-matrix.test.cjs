@@ -39,7 +39,6 @@ const { OrdersController } = require('../dist/modules/orders/orders.controller')
 const { PricingController } = require('../dist/modules/orders/pricing.controller');
 const { QuotesController } = require('../dist/modules/orders/quotes.controller');
 const { SepayPaymentController, SepayWebhookController } = require('../dist/modules/orders/sepay-payment.controller');
-const { ReportsController } = require('../dist/modules/reports/reports.controller');
 const { RoutesController } = require('../dist/modules/routes/routes.controller');
 const { HandoverController } = require('../dist/modules/tracking/handover.controller');
 const { SystemSettingsController: TrackingSystemSettingsController } = require('../dist/modules/tracking/system-settings.controller');
@@ -66,7 +65,6 @@ const ALL_CONTROLLERS = [
   QuotesController,
   SepayPaymentController,
   SepayWebhookController,
-  ReportsController,
   RoutesController,
   HandoverController,
   TrackingSystemSettingsController,

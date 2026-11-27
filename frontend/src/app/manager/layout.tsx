@@ -9,7 +9,6 @@ import {
   MapPin,
   Users,
   AlertTriangle,
-  BarChart3,
   Bell,
   Settings,
   HelpCircle,
@@ -241,12 +240,12 @@ export default function ManagerLayout({
           label: t('manager.nav.incidents', 'Sự Cố & Cảnh Báo'),
           href: '/manager/incidents',
           icon: <AlertTriangle size={18} />,
-          matchPrefixes: ['/manager/incidents', '/manager/monitoring/alerts'],
+          matchPrefixes: ['/manager/incidents'],
         },
       ],
     },
     {
-      title: t('manager.navGroupResources', 'Tài Nguyên & Báo Cáo'),
+      title: t('manager.navGroupResources', 'Tài Nguyên & Bảo Hiểm'),
       items: [
         {
           label: t('manager.nav.fleetHub', 'Đội Xe & Trạm Xe'),
@@ -264,11 +263,6 @@ export default function ManagerLayout({
           href: '/manager/insurance/claims',
           icon: <ShieldAlert size={18} />,
           matchPrefixes: ['/manager/insurance'],
-        },
-        {
-          label: t('manager.nav.reports', 'Báo Cáo & Đối Soát'),
-          href: '/manager/reports',
-          icon: <BarChart3 size={18} />,
         },
       ],
     },
@@ -327,7 +321,7 @@ export default function ManagerLayout({
         subtitle: t('manager.header.fleetSub', 'Quản lý phương tiện chuyên dụng và trạm trung chuyển'),
       };
     }
-    if (p.startsWith('/manager/monitoring/alerts') || p.startsWith('/manager/incidents')) {
+    if (p.startsWith('/manager/incidents')) {
       return {
         title: t('manager.nav.incidents', 'Sự Cố & Cảnh Báo'),
         subtitle: t('manager.header.incidentsSub', 'Cảnh báo trực tuyến, đề xuất đổi tuyến và tranh chấp bàn giao'),
@@ -343,12 +337,6 @@ export default function ManagerLayout({
       return {
         title: t('manager.nav.claims', 'Bồi Thường Bảo Hiểm'),
         subtitle: t('manager.header.claimsSub', 'Thẩm định hồ sơ bồi thường M1–M4 và đối soát hạn mức'),
-      };
-    }
-    if (p.startsWith('/manager/reports')) {
-      return {
-        title: t('manager.nav.reports', 'Báo Cáo & Đối Soát'),
-        subtitle: t('manager.header.reportsSub', 'Doanh thu thực thu, chi phí vận hành và chỉ số OTD'),
       };
     }
     if (p.startsWith('/manager/staff')) {

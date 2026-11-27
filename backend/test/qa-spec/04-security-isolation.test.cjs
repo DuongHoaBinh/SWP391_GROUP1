@@ -515,8 +515,6 @@ describe('QA Spec v3.1 Tier 4: Security, IDOR, Shared-Trip Isolation, RBAC, Uplo
       // Manager-only
       { endpoint: `/orders/${sid}/approve`, method: 'PATCH', body: {}, denied: ['custA', 'specialist', 'coordinator', 'driver1'] },
       { endpoint: `/orders/${sid}/operational-cancel`, method: 'POST', body: { category: 'company_fault', reason: 'RBAC' }, denied: ['custA', 'specialist', 'coordinator', 'driver1'] },
-      { endpoint: '/reports/performance', method: 'GET', denied: ['custA', 'specialist', 'coordinator', 'driver1'] },
-      { endpoint: `/reports/shipments/${sid}/excused-delay`, method: 'PATCH', body: { excusedDelay: true, reason: 'RBAC' }, denied: ['custA', 'specialist', 'coordinator', 'driver1'] },
       { endpoint: `/orders/${sid}/payment-grace`, method: 'POST', body: { reason: 'RBAC' }, denied: ['custA', 'specialist', 'coordinator', 'driver1'] },
       // Admin-only refund transfer
       { endpoint: '/orders/refunds/1/transfer', method: 'POST', body: { recipientBankAccount: '123', bankTransactionRef: 'REF' }, denied: ['custA', 'managerA', 'specialist', 'coordinator', 'driver1'] },

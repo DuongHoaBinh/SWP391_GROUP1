@@ -1,78 +1,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { computeOtdMetrics, computeExecutiveFinancialMetrics } = require('../dist/modules/reports/reports-calculator');
-const { ReportsService } = require('../dist/modules/reports/reports.service');
 const { DocumentsService } = require('../dist/modules/documents/documents.service');
 const { RoutesStore } = require('../dist/modules/routes/routes.store');
 const { TrackingService } = require('../dist/modules/tracking/tracking.service');
 const { UserRole } = require('../dist/modules/auth/auth.types');
-
-test('AC-RPT-01: OTD tolerance (60m road / 120m air), Adjusted OTD & Executive financial reconciliation match exact spec numbers', () => {
-  const basePlanned = new Date('2099-01-10T10:00:00.000Z');
-  const otd = computeOtdMetrics([
-    { shipmentId: 1, transportMode: 'road', plannedArrival: basePlanned, actualArrival: new Date(basePlanned.getTime() + 45 * 60000), excusedDelay: false },
-    { shipmentId: 2, transportMode: 'road', plannedArrival: basePlanned, actualArrival: new Date(basePlanned.getTime() + 60 * 60000), excusedDelay: false },
-    { shipmentId: 3, transportMode: 'air', plannedArrival: basePlanned, actualArrival: new Date(basePlanned.getTime() + 110 * 60000), excusedDelay: false },
-    { shipmentId: 4, transportMode: 'road', plannedArrival: basePlanned, actualArrival: new Date(basePlanned.getTime() + 95 * 60000), excusedDelay: true },
-  ]);
-
-  assert.equal(otd.otdSampleSize, 4);
-  assert.equal(otd.onTimeCount, 3);
-  assert.equal(otd.lateCount, 1);
-  assert.equal(otd.grossOnTimeDeliveryRate, 75);
-  assert.equal(otd.adjustedOnTimeDeliveryRate, 100);
-
-  const financials = computeExecutiveFinancialMetrics({
-    quotedTransportRevenue: 85_000_000,
-    quotedInsuranceRevenue: 15_000_000,
-    sepaySucceededTotal: 115_000_000,
-    cancelledSepaySucceeded: 15_000_000,
-    refundTransferred: 8_000_000,
-    creditLiabilityBalance: 5_000_000,
-    disbursementOffset: 0,
-    operatingCost: 62_000_000,
-  });
-
-  assert.equal(financials.quotedActiveRevenue, 100_000_000);
-  assert.equal(financials.retainedCancellationRevenue, 2_000_000);
-  assert.equal(financials.creditLiabilityBalance, 5_000_000);
-  assert.equal(financials.netRealizedCashRevenue, 102_000_000);
-  assert.equal(financials.operatingCost, 62_000_000);
-  assert.equal(financials.grossProfit, 40_000_000);
-});
-
-test('AC-RPT-02: excused_delay succeeds within 48h of actual_arrival_date and throws 409 after 50h', async () => {
-  const manager = { id: '2', role: UserRole.LOGISTICS_MANAGER };
-  const now = Date.now();
-  const arrival20hAgo = new Date(now - 20 * 3600 * 1000);
-  const arrival50hAgo = new Date(now - 50 * 3600 * 1000);
-
-  const updates = [];
-  const svcRecent = new ReportsService({
-    execute: async (sql, params) => {
-      if (sql.includes('SELECT s.shipment_id')) {
-        return [[{ shipment_id: 10, status: 'completed', actual_arrival_date: arrival20hAgo }]];
-      }
-      updates.push({ sql, params });
-      return [{ affectedRows: 1 }];
-    },
-  });
-
-  const okRes = await svcRecent.updateExcusedDelay(manager, 10, {
-    excusedDelay: true,
-    reason: 'Thông quan biên giới tắc nghẽn bất khả kháng',
-  });
-  assert.equal(okRes.excusedDelay, true);
-  assert.equal(updates.length, 1);
-
-  const svcOld = new ReportsService({
-    execute: async () => [[{ shipment_id: 11, status: 'completed', actual_arrival_date: arrival50hAgo }]],
-  });
-  await assert.rejects(
-    svcOld.updateExcusedDelay(manager, 11, { excusedDelay: true, reason: 'Quá hạn' }),
-    (err) => err.getStatus?.() === 409,
-  );
-});
 
 test('AC-F2-01 & AC-F2-02: multi-dim gate filtering, lead_time_days=14, 2-tier authority gating & 48h safety buffer', async () => {
   let docRecord = {

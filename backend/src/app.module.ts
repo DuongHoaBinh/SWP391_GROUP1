@@ -8,7 +8,6 @@ import { HorsesModule } from './modules/horses/horses.module';
 import { FleetModule } from './modules/fleet/fleet.module';
 import { RoutesModule } from './modules/routes/routes.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
-import { ReportsModule } from './modules/reports/reports.module';
 import { IncidentsModule } from './modules/incidents/incidents.module';
 import { HealthController } from './modules/health/health.controller';
 import { ShipmentLifecycleModule } from './common/shipment-lifecycle';
@@ -32,7 +31,6 @@ import { getJwtExpiresIn, getJwtSecret } from './common/config/jwt.config';
     FleetModule,
     RoutesModule,
     TrackingModule,
-    ReportsModule,
     IncidentsModule,
   ],
   controllers: [HealthController],
