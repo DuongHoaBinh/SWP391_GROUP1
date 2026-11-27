@@ -142,6 +142,7 @@ export default function ManagerRequestDetailPage() {
     fileUrl?: string;
     microchip?: string | null;
     passport?: string | null;
+    expiryDate?: string | null;
   } | null>(null);
 
   // Fetch order details
@@ -837,6 +838,7 @@ export default function ManagerRequestDetailPage() {
                                   fileUrl: doc.fileUrl,
                                   microchip: horse.microchipNo,
                                   passport: horse.passportNo,
+                                  expiryDate: doc.expiryDate ?? null,
                                 })
                               }
                             >
@@ -1497,6 +1499,7 @@ export default function ManagerRequestDetailPage() {
           fileUrl={reviewDoc.fileUrl}
           horseMicrochip={reviewDoc.microchip}
           horsePassport={reviewDoc.passport}
+          currentExpiryDate={reviewDoc.expiryDate}
           onSuccess={() => {
             setReviewDoc(null);
             void mutateChecklist();

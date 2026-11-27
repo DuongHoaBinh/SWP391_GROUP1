@@ -395,3 +395,24 @@ test('Cross-border coastal city falls back to nearest international seaport with
   assert.ok(seaLeg, 'Expected sea leg for Barcelona -> Nice via Genoa port');
   assert.ok(seaLeg.toName.includes('Genoa'), `Expected Genoa seaport, got ${seaLeg.toName}`);
 });
+
+test('ASEAN+China multi-hop sea routes include 12h port-call penalty and block >168h without naive fallback', () => {
+  const asean = loadLib('asean-china-network.ts');
+  // HCMC -> Qingdao has 3 intermediate port calls (HKG, XMN, SHA): 71+26+42+34 + 3*12 = 209h > 168h
+  const hcmcQingdao = asean.resolveAseanChinaSeaCorridor([10.77, 106.7], 'Việt Nam', [36.07, 120.38], 'Trung Quốc', false);
+  assert.ok(hcmcQingdao && hcmcQingdao.durationHours > 168, `Expected >168h with port call penalties, got ${hcmcQingdao?.durationHours}`);
+
+  // Hai Phong -> Tianjin must be blocked by >168h welfare cap (must NOT fall back to naive dist/25)
+  const hpTianjin = geo.buildEquineRoute(
+    'Hải Phòng, Việt Nam',
+    'Tianjin, China',
+    'sea',
+    'International',
+    [20.8449, 106.6881],
+    [39.0842, 117.2009],
+    { coords: [20.8449, 106.6881], displayName: 'Hải Phòng, Việt Nam', country: 'Việt Nam', countryCode: 'VN' },
+    { coords: [39.0842, 117.2009], displayName: 'Tianjin, China', country: 'Trung Quốc', countryCode: 'CN' },
+  );
+  assert.ok(hpTianjin.seaUnavailableNotice && hpTianjin.seaUnavailableNotice.vi.includes('168'), 'Expected 168h welfare block');
+  assert.equal(hpTianjin.legs.length, 0, 'Must not draw legs when ASEAN+China corridor exceeds 168h');
+});

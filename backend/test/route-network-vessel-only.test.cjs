@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { plainToInstance } = require('class-transformer');
 const { validate } = require('class-validator');
 const { planNetworkRoute } = require('../dist/modules/routes/route-network.policy');
+const { RouteNetworkStore } = require('../dist/modules/routes/route-network.store');
 const { RoutePlanningError } = require('../dist/modules/routes/route-network.types');
 const { PlanNetworkRouteDto } = require('../dist/modules/routes/dto/plan-network-route.dto');
 
@@ -227,4 +228,24 @@ test('PlanNetworkRouteDto: rejects seaMode=ferry and accepts vessel or omitted s
   });
   const okErrors = await validate(okDto);
   assert.equal(okErrors.length, 0);
+});
+
+test('RouteNetworkStore.loadNetwork: filters vessel-only, <=168h, and via_points IS NOT NULL', async () => {
+  const queries = [];
+  const mockPool = {
+    async query(sql) {
+      queries.push(String(sql));
+      return [[]];
+    },
+  };
+  const store = new RouteNetworkStore(mockPool);
+  await store.loadNetwork();
+  const seaRouteQuery = queries.find((q) => q.includes('FROM sea_route'));
+  assert.ok(seaRouteQuery, 'Expected sea_route query');
+  assert.match(seaRouteQuery, /sea_mode\s*=\s*'vessel'/i);
+  assert.match(seaRouteQuery, /typical_hours\s*<=\s*168/i);
+  assert.match(seaRouteQuery, /via_points\s+IS\s+NOT\s+NULL/i);
+  const seaportQuery = queries.find((q) => q.includes('FROM seaport'));
+  assert.ok(seaportQuery, 'Expected seaport query');
+  assert.match(seaportQuery, /supports_vessel\s*=\s*TRUE/i);
 });

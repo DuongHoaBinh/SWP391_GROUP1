@@ -55,7 +55,11 @@ export class RouteNetworkStore implements OnModuleInit, OnModuleDestroy {
     );
     const [lanes] = await this.pool.query<RowDataPacket[]>(
       `SELECT sea_route_id, from_port_id, to_port_id, sea_mode, distance_km, typical_hours, via_points, notes
-       FROM sea_route WHERE is_active = TRUE AND sea_mode = 'vessel' AND typical_hours <= 168`,
+       FROM sea_route
+       WHERE is_active = TRUE
+         AND sea_mode = 'vessel'
+         AND typical_hours <= 168
+         AND via_points IS NOT NULL`,
     );
     const [airports] = await this.pool.query<RowDataPacket[]>(
       `SELECT airport_id, iata_code, name, city, country, country_code, has_quarantine_facility,

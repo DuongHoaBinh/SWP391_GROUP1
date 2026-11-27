@@ -270,6 +270,8 @@ export function resolveAseanChinaSeaCorridor(
   return null;
 }
 
+const PORT_CALL_PENALTY_HOURS = 12;
+
 function assembleSeaPathResult(
   fromPort: SeaportNode,
   toPort: SeaportNode,
@@ -296,7 +298,8 @@ function assembleSeaPathResult(
       }
     }
     distanceKm += step.edge.distanceKm;
-    durationHours += step.edge.typicalHours;
+    // Match backend route-network.policy.ts: +12h port call penalty for each intermediate transshipment
+    durationHours += step.edge.typicalHours + (i > 0 ? PORT_CALL_PENALTY_HOURS : 0);
     notesVi.push(step.edge.notesVi);
     notesEn.push(step.edge.notesEn);
   }

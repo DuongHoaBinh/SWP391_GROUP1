@@ -2394,6 +2394,35 @@ export function buildEquineRoute(
       aseanSeaPath &&
       aseanOriginDist <= MAX_SEAPORT_ROAD_KM &&
       aseanDestDist <= MAX_SEAPORT_ROAD_KM &&
+      aseanSeaPath.durationHours > 168
+    ) {
+      const seaDays = (aseanSeaPath.durationHours / 24).toFixed(1);
+      waypoints.push(
+        {
+          name: origin.name,
+          type: 'origin',
+          coords: origin.coords,
+          label: 'Điểm xuất phát',
+          country: origin.country,
+          details: 'Điểm đón ngựa dự kiến.',
+        },
+        {
+          name: destination.name,
+          type: 'destination',
+          coords: destination.coords,
+          label: 'Điểm đến',
+          country: destination.country,
+          details: 'Điểm giao ngựa dự kiến.',
+        }
+      );
+      seaUnavailableNotice = {
+        vi: `Không khả dụng tuyến đường thủy: hành trình tàu biển dự kiến mất ${seaDays} ngày (~${Math.round(aseanSeaPath.durationHours)} giờ), vượt giới hạn an toàn thú y tối đa 7 ngày (168 giờ) đối với ngựa đua sống. Vui lòng chuyển sang phương thức Hàng không.`,
+        en: `Sea freight is unavailable: estimated sea voyage is ${seaDays} days (~${Math.round(aseanSeaPath.durationHours)}h), exceeding the 7-day (168h) live thoroughbred welfare limit. Please switch to Air Cargo.`,
+      };
+    } else if (
+      aseanSeaPath &&
+      aseanOriginDist <= MAX_SEAPORT_ROAD_KM &&
+      aseanDestDist <= MAX_SEAPORT_ROAD_KM &&
       aseanSeaPath.durationHours <= 168
     ) {
       const originPort = aseanSeaPath.fromPort;

@@ -1104,7 +1104,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
     });
     await db.execute(
       `UPDATE shipment
-       SET cancel_reason_code = 'customer_cancelled',
+       SET cancelled_at = NOW(),
+           cancel_reason_code = 'customer_cancelled',
            cancellation_reason = 'Khách hàng tự hủy đơn trước khi thanh toán'
        WHERE shipment_id = ?`,
       [shipmentId],

@@ -5,10 +5,9 @@
  * - Đường bộ: đồ thị gồm điểm đi/đến, trạm nghỉ thú y và cửa khẩu nhận động vật sống. Hai nút chỉ nối nhau
  *   khi cùng khối đất liền, có chung quốc gia (cửa khẩu thuộc 2 quốc gia) và cách nhau ≤ MAX_HOP_KM, nên tuyến
  *   bám theo chuỗi trạm dọc hành lang thật (QL1A, AH1, AH2, R3A...). Chuyến nội địa không được đi nhờ nước khác.
- *   Trạm dừng nghỉ được chọn sao cho mỗi đoạn lái ≤ maxDriveHoursBeforeRest; qua cửa khẩu/phà coi như đã nghỉ.
- * - Đường biển, tàu chuyên dụng: xe ra cảng quốc tế cùng nước → hải trình theo bảng sea_route (có thể ghé cảng
- *   trung chuyển, phạt 12h/lần ghé) → xe từ cảng đến điểm giao.
- * - Đường biển, phà RoRo: ngựa ở nguyên trên xe; tuyến bắt buộc có ít nhất một chặng phà ≤ 12h.
+ *   Trạm dừng nghỉ được chọn sao cho mỗi đoạn lái ≤ maxDriveHoursBeforeRest; qua cửa khẩu coi như đã nghỉ.
+ * - Đường biển, tàu chuyên dụng (vessel-only, không hỗ trợ phà RoRo): xe ra cảng quốc tế cùng nước → hải trình
+ *   theo bảng sea_route (có thể ghé cảng trung chuyển, phạt 12h/lần ghé, tối đa 168h) → xe từ cảng đến điểm giao.
  * - Hàng không: sân bay có ram dốc ngựa cùng nước với điểm đi/đến (chuyến quốc tế cần trạm cách ly).
  *   Sân bay 'regional' chỉ bay thẳng tới 'hub'; còn lại nối chuyến qua hub gần nhất (nội địa: qua sân bay lớn trong nước).
  */
@@ -62,7 +61,7 @@ interface Endpoint {
 
 interface RoadNode {
   key: string;
-  kind: 'origin' | 'destination' | 'gate' | 'rest' | 'ferry_port' | 'hub';
+  kind: 'origin' | 'destination' | 'gate' | 'rest' | 'hub';
   name: string;
   code: string | null;
   coords: LatLng;
@@ -73,17 +72,14 @@ interface RoadNode {
   stopType?: 'rest' | 'quarantine';
   hasVet?: boolean;
   gate?: NetworkBorderCrossing;
-  port?: NetworkSeaport;
 }
 
 interface RoadEdge {
   from: RoadNode;
   to: RoadNode;
-  kind: 'road' | 'ferry';
+  kind: 'road';
   km: number;
   hours: number;
-  lane?: NetworkSeaLane;
-  reversed?: boolean;
 }
 
 interface RoadPath {
@@ -128,7 +124,7 @@ function toEndpoint(net: TransportNetwork, input: PlanRouteInput['origin'], fall
 }
 
 // ---------------------------------------------------------------------------------------------
-// Đồ thị đường bộ (+ phà)
+// Đồ thị đường bộ
 // ---------------------------------------------------------------------------------------------
 
 function endpointNode(ep: Endpoint, kind: 'origin' | 'destination' | 'hub', code: string | null = null): RoadNode {
@@ -145,7 +141,7 @@ function endpointNode(ep: Endpoint, kind: 'origin' | 'destination' | 'hub', code
   };
 }
 
-function buildRoadNodes(net: TransportNetwork, withFerryPorts: boolean, allowed?: Set<string>): RoadNode[] {
+function buildRoadNodes(net: TransportNetwork, allowed?: Set<string>): RoadNode[] {
   const ok = (countries: string[]) => !allowed || countries.every((c) => allowed.has(c));
   const nodes: RoadNode[] = [];
   for (const g of net.borderCrossings) {
@@ -184,41 +180,20 @@ function buildRoadNodes(net: TransportNetwork, withFerryPorts: boolean, allowed?
       hasVet: s.hasVeterinarian,
     });
   }
-  if (withFerryPorts) {
-    for (const p of net.seaports) {
-      if (!p.supportsFerry || !ok([p.countryCode])) continue;
-      const coords: LatLng = [p.lat, p.lng];
-      nodes.push({
-        key: `port:${p.code}`,
-        kind: 'ferry_port',
-        name: p.name,
-        code: p.code,
-        coords,
-        countries: [p.countryCode],
-        landmass: landmassOf(coords),
-        clearanceHours: 0,
-        restCapable: false,
-        port: p,
-      });
-    }
-  }
   return nodes;
 }
 
 /**
- * Dijkstra trên đồ thị đường bộ. Trạng thái gồm (nút, đã qua phà hay chưa) để ép tuyến phà khi cần.
+ * Dijkstra trên đồ thị đường bộ.
  */
 function findRoadPath(
   net: TransportNetwork,
   from: RoadNode,
   to: RoadNode,
   opts: Opts,
-  config: { ferry?: boolean; requireFerry?: boolean; allowed?: Set<string> } = {},
+  config: { allowed?: Set<string> } = {},
 ): RoadPath | null {
-  const nodes = [from, to, ...buildRoadNodes(net, false, config.allowed)];
-  const ferryLanes: NetworkSeaLane[] = [];
-  const portIdToNode = new Map<number, RoadNode>();
-  for (const n of nodes) if (n.port) portIdToNode.set(n.port.id, n);
+  const nodes = [from, to, ...buildRoadNodes(net, config.allowed)];
 
   const roadHours = (km: number) => km / opts.roadSpeedKmh;
 
@@ -252,41 +227,36 @@ function findRoadPath(
     return out;
   };
 
-  type State = { key: string; node: RoadNode; ferry: 0 | 1 };
-  const stateKey = (node: RoadNode, ferry: 0 | 1) => `${node.key}|${ferry}`;
   const dist = new Map<string, number>();
-  const prev = new Map<string, { state: State; edge: RoadEdge }>();
-  const open = new Map<string, State>();
-  const start: State = { key: stateKey(from, 0), node: from, ferry: 0 };
-  dist.set(start.key, 0);
-  open.set(start.key, start);
-  const targetFerry: 0 | 1 = config.requireFerry ? 1 : 0;
-  let reached: State | null = null;
+  const prev = new Map<string, { node: RoadNode; edge: RoadEdge }>();
+  const open = new Map<string, RoadNode>();
+  dist.set(from.key, 0);
+  open.set(from.key, from);
+  let reached: RoadNode | null = null;
 
   while (open.size) {
-    let cur: State | null = null;
+    let cur: RoadNode | null = null;
     let best = Infinity;
-    for (const s of open.values()) {
-      const d = dist.get(s.key)!;
+    for (const n of open.values()) {
+      const d = dist.get(n.key)!;
       if (d < best) {
         best = d;
-        cur = s;
+        cur = n;
       }
     }
     if (!cur) break;
     open.delete(cur.key);
-    if (cur.node === to && (cur.ferry === targetFerry || !config.requireFerry)) {
+    if (cur === to) {
       reached = cur;
       break;
     }
-    for (const e of neighbors(cur.node)) {
-      const nf: 0 | 1 = e.kind === 'ferry' ? 1 : cur.ferry;
-      const nk = stateKey(e.to, nf);
+    for (const e of neighbors(cur)) {
+      const nk = e.to.key;
       const nd = best + e.hours;
       if (nd < (dist.get(nk) ?? Infinity)) {
         dist.set(nk, nd);
-        prev.set(nk, { state: cur, edge: e });
-        open.set(nk, { key: nk, node: e.to, ferry: nf });
+        prev.set(nk, { node: cur, edge: e });
+        open.set(nk, e.to);
       }
     }
   }
@@ -297,7 +267,7 @@ function findRoadPath(
   while (prev.has(k)) {
     const p = prev.get(k)!;
     edges.unshift(p.edge);
-    k = p.state.key;
+    k = p.node.key;
   }
   const pathNodes = [from, ...edges.map((e) => e.to)];
   return { nodes: pathNodes, edges, hours: dist.get(reached.key)! };
@@ -419,7 +389,7 @@ function roadSegment(
   to: RoadNode,
   opts: Opts,
   seq: number,
-  config: { ferry?: boolean; requireFerry?: boolean; allowed?: Set<string> } = {},
+  config: { allowed?: Set<string> } = {},
 ): LegBuild | null {
   if (haversine(from.coords, to.coords) < 1.5) return { legs: [], gates: [], warnings: [] };
   const path = findRoadPath(net, from, to, opts, config);

@@ -23,6 +23,15 @@ UPDATE seaport
 SET supports_vessel = TRUE
 WHERE code IN ('VN-RGI', 'VN-PQC');
 
+-- Ensure domestic VN-RGI <-> VN-PQC vessel lane carries Gulf of Thailand offshore via_points
+UPDATE sea_route sr
+JOIN seaport p1 ON p1.port_id = sr.from_port_id
+JOIN seaport p2 ON p2.port_id = sr.to_port_id
+SET sr.via_points = CAST('[[9.98, 104.82], [10.05, 104.45]]' AS JSON)
+WHERE p1.code = 'VN-RGI' AND p2.code = 'VN-PQC'
+  AND sr.sea_mode = 'vessel'
+  AND sr.via_points IS NULL;
+
 -- 3. Add direction column to delivery_handover for round-trip outbound + return handovers (idempotent)
 SET @has_dh_direction := (
   SELECT COUNT(*)
