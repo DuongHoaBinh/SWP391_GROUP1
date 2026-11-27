@@ -57,7 +57,6 @@ export class QuotesService {
       horseId: number;
       name: string;
       quantity: number;
-      requiresPrivateStall: boolean;
       insurance: ReturnType<typeof calculateInsurance>;
       roundTripInsuranceFee?: number;
       returnInsuranceFee?: number;
@@ -100,7 +99,6 @@ export class QuotesService {
         horseId: horse.horseId,
         name: horse.name,
         quantity: qty,
-        requiresPrivateStall: horse.requiresPrivateStall, // Lấy từ DB, không tin client
         insurance: insResult,
         roundTripInsuranceFee: roundTripFee,
         returnInsuranceFee: returnInsFee,
@@ -138,7 +136,7 @@ export class QuotesService {
         seaMode: dto.seaMode,
         origin: dto.origin,
         destination: dto.destination,
-        horses: horseSnapshots.map((h) => ({ quantity: h.quantity, requiresPrivateStall: h.requiresPrivateStall })),
+        horses: horseSnapshots.map((h) => ({ quantity: h.quantity })),
         pickupAt,
       });
       if (!allocation.options.length) {
@@ -193,7 +191,6 @@ export class QuotesService {
         destination: dto.destination,
         horses: horseSnapshots.map((h) => ({
           quantity: h.quantity,
-          requiresPrivateStall: h.requiresPrivateStall,
         })),
       },
     });
@@ -242,7 +239,7 @@ export class QuotesService {
             seaMode: dto.seaMode,
             origin: dto.destination,
             destination: dto.origin,
-            horses: horseSnapshots.map((h) => ({ quantity: h.quantity, requiresPrivateStall: h.requiresPrivateStall })),
+            horses: horseSnapshots.map((h) => ({ quantity: h.quantity })),
             pickupAt: new Date(dto.returnDepartureAt!),
           });
           const bestRet = returnAlloc.options.find((o) => o.optionCode === returnAlloc.recommendedOptionCode) ?? returnAlloc.options[0];
@@ -411,7 +408,6 @@ export class QuotesService {
           horseId: h.horseId,
           name: h.name,
           quantity: h.quantity,
-          requiresPrivateStall: h.requiresPrivateStall,
           declaredValue: h.insurance.declaredValue,
           declaredCurrency: h.insurance.declaredCurrency,
           insurancePackage: h.insurance.insurancePackage,

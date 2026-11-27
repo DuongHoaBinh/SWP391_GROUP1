@@ -40,7 +40,6 @@ const AIR_TARIFF_V1 = {
   baseFeePerHorse: 60000000,
   pricePerKmPerHorse: 25000,
   airportHandlingPerHorse: 5000000,
-  privateStallMultiplier: 1.5,
   roundingUnit: 1000,
   averageSpeedKmh: 700,
   version: 1,
@@ -69,9 +68,9 @@ test('2. Ví dụ C3 đường bộ: Phương án A = 18.750.000, Phương án B
   const inputA = {
     mode: 'road',
     horses: [
-      { horseId: 1, quantity: 1, requiresPrivateStall: false },
-      { horseId: 2, quantity: 1, requiresPrivateStall: false },
-      { horseId: 3, quantity: 1, requiresPrivateStall: false },
+      { horseId: 1, quantity: 1 },
+      { horseId: 2, quantity: 1 },
+      { horseId: 3, quantity: 1 },
     ],
     vehicles: [
       { classCode: 'truck_4', priceCoefficient: 1.3, capacity: 4, deadheadKm: 20 },
@@ -87,9 +86,9 @@ test('2. Ví dụ C3 đường bộ: Phương án A = 18.750.000, Phương án B
   const inputB = {
     mode: 'road',
     horses: [
-      { horseId: 1, quantity: 1, requiresPrivateStall: false },
-      { horseId: 2, quantity: 1, requiresPrivateStall: false },
-      { horseId: 3, quantity: 1, requiresPrivateStall: false },
+      { horseId: 1, quantity: 1 },
+      { horseId: 2, quantity: 1 },
+      { horseId: 3, quantity: 1 },
     ],
     vehicles: [
       { classCode: 'truck_1', priceCoefficient: 1.0, capacity: 1, deadheadKm: 20 },
@@ -105,13 +104,12 @@ test('2. Ví dụ C3 đường bộ: Phương án A = 18.750.000, Phương án B
 });
 
 // Test 3: Ví dụ 2 C3 đường hàng không
-test('3. Ví dụ 2 C3 hàng không: 2 ngựa thường bay 1.090 km = 184.500.000; 1 ngựa chuồng riêng tăng đúng 50% phần bay', () => {
-  // 2 ngựa thường
+test('3. Ví dụ 2 C3 hàng không: 2 ngựa bay 1.090 km = 184.500.000', () => {
   const inputAir = {
     mode: 'air',
     horses: [
-      { horseId: 1, quantity: 1, requiresPrivateStall: false },
-      { horseId: 2, quantity: 1, requiresPrivateStall: false },
+      { horseId: 1, quantity: 1 },
+      { horseId: 2, quantity: 1 },
     ],
     vehicles: [{ classCode: 'truck_4', priceCoefficient: 1.3, capacity: 4, deadheadKm: 0 }],
     roadLegs: [],
@@ -120,24 +118,6 @@ test('3. Ví dụ 2 C3 hàng không: 2 ngựa thường bay 1.090 km = 184.500.0
 
   const resAir = calculateFreight(inputAir, { road: ROAD_TARIFF_V1, air: AIR_TARIFF_V1 });
   assert.equal(resAir.total, 184500000); // 2 * (60,000,000 + 1090 * 25,000 + 5,000,000) = 184,500,000
-
-  // 1 ngựa chuồng riêng + 1 ngựa thường
-  const inputAirPrivate = {
-    mode: 'air',
-    horses: [
-      { horseId: 1, quantity: 1, requiresPrivateStall: false },
-      { horseId: 2, quantity: 1, requiresPrivateStall: true },
-    ],
-    vehicles: [{ classCode: 'truck_4', priceCoefficient: 1.3, capacity: 4, deadheadKm: 0 }],
-    roadLegs: [],
-    airKm: 1090,
-  };
-
-  const resAirPrivate = calculateFreight(inputAirPrivate, { road: ROAD_TARIFF_V1, air: AIR_TARIFF_V1 });
-  // Ngựa thường: 87,250,000 + 5,000,000 = 92,250,000
-  // Ngựa chuồng riêng: 87,250,000 * 1.5 + 5,000,000 = 130,875,000 + 5,000,000 = 135,875,000
-  // Tổng = 92,250,000 + 135,875,000 = 228,125,000
-  assert.equal(resAirPrivate.total, 228125000);
 });
 
 // Test 4: Đường thủy vessel và từ chối ferry
@@ -149,7 +129,7 @@ test('4. Sea vessel: ô chuồng + cảnh báo SEA_VESSEL_HEALTH_RISK; Sea ferry
         {
           mode: 'sea',
           seaMode: 'ferry',
-          horses: [{ horseId: 1, quantity: 1, requiresPrivateStall: false }],
+          horses: [{ horseId: 1, quantity: 1 }],
           vehicles: [{ classCode: 'truck_2', priceCoefficient: 1.0, capacity: 2, deadheadKm: 0 }],
           roadLegs: [{ key: 'main', distanceKm: 120, borderCrossings: 0 }],
         },
@@ -162,7 +142,7 @@ test('4. Sea vessel: ô chuồng + cảnh báo SEA_VESSEL_HEALTH_RISK; Sea ferry
   const inputVessel = {
     mode: 'sea',
     seaMode: 'vessel',
-    horses: [{ horseId: 1, quantity: 1, requiresPrivateStall: false }],
+    horses: [{ horseId: 1, quantity: 1 }],
     vehicles: [{ classCode: 'truck_2', priceCoefficient: 1.0, capacity: 2, deadheadKm: 0 }],
     roadLegs: [],
     seaKm: 1000,
@@ -182,7 +162,7 @@ test('5. Làm tròn lên 1.000: subtotal 18.750.001 -> total 18.751.000, roundin
   };
   const input = {
     mode: 'road',
-    horses: [{ horseId: 1, quantity: 1, requiresPrivateStall: false }],
+    horses: [{ horseId: 1, quantity: 1 }],
     vehicles: [{ classCode: 'truck_2', priceCoefficient: 1.0, capacity: 2, deadheadKm: 0 }],
     roadLegs: [{ key: 'main', distanceKm: 0, borderCrossings: 0 }],
   };
@@ -324,7 +304,7 @@ test('8. DistanceService: không có ORS key -> gọi OSRM; có ORS key -> gọi
 });
 
 // Test 9: Service báo giá (QuotesService) với store giả
-test('9. QuotesService: ngựa của người khác -> 403; tripType round_trip -> 400; chuồng riêng tăng slots', async () => {
+test('9. QuotesService: ngựa của người khác -> 403; tripType round_trip -> 400; 2 ngựa chọn xe 2 chỗ', async () => {
   const fakePricingStore = {
     getActiveTariffs: async () => ({ road: { params: ROAD_TARIFF_V1, version: 1 } }),
     getRoadVehicleClasses: async () => [
@@ -340,9 +320,9 @@ test('9. QuotesService: ngựa của người khác -> 403; tripType round_trip 
 
   const fakeQuotesStore = {
     findHorseById: async (id) => {
-      if (id === 1) return { horseId: 1, ownerId: 10, name: 'Xích Thố', status: 'active', requiresPrivateStall: false, quantity: 1 };
-      if (id === 2) return { horseId: 2, ownerId: 99, name: 'Ngựa của B', status: 'active', requiresPrivateStall: false, quantity: 1 };
-      if (id === 3) return { horseId: 3, ownerId: 10, name: 'Đực Giống', status: 'active', requiresPrivateStall: true, quantity: 1 };
+      if (id === 1) return { horseId: 1, ownerId: 10, name: 'Xích Thố', status: 'active', quantity: 1 };
+      if (id === 2) return { horseId: 2, ownerId: 99, name: 'Ngựa của B', status: 'active', quantity: 1 };
+      if (id === 3) return { horseId: 3, ownerId: 10, name: 'Đực Giống', status: 'active', quantity: 1 };
       return null;
     },
     createQuote: async () => 501,
@@ -379,18 +359,18 @@ test('9. QuotesService: ngựa của người khác -> 403; tripType round_trip 
     ForbiddenException,
   );
 
-  // 9c. Ngựa có requiresPrivateStall -> slots = 2, chọn xe 2 chỗ thay vì 1 chỗ
-  const quotePrivate = await quotesService.createQuote(user, {
+  // 9c. 2 ngựa -> slots = 2, chọn xe 2 chỗ
+  const quoteTwoHorses = await quotesService.createQuote(user, {
     origin: { address: 'Q7 TP.HCM', lat: 10.734, lng: 106.7216 },
     destination: { address: 'Đà Lạt', lat: 11.9404, lng: 108.4583 },
     departureDate: '2026-12-10',
     transportMode: 'road',
     tripType: 'one_way',
-    horses: [{ horseId: 3 }],
+    horses: [{ horseId: 1 }, { horseId: 3 }],
   });
 
-  assert.equal(quotePrivate.requiredStallSlots, 2);
-  assert.equal(quotePrivate.options[0].vehicles[0].classCode, 'truck_2');
+  assert.equal(quoteTwoHorses.requiredStallSlots, 2);
+  assert.equal(quoteTwoHorses.options[0].vehicles[0].classCode, 'truck_2');
 });
 
 // Test 10: Tạo đơn từ quote và các mã lỗi (410, 409, 403)
@@ -553,7 +533,6 @@ test('12. Sea quoting: regional <= 7d succeeds; > 7d (Vietnam -> Dubai) throws 4
       ownerId: 10,
       name: 'Thunder',
       status: 'active',
-      requiresPrivateStall: false,
       quantity: 1,
     }),
     createQuote: async () => 777,
@@ -576,20 +555,19 @@ test('12. Sea quoting: regional <= 7d succeeds; > 7d (Vietnam -> Dubai) throws 4
   assert.ok(seaLeg);
   assert.equal(seaLeg.distanceKm, 1175);
 
-  // 12a-2. Long-haul Vietnam -> Dubai (311h > 168h / 7 days) must be rejected for equine welfare
-  await assert.rejects(
-    () =>
-      quotesService.createQuote(user, {
-        origin: { address: 'Củ Chi, TP.HCM', lat: 11.0067, lng: 106.5136, country: 'Vietnam' },
-        destination: { address: 'Meydan Racecourse, Dubai', lat: 25.156, lng: 55.302, country: 'UAE' },
-        departureDate: '2026-12-10',
-        transportMode: 'sea',
-        seaMode: 'vessel',
-        tripType: 'one_way',
-        horses: [{ horseId: 1 }],
-      }),
-    UnprocessableEntityException,
-  );
+  // 12a-2. Long-haul Vietnam -> Dubai (311h) now quotes cleanly as vessel (no 7-day cap)
+  const dubaiQuote = await quotesService.createQuote(user, {
+    origin: { address: 'Củ Chi, TP.HCM', lat: 11.0067, lng: 106.5136, country: 'Vietnam' },
+    destination: { address: 'Meydan Racecourse, Dubai', lat: 25.156, lng: 55.302, country: 'UAE' },
+    departureDate: '2026-12-10',
+    transportMode: 'sea',
+    seaMode: 'vessel',
+    tripType: 'one_way',
+    horses: [{ horseId: 1 }],
+  });
+  assert.equal(dubaiQuote.quoteId, 777);
+  const dubaiSeaLeg = dubaiQuote.legs.find((l) => l.key === 'sea');
+  assert.ok(dubaiSeaLeg && dubaiSeaLeg.distanceKm > 7000);
 
   // 12b. Connected-graph fallback: Singapore -> Hong Kong (connected via VN-CLI, 122h <= 168h)
   const sgHk = await pricingService.buildRouteContext({
@@ -598,7 +576,7 @@ test('12. Sea quoting: regional <= 7d succeeds; > 7d (Vietnam -> Dubai) throws 4
     sample: {
       origin: { address: 'Singapore Turf Club', lat: 1.4228, lng: 103.7618, country: 'Singapore' },
       destination: { address: 'Sha Tin Racecourse, Hong Kong', lat: 22.3999, lng: 114.205, country: 'Hong Kong' },
-      horses: [{ quantity: 1, requiresPrivateStall: false }],
+      horses: [{ quantity: 1 }],
     },
   });
   const connectedSea = sgHk.legs.find((l) => l.key === 'sea');
@@ -613,7 +591,7 @@ test('12. Sea quoting: regional <= 7d succeeds; > 7d (Vietnam -> Dubai) throws 4
         sample: {
           origin: { address: 'Củ Chi, TP.HCM', lat: 11.0067, lng: 106.5136, country: 'Vietnam' },
           destination: { address: 'Zurich, Switzerland', lat: 47.3769, lng: 8.5417, country: 'Switzerland' },
-          horses: [{ quantity: 1, requiresPrivateStall: false }],
+          horses: [{ quantity: 1 }],
         },
       }),
     UnprocessableEntityException,
@@ -628,7 +606,7 @@ test('12. Sea quoting: regional <= 7d succeeds; > 7d (Vietnam -> Dubai) throws 4
         sample: {
           origin: { address: 'Củ Chi, TP.HCM', lat: 11.0067, lng: 106.7894, country: 'Vietnam' },
           destination: { address: 'New Delhi, India', lat: 28.6139, lng: 77.209, country: 'India' },
-          horses: [{ quantity: 1, requiresPrivateStall: false }],
+          horses: [{ quantity: 1 }],
         },
       }),
     UnprocessableEntityException,

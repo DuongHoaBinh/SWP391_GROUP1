@@ -151,7 +151,7 @@ flowchart TB
 | **UC-01** | Register Account | Customer | Base | Đăng ký tài khoản khách hàng mới qua email OTP. |
 | **UC-02** | Log In | All Roles | Base | Đăng nhập hệ thống theo vai trò được cấp quyền. |
 | **UC-03** | Reset Password | Customer / User | `<<extend>>` UC-02 | Đặt lại mật khẩu khi quên qua mã OTP gửi về email. |
-| **UC-04** | Manage Horse Profiles | Customer | `<<include>>` UC-05 | Quản lý kho hồ sơ ngựa, cờ chuồng riêng, tính khí, vi chip. |
+| **UC-04** | Manage Horse Profiles | Customer | `<<include>>` UC-05 | Quản lý kho hồ sơ ngựa, tính khí, vi chip, hộ chiếu FEI. |
 | **UC-05** | Create Transport Request | Customer | Base | Tạo đơn vận chuyển trả trước từ báo giá đã chốt. |
 | **UC-06** | Update / Resubmit Request | Customer | `<<extend>>` UC-05 | Sửa đổi và gửi lại đơn khi có yêu cầu (đơn legacy). |
 | **UC-07** | Upload Compliance Documents | Customer | `<<include>>` UC-05 | Nộp hộ chiếu, giấy kiểm dịch, xét nghiệm Coggins vào kho ngựa. |

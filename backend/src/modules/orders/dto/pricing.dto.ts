@@ -60,9 +60,6 @@ export class SampleHorseDto {
   @Min(1)
   quantity?: number;
 
-  @ApiPropertyOptional({ example: false, default: false })
-  @IsOptional()
-  requiresPrivateStall?: boolean;
 }
 
 export class SampleRouteDto {

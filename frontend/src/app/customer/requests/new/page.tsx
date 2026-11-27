@@ -1726,7 +1726,7 @@ function CreateTransportRequestForm() {
                             <td className="py-2 px-2 text-[12px] text-[#3F443D]">
                               <div className="font-medium text-[#181A17] leading-snug">{translateBreed(h.breed)}</div>
                               <div className="text-[11px] text-[#5F6977]">
-                                {h.age} {t('horses.yearsOld', 'years old')}{h.requiresPrivateStall ? ` • ${t('horses.privateStallShort', 'Chuồng riêng')}` : ''}
+                                {h.age} {t('horses.yearsOld', 'years old')}
                               </div>
                             </td>
                             <td className="py-2 px-2">

@@ -2393,37 +2393,7 @@ export function buildEquineRoute(
     if (
       aseanSeaPath &&
       aseanOriginDist <= MAX_SEAPORT_ROAD_KM &&
-      aseanDestDist <= MAX_SEAPORT_ROAD_KM &&
-      aseanSeaPath.durationHours > 168
-    ) {
-      const seaDays = (aseanSeaPath.durationHours / 24).toFixed(1);
-      waypoints.push(
-        {
-          name: origin.name,
-          type: 'origin',
-          coords: origin.coords,
-          label: 'Điểm xuất phát',
-          country: origin.country,
-          details: 'Điểm đón ngựa dự kiến.',
-        },
-        {
-          name: destination.name,
-          type: 'destination',
-          coords: destination.coords,
-          label: 'Điểm đến',
-          country: destination.country,
-          details: 'Điểm giao ngựa dự kiến.',
-        }
-      );
-      seaUnavailableNotice = {
-        vi: `Không khả dụng tuyến đường thủy: hành trình tàu biển dự kiến mất ${seaDays} ngày (~${Math.round(aseanSeaPath.durationHours)} giờ), vượt giới hạn an toàn thú y tối đa 7 ngày (168 giờ) đối với ngựa đua sống. Vui lòng chuyển sang phương thức Hàng không.`,
-        en: `Sea freight is unavailable: estimated sea voyage is ${seaDays} days (~${Math.round(aseanSeaPath.durationHours)}h), exceeding the 7-day (168h) live thoroughbred welfare limit. Please switch to Air Cargo.`,
-      };
-    } else if (
-      aseanSeaPath &&
-      aseanOriginDist <= MAX_SEAPORT_ROAD_KM &&
-      aseanDestDist <= MAX_SEAPORT_ROAD_KM &&
-      aseanSeaPath.durationHours <= 168
+      aseanDestDist <= MAX_SEAPORT_ROAD_KM
     ) {
       const originPort = aseanSeaPath.fromPort;
       const destPort = aseanSeaPath.toPort;
@@ -2664,35 +2634,6 @@ export function buildEquineRoute(
         const seaDist = Math.max(40, maritime.distanceKm);
         const seaSpeed = 25;
         const seaVoyageOnlyHours = seaDist / seaSpeed;
-        const MAX_EQUINE_SEA_HOURS = 168; // 7 days max for live racehorse welfare
-
-        if (seaVoyageOnlyHours > MAX_EQUINE_SEA_HOURS) {
-          const seaDays = (seaVoyageOnlyHours / 24).toFixed(1);
-          waypoints.length = 0;
-          legs.length = 0;
-          waypoints.push(
-            {
-              name: origin.name,
-              type: 'origin',
-              coords: origin.coords,
-              label: 'Điểm xuất phát',
-              country: origin.country,
-              details: 'Điểm đón ngựa dự kiến.',
-            },
-            {
-              name: destination.name,
-              type: 'destination',
-              coords: destination.coords,
-              label: 'Điểm đến',
-              country: destination.country,
-              details: 'Điểm giao ngựa dự kiến.',
-            }
-          );
-          seaUnavailableNotice = {
-            vi: `Không khả dụng tuyến đường thủy cho ngựa sống: hải trình ${originPort.name} → ${destPort.name} dự kiến ~${seaDays} ngày (${Math.round(seaVoyageOnlyHours)} giờ), vượt giới hạn an toàn thú y tối đa 7 ngày (168 giờ) do nguy cơ say sóng & sốt vận chuyển. Vui lòng chuyển sang Hàng không.`,
-            en: `Sea freight is unavailable for live racehorses: the voyage ${originPort.name} → ${destPort.name} takes ~${seaDays} days (${Math.round(seaVoyageOnlyHours)}h), exceeding the 7-day (168h) equine veterinary safety cap. Please switch to Air Cargo.`,
-          };
-        } else {
         const seaDur = Math.max(2, Math.round((seaVoyageOnlyHours + (isDomestic ? 2.5 : 4.5)) * 10) / 10);
         legs.push({
           sequenceNo: seq++,
@@ -2756,7 +2697,6 @@ export function buildEquineRoute(
 
         distanceKm = legs.reduce((sum, leg) => sum + leg.distanceKm, 0);
         durationHours = Math.max(3, Math.round(legs.reduce((sum, leg) => sum + leg.durationHours, 0) * 10) / 10);
-        }
       }
     }
     }

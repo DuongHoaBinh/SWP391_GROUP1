@@ -115,7 +115,7 @@ export class RouteLegDto {
   @IsInt()
   stallsBooked?: number;
 
-  @ApiPropertyOptional({ description: 'Step 9: số jet stall của chặng bay (server tự tính: 3 ngựa/stall, chuồng riêng 1 stall)' })
+  @ApiPropertyOptional({ description: 'Step 9: số jet stall của chặng bay (server tự tính: 3 ngựa/stall)' })
   @IsOptional()
   @IsInt()
   jetStallCount?: number;

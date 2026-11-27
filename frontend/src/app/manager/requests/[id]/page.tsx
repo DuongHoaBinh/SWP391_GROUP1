@@ -1234,11 +1234,6 @@ export default function ManagerRequestDetailPage() {
                             {horse.breed || (isEn ? 'Unknown breed' : 'Chưa rõ giống')}
                           </span>
                         </div>
-                        {horse.requiresPrivateStall && (
-                          <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-[#F8F0DF] text-[#966516] border border-[#EAD9B5] shrink-0">
-                            {isEn ? 'Private stall' : 'Cần chuồng riêng'}
-                          </span>
-                        )}
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 text-xs text-[#5C6658] pt-2 border-t border-[#F0EEE8]">

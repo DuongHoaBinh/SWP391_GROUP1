@@ -172,23 +172,17 @@ test('RouteNetwork (vessel-only): plans VN -> SG vessel voyage with offshore via
   assert.equal(seaLeg.geometry.length, 5, 'port + 3 viaPoints + port');
 });
 
-test('RouteNetwork (vessel-only): rejects >168h sea voyage with SEA_DURATION_EXCEEDED and suggests air', () => {
-  assert.throws(
-    () =>
-      planNetworkRoute(MOCK_NETWORK, {
-        mode: 'sea',
-        seaMode: 'vessel',
-        origin: { lat: 10.78, lng: 106.7, country: 'Vietnam', label: 'TP.HCM' },
-        destination: { lat: 39.08, lng: 117.2, country: 'China', label: 'Tianjin' },
-      }),
-    (err) => {
-      assert.ok(err instanceof RoutePlanningError);
-      assert.equal(err.code, 'SEA_DURATION_EXCEEDED');
-      assert.ok(!err.suggestions.some((s) => s.seaMode === 'ferry'));
-      assert.ok(err.suggestions.some((s) => s.mode === 'air'));
-      return true;
-    },
-  );
+test('RouteNetwork (vessel-only): allows long-haul >168h vessel sea voyages without 7-day cap', () => {
+  const plan = planNetworkRoute(MOCK_NETWORK, {
+    mode: 'sea',
+    seaMode: 'vessel',
+    origin: { lat: 10.78, lng: 106.7, country: 'Vietnam', label: 'TP.HCM' },
+    destination: { lat: 39.08, lng: 117.2, country: 'China', label: 'Tianjin' },
+  });
+  assert.equal(plan.mode, 'sea');
+  assert.equal(plan.seaMode, 'vessel');
+  const seaLeg = plan.legs.find((l) => l.type === 'sea');
+  assert.ok(seaLeg && seaLeg.distanceKm === 4434 && seaLeg.durationHours >= 185);
 });
 
 test('RouteNetwork (vessel-only): road across sea landmasses never suggests ferry', () => {
@@ -230,7 +224,7 @@ test('PlanNetworkRouteDto: rejects seaMode=ferry and accepts vessel or omitted s
   assert.equal(okErrors.length, 0);
 });
 
-test('RouteNetworkStore.loadNetwork: filters vessel-only, <=168h, and via_points IS NOT NULL', async () => {
+test('RouteNetworkStore.loadNetwork: filters vessel-only and via_points IS NOT NULL (no 168h cap)', async () => {
   const queries = [];
   const mockPool = {
     async query(sql) {
@@ -243,7 +237,7 @@ test('RouteNetworkStore.loadNetwork: filters vessel-only, <=168h, and via_points
   const seaRouteQuery = queries.find((q) => q.includes('FROM sea_route'));
   assert.ok(seaRouteQuery, 'Expected sea_route query');
   assert.match(seaRouteQuery, /sea_mode\s*=\s*'vessel'/i);
-  assert.match(seaRouteQuery, /typical_hours\s*<=\s*168/i);
+  assert.doesNotMatch(seaRouteQuery, /typical_hours\s*<=\s*168/i);
   assert.match(seaRouteQuery, /via_points\s+IS\s+NOT\s+NULL/i);
   const seaportQuery = queries.find((q) => q.includes('FROM seaport'));
   assert.ok(seaportQuery, 'Expected seaport query');

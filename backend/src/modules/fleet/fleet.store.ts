@@ -718,13 +718,13 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     return loadRequiredStallSlots(this.pool, shipmentId, fallbackHorseCount);
   }
 
-  /** Step 9: ngựa của đơn (số lượng + chuồng riêng) để tính jet stall */
-  async findShipmentStallHorses(shipmentId: number): Promise<Array<{ quantity: number; requiresPrivateStall: boolean }>> {
+  /** Ngựa của đơn (số lượng) để tính jet stall / sức chứa */
+  async findShipmentStallHorses(shipmentId: number): Promise<Array<{ quantity: number }>> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT sh.quantity, h.requires_private_stall FROM shipment_horse sh JOIN horse h ON h.horse_id = sh.horse_id WHERE sh.shipment_id = ?`,
+      `SELECT sh.quantity FROM shipment_horse sh WHERE sh.shipment_id = ?`,
       [shipmentId],
     );
-    return rows.map((r) => ({ quantity: Number(r.quantity) || 1, requiresPrivateStall: Boolean(r.requires_private_stall) }));
+    return rows.map((r) => ({ quantity: Number(r.quantity) || 1 }));
   }
 
   /** Step 9: xe đang giữ chỗ (active/consumed) của đơn */

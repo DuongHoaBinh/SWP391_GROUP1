@@ -114,7 +114,6 @@ interface OrderHorse extends Partial<InsuredHorse> {
   name?: string;
   breed?: string | null;
   age?: number | null;
-  requiresPrivateStall?: boolean;
   color?: string | null;
   weight?: number | null;
   medicalStatus?: string | null;
@@ -1238,7 +1237,6 @@ export default function ManagerRequestsPage() {
                       <tr>
                         <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseName', 'Tên ngựa')}</th>
                         <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseBreed', 'Giống')}</th>
-                        <th className="p-2.5 font-bold text-slate-600">{t('horses.requiresPrivateStall', 'Cần chuồng riêng')}</th>
                         <th className="p-2.5 font-bold text-slate-600">{t('manager.requests.horseAge', 'Tuổi')}</th>
                       </tr>
                     </thead>
@@ -1247,7 +1245,6 @@ export default function ManagerRequestsPage() {
                         <tr key={idx}>
                           <td className="p-2.5 font-bold text-slate-900">{h.name || '—'}</td>
                           <td className="p-2.5 text-slate-600">{h.breed || '—'}</td>
-                          <td className="p-2.5 text-slate-600">{h.requiresPrivateStall ? t('common.yes', isEn ? 'Yes' : 'Có') : t('common.no', isEn ? 'No' : 'Không')}</td>
                           <td className="p-2.5 text-slate-600">{h.age !== null && h.age !== undefined ? `${h.age}` : '—'}</td>
                         </tr>
                       ))}

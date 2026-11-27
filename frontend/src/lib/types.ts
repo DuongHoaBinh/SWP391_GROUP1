@@ -70,8 +70,6 @@ export interface Horse {
   quantity?: number;
   /** @deprecated Bỏ giới tính sau review 11/2026; chỉ còn ở dữ liệu cũ */
   gender?: string;
-  /** Cần chuồng riêng (thay cho phân loại theo giới tính) */
-  requiresPrivateStall?: boolean;
   temperament?: HorseTemperament;
   microchipNumber: string;
   passportNumber: string;

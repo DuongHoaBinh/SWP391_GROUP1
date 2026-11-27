@@ -107,15 +107,15 @@ test('Vietnam (Cat Lai) to Dubai (Jebel Ali) avoids landmasses in maritime graph
   // Must avoid Oman interior
   assertAvoidsLandBox(vnToDubai.pathCoords, [19.0, 23.0, 55.0, 58.5], 'VN->Dubai (Oman)');
 
-  // Equine welfare cap: > 7 days sea booking must return seaUnavailableNotice recommending Air
+  // Long-haul Vietnam -> Dubai vessel sea booking succeeds (7-day cap removed)
   const route = geo.buildEquineRoute(
     'Trang trại Củ Chi, TP. Hồ Chí Minh',
     'Meydan Racecourse (Dubai, UAE)',
     'sea',
     'International',
   );
-  assert.ok(route.seaUnavailableNotice && route.seaUnavailableNotice.vi.includes('7 ngày'));
-  assert.equal(route.legs.length, 0);
+  assert.equal(route.seaUnavailableNotice, null);
+  assert.ok(route.legs.some((l) => l.type === 'sea'));
 });
 
 test('Vietnam (Cat Lai) to Thailand (Laem Chabang) curves south around Ca Mau peninsula', () => {
@@ -173,9 +173,10 @@ test('Vietnam to Europe (London / Paris / Brussels) goes via Suez & avoids Arabi
   assertAvoidsLandBox(vnToUk.pathCoords, [18.0, 29.0, 41.0, 52.0], 'VN->UK (Arabian Peninsula)');
   assertAvoidsLandBox(vnToUk.pathCoords, [38.0, 42.0, -7.5, -1.0], 'VN->UK (Iberian Peninsula)');
 
-  // Equine welfare cap blocks >7-day VN -> UK sea booking
+  // Long-haul VN -> UK vessel sea booking succeeds (7-day cap removed)
   const route = geo.buildEquineRoute('Trang trại Củ Chi, TP. Hồ Chí Minh', 'Newmarket Racecourse (Anh Quốc)', 'sea', 'International');
-  assert.ok(route.seaUnavailableNotice !== null);
+  assert.equal(route.seaUnavailableNotice, null);
+  assert.ok(route.legs.some((l) => l.type === 'sea'));
 });
 
 test('Vietnam to Sydney and Melbourne avoid Australian Outback interior', () => {
@@ -396,13 +397,13 @@ test('Cross-border coastal city falls back to nearest international seaport with
   assert.ok(seaLeg.toName.includes('Genoa'), `Expected Genoa seaport, got ${seaLeg.toName}`);
 });
 
-test('ASEAN+China multi-hop sea routes include 12h port-call penalty and block >168h without naive fallback', () => {
+test('ASEAN+China multi-hop sea routes include 12h port-call penalty and render curved legs even >168h', () => {
   const asean = loadLib('asean-china-network.ts');
-  // HCMC -> Qingdao has 3 intermediate port calls (HKG, XMN, SHA): 71+26+42+34 + 3*12 = 209h > 168h
+  // HCMC -> Qingdao has 3 intermediate port calls (HKG, XMN, SHA): 71+26+42+34 + 3*12 = 209h
   const hcmcQingdao = asean.resolveAseanChinaSeaCorridor([10.77, 106.7], 'Việt Nam', [36.07, 120.38], 'Trung Quốc', false);
   assert.ok(hcmcQingdao && hcmcQingdao.durationHours > 168, `Expected >168h with port call penalties, got ${hcmcQingdao?.durationHours}`);
 
-  // Hai Phong -> Tianjin must be blocked by >168h welfare cap (must NOT fall back to naive dist/25)
+  // Hai Phong -> Tianjin renders ASEAN+China multi-hop sea legs cleanly (7-day cap removed)
   const hpTianjin = geo.buildEquineRoute(
     'Hải Phòng, Việt Nam',
     'Tianjin, China',
@@ -413,6 +414,6 @@ test('ASEAN+China multi-hop sea routes include 12h port-call penalty and block >
     { coords: [20.8449, 106.6881], displayName: 'Hải Phòng, Việt Nam', country: 'Việt Nam', countryCode: 'VN' },
     { coords: [39.0842, 117.2009], displayName: 'Tianjin, China', country: 'Trung Quốc', countryCode: 'CN' },
   );
-  assert.ok(hpTianjin.seaUnavailableNotice && hpTianjin.seaUnavailableNotice.vi.includes('168'), 'Expected 168h welfare block');
-  assert.equal(hpTianjin.legs.length, 0, 'Must not draw legs when ASEAN+China corridor exceeds 168h');
+  assert.equal(hpTianjin.seaUnavailableNotice, null, 'Must allow >168h multi-hop vessel route');
+  assert.ok(hpTianjin.legs.some((l) => l.type === 'sea'), 'Expected curved sea legs for Hai Phong -> Tianjin');
 });

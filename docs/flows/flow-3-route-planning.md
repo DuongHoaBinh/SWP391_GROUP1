@@ -7,7 +7,7 @@
 - **Đã bỏ gom chuyến.** Mỗi đơn mới đi xe riêng (`dedicated_charter`). Lựa chọn "Ghép ô chuồng" đã bị gỡ khỏi form tạo đơn; backend trả `400` nếu đơn mới gửi `shared_stall`, và `POST /fleet/road-trips` trả `410`. Đơn ghép cũ giữ nguyên để xem lại và điều phối nốt (RoadTripPicker chỉ hiện với đơn `shared_stall` cũ). Các mục 7 và AC liên quan đến ghép chuyến bên dưới chỉ còn áp dụng cho đơn cũ.
 - **Trạm xe.** Mỗi xe đường bộ thuộc một trạm đang hoạt động (`/manager/fleet/depots`, có bản đồ). Trạm `partner` là trạm đối tác ở nước ngoài, dùng cho chặng giao cuối. Trạm còn xe không xóa được, chỉ tạm ngưng. Việc chọn trạm gần nhất khi điều xe làm ở Step 9.
 - **Loại phương tiện và sức chứa.** Khi tạo xe, Manager chọn loại (`truck_1/2/4/6`, `jet_stall`, `ferry_slot`, `vessel_pen`); sức chứa lấy theo loại. `truck_4` và `truck_6` là xe tải nặng (dùng cho giờ cấm đô thị ở Step 9).
-- **Ngựa cần chuồng riêng chiếm 2 chỗ** khi kiểm tra sức chứa đường bộ (lưu kế hoạch, phân công xe). Ví dụ: 3 ngựa, trong đó 1 ngựa cần chuồng riêng, cần 4 chỗ, nên xe 3 chỗ bị từ chối. Phân bổ nhiều xe cho một đơn và số jet stall cho chặng bay làm ở Step 9.
+- **Sức chứa đường bộ** tính theo đúng số ngựa của đơn (`1 chỗ / ngựa`) khi lưu kế hoạch và phân công xe. Phân bổ nhiều xe cho một đơn và số jet stall cho chặng bay làm ở Step 9.
 
 ## 1. Bối cảnh và nguyên tắc cốt lõi
 
@@ -226,7 +226,7 @@ Hệ thống hỗ trợ 2 dạng vận chuyển đường thủy (`sea`) với c
 **Phân bổ khi báo giá** (`fleet/allocation-policy.ts`, hàm thuần):
 
 1. Lấy xe đường bộ **rảnh** trong khung `[giờ đón − 2h, giờ đón + ETA + 2h]` theo từng trạm `own` đang hoạt động (không bảo dưỡng, không trùng `vehicle_reservation` còn hiệu lực, không trùng `route_leg` của đơn đang hoạt động). Khoảng cách chạy rỗng: OpenRouteService cho 3 trạm gần nhất (Haversine), các trạm còn lại Haversine × 1,3.
-2. Với từng trạm, liệt kê **tổ hợp xe tối thiểu** đủ số chỗ chuồng (ngựa chuồng riêng = 2 chỗ), tối đa 4 xe; xe cùng loại cùng trạm coi là tương đương để tránh nổ tổ hợp.
+2. Với từng trạm, liệt kê **tổ hợp xe tối thiểu** đủ số chỗ chuồng (1 chỗ / ngựa), tối đa 4 xe; xe cùng loại cùng trạm coi là tương đương để tránh nổ tổ hợp.
 3. Không trạm nào đủ một mình → **ghép xe 2 trạm gần nhất** (`two_depots`). Xe lớn nhất của trạm gần nhất không chở hết một lượt → thêm phương án **chia nhiều ngày** (`split_days`, tối đa 4 lượt): cước = cước một lượt × số lượt + chạy rỗng quay đầu (điểm giao → điểm đón) giữa các lượt; `extraDays = số lượt − 1`.
 4. Chọn tối đa **3 phương án**: Rẻ nhất · Ít xe nhất · Đến sớm nhất (trạm gần nhất), gộp phương án trùng tập xe. Đề xuất = Rẻ nhất. Không có phương án → gợi ý 3 ngày gần nhất (trong 14 ngày) có đủ xe.
 
@@ -246,4 +246,4 @@ Hệ thống hỗ trợ 2 dạng vận chuyển đường thủy (`sea`) với c
 - `POST /fleet/shipments/:id/reservations/swap` (bắt buộc lý do ≥ 5 ký tự): khóa xe, giữ xe mới cùng khung giờ, nhả xe cũ (`released_reason = manager_swap`), cập nhật chặng `pending` đang dùng xe cũ kèm `route_leg.allocation_override_reason`, ghi `trip_status_log` (`milestone_type = allocation_override`) và nối lịch sử vào `shipment.allocation_snapshot.overrides`. Tổng sức chứa sau khi đổi vẫn phải đủ.
 - Trong màn dựng kế hoạch, chặng bộ dùng xe **khác** nhóm đã giữ phải nhập `allocationOverrideReason`, nếu không backend trả `400`.
 
-**Chặng bay**: `route_leg.jet_stall_count` = số ngựa chuồng riêng + ⌈số ngựa thường / 3⌉; `stalls_booked` giữ nghĩa cũ (số chỗ ngựa).
+**Chặng bay**: `route_leg.jet_stall_count` = ⌈tổng số ngựa / 3⌉; `stalls_booked` giữ nghĩa cũ (số chỗ ngựa).

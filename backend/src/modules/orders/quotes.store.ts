@@ -26,7 +26,6 @@ export interface HorseCheckRecord {
   ownerId: number;
   name: string;
   status: string;
-  requiresPrivateStall: boolean;
   quantity: number;
 }
 
@@ -139,11 +138,11 @@ export class QuotesStore implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Đọc thông tin ngựa và chủ sở hữu để kiểm tra quyền và chuồng riêng.
+   * Đọc thông tin ngựa và chủ sở hữu để kiểm tra quyền.
    */
   async findHorseById(horseId: number): Promise<HorseCheckRecord | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT horse_id, owner_id, name, status, requires_private_stall, quantity
+      `SELECT horse_id, owner_id, name, status, quantity
        FROM horse
        WHERE horse_id = ? LIMIT 1`,
       [horseId],
@@ -155,7 +154,6 @@ export class QuotesStore implements OnModuleInit, OnModuleDestroy {
       ownerId: Number(r.owner_id),
       name: r.name,
       status: r.status,
-      requiresPrivateStall: Boolean(r.requires_private_stall),
       quantity: Number(r.quantity || 1),
     };
   }

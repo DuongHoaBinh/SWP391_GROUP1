@@ -76,11 +76,6 @@ export class CreateHorseDto {
   @IsOptional()
   specialRequirements?: string;
 
-  @ApiPropertyOptional({ description: 'Cần chuồng riêng (ngựa đực giống, ngựa khó tính)', example: false, default: false })
-  @IsBoolean()
-  @IsOptional()
-  requiresPrivateStall?: boolean;
-
   @ApiPropertyOptional({ description: 'Tính khí', enum: HorseTemperament, example: HorseTemperament.NORMAL, default: HorseTemperament.NORMAL })
   @IsEnum(HorseTemperament)
   @IsOptional()

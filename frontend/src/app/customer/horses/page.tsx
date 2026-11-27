@@ -468,9 +468,6 @@ export default function HorsesPage() {
                         {translateBreed(horse.breed)}
                         {horse.gender ? ` • ${translateGender(horse.gender)}` : ''}
                         {hasValidAge ? ` • ${horse.age} ${t('common.yearsOld', isEn ? 'yrs' : 'tuổi')}` : ''}
-                        {horse.requiresPrivateStall
-                          ? ` • ${t('horses.privateStallShort', isEn ? 'Private stall' : 'Chuồng riêng')}`
-                          : ''}
                       </p>
                     </div>
 

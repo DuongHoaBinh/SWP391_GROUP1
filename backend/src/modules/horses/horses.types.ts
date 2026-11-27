@@ -31,8 +31,6 @@ export interface HorseEntity {
   weight: string | null;
   medicalStatus: string | null;
   specialRequirements: string | null;
-  /** Cần chuồng riêng (thay cho logic theo giới tính, ví dụ ngựa đực giống) */
-  requiresPrivateStall: boolean;
   temperament: HorseTemperament;
   status: HorseStatus;
   quantity: number;

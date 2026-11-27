@@ -24,13 +24,12 @@ const AIR_TARIFF = {
   baseFeePerHorse: 25000000,
   pricePerKmPerHorse: 45000,
   airportHandlingPerHorse: 5000000,
-  privateStallMultiplier: 1.5,
   roundingUnit: 1000,
   averageSpeedKmh: 700,
 };
 
 const SEA_TARIFF = {
-  vessel: { baseFeePerHorse: 15000000, pricePerKmPerHorse: 20000, privateStallMultiplier: 1.5 },
+  vessel: { baseFeePerHorse: 15000000, pricePerKmPerHorse: 20000 },
   roundingUnit: 1000,
 };
 
@@ -109,7 +108,7 @@ test('P1.2: Road ocean-crossing detection blocks Vietnam -> Japan/Australia/USA 
         sample: {
           origin: { address: 'TP.HCM, Vietnam', lat: 10.77, lng: 106.7, country: 'Vietnam' },
           destination: { address: 'Tokyo, Japan', lat: 35.67, lng: 139.65, country: 'Japan' },
-          horses: [{ quantity: 1, requiresPrivateStall: false }],
+          horses: [{ quantity: 1 }],
         },
       }),
     UnprocessableEntityException,
@@ -120,7 +119,7 @@ test('P1.2: Road ocean-crossing detection blocks Vietnam -> Japan/Australia/USA 
     sample: {
       origin: { address: 'TP.HCM, Vietnam', lat: 10.77, lng: 106.7, country: 'Vietnam' },
       destination: { address: 'Singapore Turf Club', lat: 1.42, lng: 103.76, country: 'Singapore' },
-      horses: [{ quantity: 1, requiresPrivateStall: false }],
+      horses: [{ quantity: 1 }],
     },
   });
   assert.equal(vnSg.freightBase.roadLegs[0].borderCrossings, 4, 'VN -> SG road crosses 4 borders (VN-KH-TH-MY-SG)');
@@ -147,7 +146,7 @@ test('P1.3: Air mode blocks same-airport trips and includes realistic internatio
         sample: {
           origin: { address: 'Quận 1, TP.HCM', lat: 10.77, lng: 106.7, country: 'Vietnam' },
           destination: { address: 'Củ Chi, TP.HCM', lat: 11.0, lng: 106.51, country: 'Vietnam' },
-          horses: [{ quantity: 1, requiresPrivateStall: false }],
+          horses: [{ quantity: 1 }],
         },
       }),
     UnprocessableEntityException,
@@ -158,37 +157,38 @@ test('P1.3: Air mode blocks same-airport trips and includes realistic internatio
     sample: {
       origin: { address: 'TP.HCM, Vietnam', lat: 10.77, lng: 106.7, country: 'Vietnam' },
       destination: { address: 'Singapore Turf Club', lat: 1.42, lng: 103.76, country: 'Singapore' },
-      horses: [{ quantity: 1, requiresPrivateStall: false }],
+      horses: [{ quantity: 1 }],
     },
   });
   const flightLeg = sgnSin.legs.find((l) => l.key === 'flight');
   assert.ok(flightLeg && flightLeg.durationHours >= 8.0, `Expected SGN->SIN air leg >= 8h including 6.5h dwell, got ${flightLeg?.durationHours}`);
 });
 
-test('P1.5: Sea vessel pricing applies privateStallMultiplier when requiresPrivateStall=true', () => {
-  const normal = calculateFreight(
+test('P1.5: Sea vessel pricing calculates flat per-horse vessel freight cleanly (no private stall surcharge)', () => {
+  const oneHorse = calculateFreight(
     {
       mode: 'sea',
       seaMode: 'vessel',
-      horses: [{ horseId: 1, quantity: 1, requiresPrivateStall: false }],
+      horses: [{ horseId: 1, quantity: 1 }],
       vehicles: [{ classCode: 'truck_2', priceCoefficient: 1, capacity: 2, deadheadKm: 10 }],
       roadLegs: [{ key: 'to_hub', distanceKm: 20, borderCrossings: 0 }],
       seaKm: 1000,
     },
     { road: ROAD_TARIFF, sea: SEA_TARIFF },
   );
-  const priv = calculateFreight(
+  const twoHorses = calculateFreight(
     {
       mode: 'sea',
       seaMode: 'vessel',
-      horses: [{ horseId: 1, quantity: 1, requiresPrivateStall: true }],
+      horses: [{ horseId: 1, quantity: 1 }, { horseId: 2, quantity: 1 }],
       vehicles: [{ classCode: 'truck_2', priceCoefficient: 1, capacity: 2, deadheadKm: 10 }],
       roadLegs: [{ key: 'to_hub', distanceKm: 20, borderCrossings: 0 }],
       seaKm: 1000,
     },
     { road: ROAD_TARIFF, sea: SEA_TARIFF },
   );
-  assert.ok(priv.total > normal.total, 'Private stall on sea vessel must cost more than standard stall');
+  assert.ok(twoHorses.total > oneHorse.total, 'Two horses on sea vessel must cost more than one horse');
+  assert.ok(!oneHorse.lines.some((l) => /Chuồng riêng/i.test(l.label)));
 });
 
 test('P2.2: Insurance Standard emergencyVetCovered=true; rejects premium >= declaredValue; basic 0 VND explains cap', () => {

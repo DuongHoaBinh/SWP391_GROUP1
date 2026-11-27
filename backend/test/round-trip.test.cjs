@@ -179,7 +179,6 @@ test('4. Báo giá khứ hồi: chặng về = giá đảo chiều × 0,9 làm t
       ownerId: 10,
       name: 'Chiến Mã',
       status: 'active',
-      requiresPrivateStall: false,
     }),
     createQuote: async (data) => 501,
   };

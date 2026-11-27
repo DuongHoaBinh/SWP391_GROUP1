@@ -1,9 +1,8 @@
-// Step 3 sau review 11/2026: trạm xe, loại phương tiện + sức chứa, ngựa cần chuồng riêng chiếm 2 chỗ, bỏ gom chuyến.
+// Step 3: trạm xe, loại phương tiện + sức chứa, bỏ gom chuyến.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { BadRequestException, ConflictException, GoneException } = require('@nestjs/common');
 const {
-  PRIVATE_STALL_SLOTS,
   computeRequiredStallSlots,
   loadRequiredStallSlots,
   assertRoadCapacity,
@@ -46,25 +45,24 @@ function makeFleetStore() {
 }
 const makeFleetService = (store) => new FleetService(store, {}, { createNotification: async () => 1 });
 
-test('Số chỗ chuồng: ngựa cần chuồng riêng chiếm 2 chỗ; không có ngựa thì dùng số ngựa của đơn', () => {
-  assert.equal(PRIVATE_STALL_SLOTS, 2);
-  assert.equal(computeRequiredStallSlots([{ quantity: 1 }, { quantity: 1, requiresPrivateStall: true }]), 3);
-  assert.equal(computeRequiredStallSlots([{ quantity: 2, requiresPrivateStall: true }]), 4);
+test('Số chỗ chuồng: mỗi ngựa 1 chỗ; không có ngựa thì dùng số ngựa của đơn', () => {
+  assert.equal(computeRequiredStallSlots([{ quantity: 1 }, { quantity: 2 }]), 3);
+  assert.equal(computeRequiredStallSlots([{ quantity: 2 }]), 2);
   assert.equal(computeRequiredStallSlots([], 3), 3);
   assert.equal(computeRequiredStallSlots([{ quantity: null }]), 1);
 });
 
-test('loadRequiredStallSlots đọc shipment_horse + horse.requires_private_stall', async () => {
+test('loadRequiredStallSlots đọc shipment_horse', async () => {
   const db = { execute: async (sql, params) => {
     assert.match(sql, /FROM shipment_horse/);
     assert.deepEqual(params, [7]);
-    return [[{ quantity: 1, requires_private_stall: 1 }, { quantity: 2, requires_private_stall: 0 }]];
+    return [[{ quantity: 1 }, { quantity: 2 }]];
   } };
-  assert.equal(await loadRequiredStallSlots(db, 7, 3), 4);
+  assert.equal(await loadRequiredStallSlots(db, 7, 3), 3);
 });
 
-test('3 ngựa trong đó 1 ngựa cần chuồng riêng không vừa xe 3 chỗ, vừa xe 4 chỗ', () => {
-  const slots = computeRequiredStallSlots([{ quantity: 2 }, { quantity: 1, requiresPrivateStall: true }]);
+test('4 ngựa không vừa xe 3 chỗ, vừa xe 4 chỗ', () => {
+  const slots = computeRequiredStallSlots([{ quantity: 2 }, { quantity: 2 }]);
   assert.throws(() => assertRoadCapacity(slots, [1], [{ id: 1, capacity: 3 }]), /đủ 4 chỗ chuồng/);
   assert.doesNotThrow(() => assertRoadCapacity(slots, [2], [{ id: 2, capacity: 4 }]));
 });

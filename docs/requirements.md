@@ -82,7 +82,7 @@ Each flow owns its business rules and API contract. Cross-flow changes must be r
 ## Dedicated charter booking & Biosecurity isolation (G10)
 
 - **Loại bỏ hoàn toàn ghép chuyến (No Shared Ride):** Theo khuyến nghị của Hội đồng và nguyên tắc an toàn sinh học đối với ngựa đua giá trị cao, hệ thống chỉ hỗ trợ **Bao nguyên xe / Bao chuyến chuyên dụng (Dedicated Charter)**. Không cho phép ghép ngựa của các chủ sở hữu khác nhau trên cùng một phương tiện (`shared_stall` bị cấm hoàn toàn trên các đơn mới).
-- **Cấu hình ô chuồng & Xe chuyên dụng:** Khách hàng được chọn xe 1, 2, 4 hoặc 6 chỗ tùy theo số lượng ngựa cần vận chuyển. Ngựa có yêu cầu chuồng riêng (`requires_private_stall = true`) chiếm 2 khoang tiêu chuẩn để đảm bảo không gian và sự thoải mái.
+- **Cấu hình ô chuồng & Xe chuyên dụng:** Khách hàng được chọn xe 1, 2, 4 hoặc 6 chỗ tùy theo số lượng ngựa cần vận chuyển (1 khoang tiêu chuẩn / ngựa).
 - **Giá cước trọn gói xe:** Cước vận chuyển được tính trọn gói cho toàn bộ xe chuyên dụng theo khoảng cách thực tế từ trạm trung chuyển (Depot) đến điểm đón và điểm trả; không chia nhỏ cước theo từng chỗ lẻ.
 
 ## BA Specification v3.1 — Scope, Control Gates, Reporting & NFRs
@@ -210,7 +210,7 @@ Toàn bộ KPI của Logistics Manager phải tính trực tiếp từ dữ li�
 - **FR-S9-04**: Giờ cấm xe tải nặng nội đô HN, HCM lưu dạng cấu hình (vùng tròn, khung giờ, ngày trong tuần, căn cứ pháp lý, ngoại lệ ngày lễ); điểm đón/giao trong giờ cấm → tự dời giờ, cộng phụ phí đêm khi buộc phải chạy đêm. Giao diện cấu hình luôn hiện cảnh báo "Dữ liệu demo — cần đối chiếu văn bản gốc".
 - **FR-S9-05**: ETA chèn điểm nghỉ theo tham số B4 cấu hình được (`journey.rules`).
 - **FR-S9-06**: Manager đổi xe/trạm đã giữ phải nhập lý do; hệ thống lưu lịch sử.
-- **FR-S9-07**: Chặng bay tính số jet stall = ngựa chuồng riêng + ⌈ngựa thường / 3⌉; tàu gia súc 1 ô/ngựa.
+- **FR-S9-07**: Chặng bay tính số jet stall = ⌈tổng số ngựa / 3⌉; tàu gia súc 1 ô/ngựa.
 
 ## 12. Luồng đặt chỗ trả trước, duyệt khả thi, hóa đơn VAT và hoàn tiền SoD (Step 7 — Review 11/2026)
 

@@ -138,7 +138,7 @@ async function main() {
       { filename: 'demo_coggins_xichtho.pdf', title: 'EIA Coggins Negative Test Certificate - Horse: Xich Tho' },
       { filename: 'demo_passport_bachlong.pdf', title: 'FEI Passport - Horse: Bach Long (Microchip: 9001820002)' },
       { filename: 'demo_vaccine_bachlong_expired.pdf', title: 'EXPIRED Vaccine Certificate - Horse: Bach Long' },
-      { filename: 'demo_passport_hoangphi.pdf', title: 'Official Studbook Passport - Horse: Hoang Phi (Private Stall)' },
+      { filename: 'demo_passport_hoangphi.pdf', title: 'Official Studbook Passport - Horse: Hoang Phi' },
       { filename: 'demo_health_hoangphi_expiring.pdf', title: 'Animal Quarantine Certificate (Expiring in 10 Days) - Horse: Hoang Phi' },
       { filename: 'demo_passport_kiemphong.pdf', title: 'FEI Passport - Horse: Kiem Phong (Owner: Customer B)' },
       { filename: 'demo_passport_songlong.pdf', title: 'FEI Passport - Horse: Song Long (Microchip: 9001820014)' },
@@ -167,7 +167,6 @@ async function main() {
         color: 'Hồng mã (Bay/Chestnut)',
         microchipNo: '9001820001',
         passportNo: 'VN-FEI-2026-001',
-        requiresPrivateStall: false,
         declaredValue: 2000000000,
         status: 'in_transit', // Has active in_transit shipment
       },
@@ -179,7 +178,6 @@ async function main() {
         color: 'Bạch mã (White/Grey)',
         microchipNo: '9001820002',
         passportNo: 'VN-FEI-2026-002',
-        requiresPrivateStall: false,
         declaredValue: 800000000,
         status: 'active', // Completed shipment
       },
@@ -191,21 +189,19 @@ async function main() {
         color: 'Hắc mã (Black)',
         microchipNo: '9001820003',
         passportNo: 'VN-FEI-2026-003',
-        requiresPrivateStall: false,
         declaredValue: 500000000,
         status: 'active', // awaiting_payment
       },
       {
         ownerId: customerAId,
-        name: 'Hoàng Phi (Chuồng riêng)',
+        name: 'Hoàng Phi',
         breed: 'Thoroughbred Champion',
         gender: 'male',
         color: 'Kim mã (Palomino)',
         microchipNo: '9001820004',
         passportNo: 'VN-FEI-2026-004',
-        requiresPrivateStall: true,
         declaredValue: 3500000000,
-        status: 'active', // confirmed (dedicated stall)
+        status: 'active', // confirmed
       },
       {
         ownerId: customerAId,
@@ -215,7 +211,6 @@ async function main() {
         color: 'Hoàng mã (Chestnut)',
         microchipNo: '9001820006',
         passportNo: 'VN-FEI-2026-006',
-        requiresPrivateStall: false,
         declaredValue: 1500000000,
         status: 'active', // paid_pending_review
       },
@@ -227,7 +222,6 @@ async function main() {
         color: 'Xích mã (Red Roan)',
         microchipNo: '9001820007',
         passportNo: 'VN-FEI-2026-007',
-        requiresPrivateStall: false,
         declaredValue: 1800000000,
         status: 'active', // return_pending
       },
@@ -239,7 +233,6 @@ async function main() {
         color: 'Thanh mã (Grey)',
         microchipNo: '9001820008',
         passportNo: 'VN-FEI-2026-008',
-        requiresPrivateStall: false,
         declaredValue: 2200000000,
         status: 'active', // planning
       },
@@ -251,7 +244,6 @@ async function main() {
         color: 'Ô mã (Dark Bay)',
         microchipNo: '9001820009',
         passportNo: 'VN-FEI-2026-009',
-        requiresPrivateStall: false,
         declaredValue: 950000000,
         status: 'active', // ready_to_depart
       },
@@ -263,7 +255,6 @@ async function main() {
         color: 'Hắc mã (Black)',
         microchipNo: '9001820010',
         passportNo: 'VN-FEI-2026-010',
-        requiresPrivateStall: false,
         declaredValue: 1100000000,
         status: 'active', // refund_requested
       },
@@ -275,7 +266,6 @@ async function main() {
         color: 'Hồng điều (Bay)',
         microchipNo: '9001820011',
         passportNo: 'VN-FEI-2026-011',
-        requiresPrivateStall: false,
         declaredValue: 1300000000,
         status: 'active', // requested
       },
@@ -287,7 +277,6 @@ async function main() {
         color: 'Nâu sẫm (Dark Chestnut)',
         microchipNo: '9001820012',
         passportNo: 'VN-FEI-2026-012',
-        requiresPrivateStall: false,
         declaredValue: 1400000000,
         status: 'active', // change_requested
       },
@@ -299,7 +288,6 @@ async function main() {
         color: 'Hoàng yến (Dun)',
         microchipNo: '9001820013',
         passportNo: 'VN-FEI-2026-013',
-        requiresPrivateStall: false,
         declaredValue: 850000000,
         status: 'active', // cancelled
       },
@@ -312,7 +300,6 @@ async function main() {
         color: 'Hồng mã (Bay)',
         microchipNo: '9001820014',
         passportNo: 'VN-FEI-2026-014',
-        requiresPrivateStall: false,
         declaredValue: 3000000000,
         status: 'active',
       },
@@ -324,7 +311,6 @@ async function main() {
         color: 'Bạch mã (White)',
         microchipNo: '9001820015',
         passportNo: 'VN-FEI-2026-015',
-        requiresPrivateStall: false,
         declaredValue: 1600000000,
         status: 'active',
       },
@@ -337,7 +323,6 @@ async function main() {
         color: 'Nâu sẫm (Dark Bay)',
         microchipNo: '9001820005',
         passportNo: 'VN-FEI-2026-005',
-        requiresPrivateStall: false,
         declaredValue: 1200000000,
         status: 'active',
       },
@@ -345,15 +330,14 @@ async function main() {
 
     for (const h of demoHorses) {
       await db.execute(
-        `INSERT INTO horse (owner_id, name, breed, gender, color, microchip_no, passport_no, requires_private_stall, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO horse (owner_id, name, breed, gender, color, microchip_no, passport_no, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            name = VALUES(name),
            breed = VALUES(breed),
            passport_no = VALUES(passport_no),
-           requires_private_stall = VALUES(requires_private_stall),
            status = VALUES(status)`,
-        [h.ownerId, h.name, h.breed, h.gender, h.color, h.microchipNo, h.passportNo, h.requiresPrivateStall, h.status],
+        [h.ownerId, h.name, h.breed, h.gender, h.color, h.microchipNo, h.passportNo, h.status],
       );
     }
 
@@ -363,7 +347,7 @@ async function main() {
 
     const horseXichThoId = horseMap.get(`${customerAId}:Xích Thố`);
     const horseBachLongId = horseMap.get(`${customerAId}:Bạch Long`);
-    const horseHoangPhiId = horseMap.get(`${customerAId}:Hoàng Phi (Chuồng riêng)`);
+    const horseHoangPhiId = horseMap.get(`${customerAId}:Hoàng Phi`);
     const horseKiemPhongId = horseMap.get(`${customerBId}:Kiếm Phong (Khách B)`);
 
     // 6. Seed Documents (Valid, Expired, Expiring in 10 Days) in transport_document
@@ -994,7 +978,7 @@ async function seedCustomerAShipments(db, ctx) {
     insurance_fee: 5000000,
     special_requirements: 'SEED-DEMO-CONFIRMED',
   });
-  await linkShipmentHorse(idConfirmed, getHorseId('Hoàng Phi (Chuồng riêng)'), { declared_value: 3500000000, insurance_fee: 5000000 });
+  await linkShipmentHorse(idConfirmed, getHorseId('Hoàng Phi'), { declared_value: 3500000000, insurance_fee: 5000000 });
   const confRouteId = await upsertRoute(idConfirmed, 'TP.HCM - Phnom Penh (Xe chuyên dụng chuồng riêng VIP)', 245.5, 'confirmed', 'planned', managerAId, managerAId);
   await db.query('DELETE FROM route_leg WHERE route_id = ?', [confRouteId]);
   await db.query(

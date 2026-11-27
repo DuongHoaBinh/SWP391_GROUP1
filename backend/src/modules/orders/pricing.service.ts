@@ -258,7 +258,6 @@ export class PricingService {
     const requiredStallSlots = computeRequiredStallSlots(
       sample.horses.map((h) => ({
         quantity: h.quantity || 1,
-        requiresPrivateStall: Boolean(h.requiresPrivateStall),
       })),
     );
 
@@ -286,7 +285,6 @@ export class PricingService {
       source: string;
     }> = [];
 
-    const MAX_EQUINE_SEA_HOURS = 168; // 7 ngày tối đa trên biển cho ngựa đua sống
 
     const normalizeCountryKey = (country?: string, address?: string): string => {
       const s = `${country || ''} ${address || ''}`.toLowerCase();
@@ -357,7 +355,6 @@ export class PricingService {
         horses: sample.horses.map((h, i) => ({
           horseId: i + 1,
           quantity: h.quantity || 1,
-          requiresPrivateStall: Boolean(h.requiresPrivateStall),
         })),
         roadLegs: [
           {
@@ -453,7 +450,6 @@ export class PricingService {
         horses: sample.horses.map((h, i) => ({
           horseId: i + 1,
           quantity: h.quantity || 1,
-          requiresPrivateStall: Boolean(h.requiresPrivateStall),
         })),
         roadLegs: [
           { key: 'to_hub', distanceKm: legToHub.distanceKm, borderCrossings: 0 },
@@ -600,13 +596,6 @@ export class PricingService {
         resolvedSeaHours = Number((distHrs.get(endPort.id) ?? connectedKm / 25).toFixed(2));
       }
 
-      if (resolvedSeaHours > MAX_EQUINE_SEA_HOURS) {
-        const seaDays = (resolvedSeaHours / 24).toFixed(1);
-        throw new UnprocessableEntityException(
-          `Hành trình tàu biển dự kiến mất ${seaDays} ngày (${Math.round(resolvedSeaHours)} giờ), vượt giới hạn an toàn thú y tối đa 7 ngày (168 giờ) đối với ngựa đua sống (nguy cơ say sóng & sốt vận chuyển). Vui lòng chọn phương thức Hàng không.`,
-        );
-      }
-
       const isDomesticSea = normalizeCountryKey(origin.country, origin.address) === normalizeCountryKey(destination.country, destination.address);
       const portDwellHours = isDomesticSea ? 2.5 : 4.5;
 
@@ -654,7 +643,6 @@ export class PricingService {
         horses: sample.horses.map((h, i) => ({
           horseId: i + 1,
           quantity: h.quantity || 1,
-          requiresPrivateStall: Boolean(h.requiresPrivateStall),
         })),
         roadLegs: [
           { key: 'to_hub', distanceKm: legToPort.distanceKm, borderCrossings: 0 },
@@ -691,7 +679,7 @@ export class PricingService {
     const { mode, seaMode, sample } = dto;
     const origin = sample.origin;
     const destination = sample.destination;
-    // Tuyến ngoài Đông Nam Á + Trung Quốc dùng logic toàn cầu (sân bay/cảng toàn cầu + kiểm tra phúc lợi 168h)
+    // Tuyến ngoài Đông Nam Á + Trung Quốc dùng logic toàn cầu (sân bay/cảng toàn cầu)
     if (!isInServiceArea(origin.lat, origin.lng) || !isInServiceArea(destination.lat, destination.lng)) {
       return null;
     }
@@ -732,7 +720,6 @@ export class PricingService {
     const horses = sample.horses.map((h, i) => ({
       horseId: i + 1,
       quantity: h.quantity || 1,
-      requiresPrivateStall: Boolean(h.requiresPrivateStall),
     }));
     let freightBase: Omit<FreightInput, 'vehicles'>;
     let arrivalHub: GeoPoint | null = null;

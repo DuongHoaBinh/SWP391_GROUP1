@@ -7,7 +7,7 @@
  *   bám theo chuỗi trạm dọc hành lang thật (QL1A, AH1, AH2, R3A...). Chuyến nội địa không được đi nhờ nước khác.
  *   Trạm dừng nghỉ được chọn sao cho mỗi đoạn lái ≤ maxDriveHoursBeforeRest; qua cửa khẩu coi như đã nghỉ.
  * - Đường biển, tàu chuyên dụng (vessel-only, không hỗ trợ phà RoRo): xe ra cảng quốc tế cùng nước → hải trình
- *   theo bảng sea_route (có thể ghé cảng trung chuyển, phạt 12h/lần ghé, tối đa 168h) → xe từ cảng đến điểm giao.
+ *   theo bảng sea_route (có thể ghé cảng trung chuyển, phạt 12h/lần ghé) → xe từ cảng đến điểm giao.
  * - Hàng không: sân bay có ram dốc ngựa cùng nước với điểm đi/đến (chuyến quốc tế cần trạm cách ly).
  *   Sân bay 'regional' chỉ bay thẳng tới 'hub'; còn lại nối chuyến qua hub gần nhất (nội địa: qua sân bay lớn trong nước).
  */
@@ -44,8 +44,6 @@ export const ROUTE_NETWORK_DEFAULTS = {
   flightGroundHours: 2,
   transitLayoverHours: 3,
   flightSpeedKmh: 750,
-  /** Thời gian hành trình biển tối đa cho ngựa đua sống (7 ngày = 168h) */
-  maxVesselHours: 168,
   /** Bán kính tìm cảng/sân bay quanh điểm đi/đến (chim bay) */
   hubSearchKm: 900,
 };
@@ -635,18 +633,6 @@ function planVessel(net: TransportNetwork, o: Endpoint, d: Endpoint, opts: Opts)
     const p = prev.get(cursor)!;
     hops.unshift({ lane: p.lane, from: portById.get(p.from)!, to: portById.get(cursor)!, reversed: p.reversed });
     cursor = p.from;
-  }
-
-  const totalSeaHours = hops.reduce(
-    (sum, h, idx) => sum + h.lane.typicalHours + (idx > 0 ? opts.portCallPenaltyHours : 0),
-    0,
-  );
-  if (totalSeaHours > opts.maxVesselHours) {
-    throw new RoutePlanningError(
-      'SEA_DURATION_EXCEEDED',
-      `Hành trình tàu biển dự kiến ~${Math.round(totalSeaHours)}h vượt giới hạn phúc lợi ngựa đua sống (${opts.maxVesselHours}h / 7 ngày). Vui lòng chọn Hàng không.`,
-      `Estimated sea voyage (~${Math.round(totalSeaHours)}h) exceeds the live thoroughbred welfare limit (${opts.maxVesselHours}h / 7 days). Please choose Air.`,
-    );
   }
 
   const legs: PlannedLeg[] = [];

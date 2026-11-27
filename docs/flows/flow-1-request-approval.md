@@ -133,7 +133,7 @@ Role notifications use existing active accounts with the requested role. If no a
 1. **Tính toán khoảng cách chính xác:** Gọi ORS (OpenRouteService) qua `DistanceService` với HTTP timeout 5s, bộ nhớ đệm 24h (tối đa 5.000 cặp tọa độ). Nếu ORS gặp sự cố hoặc timeout, tự động fallback sang công thức Haversine nhân hệ số đường quanh co 1.25.
 2. **Bảng giá có phiên bản (`pricing_tariff`):** Lưu trữ cấu hình giá cước tách biệt cho 3 phương thức:
    - **Đường bộ (`road`):** Bậc khoảng cách lũy tiến (`minKm`-`maxKm`, `pricePerKmPerVehicle`), cước tối thiểu mở cửa (`minChargePerTrip`), phụ thu deadhead khi xe rỗng về trạm, hệ số theo kích cỡ xe (`truck_1`, `truck_2`, `truck_4`, `truck_6`).
-   - **Hàng không (`air`):** Cước mở chuồng bay theo cá thể (`baseFeePerHorse`), đơn giá theo km bay (`pricePerKmPerHorse`), phụ phí phục vụ mặt đất/sân bay (`airportHandlingPerHorse`). Ngựa cần chuồng riêng (`requiresPrivateStall`) phụ thu +50% trên phần cước bay.
+   - **Hàng không (`air`):** Cước mở chuồng bay theo cá thể (`baseFeePerHorse`), đơn giá theo km bay (`pricePerKmPerHorse`), phụ phí phục vụ mặt đất/sân bay (`airportHandlingPerHorse`).
    - **Đường thủy (`sea`):** Gồm 2 hình thức:
      - `ferry`: Ngựa ở trên xe chuyên dụng đưa lên phà (tối đa 12 giờ biển), gồm cước đường bộ suốt tuyến cộng vé phà theo xe.
      - `vessel`: Ngựa vào chuồng cố định trên tàu biển chuyên dụng, gồm cước 2 chặng bộ kết nối cảng (mỗi chặng ≤ 400km) cộng cước đường biển theo hải lý/ngựa.

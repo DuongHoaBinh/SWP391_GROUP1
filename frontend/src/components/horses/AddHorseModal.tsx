@@ -71,7 +71,6 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   const [gender, setGender] = useState<'male' | 'female' | 'gelding'>('male');
   const [age, setAge] = useState<number>(5);
   const [temperament, setTemperament] = useState<HorseTemperament>('normal');
-  const [requiresPrivateStall, setRequiresPrivateStall] = useState(false);
   const [color, setColor] = useState('Bay');
   const [weight, setWeight] = useState('480 kg');
   const [medicalStatus, setMedicalStatus] = useState<string>('');
@@ -99,7 +98,6 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
     setGender('male');
     setAge(5);
     setTemperament('normal');
-    setRequiresPrivateStall(false);
     setColor('Bay');
     setWeight('480 kg');
     setMedicalStatus('');
@@ -195,7 +193,6 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
           age: Number(age) || 1,
           quantity: 1,
           temperament,
-          requiresPrivateStall,
           passportNo: trimmedPassport,
           microchipNo: trimmedMicrochip,
           status: 'active',
@@ -219,7 +216,6 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         age: Number(age) || 1,
         quantity: 1,
         temperament,
-        requiresPrivateStall,
         passportNumber: trimmedPassport,
         microchipNumber: trimmedMicrochip,
         medicalStatus,
@@ -485,8 +481,6 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                 <HorseHandlingFields
                   temperament={temperament}
                   onTemperamentChange={setTemperament}
-                  requiresPrivateStall={requiresPrivateStall}
-                  onRequiresPrivateStallChange={setRequiresPrivateStall}
                 />
 
                 <div className="grid grid-cols-2 gap-3">

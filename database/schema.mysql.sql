@@ -76,7 +76,6 @@ CREATE TABLE horse (
   weight VARCHAR(100),
   medical_status VARCHAR(255),
   special_requirements TEXT,
-  requires_private_stall BOOLEAN NOT NULL DEFAULT FALSE,
   temperament ENUM('calm','normal','difficult') NOT NULL DEFAULT 'normal',
   status ENUM('active','in_transit','retired','deceased') NOT NULL DEFAULT 'active',
   quantity INT NOT NULL DEFAULT 1,
@@ -1498,7 +1497,6 @@ INSERT IGNORE INTO pricing_tariff (mode, region, version, params, effective_from
   "baseFeePerHorse": 60000000,
   "pricePerKmPerHorse": 25000,
   "airportHandlingPerHorse": 5000000,
-  "privateStallMultiplier": 1.5,
   "roundingUnit": 1000,
   "averageSpeedKmh": 700
 }', CURRENT_TIMESTAMP, TRUE, 'Bảng giá demo v1 theo file định hướng C3', NULL),

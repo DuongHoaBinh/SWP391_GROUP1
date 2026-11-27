@@ -112,7 +112,7 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
     const ids = [...new Set([...oldVehicleIds, ...roadLegs.filter(l => l.vehicleId).map(l => l.vehicleId!)])].sort((a, b) => a - b);
     if (!ids.length) return prepared;
     const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT * FROM vehicle WHERE vehicle_id IN (${ids.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, ids);
-    // Số chỗ chuồng: ngựa cần chuồng riêng tính 2 chỗ (Step 3)
+    // Số chỗ chuồng: 1 chỗ / ngựa
     const requiredSlots = await loadRequiredStallSlots(db, Number(order.shipment_id), Number(order.requested_horse_count));
     // Step 9: xe đã giữ chỗ khi tạo đơn; xe trong đoàn giữ chỗ được tính tổng sức chứa của đoàn
     const reservations = await findShipmentReservations(db, Number(order.shipment_id));

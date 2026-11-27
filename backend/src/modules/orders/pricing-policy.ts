@@ -20,13 +20,12 @@ export interface AirTariff {
   baseFeePerHorse: number;
   pricePerKmPerHorse: number;
   airportHandlingPerHorse: number;
-  privateStallMultiplier: number;
   roundingUnit: number;
   averageSpeedKmh: number;
 }
 
 export interface SeaTariff {
-  vessel: { baseFeePerHorse: number; pricePerKmPerHorse: number; privateStallMultiplier?: number };
+  vessel: { baseFeePerHorse: number; pricePerKmPerHorse: number };
   roundingUnit: number;
 }
 
@@ -41,7 +40,6 @@ export interface VehicleOptionInput {
 export interface HorseQuoteInput {
   horseId: number;
   quantity: number;
-  requiresPrivateStall: boolean;
 }
 
 export interface RoadLegInput {
@@ -147,13 +145,6 @@ export function validateTariffParams(mode: 'road' | 'air' | 'sea', params: any):
     }
     if (!Number.isFinite(params.airportHandlingPerHorse) || params.airportHandlingPerHorse < 0) {
       throw new BadRequestException('airportHandlingPerHorse phải là số không âm');
-    }
-    if (
-      !Number.isFinite(params.privateStallMultiplier) ||
-      params.privateStallMultiplier < 1 ||
-      params.privateStallMultiplier > 3
-    ) {
-      throw new BadRequestException('privateStallMultiplier phải nằm trong khoảng [1, 3]');
     }
     if (!Number.isFinite(params.averageSpeedKmh) || params.averageSpeedKmh <= 0) {
       throw new BadRequestException('averageSpeedKmh phải là số dương');
@@ -392,18 +383,13 @@ export function calculateFreight(
       const qty = h.quantity || 1;
       const baseFee = airTariff.baseFeePerHorse;
       const kmFee = airKm * airTariff.pricePerKmPerHorse;
-      let flightPart = baseFee + kmFee;
-
-      // Quyết định C3: Ngựa cần chuồng riêng chỉ nhân phần bay, KHÔNG nhân phí xử lý sân bay
-      if (h.requiresPrivateStall) {
-        flightPart = flightPart * airTariff.privateStallMultiplier;
-      }
+      const flightPart = baseFee + kmFee;
       const flightAmount = Math.round(flightPart * qty);
       const handlingAmount = Math.round(airTariff.airportHandlingPerHorse * qty);
 
       lines.push({
         code: `air_flight_horse_${h.horseId}`,
-        label: `Cước chặng bay (${airKm.toFixed(0)} km${h.requiresPrivateStall ? ' — Chuồng riêng ×' + airTariff.privateStallMultiplier : ''}) — Ngựa #${h.horseId}${qty > 1 ? ` (×${qty})` : ''}`,
+        label: `Cước chặng bay (${airKm.toFixed(0)} km) — Ngựa #${h.horseId}${qty > 1 ? ` (×${qty})` : ''}`,
         quantity: qty,
         unit: 'ngựa',
         unitPrice: Math.round(flightPart),
@@ -411,7 +397,6 @@ export function calculateFreight(
         meta: {
           horseId: h.horseId,
           airKm,
-          requiresPrivateStall: h.requiresPrivateStall,
         },
       });
 
@@ -472,27 +457,20 @@ export function calculateFreight(
       warnings.push('SEA_VESSEL_HEALTH_RISK');
       const seaKm = input.seaKm || 0;
 
-      const seaPrivateMult = Number(seaTariff.vessel.privateStallMultiplier) > 1
-        ? Number(seaTariff.vessel.privateStallMultiplier)
-        : 1.5;
-
       for (const h of input.horses) {
         const qty = h.quantity || 1;
-        const baseVesselCost =
+        const perHorseVesselCost =
           seaTariff.vessel.baseFeePerHorse + seaKm * seaTariff.vessel.pricePerKmPerHorse;
-        const perHorseVesselCost = h.requiresPrivateStall
-          ? baseVesselCost * seaPrivateMult
-          : baseVesselCost;
         const totalVesselCost = Math.round(perHorseVesselCost * qty);
 
         lines.push({
           code: `sea_vessel_horse_${h.horseId}`,
-          label: `Cước ô chuồng vận tải biển (${seaKm.toFixed(0)} km${h.requiresPrivateStall ? ` — Chuồng riêng ×${seaPrivateMult}` : ''}) — Ngựa #${h.horseId}${qty > 1 ? ` (×${qty})` : ''}`,
+          label: `Cước ô chuồng vận tải biển (${seaKm.toFixed(0)} km) — Ngựa #${h.horseId}${qty > 1 ? ` (×${qty})` : ''}`,
           quantity: qty,
           unit: 'ngựa',
           unitPrice: Math.round(perHorseVesselCost),
           amount: totalVesselCost,
-          meta: { horseId: h.horseId, seaKm, requiresPrivateStall: h.requiresPrivateStall },
+          meta: { horseId: h.horseId, seaKm },
         });
       }
 

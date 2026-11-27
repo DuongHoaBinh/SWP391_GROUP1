@@ -26,7 +26,7 @@ export interface AllocationDepot {
 export type PricedVehicle = AllocationVehicle & { deadheadKm: number };
 
 export interface AllocationInput {
-  /** computeRequiredStallSlots (Step 3): ngựa cần chuồng riêng tính 2 chỗ */
+  /** computeRequiredStallSlots: 1 chỗ / ngựa */
   requiredSlots: number;
   horseCount: number;
   /** Đã sắp gần → xa theo deadheadKm */
@@ -211,23 +211,17 @@ export function generateAllocationOptions(input: AllocationInput): AllocationRes
 
 export interface StallHorse {
   quantity?: number | null;
-  requiresPrivateStall?: boolean | number | null;
 }
 
 const qtyOf = (h: StallHorse) => (Number(h.quantity) > 0 ? Number(h.quantity) : 1);
 
-/** Jet stall (máy bay): 3 ngựa thường / stall; ngựa cần chuồng riêng chiếm nguyên 1 stall (B3). */
+/** Jet stall (máy bay): 3 ngựa / stall. */
 export function jetStallCount(horses: StallHorse[]): number {
-  let privateCount = 0;
-  let normal = 0;
-  for (const h of horses) {
-    if (h.requiresPrivateStall) privateCount += qtyOf(h);
-    else normal += qtyOf(h);
-  }
-  return privateCount + Math.ceil(normal / 3);
+  const total = horses.reduce((s, h) => s + qtyOf(h), 0);
+  return Math.ceil(total / 3);
 }
 
-/** Tàu gia súc: ngựa thường 1 ô chuồng, ngựa cần chuồng riêng chiếm 2 ô chuồng (không gian tách biệt). */
+/** Tàu gia súc: 1 ô chuồng / ngựa. */
 export function vesselPenCount(horses: StallHorse[]): number {
-  return horses.reduce((s, h) => s + qtyOf(h) * (h.requiresPrivateStall ? 2 : 1), 0);
+  return horses.reduce((s, h) => s + qtyOf(h), 0);
 }

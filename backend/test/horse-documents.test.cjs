@@ -168,7 +168,7 @@ test('Driver/Escort bị chặn ở tầng role với kho giấy tờ ngựa', (
   assert.throws(() => guard.canActivate(ctxFor(UserRole.DRIVER_ESCORT)), /Access denied/);
 });
 
-test('Form ngựa hỗ trợ giới tính (male/female/gelding/other), không còn ngày sinh; có cờ chuồng riêng và tính khí', () => {
+test('Form ngựa hỗ trợ giới tính (male/female/gelding/other), không còn ngày sinh và không còn cờ chuồng riêng; có tính khí', () => {
   const { getMetadataStorage } = require('class-validator');
   const props = new Set(
     getMetadataStorage()
@@ -177,6 +177,6 @@ test('Form ngựa hỗ trợ giới tính (male/female/gelding/other), không c�
   );
   assert.ok(props.has('gender'));
   assert.ok(!props.has('dateOfBirth'));
-  assert.ok(props.has('requiresPrivateStall'));
+  assert.ok(!props.has('requiresPrivateStall'));
   assert.ok(props.has('temperament'));
 });

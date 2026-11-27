@@ -100,7 +100,6 @@ interface HorseRow extends RowDataPacket {
   microchip_no?: string | null;
   passport_no?: string | null;
   special_requirements?: string | null;
-  requires_private_stall?: number | boolean | null;
 }
 
 @Injectable()
@@ -1172,7 +1171,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
     const [horses] = await this.pool.execute<HorseRow[]>(
       `SELECT sh.shipment_horse_id, h.horse_id, h.name, h.breed, h.gender, h.age, h.color, h.weight,
-              h.medical_status, h.microchip_no, h.passport_no, h.special_requirements, h.requires_private_stall, sh.quantity, sh.declared_value, sh.declared_currency, sh.exchange_rate, sh.declared_value_vnd, sh.insurance_package, sh.insurance_fee, sh.max_compensation, sh.emergency_vet_covered, sh.insurance_policy_version
+              h.medical_status, h.microchip_no, h.passport_no, h.special_requirements, sh.quantity, sh.declared_value, sh.declared_currency, sh.exchange_rate, sh.declared_value_vnd, sh.insurance_package, sh.insurance_fee, sh.max_compensation, sh.emergency_vet_covered, sh.insurance_policy_version
        FROM shipment_horse sh
        JOIN horse h ON h.horse_id = sh.horse_id
        WHERE sh.shipment_id = ?`,
@@ -1275,7 +1274,6 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         breed: h.breed,
         gender: h.gender,
         age: h.age !== null ? Number(h.age) : null,
-        requiresPrivateStall: Boolean(h.requires_private_stall),
         quantity: h.quantity !== null && h.quantity !== undefined ? Number(h.quantity) : 1,
         declaredValue: Number(h.declared_value ?? 0), declaredCurrency: h.declared_currency ?? 'VND',
         exchangeRate: Number(h.exchange_rate ?? 1), declaredValueVnd: Number(h.declared_value_vnd ?? 0),

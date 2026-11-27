@@ -1189,23 +1189,19 @@ export class RoutesStore implements OnModuleInit, OnModuleDestroy {
       const firstCrossBorderLeg = legs.find(l => l.leg_type === 'flight' || l.leg_type === 'sea');
       const firstCrossBorderSeq = firstCrossBorderLeg ? Number(firstCrossBorderLeg.sequence_no) : null;
 
-      // Compute required air jet stalls: 1 stall per private-stall horse + ceil(standardHorses / 3)
+      // Compute required air jet stalls: ceil(totalHorses / 3)
       const [flightHorseRows] = await db.execute<RowDataPacket[]>(
-        `SELECT sh.quantity, h.requires_private_stall
+        `SELECT sh.quantity
          FROM shipment_horse sh
-         JOIN horse h ON h.horse_id = sh.horse_id
          WHERE sh.shipment_id = ?`,
         [shipmentId],
       );
-      let privateHorses = 0;
-      let standardHorses = 0;
-      for (const hr of flightHorseRows) {
-        const qty = Math.max(1, Number(hr.quantity ?? 1));
-        if (hr.requires_private_stall) privateHorses += qty;
-        else standardHorses += qty;
-      }
+      const totalFlightHorses = flightHorseRows.reduce(
+        (sum, hr) => sum + Math.max(1, Number(hr.quantity ?? 1)),
+        0,
+      );
       const requiredAirStalls = flightHorseRows.length > 0
-        ? Math.max(1, privateHorses + Math.ceil(standardHorses / 3))
+        ? Math.max(1, Math.ceil(totalFlightHorses / 3))
         : Math.max(1, Math.ceil(Number(order.requested_horse_count || 1) / 3));
 
       // Auto-heal legacy flight legs that have flight_number & booking_reference but missed airport/airline foreign keys or stalls_booked

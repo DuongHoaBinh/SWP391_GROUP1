@@ -563,15 +563,12 @@ Registers a new racehorse profile directly into the database.
   "age": 5,
   "microchipNo": "985141001248999",
   "passportNo": "FEI-VN-2026-888",
-  "requiresPrivateStall": false,
   "temperament": "normal",
   "status": "active"
 }
 ```
 - Sau review 11/2026 (Step 2): **bỏ `gender` và `dateOfBirth`**. Hai trường này không còn trong DTO; nếu client cũ vẫn gửi thì bị bỏ qua (ValidationPipe `whitelist`). Cột DB được giữ cho dữ liệu cũ nhưng API không trả về nữa.
-- `requiresPrivateStall` (boolean, mặc định `false`): ngựa cần chuồng riêng (đực giống, dễ kích động). Dùng khi xếp ngựa lên phương tiện.
 - `temperament`: `calm` | `normal` | `difficult` (mặc định `normal`).
-- Order detail (`GET /orders/:id`) trả thêm `horses[].requiresPrivateStall`.
 
 ### Horse documents (Step 2: giấy tờ lưu trên ngựa)
 
@@ -725,7 +722,7 @@ Lists drivers, escorts, and coordinators available for trip assignment.
 Retrieves all vehicles and staff assigned to a specific shipment.
 
 ### `POST /fleet/shipments/:id/assign-vehicles` (Fleet Coordinator / Manager / Admin)
-Assigns vehicles to an approved transport order. Enforces rule: total vehicle capacity must be >= the order's **required stall slots** (each horse 1 slot; a horse with `requiresPrivateStall` takes 2 slots — Step 3). Sets vehicle status to `in_use` and order status to `planning`.
+Assigns vehicles to an approved transport order. Enforces rule: total vehicle capacity must be >= the order's **required stall slots** (1 slot per horse). Sets vehicle status to `in_use` and order status to `planning`.
 - **Body:** `{ "vehicleIds": [1, 2] }`
 
 ### `POST /fleet/shipments/:id/assign-staff` (Fleet Coordinator / Manager / Admin)
@@ -954,7 +951,7 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
 - On owned `change_requested` orders, omitted horse policy fields and quantity preserve saved values. Actual declaration changes recalculate the policy; unchanged declarations preserve saved FX rates. Approval mode never overwrites Domestic/International scope.
 - `GET /fleet/road-trips`: Coordinator/Manager/Admin only. Returns id, vehicleId, vehiclePlate, bookingType, originLocation, destinationLocation, plannedDeparture, plannedArrival, capacity and bookedStalls. No other customers' identity or horses are included.
 - `POST /fleet/road-trips`: **410 Gone since Step 3** (trip consolidation removed; hidden from Swagger). Road legs of new plans still create their own `road_trip` automatically when the plan is saved.
-- Road capacity checks (plan save, vehicle assignment) count **stall slots**: a horse with `requiresPrivateStall` takes 2 slots; `stallsBooked` stores slots.
+- Road capacity checks (plan save, vehicle assignment) count **stall slots** (1 slot per horse); `stallsBooked` stores slots.
 - `POST /routes/plan/:shipmentId/build-detail`: each road leg may send `roadTripId`. The backend uses that trip's vehicle/route/times, validates booking type, and sets `stallsBooked` from the shipment. Without an id, a timed road leg creates its own trip when saved. All leg/stop/vehicle changes and capacity checks are transactional. Insufficient slots or an overlapping exclusive/other trip return 400; the plan is not partially saved. No automatic compatibility tolerance is imposed.
 - Flight legs cannot set roadTripId; existing air fields retain their meaning. Air operational shared/dedicated rules await approval.
 - Customer route/full-plan reads enforce order ownership. `PATCH /orders/:id/complete` requires an in-transit order and Manager/Admin or an assigned Driver/Escort; completed retries do not duplicate notifications.

@@ -48,7 +48,7 @@ const PRESET_SAMPLES = [
     sample: {
       origin: { address: 'Quận 7, TP.HCM', lat: 10.734, lng: 106.7216, country: 'Vietnam' },
       destination: { address: 'Đà Lạt, Lâm Đồng', lat: 11.9404, lng: 108.4583, country: 'Vietnam' },
-      horses: [{ quantity: 3, requiresPrivateStall: false }],
+      horses: [{ quantity: 3 }],
     },
   },
   {
@@ -58,7 +58,7 @@ const PRESET_SAMPLES = [
     sample: {
       origin: { address: 'TP.HCM, Việt Nam', lat: 10.8231, lng: 106.6297, country: 'Vietnam' },
       destination: { address: 'Singapore Turf Club, Singapore', lat: 1.4206, lng: 103.7619, country: 'Singapore' },
-      horses: [{ quantity: 2, requiresPrivateStall: false }],
+      horses: [{ quantity: 2 }],
     },
   },
   {
@@ -69,7 +69,7 @@ const PRESET_SAMPLES = [
     sample: {
       origin: { address: 'TP.HCM, Việt Nam', lat: 10.8231, lng: 106.6297, country: 'Vietnam' },
       destination: { address: 'Singapore Turf Club, Singapore', lat: 1.4206, lng: 103.7619, country: 'Singapore' },
-      horses: [{ quantity: 1, requiresPrivateStall: false }],
+      horses: [{ quantity: 1 }],
     },
   },
 ];
@@ -104,7 +104,6 @@ export default function PricingSettingsPage() {
     baseFeePerHorse: 60000000,
     pricePerKmPerHorse: 25000,
     airportHandlingPerHorse: 5000000,
-    privateStallMultiplier: 1.5,
     roundingUnit: 1000,
     averageSpeedKmh: 700,
   });
@@ -496,22 +495,6 @@ export default function PricingSettingsPage() {
                       value={airParams.airportHandlingPerHorse}
                       onChange={(e) =>
                         setAirParams({ ...airParams, airportHandlingPerHorse: Number(e.target.value) })
-                      }
-                      className="w-full h-10 px-3 rounded-xl border border-[#D8CEBE] font-mono text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-[#181A17] block mb-1">
-                      {isEn ? 'Private Stall Multiplier (Flight part only)' : 'Hệ số chuồng riêng (chỉ nhân phần bay)'}
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="1.0"
-                      max="3.0"
-                      value={airParams.privateStallMultiplier}
-                      onChange={(e) =>
-                        setAirParams({ ...airParams, privateStallMultiplier: Number(e.target.value) })
                       }
                       className="w-full h-10 px-3 rounded-xl border border-[#D8CEBE] font-mono text-sm"
                     />

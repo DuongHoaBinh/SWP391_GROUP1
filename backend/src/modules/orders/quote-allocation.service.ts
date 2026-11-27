@@ -35,7 +35,7 @@ export interface AllocationQuoteInput {
   seaMode?: 'vessel';
   origin: GeoPoint & { address: string; country?: string };
   destination: GeoPoint & { address: string; country?: string };
-  horses: Array<{ quantity: number; requiresPrivateStall: boolean }>;
+  horses: Array<{ quantity: number }>;
   pickupAt: Date;
 }
 

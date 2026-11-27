@@ -174,7 +174,6 @@ export default function HorseDetailPage() {
             breed: res.breed || 'Thoroughbred',
             gender: res.gender || undefined,
             age: parsedAge,
-            requiresPrivateStall: Boolean(res.requiresPrivateStall),
             temperament: res.temperament || 'normal',
             color: res.color || '',
             weight: res.weight ? String(res.weight) : '',
@@ -558,16 +557,6 @@ export default function HorseDetailPage() {
                 </span>
                 <div className="font-mono font-bold text-[#181A17] break-all">
                   {horse.passportNumber || notUpdatedText}
-                </div>
-              </div>
-              <div>
-                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">
-                  {t('horses.requiresPrivateStall', isEn ? 'Private Stall Required' : 'Cần chuồng riêng')}
-                </span>
-                <div className={`font-bold ${horse.requiresPrivateStall ? 'text-[#966516]' : 'text-[#181A17]'}`}>
-                  {horse.requiresPrivateStall
-                    ? t('common.yes', isEn ? 'Yes' : 'Có')
-                    : t('common.no', isEn ? 'No' : 'Không')}
                 </div>
               </div>
               <div>

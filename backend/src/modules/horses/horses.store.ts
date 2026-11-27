@@ -18,7 +18,6 @@ interface HorseRow extends RowDataPacket {
   weight: string | null;
   medical_status: string | null;
   special_requirements: string | null;
-  requires_private_stall: number | boolean | null;
   temperament: HorseTemperament | null;
   photo_url: string | null;
   status: HorseStatus;
@@ -57,7 +56,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findByOwnerId(ownerId: number): Promise<HorseEntity[]> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity, created_at
        FROM horse
        WHERE owner_id = ? AND (status IS NULL OR status NOT IN ('retired', 'deleted'))
        ORDER BY horse_id DESC`,
@@ -69,7 +68,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findById(horseId: number): Promise<HorseEntity | undefined> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity, created_at
        FROM horse
        WHERE horse_id = ?
        LIMIT 1`,
@@ -82,7 +81,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findByMicrochipNo(microchipNo: string): Promise<HorseEntity | undefined> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity, created_at
        FROM horse
        WHERE LOWER(TRIM(microchip_no)) = LOWER(TRIM(?))
        LIMIT 1`,
@@ -94,7 +93,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findByPassportNo(passportNo: string): Promise<HorseEntity | undefined> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity, created_at
        FROM horse
        WHERE LOWER(TRIM(passport_no)) = LOWER(TRIM(?))
        LIMIT 1`,
@@ -137,8 +136,8 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
   async create(ownerId: number, dto: CreateHorseDto): Promise<number> {
     try {
       const [result] = await this.pool.execute(
-        `INSERT INTO horse (owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO horse (owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           ownerId,
           dto.name,
@@ -151,7 +150,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
           dto.weight ?? null,
           dto.medicalStatus ?? null,
           dto.specialRequirements ?? null,
-          dto.requiresPrivateStall ?? false,
           dto.temperament ?? HorseTemperament.NORMAL,
           dto.photoUrl ?? null,
           dto.status ?? HorseStatus.ACTIVE,
@@ -180,7 +178,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
            weight = COALESCE(?, weight),
            medical_status = COALESCE(?, medical_status),
            special_requirements = COALESCE(?, special_requirements),
-           requires_private_stall = COALESCE(?, requires_private_stall),
            temperament = COALESCE(?, temperament),
            photo_url = COALESCE(?, photo_url),
            status = COALESCE(?, status),
@@ -197,7 +194,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
           dto.weight ?? null,
           dto.medicalStatus ?? null,
           dto.specialRequirements ?? null,
-          dto.requiresPrivateStall ?? null,
           dto.temperament ?? null,
           dto.photoUrl ?? null,
           dto.status ?? null,
@@ -262,7 +258,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
       weight: row.weight ?? null,
       medicalStatus: row.medical_status ?? null,
       specialRequirements: row.special_requirements ?? null,
-      requiresPrivateStall: Boolean(row.requires_private_stall),
       temperament: row.temperament ?? HorseTemperament.NORMAL,
       photoUrl: row.photo_url ?? null,
       status: row.status,

@@ -185,7 +185,7 @@ export class RoutesService implements OnModuleInit {
       missingRequirements.push('Chưa phân công phương tiện vận chuyển cho các chặng đường bộ');
     } else if (totalCapacity < requiredSlots && totalCapacity > 0) {
       missingRequirements.push(
-        `Sức chứa của phương tiện (${totalCapacity} chỗ) chưa đủ cho nhu cầu chuồng của đơn (${requiredSlots} chỗ, gồm chuồng riêng tính 2 chỗ)`,
+        `Sức chứa của phương tiện (${totalCapacity} chỗ) chưa đủ cho nhu cầu chuồng của đơn (${requiredSlots} chỗ)`,
       );
     }
 
@@ -266,7 +266,7 @@ export class RoutesService implements OnModuleInit {
       }) };
     }
 
-    // Step 9: số jet stall cho chặng bay (3 ngựa thường/stall, ngựa chuồng riêng 1 stall)
+    // Step 9: số jet stall cho chặng bay (3 ngựa/stall)
     const stallHorses = dto.legs.some(l => l.legType === 'flight') && typeof (this.fleetStore as any).findShipmentStallHorses === 'function'
       ? await (this.fleetStore as any).findShipmentStallHorses(shipmentId)
       : null;

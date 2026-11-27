@@ -135,8 +135,8 @@ export default function VehicleManagementPage() {
           <p className="text-[11px] text-slate-500 mt-1 m-0">
             {selectedClass.horseCapacity != null
               ? language === 'en'
-                ? `Capacity is fixed by class: ${selectedClass.horseCapacity} horses. A horse needing a private stall uses 2 places.`
-                : `Sức chứa theo loại: ${selectedClass.horseCapacity} ngựa. Ngựa cần chuồng riêng chiếm 2 chỗ.`
+                ? `Capacity is fixed by class: ${selectedClass.horseCapacity} horses.`
+                : `Sức chứa theo loại: ${selectedClass.horseCapacity} ngựa.`
               : language === 'en'
                 ? 'Capacity is variable; enter it below.'
                 : 'Sức chứa tùy phương tiện; nhập ở ô bên dưới.'}

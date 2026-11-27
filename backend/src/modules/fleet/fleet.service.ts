@@ -371,14 +371,13 @@ export class FleetService {
       throw new BadRequestException('Xe đang được sử dụng hoặc bảo trì. Ghép chuyến phải chọn chuyến đường bộ trong kế hoạch để kiểm tra chỗ');
     }
 
-    // Ngựa cần chuồng riêng tính 2 chỗ (Step 3)
     const totalCapacity = vehicles.reduce((sum, v) => sum + v.capacity, 0);
     const requiredSlots = typeof this.fleetStore.findRequiredStallSlots === 'function'
       ? await this.fleetStore.findRequiredStallSlots(shipmentId, order.requestedHorseCount)
       : order.requestedHorseCount;
     if (totalCapacity < requiredSlots) {
       throw new BadRequestException(
-        `Tổng sức chứa của các xe được chọn (${totalCapacity} chỗ) nhỏ hơn số chỗ chuồng cần cho đơn (${requiredSlots} chỗ, ngựa cần chuồng riêng tính 2 chỗ). Vui lòng chọn thêm xe hoặc xe có sức chứa lớn hơn.`,
+        `Tổng sức chứa của các xe được chọn (${totalCapacity} chỗ) nhỏ hơn số chỗ chuồng cần cho đơn (${requiredSlots} chỗ). Vui lòng chọn thêm xe hoặc xe có sức chứa lớn hơn.`,
       );
     }
 

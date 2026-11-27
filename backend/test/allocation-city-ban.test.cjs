@@ -43,7 +43,7 @@ const ROAD_PARTNER = {
   ],
   deadheadPerKm: 18000,
 };
-const AIR = { baseFeePerHorse: 60000000, pricePerKmPerHorse: 25000, airportHandlingPerHorse: 5000000, privateStallMultiplier: 1.5, roundingUnit: 1000, averageSpeedKmh: 700 };
+const AIR = { baseFeePerHorse: 60000000, pricePerKmPerHorse: 25000, airportHandlingPerHorse: 5000000, roundingUnit: 1000, averageSpeedKmh: 700 };
 
 const truck = (id, classCode, capacity, coef, heavy) => ({
   vehicleId: id, plate: `51C-${id}`, classCode, className: classCode, capacity, priceCoefficient: coef, isHeavyTruck: heavy,
@@ -52,7 +52,7 @@ const truck1 = (id) => truck(id, 'truck_1', 1, 1.0, false);
 const truck4 = (id) => truck(id, 'truck_4', 4, 1.3, true);
 
 // Ví dụ C3: 3 ngựa thường, 300 km (main), deadhead 20 km
-const horses3 = [{ horseId: 1, quantity: 3, requiresPrivateStall: false }];
+const horses3 = [{ horseId: 1, quantity: 3 }];
 const priceC3 = (vehicles) =>
   calculateFreight(
     { mode: 'road', horses: horses3, vehicles: vehicles.map((v) => ({ ...v })), roadLegs: [{ key: 'main', distanceKm: 300, borderCrossings: 0 }] },
@@ -84,10 +84,10 @@ test('1. Ví dụ C3: 1 xe 4 chỗ = 18.750.000; 3 xe 1 chỗ = 42.900.000; ch�
   assert.equal(withTurnaround.options[0].totalFreight, 42900000 + 2 * 4500000);
 });
 
-test('2. Ngựa chuồng riêng: 2 thường + 1 chuồng riêng = 4 chỗ → xe 4 chỗ; xe 3 chỗ không được chọn', () => {
-  const required = 2 + 2;
+test('2. 4 ngựa = 4 chỗ → chọn xe 4 chỗ; xe 3 chỗ không được chọn', () => {
+  const required = 4;
   const r = generateAllocationOptions({
-    requiredSlots: required, horseCount: 3,
+    requiredSlots: required, horseCount: 4,
     depots: [depot(1, 'Trạm A', 10, [truck(1, 'truck_3', 3, 1.2, true), truck4(2)])],
     priceVehicleSet: (vs) => vs.reduce((s, v) => s + v.capacity * 1000, 0),
   });
@@ -141,11 +141,11 @@ test('4. Gộp phương án trùng tập xe; tối đa 3 phương án; earliest 
 });
 
 test('5. jetStallCount và vesselPenCount', () => {
-  assert.equal(jetStallCount([{ quantity: 3, requiresPrivateStall: false }]), 1);
-  assert.equal(jetStallCount([{ quantity: 4, requiresPrivateStall: false }]), 2);
-  assert.equal(jetStallCount([{ quantity: 2, requiresPrivateStall: false }, { quantity: 1, requiresPrivateStall: true }]), 2);
-  assert.equal(jetStallCount([{ quantity: 1, requiresPrivateStall: true }]), 1);
-  assert.equal(vesselPenCount([{ quantity: 2 }, { quantity: 1, requiresPrivateStall: true }]), 4);
+  assert.equal(jetStallCount([{ quantity: 3 }]), 1);
+  assert.equal(jetStallCount([{ quantity: 4 }]), 2);
+  assert.equal(jetStallCount([{ quantity: 2 }, { quantity: 1 }]), 1);
+  assert.equal(jetStallCount([{ quantity: 1 }]), 1);
+  assert.equal(vesselPenCount([{ quantity: 2 }, { quantity: 1 }]), 3);
 });
 
 const HCM = {
@@ -313,7 +313,7 @@ test('10. Chặng giao ở nước ngoài dùng trạm partner gần nhất + ta
     mode: 'air',
     origin: { address: 'Quận 1, TP.HCM', country: 'Vietnam', ...QUAN_1 },
     destination: { address: 'Singapore', country: 'Singapore', lat: 1.3, lng: 103.85 },
-    horses: [{ quantity: 2, requiresPrivateStall: false }],
+    horses: [{ quantity: 2 }],
     pickupAt: localToUtc('2026-12-10', '09:00'),
   });
   assert.equal(result.partnerDepot.name, 'Đối tác Singapore');
@@ -336,7 +336,7 @@ test('10. Chặng giao ở nước ngoài dùng trạm partner gần nhất + ta
     mode: 'air',
     origin: { address: 'Quận 1', country: 'Vietnam', ...QUAN_1 },
     destination: { address: 'Singapore', country: 'Singapore', lat: 1.3, lng: 103.85 },
-    horses: [{ quantity: 2, requiresPrivateStall: false }],
+    horses: [{ quantity: 2 }],
     pickupAt: localToUtc('2026-12-10', '09:00'),
   });
   assert.ok(r2.warnings.includes('NO_PARTNER_DEPOT'));
@@ -353,7 +353,7 @@ test('10. Chặng giao ở nước ngoài dùng trạm partner gần nhất + ta
     mode: 'road',
     origin: { address: 'Quận 1', country: 'Vietnam', ...QUAN_1 },
     destination: { address: 'Đà Lạt', country: 'Vietnam', lat: 11.94, lng: 108.45 },
-    horses: [{ quantity: 3, requiresPrivateStall: false }],
+    horses: [{ quantity: 3 }],
     pickupAt: localToUtc('2026-12-10', '09:00'),
   });
   const opt = r3.options[0];
@@ -376,7 +376,7 @@ test('10. Chặng giao ở nước ngoài dùng trạm partner gần nhất + ta
     mode: 'road',
     origin: { address: 'Thủ Đức', country: 'Vietnam', lat: 10.85, lng: 106.76 },
     destination: { address: 'Đà Lạt', country: 'Vietnam', lat: 11.94, lng: 108.45 },
-    horses: [{ quantity: 3, requiresPrivateStall: false }],
+    horses: [{ quantity: 3 }],
     pickupAt: localToUtc('2026-12-10', '09:00'),
   });
   assert.deepEqual(r4.options, []);

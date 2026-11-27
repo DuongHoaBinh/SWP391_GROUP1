@@ -19,7 +19,7 @@ The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with
   - `depot(depot_id, code UNIQUE, name, country, city, address, lat, lng, type ENUM('own','partner'), is_active)`. Seed demo: Thủ Đức, Long Biên, Đà Nẵng, Cần Thơ (own) và Phnom Penh, Bangkok, Singapore (partner).
   - `vehicle_class(code PK, mode ENUM('road','air','sea'), name_vi, name_en, horse_capacity NULL, price_coefficient, is_heavy_truck, sort_order)`.
   - `vehicle.depot_id` là FK nullable tới `depot`; xe đường bộ cũ được gán Trạm Thủ Đức. `vehicle.vehicle_class_code` là FK nullable tới `vehicle_class`, backfill theo `capacity`. `vehicle.capacity` được giữ để tương thích và luôn lấy theo loại khi tạo hoặc đổi loại. Cột `vehicle.current_location` có trong schema (trước đây chỉ được thêm lúc backend khởi động).
-  - Số chỗ chuồng của đơn = tổng `shipment_horse.quantity` × (2 nếu `horse.requires_private_stall`, ngược lại 1). `route_leg.stalls_booked` lưu số chỗ này.
+  - Số chỗ chuồng của đơn = tổng `shipment_horse.quantity` (1 chỗ / ngựa). `route_leg.stalls_booked` lưu số chỗ này.
   - `shipment.booking_type` mặc định đổi sang `dedicated_charter`; giá trị `shared_stall` giữ trong ENUM cho đơn cũ. Bảng `road_trip` được giữ: mỗi chặng đường bộ của đơn mới vẫn có một `road_trip` riêng.
 
 - A customer owns one or more horses and creates transport orders.
@@ -28,7 +28,7 @@ The executable schema is `database/schema.mysql.sql` and targets MySQL 8.0+ with
 - A horse has a document set whose required documents depend on destination country and border gate.
 - **Hồ sơ ngựa sau review 11/2026 (migration `029_horse_profile_after_review.sql`)**:
   - `horse.gender` và `horse.date_of_birth` ngừng dùng. Cột được giữ để không mất dữ liệu cũ, nhưng API không đọc/ghi nữa.
-  - Thêm `horse.requires_private_stall BOOLEAN DEFAULT FALSE` và `horse.temperament ENUM('calm','normal','difficult') DEFAULT 'normal'` để xếp ngựa lên phương tiện.
+  - Thêm `horse.temperament ENUM('calm','normal','difficult') DEFAULT 'normal'` để ghi nhận tính khí khi chăm sóc & vận chuyển (đã bỏ `horse.requires_private_stall` ở migration `045`).
   - `document_type(code PK, name_vi, name_en, default_validity_days, is_identity, sort_order)` là danh mục loại giấy tờ.
   - `transport_document.document_type_code` là FK nullable tới `document_type.code`. `transport_document.regulation_id` cho phép NULL: giấy tờ chung của ngựa (hộ chiếu, vi mạch...) không thuộc riêng quy định nào và được dùng lại cho nhiều đơn.
   - Giấy tờ vẫn append-only: tải bản mới thì bản cũ cùng loại có `is_archived = TRUE` và `superseded_by_document_id` trỏ sang bản mới.

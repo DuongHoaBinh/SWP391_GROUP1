@@ -80,7 +80,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
   const [gender, setGender] = useState<'male' | 'female' | 'gelding'>(normalizeGender(horse.gender));
   const [age, setAge] = useState(horse.age || 5);
   const [temperament, setTemperament] = useState<HorseTemperament>(horse.temperament || 'normal');
-  const [requiresPrivateStall, setRequiresPrivateStall] = useState(Boolean(horse.requiresPrivateStall));
   const [color, setColor] = useState(horse.color || 'Bay');
   const [weight, setWeight] = useState(horse.weight || '480 kg');
   const [medicalStatus, setMedicalStatus] = useState<'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention'>(
@@ -111,7 +110,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
       setGender(normalizeGender(horse.gender));
       setAge(horse.age || 5);
       setTemperament(horse.temperament || 'normal');
-      setRequiresPrivateStall(Boolean(horse.requiresPrivateStall));
       let initialColor = horse.color || 'Bay';
       if (initialColor.toLowerCase() === 'grey' || initialColor.toLowerCase() === 'gray') {
         initialColor = 'Gray / Grey';
@@ -180,7 +178,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
             age: Number(age) || 4,
             quantity: 1,
             temperament,
-            requiresPrivateStall,
             passportNo: passportNumber.trim() || undefined,
             microchipNo: microchipNumber.trim() || undefined,
             color: color.trim() || undefined,
@@ -200,7 +197,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
         age: Number(age) || 4,
         quantity: 1,
         temperament,
-        requiresPrivateStall,
         color,
         weight: weight.trim() || '480 kg',
         medicalStatus,
@@ -508,8 +504,6 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                 <HorseHandlingFields
                   temperament={temperament}
                   onTemperamentChange={setTemperament}
-                  requiresPrivateStall={requiresPrivateStall}
-                  onRequiresPrivateStallChange={setRequiresPrivateStall}
                 />
 
                 <div className="grid grid-cols-2 gap-3">

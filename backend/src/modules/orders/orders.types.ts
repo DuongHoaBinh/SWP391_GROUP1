@@ -34,8 +34,6 @@ export interface OrderHorse {
   /** @deprecated Bỏ giới tính sau review 11/2026; chỉ còn ở dữ liệu cũ */
   gender: 'male' | 'female' | 'other' | 'gelding' | null;
   age: number | null;
-  /** Cần chuồng riêng (Step 2): dùng khi xếp ngựa lên phương tiện */
-  requiresPrivateStall?: boolean;
   quantity?: number;
   declaredValue: number;
   declaredCurrency: 'VND' | 'USD';
