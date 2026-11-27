@@ -411,7 +411,7 @@ export class FleetService {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
 
-    if (['in_transit', 'return_pending', 'completed', 'cancelled', 'cancelled_operational', 'rejected'].includes(order.status)) {
+    if (['in_transit', 'return_pending', 'completed', 'cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded'].includes(order.status)) {
       throw new ConflictException(
         `Không thể thay đổi phân công nhân sự khi đơn đang ở trạng thái "${order.status}"`,
       );

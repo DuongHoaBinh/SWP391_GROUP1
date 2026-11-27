@@ -279,7 +279,7 @@ export function suggestManagerFreightQuote(params: {
       : params.transportMode === 'sea'
         ? 'sea'
         : 'road';
-  const type: BookingType = params.bookingType === 'dedicated_charter' ? 'dedicated_charter' : 'shared_stall';
+  const type: BookingType = params.bookingType === 'shared_stall' ? 'shared_stall' : 'dedicated_charter';
   const safeCount = Math.max(1, Math.round(Number(params.horseCount) || 1));
   const safeKm = Math.max(30, Math.round(Number(params.distanceKm) || 350));
   const safeCustoms = Math.max(0, Math.round(Number(params.customsCount) || 0));

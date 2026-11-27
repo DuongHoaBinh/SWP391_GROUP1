@@ -13,10 +13,10 @@ export class UpdateRegulationDto {
   @IsString()
   borderGate?: string | null;
 
-  @ApiPropertyOptional({ enum: ['road', 'air', 'both'] })
+  @ApiPropertyOptional({ enum: ['road', 'air', 'sea', 'both'] })
   @IsOptional()
-  @IsEnum(['road', 'air', 'both'])
-  transportMode?: 'road' | 'air' | 'both';
+  @IsEnum(['road', 'air', 'sea', 'both'])
+  transportMode?: 'road' | 'air' | 'sea' | 'both';
 
   @ApiPropertyOptional({ enum: ['A', 'B'] })
   @IsOptional()

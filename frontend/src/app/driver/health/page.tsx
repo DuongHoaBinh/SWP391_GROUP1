@@ -492,7 +492,7 @@ function HorseHealthContent() {
   const avgTemp =
     healthLogs.length > 0
       ? (healthLogs.reduce((acc, l) => acc + (l.temperatureC || 38), 0) / healthLogs.length).toFixed(1)
-      : '38.0';
+      : null;
 
   const stableCount = healthLogs.filter((l) => l.conditionStatus === 'stable').length;
   const abnormalLogs = healthLogs.filter(
@@ -664,7 +664,7 @@ function HorseHealthContent() {
                   {t('driver.health.avgTemp', language === 'en' ? 'Average Temperature' : 'Thân nhiệt trung bình')}
                 </span>
                 <span className="text-lg font-bold text-[#181A17]">
-                  {avgTemp}°C ({t('driver.health.standardTempRange', language === 'en' ? 'Normal: 37.5 - 38.5°C' : 'Chuẩn: 37.5 - 38.5°C')})
+                  {avgTemp ? `${avgTemp}°C` : '—'} ({t('driver.health.standardTempRange', language === 'en' ? 'Normal: 37.5 - 38.5°C' : 'Chuẩn: 37.5 - 38.5°C')})
                 </span>
               </div>
             </div>

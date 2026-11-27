@@ -56,9 +56,9 @@ export function ManagerSectionTabs({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={`flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 ${className}`}
+      className={`flex flex-wrap items-center gap-1.5 pb-1 ${className}`}
     >
-      <div className="inline-flex items-center gap-1 bg-white/90 border border-[#D8CEBE] rounded-2xl p-1 shadow-xs">
+      <div className="inline-flex flex-wrap items-center gap-1 bg-white/90 border border-[#D8CEBE] rounded-2xl p-1 shadow-xs max-w-full">
         {tabs.map((tab) => {
           const active = isTabActive(tab);
           const sharedClasses = `inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all no-underline cursor-pointer ${

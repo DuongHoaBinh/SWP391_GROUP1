@@ -522,7 +522,7 @@ export class IncidentsStore implements OnModuleInit, OnModuleDestroy {
          JOIN shipment s2 ON s2.shipment_id = r2.shipment_id
          WHERE r1.shipment_id = ?
            AND rl1.road_trip_id IS NOT NULL
-           AND s2.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')`,
+           AND s2.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded')`,
         [Number(cr.shipment_id)],
       );
 

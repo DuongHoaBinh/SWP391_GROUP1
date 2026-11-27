@@ -4,7 +4,7 @@ export interface RegulationItem {
   id: number;
   country: string;
   borderGate?: string | null;
-  transportMode?: 'road' | 'air' | 'both';
+  transportMode?: 'road' | 'air' | 'sea' | 'both';
   docTier?: 'A' | 'B';
   leadTimeDays?: number;
   requiresAuthorityApproval?: boolean;
@@ -170,7 +170,7 @@ export const documentsApi = {
   createRegulation: async (data: {
     country: string;
     borderGate?: string;
-    transportMode?: 'road' | 'air' | 'both';
+    transportMode?: 'road' | 'air' | 'sea' | 'both';
     docTier?: 'A' | 'B';
     leadTimeDays?: number;
     requiresAuthorityApproval?: boolean;
@@ -190,7 +190,7 @@ export const documentsApi = {
     data: {
       country?: string;
       borderGate?: string | null;
-      transportMode?: 'road' | 'air' | 'both';
+      transportMode?: 'road' | 'air' | 'sea' | 'both';
       docTier?: 'A' | 'B';
       leadTimeDays?: number;
       requiresAuthorityApproval?: boolean;

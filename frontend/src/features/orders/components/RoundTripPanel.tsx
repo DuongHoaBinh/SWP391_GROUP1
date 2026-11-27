@@ -151,7 +151,10 @@ export function RoundTripPanel({ order, userRole, onRefresh }: RoundTripPanelPro
     const hoursLeft = (oldDep - now) / 3600000;
     if (hoursLeft >= 168) return 0;
     // Estimated 10%
-    const estFreight = Number(order.return_freight_total || order.returnFreightTotal || 10000000);
+    const estFreight = Number(
+      order.returnFreight ?? order.return_freight ?? order.return_freight_total ?? order.returnFreightTotal ?? 0,
+    );
+    if (estFreight <= 0) return 0;
     return Math.ceil((estFreight * 0.1) / 1000) * 1000;
   };
 

@@ -37,7 +37,7 @@ import toast from 'react-hot-toast';
 
 function getTripPriority(status?: string): number {
   const s = (status || '').toLowerCase();
-  if (s === 'in_transit' || s === 'return_in_transit') return 0;
+  if (s === 'in_transit') return 0;
   if (s === 'return_pending') return 1;
   if (s === 'ready_to_depart') return 2;
   if (s === 'confirmed' || s === 'planning' || s === 'approved') return 3;
@@ -386,7 +386,7 @@ function CustomerTrackingContent() {
           {trips.map((trip) => {
             const active = trip.shipment_id === selectedShipmentId;
             const st = (trip.shipment_status || '').toLowerCase();
-            const isLive = st === 'in_transit' || st === 'return_pending' || st === 'return_in_transit';
+            const isLive = st === 'in_transit' || st === 'return_pending';
             const code = trip.customer_request_code || trip.request_code;
             return (
               <button
@@ -513,7 +513,7 @@ function CustomerTrackingContent() {
               <StatusBadge
                 label={formatShipmentStatusLabel(trackingDetails?.shipmentStatus || 'ready_to_depart', isEn)}
                 variant={statusMeta.variant}
-                hasDot={statusLower === 'in_transit' || statusLower === 'return_in_transit'}
+                hasDot={statusLower === 'in_transit'}
               />
             </div>
           </div>

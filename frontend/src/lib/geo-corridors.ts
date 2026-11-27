@@ -2269,7 +2269,7 @@ export function resolveEndpointCoordinates(
 export function estimateLegDistanceAndDuration(
   originText?: string | null,
   destinationText?: string | null,
-  legType: 'road' | 'flight' = 'road',
+  legType: 'road' | 'flight' | 'sea' = 'road',
   originCoords?: [number, number] | null,
   destCoords?: [number, number] | null
 ): { distanceKm: number; durationHours: number } | null {
@@ -2281,6 +2281,11 @@ export function estimateLegDistanceAndDuration(
   if (legType === 'flight') {
     const distanceKm = Math.max(80, Math.round(directKm * 1.05));
     const durationHours = Math.max(1, Math.round((distanceKm / 750 + 0.5) * 2) / 2);
+    return { distanceKm, durationHours };
+  }
+  if (legType === 'sea') {
+    const distanceKm = Math.max(50, Math.round(directKm * 1.25));
+    const durationHours = Math.max(2, Math.round((distanceKm / 35 + 1.0) * 2) / 2);
     return { distanceKm, durationHours };
   }
 

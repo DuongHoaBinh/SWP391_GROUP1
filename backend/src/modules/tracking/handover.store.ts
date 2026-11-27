@@ -221,7 +221,7 @@ export class HandoverStore implements OnModuleInit, OnModuleDestroy {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
         `SELECT COALESCE(SUM(COALESCE(approved_amount, requested_amount)), 0) AS total_claimed
          FROM insurance_claim
-         WHERE shipment_horse_id = ? AND status IN ('submitted', 'under_review', 'approved', 'pending_second_approval', 'approved_for_transfer', 'transferred')`,
+         WHERE shipment_horse_id = ? AND status IN ('submitted', 'under_review', 'approved', 'paid')`,
         [shipmentHorseId],
       );
       return Number(rows[0]?.total_claimed || 0);

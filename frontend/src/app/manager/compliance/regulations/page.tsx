@@ -56,7 +56,7 @@ interface DisplayRegulation {
   id: number;
   country: string;
   borderGate?: string | null;
-  transportMode: 'road' | 'air' | 'both';
+  transportMode: 'road' | 'air' | 'sea' | 'both';
   docTier: 'A' | 'B';
   leadTimeDays: number;
   requiresAuthorityApproval: boolean;
@@ -154,7 +154,7 @@ export default function RegulationsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newCountry, setNewCountry] = useState('Singapore');
   const [newBorderGate, setNewBorderGate] = useState('');
-  const [newTransportMode, setNewTransportMode] = useState<'road' | 'air' | 'both'>('both');
+  const [newTransportMode, setNewTransportMode] = useState<'road' | 'air' | 'sea' | 'both'>('both');
   const [newDocTier, setNewDocTier] = useState<'A' | 'B'>('A');
   const [newLeadTimeDays, setNewLeadTimeDays] = useState('5');
   const [newRequiresAuth, setNewRequiresAuth] = useState(false);
@@ -176,7 +176,7 @@ export default function RegulationsPage() {
   const [editingReg, setEditingReg] = useState<DisplayRegulation | null>(null);
   const [editCountry, setEditCountry] = useState('');
   const [editBorderGate, setEditBorderGate] = useState('');
-  const [editTransportMode, setEditTransportMode] = useState<'road' | 'air' | 'both'>('both');
+  const [editTransportMode, setEditTransportMode] = useState<'road' | 'air' | 'sea' | 'both'>('both');
   const [editDocTier, setEditDocTier] = useState<'A' | 'B'>('A');
   const [editLeadTimeDays, setEditLeadTimeDays] = useState('5');
   const [editRequiresAuth, setEditRequiresAuth] = useState(false);
@@ -1269,12 +1269,13 @@ export default function RegulationsPage() {
                 <select
                   id="add-reg-mode"
                   value={newTransportMode}
-                  onChange={(e) => setNewTransportMode(e.target.value as 'road' | 'air' | 'both')}
+                  onChange={(e) => setNewTransportMode(e.target.value as 'road' | 'air' | 'sea' | 'both')}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:border-[#C4B38E] bg-white"
                 >
-                  <option value="both">{language === 'en' ? 'Both (Road & Air)' : 'Cả đường bộ & hàng không'}</option>
+                  <option value="both">{language === 'en' ? 'All Modes (Road / Air / Sea)' : 'Tất cả phương thức (Bộ / Bay / Thủy)'}</option>
                   <option value="road">{language === 'en' ? 'Road Only' : 'Đường bộ'}</option>
                   <option value="air">{language === 'en' ? 'Air Only' : 'Hàng không'}</option>
+                  <option value="sea">{language === 'en' ? 'Sea Only' : 'Đường thủy'}</option>
                 </select>
               </div>
               <div>
@@ -1443,12 +1444,13 @@ export default function RegulationsPage() {
                 <select
                   id="edit-reg-mode"
                   value={editTransportMode}
-                  onChange={(e) => setEditTransportMode(e.target.value as 'road' | 'air' | 'both')}
+                  onChange={(e) => setEditTransportMode(e.target.value as 'road' | 'air' | 'sea' | 'both')}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:border-[#181A17] bg-white"
                 >
-                  <option value="both">{language === 'en' ? 'Both' : 'Cả hai'}</option>
+                  <option value="both">{language === 'en' ? 'All Modes' : 'Tất cả phương thức'}</option>
                   <option value="road">{language === 'en' ? 'Road' : 'Đường bộ'}</option>
                   <option value="air">{language === 'en' ? 'Air' : 'Hàng không'}</option>
+                  <option value="sea">{language === 'en' ? 'Sea' : 'Đường thủy'}</option>
                 </select>
               </div>
               <div>

@@ -110,16 +110,19 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
         );
       }
       await this.pool.execute(
-        `UPDATE \`user\` SET \`specialization\` = 'driver'
-         WHERE \`role_id\` = 5 AND \`specialization\` IS NULL AND (\`full_name\` LIKE '%Tài xế%' OR \`full_name\` LIKE '%Driver%' OR \`email\` LIKE '%driver%')`,
+        `UPDATE \`user\` u JOIN \`role\` r ON r.role_id = u.role_id
+         SET u.\`specialization\` = 'driver'
+         WHERE r.role_name = 'Vehicle Driver / Escort' AND u.\`specialization\` IS NULL AND (u.\`full_name\` LIKE '%Tài xế%' OR u.\`full_name\` LIKE '%Driver%' OR u.\`email\` LIKE '%driver%')`,
       );
       await this.pool.execute(
-        `UPDATE \`user\` SET \`specialization\` = 'escort'
-         WHERE \`role_id\` = 5 AND \`specialization\` IS NULL AND (\`full_name\` LIKE '%Thú y%' OR \`full_name\` LIKE '%Escort%' OR \`full_name\` LIKE '%Vet%' OR \`email\` LIKE '%escort%')`,
+        `UPDATE \`user\` u JOIN \`role\` r ON r.role_id = u.role_id
+         SET u.\`specialization\` = 'escort'
+         WHERE r.role_name = 'Vehicle Driver / Escort' AND u.\`specialization\` IS NULL AND (u.\`full_name\` LIKE '%Thú y%' OR u.\`full_name\` LIKE '%Escort%' OR u.\`full_name\` LIKE '%Vet%' OR u.\`email\` LIKE '%escort%')`,
       );
       await this.pool.execute(
-        `UPDATE \`user\` SET \`specialization\` = 'driver'
-         WHERE \`role_id\` = 5 AND \`specialization\` IS NULL`,
+        `UPDATE \`user\` u JOIN \`role\` r ON r.role_id = u.role_id
+         SET u.\`specialization\` = 'driver'
+         WHERE r.role_name = 'Vehicle Driver / Escort' AND u.\`specialization\` IS NULL`,
       );
 
       const [vehCols] = await this.pool.query<any[]>(
@@ -309,7 +312,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
        FROM route_leg rl
        JOIN route r ON r.route_id = rl.route_id
        JOIN shipment s ON s.shipment_id = r.shipment_id
-       WHERE rl.vehicle_id = ? AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')`,
+       WHERE rl.vehicle_id = ? AND s.status NOT IN ${INACTIVE_SHIPMENT_SQL}`,
       [vehicleId],
     );
     if (Number(activeTrips[0]?.cnt ?? 0) > 0) {
@@ -367,7 +370,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
 
     if (targetLegs.length === 0) return;
     const siblingIds = new Set(await this.findSiblingShipmentsOnSameRoadTrip(shipmentId));
-    const hasFlightLeg = targetLegs.some((l) => l.leg_type === 'flight');
+    const hasCrossBorderMainLeg = targetLegs.some((l) => l.leg_type === 'flight' || l.leg_type === 'sea');
     const roleByUserId = new Map<number, string>();
     for (const a of assignments || []) {
       if (a && Number.isFinite(Number(a.userId)) && a.roleInShipment) {
@@ -377,10 +380,10 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
 
     for (const u of users) {
       const assignedRole = roleByUserId.get(Number(u.user_id));
-      // On multimodal air shipments, the road truck driver only operates company road leg(s) (e.g. Farm -> Departure Airport),
-      // while the veterinary escort accompanies the horses across all legs (road + flight + arrival clearance).
+      // On multimodal air/sea shipments, the road truck driver only operates company road leg(s) (e.g. Farm -> Departure Airport/Seaport),
+      // while the veterinary escort accompanies the horses across all legs (road + flight/sea + arrival clearance).
       const applicableLegs =
-        hasFlightLeg && assignedRole === 'driver'
+        hasCrossBorderMainLeg && assignedRole === 'driver'
           ? targetLegs.filter(
               (l) => l.leg_type === 'road' && (l.vehicle_id !== null || Number(l.sequence_no) === 1),
             )
@@ -470,7 +473,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       const [vehicles] = await db.execute<RowDataPacket[]>(`SELECT * FROM vehicle WHERE vehicle_id IN (${ids.map(() => '?').join(',')}) ORDER BY vehicle_id FOR UPDATE`, ids);
       if (vehicles.length !== ids.length || vehicles.some(v => v.status === 'maintenance') || vehicles.reduce((sum, v) => sum + Number(v.capacity), 0) < Number(orders[0].requested_horse_count)) throw new BadRequestException('Phương tiện không hoạt động hoặc không đủ sức chứa');
       const [conflicts] = await db.execute<RowDataPacket[]>(`SELECT sv.shipment_id FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id
-        WHERE sv.vehicle_id IN (${ids.map(() => '?').join(',')}) AND sv.shipment_id <> ? AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected')`, [...ids, shipmentId]);
+        WHERE sv.vehicle_id IN (${ids.map(() => '?').join(',')}) AND sv.shipment_id <> ? AND s.status NOT IN ${INACTIVE_SHIPMENT_SQL}`, [...ids, shipmentId]);
       if (conflicts.length) throw new BadRequestException('Xe đã có phân công. Hãy chọn chuyến đường bộ trong màn hình lập tuyến để ghép chỗ và kiểm tra lịch');
     }
     const [planned] = await db.execute<RowDataPacket[]>('SELECT l.leg_id FROM route_leg l JOIN route r ON r.route_id = l.route_id WHERE r.shipment_id = ? AND l.vehicle_id IS NOT NULL', [shipmentId]);
@@ -591,7 +594,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
                       SELECT 1
                       FROM route r_fl
                       JOIN route_leg rl_fl ON rl_fl.route_id = r_fl.route_id
-                      WHERE r_fl.shipment_id = s.shipment_id AND rl_fl.leg_type = 'flight'
+                      WHERE r_fl.shipment_id = s.shipment_id AND rl_fl.leg_type IN ('flight', 'sea')
                     )
                     AND EXISTS (
                       SELECT 1
@@ -614,7 +617,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
               ) AS active_trips_count
        FROM \`user\` u
        JOIN \`role\` r ON u.role_id = r.role_id
-       WHERE r.role_name NOT IN ('Customer', 'Admin', 'Logistics Manager') AND u.role_id NOT IN (1, 2, 6)
+       WHERE r.role_name NOT IN ('Customer', 'Admin', 'Logistics Manager')
        ORDER BY r.role_name ASC, u.full_name ASC`,
     );
 
@@ -625,7 +628,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       phone: r.phone,
       roleId: r.role_id,
       roleName: r.role_name,
-      specialization: r.specialization || (r.role_id === 5 ? (r.email?.includes('escort') ? 'escort' : 'driver') : null),
+      specialization: r.specialization || (r.role_name === 'Vehicle Driver / Escort' ? (r.email?.includes('escort') ? 'escort' : 'driver') : null),
       activeTrips: Number(r.active_trips_count || 0),
       status: r.status,
       currentShift: r.current_shift ?? 'Ca Hành Chính (08:00 - 17:00)',

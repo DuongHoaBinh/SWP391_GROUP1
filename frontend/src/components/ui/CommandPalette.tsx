@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
+import { formatShipmentStatusLabel } from '@/features/orders/shipment-status';
 
 interface PaletteItem {
   id: string;
@@ -79,8 +80,8 @@ export function CommandPalette() {
               category: 'shipments',
               title: `${code} · ${(o.originLocation || '').split(',')[0]} → ${(o.destinationLocation || '').split(',')[0]}`,
               subtitle: isEn
-                ? `Status: ${o.status} · ${o.horses?.length || o.requestedHorseCount || 1} horse(s)`
-                : `Trạng thái: ${o.status} · ${o.horses?.length || o.requestedHorseCount || 1} ngựa`,
+                ? `Status: ${formatShipmentStatusLabel(o.status, true)} · ${o.horses?.length || o.requestedHorseCount || 1} horse(s)`
+                : `Trạng thái: ${formatShipmentStatusLabel(o.status, false)} · ${o.horses?.length || o.requestedHorseCount || 1} ngựa`,
               badge: code,
               icon: <Truck className="w-4 h-4 text-[#A67C2E]" />,
               url: `/customer/requests/${o.id}`,
@@ -234,7 +235,7 @@ export function CommandPalette() {
             ? 'Track customs & veterinary authority approvals'
             : 'Theo dõi phê duyệt hải quan & chi cục thú y',
           icon: <Activity className="w-4 h-4 text-[#A67C2E]" />,
-          url: '/manager/compliance/approval',
+          url: '/manager/compliance/documents',
         },
         {
           id: 'spec-reg',

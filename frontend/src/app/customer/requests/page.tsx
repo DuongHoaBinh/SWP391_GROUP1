@@ -91,7 +91,6 @@ const ACTION_NEEDED_STATUSES = new Set([
 const REVIEW_PREP_STATUSES = new Set([
   'requested',
   'paid_pending_review',
-  'paid_pending_feasibility',
   'under_review',
   'approved',
   'planning',
@@ -101,7 +100,6 @@ const REVIEW_PREP_STATUSES = new Set([
 const IN_TRANSIT_STATUSES = new Set([
   'in_transit',
   'return_pending',
-  'return_in_transit',
 ]);
 const COMPLETED_STATUSES = new Set(['completed', 'delivered']);
 const CANCELLED_STATUSES = new Set([
@@ -467,7 +465,7 @@ export default function RequestsPage() {
     const isPaid =
       order.paymentStatus === 'succeeded' ||
       order.paymentStatus === 'paid' ||
-      ['paid_pending_review', 'paid_pending_feasibility', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'return_in_transit', 'completed', 'delivered'].includes(s);
+      ['paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed', 'delivered'].includes(s);
 
     if (s === 'awaiting_payment') {
       return (
@@ -555,7 +553,7 @@ export default function RequestsPage() {
       {/* Quick Status Tabs + Search/Date Filter Bar */}
       <div className="bg-white rounded-2xl border border-[#E5DDD0] p-3.5 shadow-sm flex flex-col gap-3">
         {/* Quick Status Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {statusTabs.map((tab) => {
             const active = statusTab === tab.key;
             return (

@@ -298,12 +298,6 @@ export default function DriverLayout({
     }
     const driverVariant = href.replace(/^\/escort/, '/driver');
     const escortVariant = href.replace(/^\/driver/, '/escort');
-    if (driverVariant === '/driver/status' && /^\/(driver|escort)\/trips\/\d+/.test(pathname || '')) {
-      return true;
-    }
-    if (driverVariant === '/driver/trips' && /^\/(driver|escort)\/trips\/\d+/.test(pathname || '')) {
-      return false;
-    }
     return Boolean(
       pathname === href ||
         pathname?.startsWith(`${href}/`) ||

@@ -1152,7 +1152,7 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
       `SELECT sh.shipment_id
        FROM shipment_horse sh
        JOIN shipment s ON s.shipment_id = sh.shipment_id
-       WHERE sh.horse_id = ? AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'completed')
+       WHERE sh.horse_id = ? AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded', 'completed')
        ORDER BY sh.shipment_id DESC`,
       [horseId],
     );

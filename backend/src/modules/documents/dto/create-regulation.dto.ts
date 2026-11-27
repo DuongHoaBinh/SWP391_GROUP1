@@ -13,10 +13,10 @@ export class CreateRegulationDto {
   @IsString()
   borderGate?: string;
 
-  @ApiPropertyOptional({ enum: ['road', 'air', 'both'], default: 'both' })
+  @ApiPropertyOptional({ enum: ['road', 'air', 'sea', 'both'], default: 'both' })
   @IsOptional()
-  @IsEnum(['road', 'air', 'both'])
-  transportMode?: 'road' | 'air' | 'both';
+  @IsEnum(['road', 'air', 'sea', 'both'])
+  transportMode?: 'road' | 'air' | 'sea' | 'both';
 
   @ApiPropertyOptional({ enum: ['A', 'B'], default: 'A', description: 'Tầng hồ sơ (A: dài hạn trước D-3; B: kiểm dịch ngắn hạn từ D-1)' })
   @IsOptional()

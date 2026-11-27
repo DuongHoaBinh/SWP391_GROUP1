@@ -611,6 +611,20 @@ export class OrdersService {
     if (order.tripType !== 'round_trip') {
       throw new BadRequestException('Đơn vận chuyển không phải là chuyến khứ hồi');
     }
+    const allowedRescheduleStatuses = [
+      'paid_pending_review',
+      'approved',
+      'planning',
+      'confirmed',
+      'ready_to_depart',
+      'in_transit',
+      'return_pending',
+    ];
+    if (!allowedRescheduleStatuses.includes(String(order.status))) {
+      throw new ConflictException(
+        `Không thể đổi ngày chặng về khi đơn hàng đang ở trạng thái "${order.status}"`,
+      );
+    }
     if (order.returnStatus !== 'scheduled') {
       throw new ConflictException(`Không thể đổi ngày về khi chặng về ở trạng thái "${order.returnStatus}"`);
     }

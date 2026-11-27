@@ -55,7 +55,6 @@ const EXCLUDED_SPEND_STATUSES = new Set([
 const ACTIVE_STATUSES = new Set([
   'awaiting_payment',
   'paid_pending_review',
-  'paid_pending_feasibility',
   'requested',
   'under_review',
   'change_requested',
@@ -65,13 +64,11 @@ const ACTIVE_STATUSES = new Set([
   'ready_to_depart',
   'in_transit',
   'return_pending',
-  'return_in_transit',
 ]);
 
 const IN_TRANSIT_STATUSES = new Set([
   'in_transit',
   'return_pending',
-  'return_in_transit',
 ]);
 
 function shortLocation(loc?: string | null): string {
@@ -129,14 +126,12 @@ export default function CustomerReportsPage() {
       o.paymentStatus === 'paid' ||
       [
         'paid_pending_review',
-        'paid_pending_feasibility',
         'approved',
         'planning',
         'confirmed',
         'ready_to_depart',
         'in_transit',
         'return_pending',
-        'return_in_transit',
       ].includes(s)
     );
   };
@@ -156,7 +151,10 @@ export default function CustomerReportsPage() {
       .reduce((sum, o) => sum + Number(o.totalCost || 0), 0);
 
     const totalHorses = orders
-      .filter((o) => !EXCLUDED_SPEND_STATUSES.has((o.status || '').toLowerCase()))
+      .filter((o) => {
+        const s = (o.status || '').toLowerCase();
+        return !EXCLUDED_SPEND_STATUSES.has(s) && s !== 'awaiting_payment';
+      })
       .reduce((sum, o) => sum + Number(o.requestedHorseCount || 1), 0);
 
     const approvedDocs = documents.filter(

@@ -1063,7 +1063,7 @@ async function seedCustomerAShipments(db, ctx) {
        (?, 1, 'border_check', 'Cửa khẩu Quốc tế Mộc Bài', 'Vietnam', 'departed', 'outbound', 11.071200, 106.182300, ?, ?),
        (?, 2, 'rest', 'Trạm dừng nghỉ Soài Riêng', 'Cambodia', 'pending', 'outbound', 11.085000, 105.799000, NULL, NULL)`,
     [
-      transitRouteId, toSqlDateTime(subHours(now, 1)), toSqlDateTime(subMinutes(now, 45)),
+      transitRouteId, toSqlDateTime(subMinutes(now, 105)), toSqlDateTime(subMinutes(now, 75)),
       transitRouteId,
     ]
   );

@@ -212,8 +212,8 @@ export function IncidentChangeRequestsPanel({ mode, hideDisputes = false }: Prop
         </button>
       </div>
 
-      {/* Coordinator: Open Incidents eligible for Change Proposals */}
-      {mode === 'coordinator' && incidents.length > 0 && (
+      {/* Manager & Coordinator: Open Incidents eligible for Change Proposals */}
+      {(mode === 'coordinator' || mode === 'manager') && incidents.length > 0 && (
         <div className="space-y-2.5">
           <h3 className="text-xs font-bold uppercase tracking-wider text-[#5F6977] m-0">
             {isEn ? 'Active Field Incidents (Propose Route/Schedule/Cost Change)' : 'Sự cố thực địa (Lập đề xuất đổi tuyến / chi phí)'}
@@ -400,7 +400,7 @@ export function IncidentChangeRequestsPanel({ mode, hideDisputes = false }: Prop
                       </Button>
                     </>
                   )}
-                  {mode === 'coordinator' && cr.status === 'approved' && !cr.publishedAt && (
+                  {(mode === 'coordinator' || mode === 'manager') && cr.status === 'approved' && !cr.publishedAt && (
                     <Button
                       type="button"
                       size="sm"

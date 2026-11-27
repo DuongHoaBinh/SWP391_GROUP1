@@ -635,7 +635,8 @@ export class TrackingService {
     statusLogs?: any[],
     consolidationContext?: { itinerary: ConsolidatedRoadItinerary; shipments: any[] },
   ): TrackingMilestoneItem[] {
-    const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
+    const hasReturnLegs = legs.some((l) => (l as any).direction === 'return');
+    const isMultiModalFlight = !hasReturnLegs && legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
 
     let items: TrackingMilestoneItem[] = [];
     if (isMultiModalFlight) {
@@ -1422,7 +1423,8 @@ export class TrackingService {
     if (!targetStop) throw new NotFoundException(`Không tìm thấy trạm dừng #${stopId}`);
 
     const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
-    const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
+    const hasReturnLegs = legs.some((l) => (l as any).direction === 'return');
+    const isMultiModalFlight = !hasReturnLegs && legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
     const classifiedStops = isMultiModalFlight ? this.classifyMultimodalStops(legs, stops) : null;
     const isImportStop = Boolean(
       classifiedStops?.stopImport && targetStop.route_stop_id === classifiedStops.stopImport.route_stop_id,
@@ -1577,7 +1579,7 @@ export class TrackingService {
       {
         stopType: targetStop.stop_type,
         geofenceRadiusM: targetStop.geofence_radius_m,
-        locationRefType: targetStop.location_ref_type,
+        locationRefType: targetStop.location_ref_type ?? stopCoords?.locationRefType ?? null,
         name: targetStop.location_name,
       },
       dto.manualReason,
@@ -1704,7 +1706,8 @@ export class TrackingService {
 
     // Rule: Tất cả các trạm dừng thuộc đúng chặng này phải đã hoàn thành
     const stops = await this.trackingStore.findStopsByRouteId(route.route_id);
-    const isMultiModalFlight = legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
+    const hasReturnLegs = legs.some((l) => (l as any).direction === 'return');
+    const isMultiModalFlight = !hasReturnLegs && legs.some((l) => l.leg_type === 'flight') && legs.length >= 2;
     const classifiedStops = isMultiModalFlight ? this.classifyMultimodalStops(legs, stops) : null;
     const targetLegIdx = legs.findIndex((l) => Number(l.leg_id) === Number(legId));
     const legStops = this.getStopsForLeg(
@@ -1755,10 +1758,10 @@ export class TrackingService {
     // Complete this leg
     await this.trackingStore.updateLegStatus(legId, 'completed', undefined, now);
 
-    // Tuyến đa phương thức: Khi chặng đường bộ 1 tới sân bay hoàn thành, giải phóng xe tải về available
+    // Tuyến đa phương thức: Khi chặng đường bộ 1 tới sân bay hoặc cảng biển hoàn thành, giải phóng xe tải về available
     if (targetLeg.leg_type === 'road' && targetLeg.sequence_no < legs.length) {
       const nextLeg = legs.find((l) => l.sequence_no === targetLeg.sequence_no + 1);
-      if (nextLeg && nextLeg.leg_type === 'flight' && targetLeg.vehicle_id) {
+      if (nextLeg && (nextLeg.leg_type === 'flight' || nextLeg.leg_type === 'sea') && targetLeg.vehicle_id) {
         await this.trackingStore.updateVehicleStatus(targetLeg.vehicle_id, 'available');
       }
     }
@@ -1820,11 +1823,13 @@ export class TrackingService {
       await this.trackingStore.updateRoutePlanStatus(route.route_id, 'completed');
 
       // Send auto notification to Customer
-      const customerDest = shipment.destination_location || targetLeg.destination_location;
+      const finalDest = isRoundTrip
+        ? (targetLeg.destination_location || shipment.origin_location || shipment.destination_location)
+        : (shipment.destination_location || targetLeg.destination_location);
       await this.notificationsService.createNotification(
         shipment.customer_id,
         'Ngựa đã tới địa điểm bàn giao an toàn!',
-        `Chuyến vận chuyển #${shipment.request_code} đã hoàn thành toàn bộ lộ trình và cập bến tại ${customerDest}. Sẵn sàng bàn giao ngựa.`,
+        `Chuyến vận chuyển #${shipment.request_code} đã hoàn thành toàn bộ lộ trình và cập bến tại ${finalDest}. Sẵn sàng bàn giao ngựa.`,
         'handover_complete',
         shipmentId,
       );
@@ -1832,7 +1837,7 @@ export class TrackingService {
       // Send auto notification to Coordinator
       const actor = await this.resolveStaffActor(shipmentId, user);
       const coordEndTitle = `Chuyến đi #${shipment.request_code} đã hoàn thành bàn giao`;
-      const coordEndMessage = `${actor.displayName} đã xác nhận cập bến an toàn tại điểm đích (${customerDest}) và bàn giao ngựa thành công.`;
+      const coordEndMessage = `${actor.displayName} đã xác nhận cập bến an toàn tại điểm đích (${finalDest}) và bàn giao ngựa thành công.`;
       if (route.assigned_coordinator_id) {
         await this.notificationsService.createNotification(
           route.assigned_coordinator_id,
@@ -2913,21 +2918,52 @@ export class TrackingService {
     }));
     const path = decimatePath(rawPath, 500);
 
-    const liveStops: LiveTrackingStop[] = stops.map((s) => ({
-      stopId: s.route_stop_id,
-      routeStopId: s.route_stop_id,
-      sequenceNo: s.sequence_no,
-      name: s.location_name,
-      locationName: s.location_name,
-      type: s.stop_type,
-      stopType: s.stop_type,
-      lat: s.lat != null ? Number(s.lat) : null,
-      lng: s.lng != null ? Number(s.lng) : null,
-      geofenceRadiusM: s.geofence_radius_m != null ? Number(s.geofence_radius_m) : null,
-      status: s.status,
-      actualArrival: s.actual_arrival ? new Date(s.actual_arrival).toISOString() : null,
-      actualDeparture: s.actual_departure ? new Date(s.actual_departure).toISOString() : null,
-    }));
+    const geofenceConfig =
+      (typeof this.trackingStore?.getSetting === 'function'
+        ? await this.trackingStore.getSetting('tracking.geofence')
+        : null) || {};
+
+    const liveStops: LiveTrackingStop[] = await Promise.all(
+      stops.map(async (s) => {
+        let lat = s.lat != null ? Number(s.lat) : null;
+        let lng = s.lng != null ? Number(s.lng) : null;
+        let refType = s.location_ref_type ?? null;
+
+        if ((lat === null || lng === null) && typeof this.trackingStore?.findStopCoordinates === 'function') {
+          const resolved = await this.trackingStore.findStopCoordinates(s.route_stop_id);
+          if (resolved && resolved.lat != null && resolved.lng != null) {
+            lat = resolved.lat;
+            lng = resolved.lng;
+            refType = refType ?? resolved.locationRefType ?? null;
+          }
+        }
+
+        const effectiveRadiusM = radiusForStop(
+          {
+            stopType: s.stop_type,
+            geofenceRadiusM: s.geofence_radius_m != null ? Number(s.geofence_radius_m) : null,
+            locationRefType: refType,
+          },
+          geofenceConfig,
+        );
+
+        return {
+          stopId: s.route_stop_id,
+          routeStopId: s.route_stop_id,
+          sequenceNo: s.sequence_no,
+          name: s.location_name,
+          locationName: s.location_name,
+          type: s.stop_type,
+          stopType: s.stop_type,
+          lat,
+          lng,
+          geofenceRadiusM: effectiveRadiusM,
+          status: s.status,
+          actualArrival: s.actual_arrival ? new Date(s.actual_arrival).toISOString() : null,
+          actualDeparture: s.actual_departure ? new Date(s.actual_departure).toISOString() : null,
+        };
+      }),
+    );
 
     const liveLegs: LiveTrackingLeg[] = legs.map((l) => {
       const rawPolyline = l.route_polyline || l.polyline_json || null;
@@ -3274,11 +3310,15 @@ export class TrackingService {
     const items: TimelineItemDto[] = [];
     const status = String(shipment.status || 'requested').toLowerCase();
     const tripType = shipment.trip_type === 'round_trip' ? 'round_trip' : 'one_way';
+    const paymentRefundTs =
+      typeof this.trackingStore?.findPaymentAndRefundTimestamps === 'function'
+        ? await this.trackingStore.findPaymentAndRefundTimestamps(shipmentId)
+        : { paidAt: null, refundedAt: null };
 
     // ── 1. PRE-TRIP GROUP ──
     const isCancelledOrRejected = ['rejected', 'cancelled', 'cancelled_operational'].includes(status);
     const isPaid =
-      Boolean(shipment.paid_at || shipment.payment_received_at) ||
+      Boolean(paymentRefundTs.paidAt || shipment.paid_at || shipment.payment_received_at) ||
       [
         'paid_pending_review',
         'approved',
@@ -3293,7 +3333,8 @@ export class TrackingService {
         'refund_requested',
         'refunded',
       ].includes(status);
-    const paymentActualAt = shipment.paid_at || shipment.payment_received_at || (isPaid ? shipment.created_at : null);
+    const paymentActualAt =
+      paymentRefundTs.paidAt || shipment.paid_at || shipment.payment_received_at || (isPaid ? shipment.created_at : null);
     items.push({
       id: 'pre_payment',
       group: 'pre_trip',
@@ -3747,6 +3788,7 @@ export class TrackingService {
           : new Date().toISOString(),
       });
     } else if (isRefunded) {
+      const refundedAt = paymentRefundTs.refundedAt || shipment.refunded_at || shipment.updated_at || null;
       items.push({
         id: 'post_refund',
         group: 'post_trip',
@@ -3754,7 +3796,7 @@ export class TrackingService {
         title: 'Đã hoàn tiền đơn hàng',
         subtitle: 'Hoàn tiền 100% qua chuyển khoản ngân hàng',
         status: 'failed',
-        actualAt: shipment.refunded_at ? new Date(shipment.refunded_at).toISOString() : new Date().toISOString(),
+        actualAt: refundedAt ? new Date(refundedAt).toISOString() : new Date().toISOString(),
       });
     } else {
       items.push({

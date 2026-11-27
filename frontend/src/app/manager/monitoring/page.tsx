@@ -102,7 +102,7 @@ function TripMonitoringContent() {
         const data = await trackingApi.getMyTrips();
         const priorityRank = (st?: string) => {
           const s = String(st || '').toLowerCase();
-          if (s === 'in_transit' || s === 'return_in_transit') return 0;
+          if (s === 'in_transit') return 0;
           if (s === 'return_pending') return 1;
           if (s === 'ready_to_depart') return 2;
           if (s === 'confirmed' || s === 'planning' || s === 'approved') return 3;

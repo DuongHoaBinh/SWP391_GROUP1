@@ -57,7 +57,7 @@ export async function paymentGate(db: Pool | PoolConnection, shipmentId: number)
       blockedReason = 'Hóa đơn chưa sẵn sàng hoặc báo giá đã thay đổi. Vui lòng liên hệ bộ phận vận chuyển để đối soát.';
     }
   } else {
-    if (!row || ['requested', 'change_requested', 'rejected', 'cancelled', 'cancelled_operational'].includes(row.status)) {
+    if (!row || ['requested', 'change_requested', 'rejected', 'cancelled', 'cancelled_operational', 'refund_requested', 'refunded'].includes(row.status)) {
       blockedReason = 'Đơn hàng hiện không đủ điều kiện thanh toán.';
     } else if (!CONFIRMED_PLAN_STATUSES.includes(row.plan_status) || !Number(row.staff_count) || Number(row.unconfirmed_count)) {
       blockedReason = WAITING_FOR_PLAN;

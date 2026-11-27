@@ -6,6 +6,7 @@ import {
   TripStatusLogEntity,
 } from './tracking.types';
 import { MYSQL_POOL } from '../../common/database/database.module';
+import { INACTIVE_SHIPMENT_SQL, releaseShipmentReservations } from '../fleet/vehicle-reservation';
 import {
   DEFAULT_EQUINE_VITAL_CONFIG,
   EquineVitalConfig,
@@ -146,13 +147,22 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
 
       // Find driver (user_id with driver specialization) and escort
       const [drivers] = await this.pool.execute<any[]>(
-        "SELECT user_id, full_name, email FROM `user` WHERE role_id = 5 AND specialization = 'driver' LIMIT 2",
+        `SELECT u.user_id, u.full_name, u.email
+         FROM \`user\` u JOIN \`role\` r ON r.role_id = u.role_id
+         WHERE r.role_name = 'Vehicle Driver / Escort' AND u.specialization = 'driver'
+         LIMIT 2`,
       );
       const [escorts] = await this.pool.execute<any[]>(
-        "SELECT user_id, full_name, email FROM `user` WHERE role_id = 5 AND specialization = 'escort' LIMIT 2",
+        `SELECT u.user_id, u.full_name, u.email
+         FROM \`user\` u JOIN \`role\` r ON r.role_id = u.role_id
+         WHERE r.role_name = 'Vehicle Driver / Escort' AND u.specialization = 'escort'
+         LIMIT 2`,
       );
       const [customers] = await this.pool.execute<any[]>(
-        "SELECT user_id, full_name, email FROM `user` WHERE role_id = 6 LIMIT 1",
+        `SELECT u.user_id, u.full_name, u.email
+         FROM \`user\` u JOIN \`role\` r ON r.role_id = u.role_id
+         WHERE r.role_name = 'Customer'
+         LIMIT 1`,
       );
       const [vehicles] = await this.pool.execute<any[]>(
         "SELECT vehicle_id, plate_or_code FROM vehicle LIMIT 2",
@@ -692,7 +702,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
        JOIN route r ON r.route_id = rl.route_id
        JOIN shipment s ON s.shipment_id = r.shipment_id
        WHERE rl.road_trip_id = ?
-         AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected')
+         AND s.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded')
        ORDER BY rl.leg_id ASC`,
       [roadTripId],
     );
@@ -838,18 +848,29 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       [data.shipmentId],
     );
 
-    // 3. Release vehicles
+    // 3. Release vehicles only if currently in_use and not actively assigned to another in_transit/return_pending shipment
     await this.pool.execute(
       `UPDATE vehicle v
        SET v.status = 'available'
-       WHERE v.vehicle_id IN (
-         SELECT rl.vehicle_id
-         FROM route_leg rl
-         JOIN route r ON rl.route_id = r.route_id
-         WHERE r.shipment_id = ? AND rl.vehicle_id IS NOT NULL
-       )`,
-      [data.shipmentId],
+       WHERE v.status = 'in_use'
+         AND v.vehicle_id IN (
+           SELECT rl.vehicle_id
+           FROM route_leg rl
+           JOIN route r ON rl.route_id = r.route_id
+           WHERE r.shipment_id = ? AND rl.vehicle_id IS NOT NULL
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM route_leg rl2
+           JOIN route r2 ON rl2.route_id = r2.route_id
+           JOIN shipment s2 ON s2.shipment_id = r2.shipment_id
+           WHERE rl2.vehicle_id = v.vehicle_id
+             AND s2.shipment_id <> ?
+             AND s2.status IN ('in_transit', 'return_pending')
+         )`,
+      [data.shipmentId, data.shipmentId],
     );
+    await releaseShipmentReservations(this.pool, data.shipmentId, 'return_no_show');
 
     // 4. Update route to completed
     await this.pool.execute(
@@ -1406,35 +1427,100 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  async resolveLocationCoords(locName: string): Promise<{ lat: number; lng: number } | null> {
+  async resolveLocationCoords(
+    locName: string,
+  ): Promise<{ lat: number; lng: number; refType?: 'master_stop' | 'airport' | 'seaport' | 'depot' } | null> {
     if (!locName || !locName.trim()) return null;
-    const needle = locName.trim();
-    try {
-      const [ms] = await this.pool.execute<any[]>(
-        'SELECT lat, lng FROM master_stop WHERE LOWER(name) = LOWER(?) OR LOWER(address) LIKE LOWER(?) LIMIT 1',
-        [needle, `%${needle}%`],
-      );
-      if (ms[0]?.lat != null) return { lat: Number(ms[0].lat), lng: Number(ms[0].lng) };
+    const rawNeedle = locName.trim();
+    const strippedNeedle = rawNeedle.replace(/\s*\([^)]*\)\s*$/g, '').trim();
+    const candidates =
+      strippedNeedle.length >= 6 && strippedNeedle.toLowerCase() !== rawNeedle.toLowerCase()
+        ? [rawNeedle, strippedNeedle]
+        : [rawNeedle];
 
-      const [ap] = await this.pool.execute<any[]>(
-        'SELECT lat, lng FROM airport WHERE LOWER(name) LIKE LOWER(?) OR LOWER(iata_code) = LOWER(?) LIMIT 1',
-        [`%${needle}%`, needle],
-      );
-      if (ap[0]?.lat != null) return { lat: Number(ap[0].lat), lng: Number(ap[0].lng) };
+    for (const needle of candidates) {
+      try {
+        const [ms] = await this.pool.execute<any[]>(
+          `SELECT lat, lng FROM master_stop
+           WHERE LOWER(name) = LOWER(?)
+              OR (CHAR_LENGTH(?) >= 6 AND LOWER(name) LIKE LOWER(?))
+              OR LOWER(address) LIKE LOWER(?)
+           ORDER BY (LOWER(name) = LOWER(?)) DESC
+           LIMIT 1`,
+          [needle, needle, `%${needle}%`, `%${needle}%`, needle],
+        );
+        if (ms[0]?.lat != null && ms[0]?.lng != null) {
+          return { lat: Number(ms[0].lat), lng: Number(ms[0].lng), refType: 'master_stop' };
+        }
+      } catch {}
 
-      const [sp] = await this.pool.execute<any[]>(
-        'SELECT lat, lng FROM seaport WHERE LOWER(name) LIKE LOWER(?) OR LOWER(code) = LOWER(?) LIMIT 1',
-        [`%${needle}%`, needle],
-      );
-      if (sp[0]?.lat != null) return { lat: Number(sp[0].lat), lng: Number(sp[0].lng) };
+      try {
+        const [bc] = await this.pool.execute<any[]>(
+          `SELECT lat, lng FROM border_crossing
+           WHERE LOWER(name) LIKE LOWER(?) OR LOWER(name_en) LIKE LOWER(?) OR LOWER(code) = LOWER(?)
+           LIMIT 1`,
+          [`%${needle}%`, `%${needle}%`, needle],
+        );
+        if (bc[0]?.lat != null && bc[0]?.lng != null) {
+          return { lat: Number(bc[0].lat), lng: Number(bc[0].lng), refType: 'master_stop' };
+        }
+      } catch {}
 
-      const [dp] = await this.pool.execute<any[]>(
-        'SELECT lat, lng FROM depot WHERE LOWER(depot_name) LIKE LOWER(?) LIMIT 1',
-        [`%${needle}%`],
-      );
-      if (dp[0]?.lat != null) return { lat: Number(dp[0].lat), lng: Number(dp[0].lng) };
-    } catch {}
+      try {
+        const [ap] = await this.pool.execute<any[]>(
+          'SELECT lat, lng FROM airport WHERE LOWER(name) LIKE LOWER(?) OR LOWER(iata_code) = LOWER(?) LIMIT 1',
+          [`%${needle}%`, needle],
+        );
+        if (ap[0]?.lat != null && ap[0]?.lng != null) {
+          return { lat: Number(ap[0].lat), lng: Number(ap[0].lng), refType: 'airport' };
+        }
+      } catch {}
+
+      try {
+        const [sp] = await this.pool.execute<any[]>(
+          'SELECT lat, lng FROM seaport WHERE LOWER(name) LIKE LOWER(?) OR LOWER(code) = LOWER(?) LIMIT 1',
+          [`%${needle}%`, needle],
+        );
+        if (sp[0]?.lat != null && sp[0]?.lng != null) {
+          return { lat: Number(sp[0].lat), lng: Number(sp[0].lng), refType: 'seaport' };
+        }
+      } catch {}
+
+      try {
+        const [dp] = await this.pool.execute<any[]>(
+          'SELECT lat, lng FROM depot WHERE LOWER(name) LIKE LOWER(?) LIMIT 1',
+          [`%${needle}%`],
+        );
+        if (dp[0]?.lat != null && dp[0]?.lng != null) {
+          return { lat: Number(dp[0].lat), lng: Number(dp[0].lng), refType: 'depot' };
+        }
+      } catch {}
+    }
     return null;
+  }
+
+  async findPaymentAndRefundTimestamps(shipmentId: number): Promise<{ paidAt: Date | null; refundedAt: Date | null }> {
+    let paidAt: Date | null = null;
+    let refundedAt: Date | null = null;
+    try {
+      const [payRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT MAX(COALESCE(paid_at, updated_at, created_at)) AS paid_at
+         FROM shipment_sepay_payment
+         WHERE shipment_id = ? AND status = 'succeeded'`,
+        [shipmentId],
+      );
+      if (payRows[0]?.paid_at) paidAt = new Date(payRows[0].paid_at);
+    } catch {}
+    try {
+      const [refRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT MAX(COALESCE(transferred_at, updated_at)) AS refunded_at
+         FROM shipment_refund_record
+         WHERE shipment_id = ? AND status = 'transferred' AND cancellation_category <> 'insurance_claim'`,
+        [shipmentId],
+      );
+      if (refRows[0]?.refunded_at) refundedAt = new Date(refRows[0].refunded_at);
+    } catch {}
+    return { paidAt, refundedAt };
   }
 
   async findStopCoordinates(stopId: number): Promise<{
@@ -1464,12 +1550,25 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     let lng = r.lng !== null && r.lng !== undefined ? Number(r.lng) : null;
     let refType = r.location_ref_type ?? null;
 
+    if ((lat === null || lng === null) && refType === 'master_stop' && r.location_ref_id) {
+      try {
+        const [msById] = await this.pool.execute<any[]>(
+          'SELECT lat, lng FROM master_stop WHERE stop_id = ? LIMIT 1',
+          [Number(r.location_ref_id)],
+        );
+        if (msById[0]?.lat != null && msById[0]?.lng != null) {
+          lat = Number(msById[0].lat);
+          lng = Number(msById[0].lng);
+        }
+      } catch {}
+    }
+
     if (lat === null || lng === null) {
       const resolved = await this.resolveLocationCoords(r.location_name);
       if (resolved) {
         lat = resolved.lat;
         lng = resolved.lng;
-        refType = refType || 'master_stop';
+        refType = refType || resolved.refType || 'master_stop';
       }
     }
 

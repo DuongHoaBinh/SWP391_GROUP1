@@ -54,7 +54,6 @@ type ShipmentStatus =
   | 'requested'
   | 'awaiting_payment'
   | 'paid_pending_review'
-  | 'paid_pending_feasibility'
   | 'refund_requested'
   | 'refunded'
   | 'change_requested'
@@ -66,7 +65,6 @@ type ShipmentStatus =
   | 'ready_to_depart'
   | 'in_transit'
   | 'return_pending'
-  | 'return_in_transit'
   | 'completed'
   | 'cancelled'
   | 'cancelled_operational'
@@ -431,9 +429,17 @@ export default function ManagerRequestsPage() {
     const dStr = (order.destinationLocation || '').toLowerCase();
     const reqNotes = (order.specialRequirements || '').toLowerCase();
 
-    const isDomestic =
-      (oStr.includes('vietnam') || oStr.includes('việt nam') || oStr.includes('hồ chí minh') || oStr.includes('ho chi minh')) &&
-      (dStr.includes('vietnam') || dStr.includes('việt nam') || dStr.includes('hà nội') || dStr.includes('ha noi'));
+    const isVietnamLoc = (s: string) =>
+      s.includes('vietnam') ||
+      s.includes('việt nam') ||
+      s.includes('hồ chí minh') ||
+      s.includes('ho chi minh') ||
+      s.includes('hà nội') ||
+      s.includes('ha noi') ||
+      s.includes('đà nẵng') ||
+      s.includes('da nang') ||
+      s.includes('củ chi');
+    const isDomestic = isVietnamLoc(oStr) && isVietnamLoc(dStr);
     const isRoadRequested = reqNotes.includes('đường bộ') || reqNotes.includes('road') || isDomestic;
 
     const initialMode: 'road' | 'air' | 'sea' =
@@ -460,7 +466,7 @@ export default function ManagerRequestsPage() {
     });
 
     setCostCurrency('VND');
-    const shared = order.bookingType !== 'dedicated_charter';
+    const shared = order.bookingType === 'shared_stall';
     const existingQuote = shared
       ? Number(order.stallUnitPrice || 0)
       : Number(order.transportCost || 0);

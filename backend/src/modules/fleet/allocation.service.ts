@@ -167,7 +167,7 @@ export class AllocationService {
       );
       const order = orders[0];
       if (!order) throw new NotFoundException(`Không tìm thấy đơn #${shipmentId}`);
-      if (INACTIVE_SHIPMENT_SQL.includes(`'${order.status}'`) || order.status === 'in_transit') {
+      if (INACTIVE_SHIPMENT_SQL.includes(`'${order.status}'`) || ['in_transit', 'return_pending'].includes(order.status)) {
         throw new ConflictException('Đơn đã kết thúc hoặc đang chạy, không thể đổi xe đã giữ');
       }
       const current = await findShipmentReservations(db, shipmentId);
@@ -175,7 +175,7 @@ export class AllocationService {
       if (!from) throw new NotFoundException('Xe cần đổi không nằm trong danh sách xe đang giữ của đơn');
 
       const [toRows] = await db.execute<RowDataPacket[]>('SELECT vehicle_id, capacity, vehicle_type FROM vehicle WHERE vehicle_id = ?', [dto.toVehicleId]);
-      if (!toRows[0] || toRows[0].vehicle_type === 'aircraft_stall') throw new BadRequestException('Xe thay thế phải là xe đường bộ');
+      if (!toRows[0] || ['aircraft_stall', 'container'].includes(String(toRows[0].vehicle_type))) throw new BadRequestException('Xe thay thế phải là xe đường bộ');
       const sameDirection = current.filter((r) => r.direction === from.direction && r.vehicleId !== from.vehicleId);
       const newCapacity = sameDirection.reduce((s, r) => s + r.capacity, 0) + Number(toRows[0].capacity);
       const required = await loadRequiredStallSlots(db as any, shipmentId, Number(order.requested_horse_count));

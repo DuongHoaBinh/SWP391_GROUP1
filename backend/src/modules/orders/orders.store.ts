@@ -797,7 +797,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
     await db.execute("UPDATE route SET status = 'completed', plan_status = 'completed' WHERE shipment_id = ? AND plan_status IN ('in_transit', 'return_pending')", [shipmentId]);
     for (const id of vehicleIds) await db.execute(`UPDATE vehicle v SET status = 'available' WHERE v.vehicle_id = ? AND v.status = 'in_use'
-      AND NOT EXISTS (SELECT 1 FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id WHERE sv.vehicle_id = v.vehicle_id AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected'))`, [id]);
+      AND NOT EXISTS (SELECT 1 FROM shipment_vehicle sv JOIN shipment s ON s.shipment_id = sv.shipment_id WHERE sv.vehicle_id = v.vehicle_id AND s.status NOT IN ('completed','cancelled','cancelled_operational','rejected','refund_requested','refunded'))`, [id]);
 
     return (result as { affectedRows: number }).affectedRows > 0;
     });
@@ -910,7 +910,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       try {
         await db.execute(
           `UPDATE vehicle_reservation
-           SET status = 'released', released_at = NOW(), release_reason = ?
+           SET status = 'released', released_at = NOW(), released_reason = ?
            WHERE shipment_id = ? AND direction = 'return' AND status IN ('active', 'consumed')`,
           [category, data.shipmentId],
         );
@@ -989,6 +989,18 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       );
       const ship = rows[0];
       if (!ship) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
+      const allowedRescheduleStatuses = [
+        'paid_pending_review',
+        'approved',
+        'planning',
+        'confirmed',
+        'ready_to_depart',
+        'in_transit',
+        'return_pending',
+      ];
+      if (!allowedRescheduleStatuses.includes(String(ship.status))) {
+        throw new ConflictException(`Không thể đổi ngày chặng về khi đơn hàng đang ở trạng thái "${ship.status}"`);
+      }
       if (ship.return_status !== 'scheduled') {
         throw new ConflictException(`Không thể đổi ngày về khi chặng về ở trạng thái "${ship.return_status}"`);
       }
@@ -1004,10 +1016,28 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         `UPDATE shipment
          SET return_departure_at = ?,
              return_reschedule_fee = ?,
+             transport_cost = CASE WHEN transport_cost IS NOT NULL THEN transport_cost + ? ELSE transport_cost END,
              total_cost = total_cost + ?
          WHERE shipment_id = ?`,
-        [data.newAt, nextFee, data.fee, data.shipmentId],
+        [data.newAt, nextFee, data.fee, data.fee, data.shipmentId],
       );
+
+      // Synchronize return-leg vehicle_reservation time window with the new return departure time
+      try {
+        const deltaMs = data.newAt.getTime() - data.oldAt.getTime();
+        if (Number.isFinite(deltaMs) && deltaMs !== 0) {
+          const deltaSec = Math.round(deltaMs / 1000);
+          await db.execute(
+            `UPDATE vehicle_reservation
+             SET start_at = DATE_ADD(start_at, INTERVAL ? SECOND),
+                 end_at = DATE_ADD(end_at, INTERVAL ? SECOND)
+             WHERE shipment_id = ? AND direction = 'return' AND status IN ('active', 'consumed')`,
+            [deltaSec, deltaSec, data.shipmentId],
+          );
+        }
+      } catch {
+        // Ignore if vehicle_reservation table is omitted in minimal mocks
+      }
 
       if (data.fee > 0) {
         const [routes] = await db.execute<RowDataPacket[]>(
@@ -1121,7 +1151,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
            JOIN shipment s2 ON s2.shipment_id = sh2.shipment_id
            WHERE sh2.horse_id = h.horse_id
              AND s2.shipment_id <> ?
-             AND s2.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refunded', 'completed')
+             AND s2.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded', 'completed')
          )`,
       [shipmentId, shipmentId],
     );

@@ -562,8 +562,11 @@ export default function DriverDashboardPage() {
                     {isEn ? 'All Route Milestones' : 'Toàn Bộ Mốc Hành Trình'}
                   </h3>
                   <span className="text-xs text-[#747D88] font-semibold tabular-nums">
-                    {completedMilestones}/{totalMilestones}{' '}
-                    {isEn ? 'completed' : 'mốc hoàn tất'} ({progressPct}%)
+                    {totalMilestones === 0 && activeTrip.shipment_status === 'completed'
+                      ? isEn
+                        ? 'Completed (100%)'
+                        : 'Đã hoàn tất bàn giao (100%)'
+                      : `${completedMilestones}/${totalMilestones} ${isEn ? 'completed' : 'mốc hoàn tất'} (${progressPct}%)`}
                   </span>
                 </div>
 
@@ -627,7 +630,13 @@ export default function DriverDashboardPage() {
                   </div>
                 ) : (
                   <p className="text-xs text-[#747D88] py-3 italic m-0">
-                    {isEn ? 'No milestones configured yet.' : 'Chưa có danh sách mốc hành trình.'}
+                    {activeTrip.shipment_status === 'completed'
+                      ? isEn
+                        ? 'This trip has been completed and handed over.'
+                        : 'Chuyến đi này đã hoàn tất và bàn giao thành công.'
+                      : isEn
+                        ? 'No milestones configured yet.'
+                        : 'Chưa có danh sách mốc hành trình.'}
                   </p>
                 )}
               </div>

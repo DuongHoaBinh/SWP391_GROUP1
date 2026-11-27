@@ -89,11 +89,13 @@ const notificationsFetcher = async (url: string): Promise<NotificationRecord[]> 
 };
 
 const REVENUE_ELIGIBLE_STATUSES = new Set([
+  'paid_pending_review',
   'approved',
   'planning',
   'confirmed',
   'ready_to_depart',
   'in_transit',
+  'return_pending',
   'completed',
 ]);
 
@@ -102,6 +104,7 @@ const ACTIVE_SHIPMENT_STATUSES = new Set([
   'confirmed',
   'ready_to_depart',
   'in_transit',
+  'return_pending',
 ]);
 
 export default function ManagerDashboardPage() {
@@ -130,8 +133,7 @@ export default function ManagerDashboardPage() {
       allOrders.filter(
         (o) =>
           o.status === 'requested' ||
-          o.status === 'paid_pending_review' ||
-          o.status === 'paid_pending_feasibility',
+          o.status === 'paid_pending_review',
       ),
     [allOrders],
   );
@@ -179,7 +181,7 @@ export default function ManagerDashboardPage() {
 
   // Derived real metrics
   const inTransitCount = useMemo(
-    () => allOrders.filter((o) => o.status === 'in_transit').length,
+    () => allOrders.filter((o) => o.status === 'in_transit' || o.status === 'return_pending').length,
     [allOrders]
   );
   const upcomingCount = useMemo(
@@ -239,12 +241,15 @@ export default function ManagerDashboardPage() {
     [allOrders]
   );
 
-  const completionRatePct = useMemo(() => {
+  const eligibleCompletionCount = useMemo(() => {
     const EXCLUDED_COMPLETION = new Set(['cancelled', 'cancelled_operational', 'rejected', 'refunded', 'refund_requested', 'awaiting_payment']);
-    const eligible = allOrders.filter((o) => !EXCLUDED_COMPLETION.has(String(o.status || '').toLowerCase()));
-    if (eligible.length === 0) return 0;
-    return Math.round((completedCount / eligible.length) * 1000) / 10;
-  }, [allOrders, completedCount]);
+    return allOrders.filter((o) => !EXCLUDED_COMPLETION.has(String(o.status || '').toLowerCase())).length;
+  }, [allOrders]);
+
+  const completionRatePct = useMemo(() => {
+    if (eligibleCompletionCount === 0) return 0;
+    return Math.round((completedCount / eligibleCompletionCount) * 1000) / 10;
+  }, [eligibleCompletionCount, completedCount]);
 
   // Modal States
   const [activeModal, setActiveModal] = useState<'NONE' | 'APPROVE' | 'REJECT' | 'CHANGE'>('NONE');
@@ -588,8 +593,8 @@ export default function ManagerDashboardPage() {
             <div className="mt-2 flex items-center justify-between text-xs text-[#287653] font-bold">
               <span className="inline-flex items-center gap-1.5">
                 <TrendingUp className="w-3.5 h-3.5" />
-                {completedCount}/{allOrders.length}{' '}
-                {t('manager.dashboard.kpiCompletionSub', 'đơn hoàn tất')}
+                {completedCount}/{eligibleCompletionCount}{' '}
+                {t('manager.dashboard.kpiCompletionSub', 'đơn hợp lệ hoàn tất')}
               </span>
               <ChevronRight className="w-3.5 h-3.5 shrink-0" />
             </div>
@@ -856,8 +861,7 @@ export default function ManagerDashboardPage() {
                         </div>
 
                         <div className="flex flex-wrap items-center sm:justify-end gap-1.5 shrink-0">
-                          {(req.status === 'paid_pending_review' ||
-                            req.status === 'paid_pending_feasibility') && (
+                          {req.status === 'paid_pending_review' && (
                             <Link
                               href={`/manager/requests/${req.id}`}
                               className="no-underline px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-[#287653] hover:bg-[#1f5e42] transition-colors whitespace-nowrap shadow-xs"

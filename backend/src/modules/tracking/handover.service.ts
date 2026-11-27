@@ -100,7 +100,7 @@ export class HandoverService {
       const mergedEvidence = [...fileUrls, ...(dto.evidenceUrls || [])].slice(0, 10);
 
       const inferredDirection: 'outbound' | 'return' =
-        dto.direction ?? (target.tripType === 'round_trip' && (target.shipmentStatus === 'return_pending' || target.returnStatus === 'in_progress') ? 'return' : 'outbound');
+        dto.direction ?? (target.tripType === 'round_trip' && ['in_progress', 'completed'].includes(target.returnStatus) ? 'return' : 'outbound');
       const defaultLocation = inferredDirection === 'return' ? (target.originLocation || target.destinationLocation) : target.destinationLocation;
 
       const created = await this.handoverStore.createHandover({
