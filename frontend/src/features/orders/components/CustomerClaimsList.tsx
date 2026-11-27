@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import useSWR from 'swr';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, openAuthenticatedApiFile } from '@/lib/api-client';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { CustomerClaimModal } from './CustomerClaimModal';
 import { InsurancePackage, vnd } from '../insurance-policy';
-import { CheckCircle, Clock, PlusCircle, ShieldAlert, XCircle } from 'lucide-react';
+import { ArrowRight, Building2, CheckCircle, Clock, FileText, PlusCircle, ShieldAlert, XCircle } from 'lucide-react';
 
 export interface CustomerClaimsListProps {
   shipmentId: number;
@@ -86,7 +87,7 @@ export function CustomerClaimsList({
   const statusLower = String(shipmentStatus || '').toLowerCase();
   const isDeliveredOrCompleted =
     Boolean(deliveredAt) ||
-    ['completed', 'delivered', 'in_transit', 'return_pending', 'return_in_transit'].includes(
+    ['completed', 'delivered', 'in_transit', 'return_pending'].includes(
       statusLower,
     );
 
@@ -259,6 +260,90 @@ export function CustomerClaimsList({
                       {c.rejectionReasonCode && (
                         <span className="ml-1 text-rose-700">({c.rejectionReasonCode})</span>
                       )}
+                    </div>
+                  )}
+
+                  {c.status === 'approved' && !c.refundFormSubmittedAt && (
+                    <div className="mt-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-[#DFCA9A] bg-[#FFF9EB] p-3 text-xs">
+                      <div className="flex items-start gap-2 text-[#4A4338]">
+                        <Building2 className="h-4 w-4 text-[#A67C2E] shrink-0 mt-0.5" aria-hidden="true" />
+                        <div>
+                          <strong className="text-[#181A17] block">
+                            {isEn
+                              ? 'Action required: Submit bank details for insurance payout'
+                              : 'Cần thực hiện: Điền thông tin tài khoản nhận tiền bồi thường'}
+                          </strong>
+                          <span>
+                            {isEn
+                              ? `Please provide your beneficiary bank account to receive ${vnd(c.approvedAmount ?? 0)}.`
+                              : `Vui lòng điền tài khoản ngân hàng thụ hưởng để nhận khoản bồi thường ${vnd(c.approvedAmount ?? 0)}.`}
+                          </span>
+                        </div>
+                      </div>
+                      <Link
+                        href={`/customer/requests/${shipmentId}/refund?claimId=${c.id}`}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#181A17] px-3.5 py-2 text-xs font-bold text-[#FAF8F4] hover:bg-[#2C2F2A] no-underline shrink-0"
+                      >
+                        <span>
+                          {isEn ? 'Fill Payout Bank Form' : 'Điền thông tin nhận tiền'}
+                        </span>
+                        <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Link>
+                    </div>
+                  )}
+
+                  {c.status === 'approved' && c.refundFormSubmittedAt && (
+                    <div className="mt-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-[#B7DBC4] bg-[#F2F9F4] p-3 text-xs">
+                      <div className="space-y-0.5 text-[#1E563B]">
+                        <strong className="block">
+                          {isEn ? 'Bank account submitted · Payout in progress' : 'Đã gửi STK nhận bồi thường · Đang xử lý chi trả'}
+                        </strong>
+                        <span className="text-[#273244]">
+                          {c.refundBankName} · <strong className="font-mono">{c.refundAccountNumber}</strong> · {c.refundAccountHolder}
+                        </span>
+                      </div>
+                      <Link
+                        href={`/customer/requests/${shipmentId}/refund?claimId=${c.id}`}
+                        className="inline-flex items-center gap-1 font-bold text-[#1E563B] hover:underline no-underline shrink-0"
+                      >
+                        <span>{isEn ? 'Track Payout' : 'Xem tiến độ chi trả'}</span>
+                        <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Link>
+                    </div>
+                  )}
+
+                  {c.status === 'paid' && (
+                    <div className="mt-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-purple-200 bg-purple-50/70 p-3 text-xs">
+                      <div className="space-y-0.5 text-purple-900">
+                        <strong className="block">
+                          {isEn ? 'Insurance compensation transferred' : 'Đã hoàn tất chuyển khoản bồi thường bảo hiểm'}
+                        </strong>
+                        {(c.refundBankName || c.refundAccountNumber || c.refundBankTransactionRef) && (
+                          <span className="text-purple-800">
+                            {[c.refundBankName, c.refundAccountNumber, c.refundBankTransactionRef ? `GD: ${c.refundBankTransactionRef}` : '']
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        {c.refundRecordId && c.refundTransferReceiptUrl && (
+                          <button
+                            type="button"
+                            onClick={() => void openAuthenticatedApiFile(`/api/orders/refunds/${c.refundRecordId}/receipt`)}
+                            className="inline-flex items-center gap-1 font-bold text-purple-800 hover:underline bg-transparent border-0 cursor-pointer"
+                          >
+                            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span>{isEn ? 'View Receipt' : 'Xem ủy nhiệm chi'}</span>
+                          </button>
+                        )}
+                        <Link
+                          href={`/customer/requests/${shipmentId}/refund?claimId=${c.id}`}
+                          className="inline-flex items-center gap-1 font-bold text-purple-900 hover:underline no-underline"
+                        >
+                          <span>{isEn ? 'Details' : 'Chi tiết'}</span>
+                        </Link>
+                      </div>
                     </div>
                   )}
                 </div>

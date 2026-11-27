@@ -4,12 +4,14 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import * as fs from 'fs';
 import { basename, join } from 'path';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { verifyUploadedFileMagicBytes } from '../../common/utils/upload-validation';
 import { UserRole } from '../auth/auth.types';
+import { MailService } from '../auth/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
   DEFAULT_PAYOUT_RULES_V2,
@@ -17,6 +19,7 @@ import {
   suggestPayout,
 } from './insurance-policy';
 import { CreateInsuranceClaimDto, ReviewInsuranceClaimDto } from './dto/insurance-claim.dto';
+import { SubmitRefundFormDto } from './dto/prepaid-flow.dto';
 import { InsuranceClaimStore } from './insurance-claim.store';
 import { InsuranceClaimEventItem, InsuranceClaimItem } from './insurance-claim.types';
 import { OrdersStore } from './orders.store';
@@ -37,6 +40,7 @@ export class InsuranceClaimService {
     private readonly claimStore: InsuranceClaimStore,
     private readonly ordersStore: OrdersStore,
     private readonly notificationsService: NotificationsService,
+    @Optional() private readonly mailService?: MailService,
   ) {}
 
   private cleanupFiles(files?: Express.Multer.File[]) {
@@ -365,13 +369,25 @@ export class InsuranceClaimService {
     // Notify customer
     const code = claim.requestCode || `REQ-${String(claim.shipmentId).padStart(3, '0')}`;
     if (dto.decision === 'approve') {
+      const formPath = `/customer/requests/${claim.shipmentId}/refund?claimId=${claimId}`;
       await this.notificationsService.createNotification(
         claim.customerId,
-        `Yêu cầu bồi thường #${claimId} đã được phê duyệt (${code})`,
-        `Khoản bồi thường ${dto.approvedAmount?.toLocaleString('vi-VN')} VND cho ngựa "${claim.horseName}" đã được duyệt. Hồ sơ hoàn tiền #${result.refundRecordId} đang được xử lý chi trả.`,
+        `Yêu cầu bồi thường #${claimId} đã được phê duyệt — Vui lòng điền thông tin nhận tiền (${code})`,
+        `Khoản bồi thường ${dto.approvedAmount?.toLocaleString('vi-VN')} VND cho ngựa "${claim.horseName}" đã được phê duyệt (Hồ sơ hoàn tiền #${result.refundRecordId}). Vui lòng truy cập trang chi tiết đơn hàng (${formPath}) để điền thông tin tài khoản ngân hàng nhận tiền bồi thường.`,
         'status_update',
         claim.shipmentId,
       );
+      if (this.mailService && claim.customerEmail) {
+        try {
+          await this.mailService.sendNotificationEmail(
+            claim.customerEmail,
+            `[EquiTransit] Bồi thường bảo hiểm #${claimId} (${code}) đã duyệt — Điền thông tin nhận tiền`,
+            `Xin chào ${claim.customerName || 'Quý khách'},<br/><br/>Yêu cầu bồi thường bảo hiểm #${claimId} cho ngựa <b>${claim.horseName || ''}</b> (đơn <b>${code}</b>) đã được phê duyệt với số tiền <b>${dto.approvedAmount?.toLocaleString('vi-VN')} VND</b>.<br/><br/>Vui lòng truy cập biểu mẫu nhận tiền bồi thường tại mục <b>Bảo hiểm & Khiếu nại</b> trên trang chi tiết đơn hàng (<code>${formPath}</code>) để cung cấp thông tin tài khoản ngân hàng thụ hưởng.<br/><br/>Trân trọng,<br/>EquiTransit Logistics`,
+          );
+        } catch {
+          // Do not fail claim approval when SMTP is unavailable in dev/test
+        }
+      }
     } else if (dto.decision === 'reject') {
       await this.notificationsService.createNotification(
         claim.customerId,
@@ -384,5 +400,33 @@ export class InsuranceClaimService {
 
     const events = await this.claimStore.findClaimEvents(claimId);
     return { claim: result.claim, events, refundRecordId: result.refundRecordId };
+  }
+
+  async getClaimRefundForm(user: AuthenticatedUser, claimId: number) {
+    return this.claimStore.getClaimRefundFormInfo(claimId, Number(user.id), user.role);
+  }
+
+  async submitClaimRefundForm(user: AuthenticatedUser, claimId: number, dto: SubmitRefundFormDto) {
+    if (user.role !== UserRole.CUSTOMER) {
+      throw new ForbiddenException('Chỉ khách hàng chủ đơn mới có quyền nộp thông tin nhận tiền bồi thường.');
+    }
+    const result = await this.claimStore.submitClaimRefundForm(claimId, Number(user.id), dto);
+    const code = `REQ-${String(result.shipmentId).padStart(3, '0')}`;
+    const msg = `Khách hàng đã gửi thông tin tài khoản ngân hàng (${result.bankName} · ${result.accountNumber} · ${result.accountHolder}) để nhận bồi thường bảo hiểm #${claimId} (${result.amount.toLocaleString('vi-VN')} VND) cho đơn ${code}. Hồ sơ hoàn tiền #${result.refundId} sẵn sàng duyệt chi.`;
+    await this.notificationsService.notifyRole(
+      'Logistics Manager',
+      `Khách đã điền STK nhận bồi thường #${claimId} (${code})`,
+      msg,
+      'status_update',
+      result.shipmentId,
+    );
+    await this.notificationsService.notifyRole(
+      'Admin',
+      `Khách đã điền STK nhận bồi thường #${claimId} (${code})`,
+      msg,
+      'status_update',
+      result.shipmentId,
+    );
+    return result;
   }
 }

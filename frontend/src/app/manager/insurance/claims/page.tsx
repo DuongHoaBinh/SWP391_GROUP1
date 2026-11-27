@@ -1,15 +1,18 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import useSWR from 'swr';
 import { apiClient } from '@/lib/api-client';
 import { getAuthToken } from '@/lib/auth';
 import {
   AlertCircle,
   AlertTriangle,
+  Building2,
   CheckCircle2,
   Clock,
   Download,
+  ExternalLink,
   FileText,
   Filter,
   Loader2,
@@ -41,6 +44,15 @@ interface InsuranceClaim {
   decidedBy: number | null;
   decidedAt: string | null;
   refundRecordId: number | null;
+  refundStatus?: string | null;
+  refundBankName?: string | null;
+  refundAccountNumber?: string | null;
+  refundAccountHolder?: string | null;
+  refundCustomerNote?: string | null;
+  refundFormSubmittedAt?: string | null;
+  refundSlaDueAt?: string | null;
+  refundBankTransactionRef?: string | null;
+  refundTransferReceiptUrl?: string | null;
   createdAt: string;
   horseName?: string;
   requestCode?: string;
@@ -562,17 +574,78 @@ export default function ManagerInsuranceClaimsPage() {
                   </div>
                 </div>
               ) : (
-                <div className="border-t border-[#E8E2D8] pt-4 text-xs text-[#5B6779] bg-[#FAF8F5] p-3 rounded-lg">
-                  <strong>Kết quả xử lý:</strong> Hồ sơ đã được quyết định ({activeClaim.status}).
-                  {activeClaim.decisionReason && (
-                    <p className="mt-1">
-                      Lý do: <em>{activeClaim.decisionReason}</em>
-                    </p>
-                  )}
-                  {activeClaim.refundRecordId && (
-                    <p className="mt-1 text-emerald-700 font-semibold">
-                      Hồ sơ hoàn tiền liên kết: #{activeClaim.refundRecordId}
-                    </p>
+                <div className="border-t border-[#E8E2D8] pt-4 space-y-3 text-xs text-[#5B6779]">
+                  <div className="bg-[#FAF8F5] p-3.5 rounded-xl border border-[#E8E2D8]">
+                    <strong className="text-[#181A17]">Kết quả xử lý:</strong> Hồ sơ đã được quyết định ({activeClaim.status}).
+                    {activeClaim.approvedAmount !== null && (
+                      <p className="mt-1 mb-0">
+                        Số tiền duyệt bồi thường: <strong className="text-emerald-700">{vnd(activeClaim.approvedAmount)}</strong>
+                      </p>
+                    )}
+                    {activeClaim.decisionReason && (
+                      <p className="mt-1 mb-0">
+                        Lý do: <em>{activeClaim.decisionReason}</em>
+                      </p>
+                    )}
+                    {activeClaim.refundRecordId && (
+                      <p className="mt-1 mb-0 text-emerald-700 font-semibold">
+                        Hồ sơ hoàn tiền liên kết: #{activeClaim.refundRecordId} ({activeClaim.refundStatus || 'pending_approval'})
+                      </p>
+                    )}
+                  </div>
+
+                  {['approved', 'paid'].includes(activeClaim.status) && activeClaim.refundRecordId && (
+                    <div
+                      className={`p-3.5 rounded-xl border space-y-1.5 ${
+                        activeClaim.refundFormSubmittedAt
+                          ? 'bg-[#F2F9F4] border-[#B7DBC4] text-[#1E563B]'
+                          : 'bg-[#FFF9EB] border-[#DFCA9A] text-[#7A5616]'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <strong className="flex items-center gap-1.5 text-[#181A17]">
+                          <Building2 className="h-4 w-4 text-[#A67C2E]" />
+                          Thông tin tài khoản nhận bồi thường của khách hàng
+                        </strong>
+                        <Link
+                          href={`/manager/requests/${activeClaim.shipmentId}`}
+                          className="inline-flex items-center gap-1 font-bold text-[#A67C2E] hover:underline no-underline"
+                        >
+                          <span>Mở Sổ hoàn tiền đơn</span>
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </Link>
+                      </div>
+
+                      {activeClaim.refundFormSubmittedAt ? (
+                        <div className="text-[#273244] space-y-1 pt-1">
+                          <p className="m-0">
+                            <strong>Ngân hàng:</strong> {activeClaim.refundBankName}
+                          </p>
+                          <p className="m-0">
+                            <strong>Số tài khoản:</strong>{' '}
+                            <span className="font-mono font-bold text-[#181A17]">{activeClaim.refundAccountNumber}</span>
+                          </p>
+                          <p className="m-0">
+                            <strong>Chủ tài khoản:</strong> {activeClaim.refundAccountHolder}
+                          </p>
+                          <p className="m-0 text-[11px] text-[#5B6779]">
+                            Khách đã nộp lúc: {new Date(activeClaim.refundFormSubmittedAt).toLocaleString('vi-VN')}
+                            {activeClaim.refundSlaDueAt
+                              ? ` · Hạn SLA: ${new Date(activeClaim.refundSlaDueAt).toLocaleDateString('vi-VN')}`
+                              : ''}
+                          </p>
+                          {activeClaim.refundBankTransactionRef && (
+                            <p className="m-0 text-emerald-700 font-semibold">
+                              Mã GD chuyển khoản: {activeClaim.refundBankTransactionRef}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="m-0 pt-0.5">
+                          Hệ thống đã gửi thông báo &amp; biểu mẫu nhận tiền tới khách hàng. Đang chờ khách hàng điền thông tin tài khoản ngân hàng trước khi duyệt chi.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}

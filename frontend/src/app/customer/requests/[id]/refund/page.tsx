@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { apiClient } from '@/lib/api-client';
+import React, { Suspense, useCallback, useEffect, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { apiClient, openAuthenticatedApiFile } from '@/lib/api-client';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -13,6 +13,7 @@ import {
   FileText,
   Info,
   Loader2,
+  ShieldCheck,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatVietnamDateTime } from '@/features/orders/prepaid-policy';
@@ -35,11 +36,15 @@ const POPULAR_BANKS = [
   'OTHER',
 ];
 
-export default function CustomerRefundPage() {
+function CustomerRefundPageContent() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const { language } = useLanguage();
   const isEn = language === 'en';
   const id = params?.id as string;
+  const claimIdParam = searchParams?.get('claimId');
+  const claimId = claimIdParam && /^\d+$/.test(claimIdParam) ? Number(claimIdParam) : null;
+  const isClaimMode = claimId !== null;
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -58,7 +63,10 @@ export default function CustomerRefundPage() {
     if (!id) return;
     setLoading(true);
     setLoadError(null);
-    apiClient<any>(`/orders/${id}/refund-form`)
+    const endpoint = isClaimMode
+      ? `/insurance/claims/${claimId}/refund-form`
+      : `/orders/${id}/refund-form`;
+    apiClient<any>(endpoint)
       .then((res) => {
         setInfo(res);
       })
@@ -72,17 +80,21 @@ export default function CustomerRefundPage() {
       .finally(() => {
         setLoading(false);
       });
-  }, [id, isEn]);
+  }, [id, isEn, isClaimMode, claimId]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
+  const payoutAmount = isClaimMode
+    ? Number(info?.approvedAmount || 0)
+    : Number(info?.totalPaidAmount || 0);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!info) return;
     if (!confirmed) {
-      toast.error(isEn ? 'Please confirm the refund amount.' : 'Vui lòng tích xác nhận số tiền hoàn.');
+      toast.error(isEn ? 'Please confirm the refund amount.' : 'Vui lòng tích xác nhận số tiền nhận.');
       return;
     }
     const bankName = selectedBank === 'OTHER' ? customBankName.trim() : selectedBank;
@@ -107,26 +119,33 @@ export default function CustomerRefundPage() {
 
     try {
       setSubmitting(true);
-      await apiClient(`/orders/${id}/refund-form`, {
+      const submitEndpoint = isClaimMode
+        ? `/insurance/claims/${claimId}/refund-form`
+        : `/orders/${id}/refund-form`;
+      await apiClient(submitEndpoint, {
         method: 'POST',
         body: JSON.stringify({
           bankName,
           accountNumber: accountNumber.trim(),
           accountHolder: accountHolder.trim().toUpperCase(),
-          confirmAmount: Number(info.totalPaidAmount || 0),
+          confirmAmount: payoutAmount,
           note: note.trim() || undefined,
         }),
       });
       toast.success(
-        isEn
-          ? 'Refund bank details submitted successfully!'
-          : 'Gửi thông tin nhận hoàn tiền thành công!',
+        isClaimMode
+          ? isEn
+            ? 'Insurance payout bank details submitted successfully!'
+            : 'Gửi thông tin tài khoản nhận bồi thường bảo hiểm thành công!'
+          : isEn
+            ? 'Refund bank details submitted successfully!'
+            : 'Gửi thông tin nhận hoàn tiền thành công!',
       );
       loadData();
     } catch (err: any) {
       toast.error(
         err?.message ||
-          (isEn ? 'Failed to submit refund form.' : 'Gửi form hoàn tiền thất bại.'),
+          (isEn ? 'Failed to submit refund form.' : 'Gửi biểu mẫu hoàn tiền thất bại.'),
       );
     } finally {
       setSubmitting(false);
@@ -159,8 +178,8 @@ export default function CustomerRefundPage() {
           <p className="text-sm text-[#5F6977] m-0 leading-relaxed">
             {loadError ||
               (isEn
-                ? 'This order could not be found or is not eligible for a 100% refund.'
-                : 'Không tìm thấy đơn hàng hoặc đơn hiện không thuộc diện hoàn tiền 100%.')}
+                ? 'This order or claim could not be found or is not eligible for refund bank submission.'
+                : 'Không tìm thấy đơn hàng / hồ sơ bồi thường hoặc chưa đủ điều kiện nộp thông tin hoàn tiền.')}
           </p>
           <div className="pt-2 flex justify-center gap-3">
             <Link
@@ -177,11 +196,16 @@ export default function CustomerRefundPage() {
   }
 
   const existingRefund = info.refundRecord;
+  const hasSubmittedBankForm = isClaimMode
+    ? Boolean(existingRefund?.formSubmittedAt)
+    : Boolean(existingRefund);
   const orderStatusLower = String(info.status || '').toLowerCase();
-  const isRefundEligible =
-    Boolean(existingRefund) ||
-    orderStatusLower === 'refund_requested' ||
-    orderStatusLower === 'refunded';
+  const claimStatusLower = String(info.claimStatus || '').toLowerCase();
+  const isRefundEligible = isClaimMode
+    ? ['approved', 'paid'].includes(claimStatusLower) && Boolean(existingRefund)
+    : Boolean(existingRefund) ||
+      orderStatusLower === 'refund_requested' ||
+      orderStatusLower === 'refunded';
 
   if (!isRefundEligible) {
     return (
@@ -199,14 +223,22 @@ export default function CustomerRefundPage() {
             <Info className="w-6 h-6" />
           </div>
           <h1 className="text-lg font-extrabold text-[#181A17] m-0">
-            {isEn
-              ? `Order #${id} is not in refund status`
-              : `Đơn hàng #${id} hiện không ở trạng thái hoàn tiền`}
+            {isClaimMode
+              ? isEn
+                ? `Insurance Claim #${claimId} is not ready for payout`
+                : `Hồ sơ bồi thường #${claimId} hiện chưa ở trạng thái nhận chi trả`
+              : isEn
+                ? `Order #${id} is not in refund status`
+                : `Đơn hàng #${id} hiện không ở trạng thái hoàn tiền`}
           </h1>
           <p className="text-sm text-[#5F6977] m-0 leading-relaxed max-w-lg mx-auto">
-            {isEn
-              ? 'The 100% refund bank form is only available when Logistics Manager marks an order as unable to fulfill (refund_requested) or a refund record exists.'
-              : 'Biểu mẫu nhập tài khoản nhận hoàn tiền 100% chỉ khả dụng khi Quản lý vận hành xác nhận không thể đáp ứng chuyến đi hoặc đơn đã phát sinh hồ sơ hoàn tiền.'}
+            {isClaimMode
+              ? isEn
+                ? 'The insurance payout bank form opens once Logistics Manager approves your claim.'
+                : 'Biểu mẫu nhập tài khoản nhận bồi thường bảo hiểm chỉ khả dụng sau khi Quản lý vận hành phê duyệt hồ sơ bồi thường.'
+              : isEn
+                ? 'The 100% refund bank form is only available when Logistics Manager marks an order as unable to fulfill (refund_requested) or a refund record exists.'
+                : 'Biểu mẫu nhập tài khoản nhận hoàn tiền 100% chỉ khả dụng khi Quản lý vận hành xác nhận không thể đáp ứng chuyến đi hoặc đơn đã phát sinh hồ sơ hoàn tiền.'}
           </p>
           <div className="pt-3">
             <Link
@@ -234,20 +266,45 @@ export default function CustomerRefundPage() {
         </Link>
       </div>
 
-      {/* Header Alert Card (Warm Editorial Light Theme — High Contrast WCAG AA+) */}
+      {/* Header Alert Card */}
       <div className="bg-[#FFF9EB] border border-[#DFCA9A] rounded-2xl p-5 sm:p-6 shadow-xs">
         <div className="flex items-start gap-4">
           <div className="p-2.5 rounded-xl bg-[#F5E6C4] text-[#8C6621] shrink-0">
-            <AlertTriangle className="w-6 h-6" aria-hidden="true" />
+            {isClaimMode ? (
+              <ShieldCheck className="w-6 h-6" aria-hidden="true" />
+            ) : (
+              <AlertTriangle className="w-6 h-6" aria-hidden="true" />
+            )}
           </div>
           <div className="min-w-0">
             <h1 className="text-base sm:text-lg font-extrabold text-[#181A17] m-0">
-              {isEn
-                ? `100% Refund Notice for Order #${id}`
-                : `Thông Báo Hoàn Tiền 100% Cho Đơn Hàng #${id}`}
+              {isClaimMode
+                ? isEn
+                  ? `Insurance Payout Bank Form · Claim #${claimId} (${info.requestCode || `#${id}`})`
+                  : `Biểu Mẫu Nhận Tiền Bồi Thường Bảo Hiểm · Hồ Sơ #${claimId} (${info.requestCode || `#${id}`})`
+                : isEn
+                  ? `100% Refund Notice for Order #${id}`
+                  : `Thông Báo Hoàn Tiền 100% Cho Đơn Hàng #${id}`}
             </h1>
             <p className="text-xs sm:text-sm text-[#4A4338] mt-1.5 mb-0 leading-relaxed">
-              {isEn ? (
+              {isClaimMode ? (
+                isEn ? (
+                  <>
+                    Your insurance claim for horse <strong className="text-[#181A17]">{info.horseName}</strong> (Level{' '}
+                    <strong className="text-[#181A17]">{info.severity}</strong>) has been approved. Please submit your beneficiary
+                    bank account below to receive <strong className="text-[#181A17]">{payoutAmount.toLocaleString('vi-VN')} VND</strong>{' '}
+                    within <strong className="text-[#181A17]">3–5 business days</strong>.
+                  </>
+                ) : (
+                  <>
+                    Yêu cầu bồi thường bảo hiểm cho ngựa <strong className="text-[#181A17]">{info.horseName}</strong> (Mức{' '}
+                    <strong className="text-[#181A17]">{info.severity}</strong>) đã được phê duyệt. Vui lòng cung cấp thông tin
+                    tài khoản ngân hàng thụ hưởng bên dưới để nhận khoản bồi thường{' '}
+                    <strong className="text-[#181A17]">{payoutAmount.toLocaleString('vi-VN')} VND</strong> trong vòng{' '}
+                    <strong className="text-[#181A17]">3–5 ngày làm việc</strong>.
+                  </>
+                )
+              ) : isEn ? (
                 <>
                   We apologize that we cannot fulfill this transport request at this time. Under our service guarantee, you will receive a{' '}
                   <strong className="text-[#181A17]">100% refund of your paid amount</strong> to your bank account within{' '}
@@ -261,7 +318,13 @@ export default function CustomerRefundPage() {
                 </>
               )}
             </p>
-            {info.cannotFulfilReason && (
+            {isClaimMode && info.decisionReason && (
+              <div className="mt-3 p-3 bg-white rounded-xl text-xs text-[#273244] border border-[#E5DDD0]">
+                <strong className="text-[#181A17]">{isEn ? 'Manager Approval Note:' : 'Ghi chú phê duyệt của Quản lý:'}</strong>{' '}
+                {info.decisionReason}
+              </div>
+            )}
+            {!isClaimMode && info.cannotFulfilReason && (
               <div className="mt-3 p-3 bg-white rounded-xl text-xs text-[#273244] border border-[#E5DDD0] space-y-1">
                 <p className="m-0">
                   <strong className="text-[#181A17]">{isEn ? 'Reason:' : 'Lý do từ chối:'}</strong>{' '}
@@ -279,47 +342,92 @@ export default function CustomerRefundPage() {
         </div>
       </div>
 
-      {/* 100% Refund Breakdown Card */}
+      {/* Refund / Payout Breakdown Card */}
       <div className="bg-white rounded-2xl shadow-sm border border-[#D8CEBE] p-5 sm:p-6">
         <h2 className="text-base font-extrabold text-[#181A17] mb-4 mt-0 flex items-center gap-2">
           <DollarSign className="w-5 h-5 text-[#287653]" aria-hidden="true" />
-          <span>{isEn ? '100% Refund Breakdown' : 'Chi Tiết Khoản Hoàn Tiền (100%)'}</span>
+          <span>
+            {isClaimMode
+              ? isEn
+                ? 'Approved Insurance Payout Summary'
+                : 'Chi Tiết Khoản Bồi Thường Bảo Hiểm'
+              : isEn
+                ? '100% Refund Breakdown'
+                : 'Chi Tiết Khoản Hoàn Tiền (100%)'}
+          </span>
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-center">
-          <div className="p-4 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0]">
-            <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
-              {isEn ? 'Freight Refund' : 'Hoàn cước vận chuyển'}
-            </span>
-            <p className="text-lg font-extrabold text-[#181A17] font-mono mt-1 mb-0 whitespace-nowrap">
-              {Number(info.freightAmount || 0).toLocaleString('vi-VN')}{'\u00A0'}VND
-            </p>
+        {isClaimMode ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-center">
+            <div className="p-4 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0]">
+              <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
+                {isEn ? 'Insured Horse' : 'Cá thể ngựa'}
+              </span>
+              <p className="text-base font-extrabold text-[#181A17] mt-1 mb-0 truncate">
+                {info.horseName}
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0]">
+              <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
+                {isEn ? 'Severity & Package' : 'Mức độ & Gói BH'}
+              </span>
+              <p className="text-base font-extrabold text-[#181A17] mt-1 mb-0">
+                {info.severity} · {String(info.packageCode || 'basic').toUpperCase()}
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#E8F2EB] border border-[#B7DBC4]">
+              <span className="text-[11px] text-[#1E563B] uppercase font-extrabold block">
+                {isEn ? 'Approved Payout' : 'Số tiền bồi thường'}
+              </span>
+              <p className="text-xl font-black text-[#1E563B] font-mono mt-1 mb-0 whitespace-nowrap">
+                {payoutAmount.toLocaleString('vi-VN')}{'\u00A0'}VND
+              </p>
+            </div>
           </div>
-          <div className="p-4 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0]">
-            <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
-              {isEn ? 'Insurance Refund' : 'Hoàn phí bảo hiểm'}
-            </span>
-            <p className="text-lg font-extrabold text-[#181A17] font-mono mt-1 mb-0 whitespace-nowrap">
-              {Number(info.insuranceAmount || 0).toLocaleString('vi-VN')}{'\u00A0'}VND
-            </p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-center">
+            <div className="p-4 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0]">
+              <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
+                {isEn ? 'Freight Refund' : 'Hoàn cước vận chuyển'}
+              </span>
+              <p className="text-lg font-extrabold text-[#181A17] font-mono mt-1 mb-0 whitespace-nowrap">
+                {Number(info.freightAmount || 0).toLocaleString('vi-VN')}{'\u00A0'}VND
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0]">
+              <span className="text-[11px] text-[#5F6977] uppercase font-bold block">
+                {isEn ? 'Insurance Refund' : 'Hoàn phí bảo hiểm'}
+              </span>
+              <p className="text-lg font-extrabold text-[#181A17] font-mono mt-1 mb-0 whitespace-nowrap">
+                {Number(info.insuranceAmount || 0).toLocaleString('vi-VN')}{'\u00A0'}VND
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-[#E8F2EB] border border-[#B7DBC4]">
+              <span className="text-[11px] text-[#1E563B] uppercase font-extrabold block">
+                {isEn ? 'Total 100% Refund' : 'Tổng hoàn trả 100%'}
+              </span>
+              <p className="text-xl font-black text-[#1E563B] font-mono mt-1 mb-0 whitespace-nowrap">
+                {Number(info.totalPaidAmount || 0).toLocaleString('vi-VN')}{'\u00A0'}VND
+              </p>
+            </div>
           </div>
-          <div className="p-4 rounded-xl bg-[#E8F2EB] border border-[#B7DBC4]">
-            <span className="text-[11px] text-[#1E563B] uppercase font-extrabold block">
-              {isEn ? 'Total 100% Refund' : 'Tổng hoàn trả 100%'}
-            </span>
-            <p className="text-xl font-black text-[#1E563B] font-mono mt-1 mb-0 whitespace-nowrap">
-              {Number(info.totalPaidAmount || 0).toLocaleString('vi-VN')}{'\u00A0'}VND
-            </p>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* If already submitted -> Status Tracker Card */}
-      {existingRefund ? (
+      {hasSubmittedBankForm && existingRefund ? (
         <div className="bg-white rounded-2xl shadow-sm border border-[#D8CEBE] p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-base font-extrabold text-[#181A17] m-0 flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-[#287653]" aria-hidden="true" />
-              <span>{isEn ? 'Refund Processing Progress' : 'Tiến Độ Xử Lý Hoàn Tiền'}</span>
+              <span>
+                {isClaimMode
+                  ? isEn
+                    ? 'Insurance Payout Progress'
+                    : 'Tiến Độ Chi Trả Bồi Thường Bảo Hiểm'
+                  : isEn
+                    ? 'Refund Processing Progress'
+                    : 'Tiến Độ Xử Lý Hoàn Tiền'}
+              </span>
             </h2>
             <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#E8F2EB] text-[#1E563B] border border-[#B7DBC4]">
               {existingRefund.status === 'transferred'
@@ -342,7 +450,7 @@ export default function CustomerRefundPage() {
               </div>
               <div className="flex flex-col items-center">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold mb-1 ${['approved_for_transfer', 'transferred'].includes(existingRefund.status) ? 'bg-[#287653] text-white' : 'bg-[#EAE4D8] text-[#5F6977]'}`}>2</div>
-                <span className="font-semibold text-[#181A17]">{isEn ? 'Manager Approved' : 'Quản lý duyệt'}</span>
+                <span className="font-semibold text-[#181A17]">{isEn ? 'Manager Approved' : 'Quản lý duyệt chi'}</span>
               </div>
               <div className="flex flex-col items-center">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold mb-1 ${existingRefund.status === 'transferred' ? 'bg-[#287653] text-white' : 'bg-[#EAE4D8] text-[#5F6977]'}`}>3</div>
@@ -369,33 +477,46 @@ export default function CustomerRefundPage() {
               <strong className="text-[#181A17]">{isEn ? 'Account Holder:' : 'Chủ tài khoản:'}</strong>{' '}
               {existingRefund.accountHolder}
             </p>
+            {existingRefund.bankTransactionRef && (
+              <p className="m-0">
+                <strong className="text-[#181A17]">{isEn ? 'Bank Transaction Ref:' : 'Mã giao dịch ngân hàng:'}</strong>{' '}
+                <span className="font-mono font-bold text-[#1E563B]">{existingRefund.bankTransactionRef}</span>
+              </p>
+            )}
             {existingRefund.slaDueAt && (
               <p className="m-0 text-[#1E563B] font-bold">
-                {isEn ? 'SLA Refund Deadline:' : 'Hạn hoàn tiền theo cam kết SLA:'}{' '}
+                {isEn ? 'SLA Payout Deadline:' : 'Hạn chi trả theo cam kết SLA:'}{' '}
                 {formatVietnamDateTime(existingRefund.slaDueAt)}
               </p>
             )}
-            {existingRefund.transferReceiptUrl && (
+            {existingRefund.transferReceiptUrl && existingRefund.refundId && (
               <div className="pt-2">
-                <a
-                  href={existingRefund.transferReceiptUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center text-xs font-bold text-[#287653] hover:underline"
+                <button
+                  type="button"
+                  onClick={() => void openAuthenticatedApiFile(`/api/orders/refunds/${existingRefund.refundId}/receipt`)}
+                  className="inline-flex items-center text-xs font-bold text-[#287653] hover:underline bg-transparent border-0 cursor-pointer p-0"
                 >
                   <FileText className="w-4 h-4 mr-1" />
                   {isEn ? 'View Transfer Receipt (PDF/Image)' : 'Xem ủy nhiệm chi chuyển tiền (PDF/Ảnh)'}
-                </a>
+                </button>
               </div>
             )}
           </div>
         </div>
       ) : (
-        /* Refund Form — Clean Warm Light Theme with high contrast text */
+        /* Refund Form */
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-[#D8CEBE] p-5 sm:p-6">
           <h2 className="text-base font-extrabold text-[#181A17] mb-4 mt-0 flex items-center gap-2">
             <Building2 className="w-5 h-5 text-[#A67C2E]" aria-hidden="true" />
-            <span>{isEn ? 'Enter Beneficiary Bank Account Details' : 'Điền Thông Tin Tài Khoản Nhận Tiền'}</span>
+            <span>
+              {isClaimMode
+                ? isEn
+                  ? 'Enter Beneficiary Bank Account for Insurance Payout'
+                  : 'Điền Thông Tin Tài Khoản Nhận Tiền Bồi Thường'
+                : isEn
+                  ? 'Enter Beneficiary Bank Account Details'
+                  : 'Điền Thông Tin Tài Khoản Nhận Tiền'}
+            </span>
           </h2>
 
           <div className="space-y-4">
@@ -493,15 +614,27 @@ export default function CustomerRefundPage() {
                   className="mt-0.5 w-4 h-4 accent-[#181A17] rounded border-[#D8CEBE] cursor-pointer"
                 />
                 <span className="text-xs text-[#181A17] leading-relaxed">
-                  {isEn ? (
+                  {isClaimMode ? (
+                    isEn ? (
+                      <>
+                        I confirm the bank account information above is accurate and agree to receive the approved insurance compensation of{' '}
+                        <strong>{payoutAmount.toLocaleString('vi-VN')} VND</strong>.
+                      </>
+                    ) : (
+                      <>
+                        Tôi xác nhận thông tin tài khoản trên là chính xác và đồng ý nhận khoản bồi thường bảo hiểm{' '}
+                        <strong>{payoutAmount.toLocaleString('vi-VN')} VND</strong>.
+                      </>
+                    )
+                  ) : isEn ? (
                     <>
                       I confirm the bank account information above is accurate and agree to receive a 100% refund of{' '}
-                      <strong>{Number(info.totalPaidAmount || 0).toLocaleString('vi-VN')} VND</strong>.
+                      <strong>{payoutAmount.toLocaleString('vi-VN')} VND</strong>.
                     </>
                   ) : (
                     <>
                       Tôi xác nhận thông tin tài khoản trên là chính xác và đồng ý nhận hoàn 100% số tiền{' '}
-                      <strong>{Number(info.totalPaidAmount || 0).toLocaleString('vi-VN')} VND</strong>.
+                      <strong>{payoutAmount.toLocaleString('vi-VN')} VND</strong>.
                     </>
                   )}
                 </span>
@@ -519,6 +652,8 @@ export default function CustomerRefundPage() {
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     {isEn ? 'Submitting...' : 'Đang xử lý gửi...'}
                   </>
+                ) : isClaimMode ? (
+                  isEn ? 'Submit Insurance Payout Bank Details' : 'Gửi Thông Tin Nhận Bồi Thường'
                 ) : isEn ? (
                   'Submit Refund Bank Details'
                 ) : (
@@ -530,5 +665,19 @@ export default function CustomerRefundPage() {
         </form>
       )}
     </div>
+  );
+}
+
+export default function CustomerRefundPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-[#A67C2E]" />
+        </div>
+      }
+    >
+      <CustomerRefundPageContent />
+    </Suspense>
   );
 }

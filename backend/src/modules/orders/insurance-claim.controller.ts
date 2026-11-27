@@ -25,6 +25,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { CreateInsuranceClaimDto, ReviewInsuranceClaimDto } from './dto/insurance-claim.dto';
+import { SubmitRefundFormDto } from './dto/prepaid-flow.dto';
 import { InsuranceClaimService } from './insurance-claim.service';
 
 const uploadDir = join(process.cwd(), 'uploads', 'claims');
@@ -131,5 +132,26 @@ export class InsuranceClaimController {
     @Body() dto: ReviewInsuranceClaimDto,
   ) {
     return this.claimService.reviewClaim(user, claimId, dto);
+  }
+
+  @Get('insurance/claims/:claimId/refund-form')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Lấy thông tin biểu mẫu nhận tiền bồi thường bảo hiểm theo claimId' })
+  getClaimRefundForm(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('claimId', ParseIntPipe) claimId: number,
+  ) {
+    return this.claimService.getClaimRefundForm(user, claimId);
+  }
+
+  @Post('insurance/claims/:claimId/refund-form')
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({ summary: 'Khách hàng nộp thông tin tài khoản ngân hàng nhận tiền bồi thường bảo hiểm' })
+  submitClaimRefundForm(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('claimId', ParseIntPipe) claimId: number,
+    @Body() dto: SubmitRefundFormDto,
+  ) {
+    return this.claimService.submitClaimRefundForm(user, claimId, dto);
   }
 }

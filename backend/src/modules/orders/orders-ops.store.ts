@@ -61,6 +61,11 @@ export interface RefundRecordItem {
   transferredBy: number | null;
   transferredAt: string | null;
   recipientBankAccount: string | null;
+  recipientBankName: string | null;
+  recipientAccountHolder: string | null;
+  customerNote: string | null;
+  formSubmittedAt: string | null;
+  slaDueAt: string | null;
   bankTransactionRef: string | null;
   transferReceiptUrl: string | null;
   creditExpiresAt: string | null;
@@ -330,7 +335,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
                JOIN shipment s ON s.shipment_id = sv.shipment_id
                WHERE sv.vehicle_id = v.vehicle_id
                  AND s.shipment_id <> ?
-                 AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')
+                 AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded')
              )
              AND NOT EXISTS (
                SELECT 1 FROM route_leg rl
@@ -339,7 +344,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
                WHERE rl.vehicle_id = v.vehicle_id
                  AND s.shipment_id <> ?
                  AND rl.status <> 'completed'
-                 AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')
+                 AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded')
              )`,
           [vr.vehicle_id, shipmentId, shipmentId],
         );
@@ -447,6 +452,11 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
       transferredBy: r.transferred_by == null ? null : Number(r.transferred_by),
       transferredAt: r.transferred_at ? new Date(r.transferred_at).toISOString() : null,
       recipientBankAccount: r.recipient_bank_account ?? null,
+      recipientBankName: r.recipient_bank_name ?? null,
+      recipientAccountHolder: r.recipient_account_holder ?? null,
+      customerNote: r.customer_note ?? null,
+      formSubmittedAt: r.form_submitted_at ? new Date(r.form_submitted_at).toISOString() : null,
+      slaDueAt: r.sla_due_at ? new Date(r.sla_due_at).toISOString() : null,
       bankTransactionRef: r.bank_transaction_ref ?? null,
       transferReceiptUrl: r.transfer_receipt_url ?? null,
       creditExpiresAt: r.credit_expires_at ? new Date(r.credit_expires_at).toISOString() : null,
@@ -513,6 +523,14 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
       }
 
       if (r.status === 'pending_approval') {
+        if (
+          r.cancellation_category === 'insurance_claim' &&
+          (!r.form_submitted_at || !String(r.recipient_bank_account || '').trim())
+        ) {
+          throw new ConflictException(
+            'Khách hàng chưa điền thông tin tài khoản ngân hàng nhận bồi thường bảo hiểm. Vui lòng chờ khách hàng nộp biểu mẫu nhận tiền trước khi phê duyệt chi trả.',
+          );
+        }
         if (r.refund_mode === RefundMode.CREDIT_30D) {
           await db.execute(
             `UPDATE shipment_refund_record
@@ -604,6 +622,12 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
         );
       }
 
+      const effectiveBankAccount =
+        String(data.recipientBankAccount || '').trim() || String(r.recipient_bank_account || '').trim();
+      if (!effectiveBankAccount) {
+        throw new BadRequestException('Thiếu số tài khoản ngân hàng thụ hưởng để ghi nhận chuyển khoản.');
+      }
+
       await db.execute(
         `UPDATE shipment_refund_record
          SET status = 'transferred',
@@ -616,7 +640,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
          WHERE refund_id = ?`,
         [
           transferrerId,
-          data.recipientBankAccount.trim(),
+          effectiveBankAccount,
           data.bankTransactionRef.trim(),
           data.transferReceiptUrl.trim(),
           data.notes ?? null,
@@ -675,7 +699,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
              JOIN shipment s2 ON s2.shipment_id = sh2.shipment_id
              WHERE sh2.horse_id = h.horse_id
                AND s2.shipment_id <> ?
-               AND s2.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refunded', 'completed')
+               AND s2.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded', 'completed')
            )`,
           [sid, sid],
         );
@@ -1086,7 +1110,10 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
          FROM shipment_invoice i
          JOIN shipment s ON s.shipment_id = i.shipment_id
          WHERE i.status IN ('active', 'overdue')
-           AND s.status IN ('confirmed', 'planning', 'ready_to_depart')
+           AND (
+             s.status IN ('confirmed', 'planning', 'ready_to_depart')
+             OR (i.invoice_type = 'supplemental' AND s.status IN ('in_transit', 'return_pending'))
+           )
            AND i.payment_due_at IS NOT NULL
            AND NOT EXISTS (
              SELECT 1 FROM shipment_sepay_payment p
@@ -1166,7 +1193,8 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
 
             await db.execute(
               `UPDATE shipment
-               SET cancel_reason_code = 'payment_expired',
+               SET cancelled_at = COALESCE(cancelled_at, NOW()),
+                   cancel_reason_code = 'payment_expired',
                    cancellation_reason = 'Hết hạn thời gian thanh toán (payment_expired)'
                WHERE shipment_id = ?`,
               [sid],
@@ -1193,7 +1221,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
                  JOIN shipment s2 ON s2.shipment_id = sh2.shipment_id
                  WHERE sh2.horse_id = h.horse_id
                    AND s2.shipment_id <> ?
-                   AND s2.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refunded', 'completed')
+                   AND s2.status NOT IN ('cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded', 'completed')
                )`,
               [sid, sid],
             );

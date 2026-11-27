@@ -51,6 +51,11 @@ interface RefundRecordItem {
   secondApprovedBy: number | null;
   transferredBy: number | null;
   recipientBankAccount: string | null;
+  recipientBankName?: string | null;
+  recipientAccountHolder?: string | null;
+  customerNote?: string | null;
+  formSubmittedAt?: string | null;
+  slaDueAt?: string | null;
   bankTransactionRef: string | null;
   transferReceiptUrl: string | null;
   creditExpiresAt: string | null;
@@ -589,6 +594,10 @@ export function ManagerOrderFinanceGovernanceCard({
           <div className="space-y-3">
             {refunds.map((r) => {
               const needsApproval = r.status === 'pending_approval' || r.status === 'pending_second_approval';
+              const waitingInsuranceBankForm =
+                r.cancellationCategory === 'insurance_claim' &&
+                r.status === 'pending_approval' &&
+                (!r.formSubmittedAt || !r.recipientBankAccount);
               const canTransfer = r.status === 'approved_for_transfer' && isAdmin;
               return (
                 <div key={r.id} className="p-3.5 rounded-xl border border-[#D8CEBE] bg-[#FAF9F5] space-y-2 text-xs">
@@ -607,6 +616,23 @@ export function ManagerOrderFinanceGovernanceCard({
                       <span className="ml-2 text-[#B33E3E] font-bold">• Dual Approval (&ge;20M)</span>
                     )}
                   </div>
+
+                  {r.recipientBankAccount ? (
+                    <div className="p-2.5 rounded-lg bg-white border border-[#E5DDD0] text-[#273244] space-y-0.5">
+                      <span className="font-bold text-[#181A17] block">
+                        {isEn ? 'Customer Beneficiary Bank Info:' : 'Thông tin tài khoản khách hàng đã gửi:'}
+                      </span>
+                      <span>
+                        {[r.recipientBankName, r.recipientBankAccount, r.recipientAccountHolder].filter(Boolean).join(' · ')}
+                      </span>
+                    </div>
+                  ) : waitingInsuranceBankForm ? (
+                    <div className="p-2.5 rounded-lg bg-[#FFF9EB] border border-[#DFCA9A] text-[#7A5616] font-medium">
+                      {isEn
+                        ? 'Awaiting customer to submit beneficiary bank account details via the insurance payout form.'
+                        : 'Đang chờ khách hàng điền thông tin tài khoản ngân hàng qua biểu mẫu nhận bồi thường bảo hiểm.'}
+                    </div>
+                  ) : null}
 
                   {r.bankTransactionRef && (
                     <div className="flex items-center justify-between text-[#287653] font-semibold">
@@ -631,7 +657,14 @@ export function ManagerOrderFinanceGovernanceCard({
                         type="button"
                         variant="primary"
                         size="sm"
-                        disabled={busyAction === `approve-${r.id}`}
+                        disabled={busyAction === `approve-${r.id}` || waitingInsuranceBankForm}
+                        title={
+                          waitingInsuranceBankForm
+                            ? isEn
+                              ? 'Customer must submit beneficiary bank details first'
+                              : 'Cần chờ khách hàng điền STK nhận tiền trước khi duyệt chi'
+                            : undefined
+                        }
                         onClick={() => void handleApproveRefund(r.id, 'approve')}
                         className="text-xs rounded-xl"
                       >
@@ -700,7 +733,14 @@ export function ManagerOrderFinanceGovernanceCard({
                           type="button"
                           variant="primary"
                           size="sm"
-                          onClick={() => setTransferTargetId(r.id)}
+                          onClick={() => {
+                            setTransferTargetId(r.id);
+                            setBankAccount(
+                              [r.recipientBankName, r.recipientBankAccount, r.recipientAccountHolder]
+                                .filter(Boolean)
+                                .join(' - '),
+                            );
+                          }}
                           className="text-xs rounded-xl"
                         >
                           {isEn ? 'Record Manual Transfer (Admin SoD)' : 'Xác nhận đã chuyển khoản (Admin SoD)'}

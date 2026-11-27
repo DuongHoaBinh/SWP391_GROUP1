@@ -24,6 +24,16 @@ export interface InsuranceClaimItem {
   decidedBy: number | null;
   decidedAt: string | null;
   refundRecordId: number | null;
+  refundStatus?: string | null;
+  refundBankName?: string | null;
+  refundAccountNumber?: string | null;
+  refundAccountHolder?: string | null;
+  refundCustomerNote?: string | null;
+  refundFormSubmittedAt?: string | null;
+  refundSlaDueAt?: string | null;
+  refundRequiresDualApproval?: boolean;
+  refundBankTransactionRef?: string | null;
+  refundTransferReceiptUrl?: string | null;
   createdAt: string;
   horseName?: string;
   requestCode?: string;

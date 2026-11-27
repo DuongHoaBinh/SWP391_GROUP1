@@ -153,7 +153,6 @@ API contracts are organized by backend module:
 - `/api/incidents` - emergency reports, escalation, route/cost changes (optional)
 - `/api/handover` - delivery checklist and acceptance (optional)
 - `/api/notifications` - customer and internal alerts
-- `/api/reports` - revenue, operating cost, and on-time delivery
 
 ## Orders endpoints (Flow 1: Transport Request & Approval)
 
@@ -744,6 +743,55 @@ Base URL: `http://localhost:5000/api` (All endpoints require `Authorization: Bea
 ### `GET /routes/shipment/:shipmentId`
 Retrieves the planned route and ordered stops for a shipment.
 
+### `GET /routes/shipment/:shipmentId/draft-suggestion` (Logistics Manager / Admin)
+Generates a quote-driven Flow 3 draft route suggestion from persisted `shipment`, `shipment_quote` (`routePlan.legs` / `legs`), and active/consumed `vehicle_reservation` records (separated by `outbound` and `return`).
+- Preserves city-ban-adjusted `pickupAt`, `tripType` (`one_way` / `round_trip`), `transportMode` (`road` / `air` / `sea`), exact reserved vehicle IDs, airport IDs/IATA codes, `sea` legs (`stallsBooked`), and mapped `stops[]` (including corridor-matched border/quarantine checkpoints for cross-border road shipments even when `transportation_type = 'road'`, plus `lat`, `lng`, `geofenceRadiusM`, `locationRefType`, `locationRefId` for Driver GPS geofence check-in).
+- Safely falls back to `shipment.transport_mode` when legacy orders have no `quote_id`.
+- **Response (200 OK):**
+```json
+{
+  "shipmentId": 21,
+  "source": "quote_route_plan",
+  "transportMode": "sea",
+  "tripType": "one_way",
+  "routeName": "Hành lang Đường thủy: Củ Chi → Singapore",
+  "totalDistanceKm": 1272,
+  "pickupAt": "2026-12-20T00:00:00.000Z",
+  "returnDepartureAt": null,
+  "reservedOutboundVehicleIds": [9],
+  "reservedReturnVehicleIds": [],
+  "legs": [
+    {
+      "sequenceNo": 1,
+      "direction": "outbound",
+      "legType": "road",
+      "originLocation": "Trang trại Củ Chi, TP.HCM",
+      "destinationLocation": "Cảng Cát Lái (TP.HCM)",
+      "distanceKm": 42,
+      "durationHours": 1.5,
+      "plannedDeparture": "2026-12-20T00:00:00.000Z",
+      "plannedArrival": "2026-12-20T01:30:00.000Z",
+      "vehicleId": 9,
+      "stallsBooked": 3
+    },
+    {
+      "sequenceNo": 2,
+      "direction": "outbound",
+      "legType": "sea",
+      "originLocation": "Cảng Cát Lái (TP.HCM)",
+      "destinationLocation": "Cảng Pasir Panjang (Singapore)",
+      "distanceKm": 1202,
+      "durationHours": 52,
+      "plannedDeparture": "2026-12-20T03:00:00.000Z",
+      "plannedArrival": "2026-12-22T07:00:00.000Z",
+      "vehicleId": null,
+      "stallsBooked": 3
+    }
+  ],
+  "stops": []
+}
+```
+
 ### `GET /routes/shipment/:shipmentId/plan`
 Returns the full trip plan (route, assigned vehicles, staff) and readiness evaluation (`isReadyToPublish`, list of `missingRequirements`).
 
@@ -966,10 +1014,8 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
   - `PATCH /documents/regulations/:id`: (`TRANSPORT_SPECIALIST`, `ADMIN`) Updates quarantine regulation fields (`country`, `documentType`, `description`, `effectiveDate`).
   - Document & horse image uploads validate both extension/MIME and file magic bytes (`verifyUploadedFileMagicBytes`).
 - **Fleet (`backend/src/modules/fleet`):**
-  - `PATCH /fleet/vehicles/:id` & `DELETE /fleet/vehicles/:id`: (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`) Update or remove fleet equipment.
-  - `POST /fleet/staff`: Restricted to Manager/Admin for internal non-admin staff roles (`TRANSPORT_SPECIALIST`, `FLEET_ROUTE_COORDINATOR`, `DRIVER_ESCORT`).
-- **Reports (`backend/src/modules/reports`):**
-  - `GET /reports/performance`: Restricted to `LOGISTICS_MANAGER` / `ADMIN`; aggregates real MySQL shipment, revenue, corridor, and status breakdown metrics.
+  - `PATCH /fleet/vehicles/:id` & `DELETE /fleet/vehicles/:id`: (`LOGISTICS_MANAGER`, `ADMIN`) Update or remove fleet equipment.
+  - `POST /fleet/staff`: Restricted to Manager/Admin for internal non-admin staff roles (`DRIVER_ESCORT`).
 - **Database Migration Runner:** `023_drop_plain_password.sql` removes plaintext password columns from `user` and `otp_verification`; run all pending SQL migrations idempotently via `npm run migrate:all` in `backend/`.
 
 ## Spec v3.1 Endpoints (Waves 0–5: Governance, Compliance, SLA, Vitals, Flow 5 & Flow 6)
@@ -1003,12 +1049,9 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
   - `POST /tracking/shipments/:shipmentId/handovers` (`DRIVER_ESCORT`, `FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`), `POST /tracking/handovers/:handoverId/respond` (`CUSTOMER`, `ADMIN`), `POST /tracking/handovers/:handoverId/resolve-dispute` (`LOGISTICS_MANAGER`, `ADMIN`), and `GET /tracking/handovers/attachments/:filename`: Driver submission, Customer confirmation/dispute (with mandatory evidence on dispute), and Manager resolution capped at `maxCompensation`.
 
 - **Flow 5 Incidents & Change Requests (`IncidentsController`):**
-  - `GET /incidents`, `GET /incidents/:incidentId`, `GET /incidents/attachments/:filename`, `POST /incidents/shipments/:shipmentId` (`DRIVER_ESCORT`, `FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`), `PATCH /incidents/:incidentId/assess`, `POST /incidents/:incidentId/resolve` (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`).
-  - `GET /incidents/change-requests`, `POST /incidents/:incidentId/change-requests` (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`), `POST /incidents/change-requests/:changeId/review` (`LOGISTICS_MANAGER`, `ADMIN`), `POST /incidents/change-requests/:changeId/publish` (`FLEET_ROUTE_COORDINATOR`, `LOGISTICS_MANAGER`, `ADMIN`): Two-step incident route/cost change workflow (`emergency_vet_covered` requires Premium package -> `422` otherwise; `operating_cost` approval records `shipment_operating_cost` without mutating `shipment_invoice`).
-
-- **Reports & Operating Costs (`ReportsController`):**
-  - `GET /reports/performance` (`LOGISTICS_MANAGER`, `ADMIN`): Live DB aggregations for Gross/Adjusted OTD, Quarantine pass rates, revenue, `retainedCancellationRevenue`, `creditLiabilityBalance`, `netRealizedCashRevenue`, operating costs, and gross profit.
-  - `GET /reports/shipments/:shipmentId/operating-costs` & `POST /reports/shipments/:shipmentId/operating-costs` (`LOGISTICS_MANAGER`, `FLEET_ROUTE_COORDINATOR`, `ADMIN`), `DELETE /reports/operating-costs/:costId` (`LOGISTICS_MANAGER`, `ADMIN`), and `PATCH /reports/shipments/:shipmentId/excused-delay` (`LOGISTICS_MANAGER`, `ADMIN`; locked `409 Conflict` after 48h from arrival).
+  - `GET /incidents`, `GET /incidents/:incidentId`, `GET /incidents/attachments/:filename`, `POST /incidents/shipments/:shipmentId` (`DRIVER_ESCORT`, `LOGISTICS_MANAGER`, `ADMIN`), `PATCH /incidents/:incidentId/assess`, `POST /incidents/:incidentId/resolve` (`LOGISTICS_MANAGER`, `ADMIN`).
+  - `GET /incidents/change-requests`, `POST /incidents/:incidentId/change-requests` (`LOGISTICS_MANAGER`, `ADMIN`), `POST /incidents/change-requests/:changeId/review` (`LOGISTICS_MANAGER`, `ADMIN`), `POST /incidents/change-requests/:changeId/publish` (`LOGISTICS_MANAGER`, `ADMIN`): Two-step incident route/cost change workflow (`emergency_vet_covered` requires Standard/Premium package; `operating_cost` approval records `shipment_operating_cost` without mutating `shipment_invoice`).
+- *(Removed)* Manager Financial & Operating Cost Reports (`/api/reports/*` and `/manager/reports`) have been removed from the system. Customer statements (`/customer/reports`) remain intact using `/orders/my-orders` & `/documents`.
 
 ## Equine Insurance v2 & Claims Endpoints (Step 6 — Migration 033)
 
@@ -1083,7 +1126,15 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
       "reason": ""
     }
     ```
-  - **Response 200:** Updated `InsuranceClaimItem`.
+  - **Response 200:** Updated `InsuranceClaimItem` (with linked `refundRecordId` and bank-form status fields). When approved, notifies the customer to submit their beneficiary bank account details at `/customer/requests/:shipmentId/refund?claimId=:claimId`.
+
+- **GET `/insurance/claims/:claimId/refund-form`**
+  - **Access:** Claim owner (`CUSTOMER`), `LOGISTICS_MANAGER`, `ADMIN`.
+  - **Description:** Returns approved insurance claim summary (`claimId`, `shipmentId`, `horseName`, `severity`, `approvedAmount`, `claimStatus`, `decisionReason`) and linked `refundRecord` bank submission/payout status.
+
+- **POST `/insurance/claims/:claimId/refund-form`**
+  - **Access:** Claim owner (`CUSTOMER`).
+  - **Description:** Submits customer beneficiary bank details (`bankName`, `accountNumber` 6–20 digits, `accountHolder`, `confirmAmount === approvedAmount`, optional `note`) onto the linked `shipment_refund_record` (`cancellation_category = 'insurance_claim'`), stamps `form_submitted_at` + SLA deadline, logs an `insurance_claim_event`, and notifies `Logistics Manager` & `Admin`. `PATCH /orders/refunds/:refundId/approve` rejects `insurance_claim` refunds (`409 Conflict`) until customer bank details are submitted.
 
 - **Migrations:** Run `024_wave0_schema_hotfixes.sql`, `025_wave1_g1_g2_reports_compliance.sql`, `026_wave2_g3_g4_ops_refunds_sla_vitals.sql`, and `027_wave3_flow5_incidents_and_flow6_handover.sql` (or `npm run migrate:all` in `backend/`).
 
@@ -1156,7 +1207,7 @@ Không có phương án: `200` với `{ "quoteId": null, "options": [], "recomme
 
 ### `POST /routes/plan/:shipmentId/build-detail` (bổ sung)
 
-`legs[].allocationOverrideReason` bắt buộc (≥ 5 ký tự) khi chặng bộ dùng xe khác nhóm xe đã giữ chỗ của đơn, nếu không → `400`. Chặng bay được server ghi `jet_stall_count`. Xe đang được đơn khác giữ chỗ trùng khung giờ → `409`.
+`legs[].allocationOverrideReason` bắt buộc (≥ 5 ký tự) khi chặng bộ dùng xe khác nhóm xe đã giữ chỗ của đơn, nếu không → `400`. Chặng bay được server ghi `jet_stall_count`. Xe đang được đơn khác giữ chỗ trùng khung giờ → `409`. Các điểm dừng trong `stops[]` hỗ trợ thêm `lat`, `lng`, `geofenceRadiusM`, `locationRefType`, `locationRefId` (tự động bổ sung tọa độ từ `master_stop` nếu khớp ID/tên) và lưu trực tiếp vào bảng `route_stop` để phục vụ đối chiếu geofence GPS khi tài xế check-in.
 
 ## GPS Tracking, Geofence & Simulation API (Step 10 — Migration 037)
 
