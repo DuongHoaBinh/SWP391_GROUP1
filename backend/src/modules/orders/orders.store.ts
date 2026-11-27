@@ -1302,7 +1302,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         horseId: h.horse_id,
         name: h.name,
         breed: h.breed,
-        gender: h.gender,
+        gender: h.gender === 'female' ? 'female' : h.gender ? 'male' : null,
         age: h.age !== null ? Number(h.age) : null,
         quantity: h.quantity !== null && h.quantity !== undefined ? Number(h.quantity) : 1,
         declaredValue: Number(h.declared_value ?? 0), declaredCurrency: h.declared_currency ?? 'VND',

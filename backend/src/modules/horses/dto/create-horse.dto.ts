@@ -1,6 +1,34 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
-import { HorseGender, HorseStatus, HorseTemperament } from '../horses.types';
+import {
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  Validate,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
+} from 'class-validator';
+import {
+  HORSE_MAX_WEIGHT_KG,
+  HORSE_MIN_WEIGHT_KG,
+  HorseGender,
+  HorseStatus,
+  parseAndNormalizeHorseWeight,
+} from '../horses.types';
+
+@ValidatorConstraint({ name: 'isValidHorseWeight', async: false })
+export class IsValidHorseWeightConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return parseAndNormalizeHorseWeight(value) !== null;
+  }
+
+  defaultMessage(): string {
+    return `Cân nặng ngựa phải là số hợp lệ từ ${HORSE_MIN_WEIGHT_KG} đến ${HORSE_MAX_WEIGHT_KG} kg (ví dụ: 480 kg).`;
+  }
+}
 
 export class CreateHorseDto {
   @ApiProperty({ description: 'Tên con ngựa', example: 'Thunder Bolt' })
@@ -14,18 +42,18 @@ export class CreateHorseDto {
   breed?: string;
 
   @ApiPropertyOptional({
-    description: 'Giới tính (male: đực giống, female: cái, gelding: ngựa thiến)',
+    description: 'Giới tính (male: đực, female: cái)',
     enum: HorseGender,
     example: HorseGender.MALE,
   })
-  @IsEnum(HorseGender, { message: 'Giới tính phải là male, female hoặc gelding' })
+  @IsEnum(HorseGender, { message: 'Giới tính chỉ chấp nhận male (đực) hoặc female (cái).' })
   @IsOptional()
   gender?: HorseGender;
 
-  @ApiPropertyOptional({ description: 'Tuổi của ngựa', example: 5 })
-  @IsInt()
-  @Min(1)
-  @Max(35)
+  @ApiPropertyOptional({ description: 'Tuổi của ngựa (1–35)', example: 5 })
+  @IsInt({ message: 'Tuổi ngựa phải là số nguyên.' })
+  @Min(1, { message: 'Tuổi ngựa phải từ 1 đến 35.' })
+  @Max(35, { message: 'Tuổi ngựa phải từ 1 đến 35.' })
   @IsOptional()
   age?: number;
 
@@ -61,8 +89,9 @@ export class CreateHorseDto {
   @IsOptional()
   color?: string;
 
-  @ApiPropertyOptional({ description: 'Cân nặng', example: '480 kg' })
-  @IsString()
+  @ApiPropertyOptional({ description: 'Cân nặng ngựa (150–1200 kg)', example: '480 kg' })
+  @IsString({ message: 'Cân nặng ngựa phải là chuỗi số hợp lệ (ví dụ: 480 kg).' })
+  @Validate(IsValidHorseWeightConstraint)
   @IsOptional()
   weight?: string;
 
@@ -75,9 +104,4 @@ export class CreateHorseDto {
   @IsString()
   @IsOptional()
   specialRequirements?: string;
-
-  @ApiPropertyOptional({ description: 'Tính khí', enum: HorseTemperament, example: HorseTemperament.NORMAL, default: HorseTemperament.NORMAL })
-  @IsEnum(HorseTemperament)
-  @IsOptional()
-  temperament?: HorseTemperament;
 }

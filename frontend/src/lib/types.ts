@@ -58,8 +58,6 @@ export interface HorseDocument {
   fileUrl?: string;
 }
 
-export type HorseTemperament = 'calm' | 'normal' | 'difficult';
-
 export interface Horse {
   id: string;
   backendId?: number;
@@ -68,9 +66,7 @@ export interface Horse {
   breed: string;
   age: number;
   quantity?: number;
-  /** @deprecated Bỏ giới tính sau review 11/2026; chỉ còn ở dữ liệu cũ */
-  gender?: string;
-  temperament?: HorseTemperament;
+  gender?: 'male' | 'female' | string;
   microchipNumber: string;
   passportNumber: string;
   ownerName: string;

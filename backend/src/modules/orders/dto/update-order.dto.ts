@@ -105,14 +105,14 @@ export class UpdateOrderDto {
 
   @ApiPropertyOptional({
     example: 'male',
-    enum: ['male', 'female', 'other'],
-    description: 'Giới tính (male: đực, female: cái, other: khác)',
+    enum: ['male', 'female'],
+    description: 'Giới tính (male: đực, female: cái)',
   })
   @IsOptional()
-  @IsIn(['male', 'female', 'other', 'gelding'], {
-    message: 'Giới tính phải là male, female hoặc other',
+  @IsIn(['male', 'female'], {
+    message: 'Giới tính chỉ chấp nhận male (đực) hoặc female (cái).',
   })
-  horseGender?: 'male' | 'female' | 'other' | 'gelding';
+  horseGender?: 'male' | 'female';
 
   @ApiPropertyOptional({ example: 4, minimum: 0, description: 'Tuổi của con ngựa' })
   @IsOptional()

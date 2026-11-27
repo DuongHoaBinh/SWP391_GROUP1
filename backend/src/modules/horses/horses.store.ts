@@ -1,6 +1,6 @@
 import { ConflictException, Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
-import { HorseEntity, HorseGender, HorseStatus, HorseTemperament } from './horses.types';
+import { HorseEntity, HorseGender, HorseStatus } from './horses.types';
 import { CreateHorseDto } from './dto/create-horse.dto';
 import { UpdateHorseDto } from './dto/update-horse.dto';
 import { MYSQL_POOL } from '../../common/database/database.module';
@@ -18,7 +18,6 @@ interface HorseRow extends RowDataPacket {
   weight: string | null;
   medical_status: string | null;
   special_requirements: string | null;
-  temperament: HorseTemperament | null;
   photo_url: string | null;
   status: HorseStatus;
   quantity: number;
@@ -56,7 +55,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findByOwnerId(ownerId: number): Promise<HorseEntity[]> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse
        WHERE owner_id = ? AND (status IS NULL OR status NOT IN ('retired', 'deleted'))
        ORDER BY horse_id DESC`,
@@ -68,7 +67,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findById(horseId: number): Promise<HorseEntity | undefined> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse
        WHERE horse_id = ?
        LIMIT 1`,
@@ -81,7 +80,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findByMicrochipNo(microchipNo: string): Promise<HorseEntity | undefined> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse
        WHERE LOWER(TRIM(microchip_no)) = LOWER(TRIM(?))
        LIMIT 1`,
@@ -93,7 +92,7 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
 
   async findByPassportNo(passportNo: string): Promise<HorseEntity | undefined> {
     const [rows] = await this.pool.execute<HorseRow[]>(
-      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity, created_at
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity, created_at
        FROM horse
        WHERE LOWER(TRIM(passport_no)) = LOWER(TRIM(?))
        LIMIT 1`,
@@ -136,8 +135,8 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
   async create(ownerId: number, dto: CreateHorseDto): Promise<number> {
     try {
       const [result] = await this.pool.execute(
-        `INSERT INTO horse (owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, temperament, photo_url, status, quantity)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO horse (owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, photo_url, status, quantity)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           ownerId,
           dto.name,
@@ -150,7 +149,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
           dto.weight ?? null,
           dto.medicalStatus ?? null,
           dto.specialRequirements ?? null,
-          dto.temperament ?? HorseTemperament.NORMAL,
           dto.photoUrl ?? null,
           dto.status ?? HorseStatus.ACTIVE,
           dto.quantity ?? 1,
@@ -178,7 +176,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
            weight = COALESCE(?, weight),
            medical_status = COALESCE(?, medical_status),
            special_requirements = COALESCE(?, special_requirements),
-           temperament = COALESCE(?, temperament),
            photo_url = COALESCE(?, photo_url),
            status = COALESCE(?, status),
            quantity = COALESCE(?, quantity)
@@ -194,7 +191,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
           dto.weight ?? null,
           dto.medicalStatus ?? null,
           dto.specialRequirements ?? null,
-          dto.temperament ?? null,
           dto.photoUrl ?? null,
           dto.status ?? null,
           dto.quantity !== undefined ? dto.quantity : null,
@@ -235,15 +231,11 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
   private mapHorseRow(row: HorseRow): HorseEntity {
     const rawGender = row.gender ? String(row.gender).toLowerCase() : null;
     const normalizedGender: HorseGender | null =
-      rawGender === 'male'
-        ? HorseGender.MALE
-        : rawGender === 'female'
-          ? HorseGender.FEMALE
-          : rawGender === 'gelding'
-            ? HorseGender.GELDING
-            : rawGender === 'other'
-              ? HorseGender.OTHER
-              : null;
+      rawGender === 'female'
+        ? HorseGender.FEMALE
+        : rawGender === 'male' || rawGender === 'gelding' || rawGender === 'other'
+          ? HorseGender.MALE
+          : null;
 
     return {
       id: row.horse_id,
@@ -258,7 +250,6 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
       weight: row.weight ?? null,
       medicalStatus: row.medical_status ?? null,
       specialRequirements: row.special_requirements ?? null,
-      temperament: row.temperament ?? HorseTemperament.NORMAL,
       photoUrl: row.photo_url ?? null,
       status: row.status,
       quantity: row.quantity !== null && row.quantity !== undefined ? Number(row.quantity) : 1,

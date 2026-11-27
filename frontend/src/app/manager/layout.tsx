@@ -312,7 +312,7 @@ export default function ManagerLayout({
     if (p.startsWith('/manager/planning') || p.startsWith('/manager/dispatch')) {
       return {
         title: t('manager.nav.planningHub', 'Lập Tuyến & Điều Phối'),
-        subtitle: t('manager.header.planningSub', 'Lập khung tuyến, dựng lộ trình chi tiết và lịch xuất phát'),
+        subtitle: t('manager.header.planningSub', 'Xác nhận lộ trình chi tiết, phân công nhân sự và lịch xuất phát'),
       };
     }
     if (p.startsWith('/manager/fleet')) {

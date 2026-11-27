@@ -10,7 +10,14 @@ import { basename, join } from 'path';
 import { HorsesStore } from './horses.store';
 import { CreateHorseDto } from './dto/create-horse.dto';
 import { UpdateHorseDto } from './dto/update-horse.dto';
-import { HorseEntity, HorseStatus } from './horses.types';
+import {
+  HORSE_MAX_WEIGHT_KG,
+  HORSE_MIN_WEIGHT_KG,
+  HorseEntity,
+  HorseGender,
+  HorseStatus,
+  parseAndNormalizeHorseWeight,
+} from './horses.types';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { verifyUploadedFileMagicBytes } from '../../common/utils/upload-validation';
@@ -97,6 +104,22 @@ export class HorsesService {
     dto.passportNo = cleanPassport;
     dto.quantity = 1;
 
+    if (dto.gender !== undefined && dto.gender !== HorseGender.MALE && dto.gender !== HorseGender.FEMALE) {
+      throw new BadRequestException('Giới tính chỉ chấp nhận male (đực) hoặc female (cái).');
+    }
+    if (dto.age !== undefined && (!Number.isInteger(dto.age) || dto.age < 1 || dto.age > 35)) {
+      throw new BadRequestException('Tuổi ngựa phải là số nguyên từ 1 đến 35.');
+    }
+    if (dto.weight !== undefined) {
+      const normalizedWeight = parseAndNormalizeHorseWeight(dto.weight);
+      if (!normalizedWeight) {
+        throw new BadRequestException(
+          `Cân nặng ngựa phải là số hợp lệ từ ${HORSE_MIN_WEIGHT_KG} đến ${HORSE_MAX_WEIGHT_KG} kg (ví dụ: 480 kg).`,
+        );
+      }
+      dto.weight = normalizedWeight;
+    }
+
     const horseId = await this.horsesStore.create(ownerId, dto);
     const created = await this.horsesStore.findById(horseId);
     if (!created) {
@@ -150,6 +173,22 @@ export class HorsesService {
         }
       }
       dto.passportNo = cleanPassport;
+    }
+
+    if (dto.gender !== undefined && dto.gender !== HorseGender.MALE && dto.gender !== HorseGender.FEMALE) {
+      throw new BadRequestException('Giới tính chỉ chấp nhận male (đực) hoặc female (cái).');
+    }
+    if (dto.age !== undefined && (!Number.isInteger(dto.age) || dto.age < 1 || dto.age > 35)) {
+      throw new BadRequestException('Tuổi ngựa phải là số nguyên từ 1 đến 35.');
+    }
+    if (dto.weight !== undefined) {
+      const normalizedWeight = parseAndNormalizeHorseWeight(dto.weight);
+      if (!normalizedWeight) {
+        throw new BadRequestException(
+          `Cân nặng ngựa phải là số hợp lệ từ ${HORSE_MIN_WEIGHT_KG} đến ${HORSE_MAX_WEIGHT_KG} kg (ví dụ: 480 kg).`,
+        );
+      }
+      dto.weight = normalizedWeight;
     }
 
     // Không cho phép khách hàng tự ý đổi trạng thái ngựa đang được giữ/vận chuyển về lại 'active'

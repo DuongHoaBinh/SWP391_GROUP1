@@ -174,7 +174,6 @@ export default function HorseDetailPage() {
             breed: res.breed || 'Thoroughbred',
             gender: res.gender || undefined,
             age: parsedAge,
-            temperament: res.temperament || 'normal',
             color: res.color || '',
             weight: res.weight ? String(res.weight) : '',
             microchipNumber: res.microchipNumber || res.microchipNo || '',
@@ -438,17 +437,6 @@ export default function HorseDetailPage() {
                     {hasValidAge
                       ? `${horse.age} ${t('horse.yearsOld', isEn ? 'yrs' : 'tuổi')}`
                       : notUpdatedText}
-                  </strong>
-                </span>
-                <span aria-hidden="true">•</span>
-                <span>
-                  {t('horses.temperament', isEn ? 'Temperament' : 'Tính khí')}:{' '}
-                  <strong className="text-[#181A17]">
-                    {horse.temperament === 'calm'
-                      ? t('horses.temperament.calm', isEn ? 'Calm' : 'Điềm tĩnh')
-                      : horse.temperament === 'difficult'
-                        ? t('horses.temperament.difficult', isEn ? 'Spirited' : 'Khó tính')
-                        : t('horses.temperament.normal', isEn ? 'Normal' : 'Bình thường')}
                   </strong>
                 </span>
                 <span aria-hidden="true">•</span>

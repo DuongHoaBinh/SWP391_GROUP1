@@ -31,8 +31,7 @@ export interface OrderHorse {
   horseId: number;
   name: string;
   breed: string | null;
-  /** @deprecated Bỏ giới tính sau review 11/2026; chỉ còn ở dữ liệu cũ */
-  gender: 'male' | 'female' | 'other' | 'gelding' | null;
+  gender: 'male' | 'female' | null;
   age: number | null;
   quantity?: number;
   declaredValue: number;

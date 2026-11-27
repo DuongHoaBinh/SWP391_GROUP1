@@ -139,8 +139,8 @@ export function CommandPalette() {
           category: 'actions',
           title: isEn ? 'Trip Planning & Crew Dispatch' : 'Lập kế hoạch & Phân công chuyến đi',
           subtitle: isEn
-            ? 'Set strategic frameworks, approve routes & assign crews'
-            : 'Thiết lập khung chiến lược, duyệt lộ trình & phân công nhân sự',
+            ? 'Confirm routes, monitor departure gates & assign crews'
+            : 'Xác nhận lộ trình, theo dõi điều kiện xuất phát & phân công nhân sự',
           icon: <MapPin className="w-4 h-4 text-[#287653]" />,
           url: '/manager/planning',
         },

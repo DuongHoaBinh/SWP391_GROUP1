@@ -65,7 +65,7 @@ export default function ManagerPlanningPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [filterTab, setFilterTab] = useState<
-    'ALL' | 'NEED_FRAMEWORK' | 'PENDING_APPROVAL' | 'APPROVED' | 'READY' | 'IN_TRANSIT'
+    'ALL' | 'NEED_ROUTE' | 'PENDING_APPROVAL' | 'APPROVED' | 'READY' | 'IN_TRANSIT'
   >('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -213,7 +213,7 @@ export default function ManagerPlanningPage() {
 
       if (!matchSearch) return false;
 
-      if (filterTab === 'NEED_FRAMEWORK') {
+      if (filterTab === 'NEED_ROUTE') {
         return (
           (!o.routePlan || o.routePlan.planStatus === 'draft') &&
           !['in_transit', 'return_pending', 'completed'].includes(o.status)
@@ -242,7 +242,7 @@ export default function ManagerPlanningPage() {
   }, [orders, searchQuery, filterTab]);
 
   // KPI Metrics & Tab counts
-  const needFrameworkCount = orders.filter(
+  const needRouteCount = orders.filter(
     (o) =>
       (!o.routePlan || o.routePlan.planStatus === 'draft') &&
       !['in_transit', 'return_pending', 'completed'].includes(o.status)
@@ -706,7 +706,7 @@ export default function ManagerPlanningPage() {
   };
 
   const tabOptions: Array<{
-    key: 'ALL' | 'NEED_FRAMEWORK' | 'PENDING_APPROVAL' | 'APPROVED' | 'READY' | 'IN_TRANSIT';
+    key: 'ALL' | 'NEED_ROUTE' | 'PENDING_APPROVAL' | 'APPROVED' | 'READY' | 'IN_TRANSIT';
     label: string;
     count: number;
     activeClass: string;
@@ -718,9 +718,9 @@ export default function ManagerPlanningPage() {
       activeClass: 'bg-[#181A17] text-white shadow-sm border-transparent',
     },
     {
-      key: 'NEED_FRAMEWORK',
+      key: 'NEED_ROUTE',
       label: t('manager.planning.tabUnplanned', 'Chưa lập kế hoạch'),
-      count: needFrameworkCount,
+      count: needRouteCount,
       activeClass: 'bg-[#A67C2E] text-white shadow-sm border-transparent',
     },
     {

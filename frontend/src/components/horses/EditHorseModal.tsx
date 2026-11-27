@@ -3,8 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { useCustomerStore } from '@/lib/customer-store';
-import { Horse, HorseTemperament } from '@/lib/types';
-import { HorseHandlingFields } from './HorseHandlingFields';
+import { Horse } from '@/lib/types';
 import { HORSE_COAT_COLORS, HORSE_MEDICAL_STATUSES } from '@/lib/horse-constants';
 import {
   Award,
@@ -58,6 +57,22 @@ const CHAMPION_PRESETS = [
   },
 ];
 
+const MIN_HORSE_WEIGHT_KG = 150;
+const MAX_HORSE_WEIGHT_KG = 1200;
+
+function extractWeightInputValue(raw?: string | null): string {
+  const match = /^(\d+(?:\.\d{1,2})?)/.exec(String(raw || '').trim());
+  return match ? match[1] : '480';
+}
+
+function parseValidWeightKg(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < MIN_HORSE_WEIGHT_KG || n > MAX_HORSE_WEIGHT_KG) return null;
+  return n;
+}
+
 export const EditHorseModal: React.FC<EditHorseModalProps> = ({
   isOpen,
   onClose,
@@ -67,21 +82,19 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
   const { updateHorse, uploadHorseAvatar, refreshHorses } = useCustomerStore();
   const { t, language, translateBreed, translateGender, translateStatus } = useLanguage();
 
-  const normalizeGender = (g?: string | null): 'male' | 'female' | 'gelding' => {
+  const normalizeGender = (g?: string | null): 'male' | 'female' => {
     const lower = String(g || '').toLowerCase().trim();
     if (lower === 'female' || lower === 'mare' || lower.includes('cái')) return 'female';
-    if (lower === 'other' || lower === 'gelding' || lower.includes('khác') || lower.includes('thiến')) return 'gelding';
     return 'male';
   };
 
   const [activeTab, setActiveTab] = useState<'identity' | 'passport'>('identity');
   const [name, setName] = useState(horse.name || '');
   const [breed, setBreed] = useState(horse.breed || 'Thoroughbred');
-  const [gender, setGender] = useState<'male' | 'female' | 'gelding'>(normalizeGender(horse.gender));
-  const [age, setAge] = useState(horse.age || 5);
-  const [temperament, setTemperament] = useState<HorseTemperament>(horse.temperament || 'normal');
+  const [gender, setGender] = useState<'male' | 'female'>(normalizeGender(horse.gender));
+  const [ageInput, setAgeInput] = useState<string>(String(horse.age || 5));
   const [color, setColor] = useState(horse.color || 'Bay');
-  const [weight, setWeight] = useState(horse.weight || '480 kg');
+  const [weight, setWeight] = useState(extractWeightInputValue(horse.weight));
   const [medicalStatus, setMedicalStatus] = useState<'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention'>(
     (horse.medicalStatus as any) || 'Healthy'
   );
@@ -94,6 +107,12 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
 
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const isWeightInvalid = weight.trim() !== '' && parseValidWeightKg(weight) === null;
+  const parsedAgePreview = Number(ageInput);
+  const isAgeInvalid =
+    ageInput.trim() !== '' &&
+    (!Number.isInteger(parsedAgePreview) || parsedAgePreview < 1 || parsedAgePreview > 35);
 
   useEffect(() => {
     return () => {
@@ -108,14 +127,13 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
       setName(horse.name || '');
       setBreed(horse.breed || 'Thoroughbred');
       setGender(normalizeGender(horse.gender));
-      setAge(horse.age || 5);
-      setTemperament(horse.temperament || 'normal');
+      setAgeInput(String(horse.age || 5));
       let initialColor = horse.color || 'Bay';
       if (initialColor.toLowerCase() === 'grey' || initialColor.toLowerCase() === 'gray') {
         initialColor = 'Gray / Grey';
       }
       setColor(initialColor);
-      setWeight(horse.weight || '480 kg');
+      setWeight(extractWeightInputValue(horse.weight));
       setMedicalStatus((horse.medicalStatus as any) || 'Healthy');
       setSpecialRequirements(horse.specialRequirements || '');
       setPassportNumber(horse.passportNumber || '');
@@ -135,6 +153,30 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
       setActiveTab('identity');
       return;
     }
+
+    const parsedAge = Number(ageInput.trim());
+    if (!ageInput.trim() || !Number.isInteger(parsedAge) || parsedAge < 1 || parsedAge > 35) {
+      setError(
+        language === 'en'
+          ? 'Horse age must be a whole number between 1 and 35.'
+          : 'Số tuổi ngựa phải là số nguyên từ 1 đến 35.'
+      );
+      setActiveTab('identity');
+      return;
+    }
+
+    const parsedWeight = parseValidWeightKg(weight);
+    if (parsedWeight === null) {
+      setError(
+        language === 'en'
+          ? `Horse weight must be a valid number between ${MIN_HORSE_WEIGHT_KG} and ${MAX_HORSE_WEIGHT_KG} kg.`
+          : `Cân nặng ngựa phải là số hợp lệ từ ${MIN_HORSE_WEIGHT_KG} đến ${MAX_HORSE_WEIGHT_KG} kg.`
+      );
+      setActiveTab('identity');
+      return;
+    }
+    const normalizedWeight = `${Number.isInteger(parsedWeight) ? parsedWeight : Number(parsedWeight.toFixed(2))} kg`;
+
     if (!passportNumber.trim()) {
       setError('Vui lòng nhập Số hộ chiếu FEI (Passport Number).');
       setActiveTab('passport');
@@ -175,13 +217,12 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
             name: name.trim(),
             breed,
             gender,
-            age: Number(age) || 4,
+            age: parsedAge,
             quantity: 1,
-            temperament,
             passportNo: passportNumber.trim() || undefined,
             microchipNo: microchipNumber.trim() || undefined,
             color: color.trim() || undefined,
-            weight: weight.trim() || undefined,
+            weight: normalizedWeight,
             medicalStatus: medicalStatus || undefined,
             specialRequirements: specialRequirements.trim() || undefined,
             photoUrl: uploadedPhotoUrl || photoPreview || undefined,
@@ -194,11 +235,10 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
         name: name.trim(),
         breed,
         gender,
-        age: Number(age) || 4,
+        age: parsedAge,
         quantity: 1,
-        temperament,
         color,
-        weight: weight.trim() || '480 kg',
+        weight: normalizedWeight,
         medicalStatus,
         specialRequirements: specialRequirements.trim(),
         passportNumber: passportNumber.trim(),
@@ -238,7 +278,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
       hideHeader
       bodyClassName="p-0 overflow-y-auto max-h-[92vh]"
     >
-      <form onSubmit={handleSubmit} className="flex flex-col bg-surface">
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col bg-surface">
         {/* Luxury Obsidian Header Banner */}
         <div className="relative bg-gradient-to-r from-[#181A17] via-[#242722] to-[#181A17] px-6 sm:px-8 pt-7 pb-6 text-[#F7F7F4] overflow-hidden border-b border-[#2C2F2A]">
           <div className="flex items-center justify-between gap-4 mb-4 relative z-10">
@@ -273,7 +313,7 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                 <span>{translateGender(gender)}</span>
                 <span className="text-slate-500">•</span>
                 <span>
-                  {age} {t('horses.yearsOld', 'tuổi')}
+                  {ageInput || horse.age || 0} {t('horses.yearsOld', 'tuổi')}
                 </span>
               </p>
             </div>
@@ -479,11 +519,10 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                   <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
                     {t('horses.gender', 'Giới Tính')}
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     {[
-                      { value: 'male' as const, label: language === 'en' ? 'Stallion' : 'Đực giống' },
-                      { value: 'female' as const, label: language === 'en' ? 'Mare' : 'Cái' },
-                      { value: 'gelding' as const, label: language === 'en' ? 'Gelding' : 'Thiến' },
+                      { value: 'male' as const, label: language === 'en' ? 'Male' : 'Đực' },
+                      { value: 'female' as const, label: language === 'en' ? 'Female' : 'Cái' },
                     ].map((opt) => (
                       <button
                         key={opt.value}
@@ -501,37 +540,67 @@ export const EditHorseModal: React.FC<EditHorseModalProps> = ({
                   </div>
                 </div>
 
-                <HorseHandlingFields
-                  temperament={temperament}
-                  onTemperamentChange={setTemperament}
-                />
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
-                      {t('horses.age', 'Số Tuổi')}
-                    </label>
+                <div>
+                  <label htmlFor="edit-horse-age" className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.age', 'Số Tuổi')}
+                  </label>
+                  <div className="relative">
                     <input
+                      id="edit-horse-age"
                       type="number"
+                      inputMode="numeric"
                       min={1}
                       max={35}
-                      value={age}
-                      onChange={(e) => setAge(Math.min(35, Math.max(1, Number(e.target.value) || 1)))}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
+                      step={1}
+                      value={ageInput}
+                      onKeyDown={(e) => {
+                        if (['e', 'E', '+', '-', '.'].includes(e.key)) e.preventDefault();
+                      }}
+                      onChange={(e) => setAgeInput(e.target.value.replace(/[^0-9]/g, ''))}
+                      className={`w-full pl-3.5 pr-12 py-2.5 rounded-xl border bg-surface text-sm font-semibold text-text-primary ${
+                        isAgeInvalid ? 'border-danger focus:border-danger' : 'border-border'
+                      }`}
                     />
+                    <span className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-xs font-bold text-text-muted pointer-events-none">
+                      {language === 'en' ? 'yrs' : 'tuổi'}
+                    </span>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
-                      {t('horses.weight', 'Cân Nặng')}
-                    </label>
+                  <p className={`mt-1 text-[11px] font-medium ${isAgeInvalid ? 'text-danger' : 'text-text-muted'}`}>
+                    {language === 'en' ? 'Valid range: 1 – 35 years' : 'Khoảng hợp lệ: 1 – 35 tuổi'}
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="edit-horse-weight" className="block text-xs font-bold text-text-primary uppercase tracking-wide mb-1.5">
+                    {t('horses.weight', 'Cân Nặng')} <span className="text-danger">*</span>
+                  </label>
+                  <div className="relative">
                     <input
-                      type="text"
+                      id="edit-horse-weight"
+                      type="number"
+                      inputMode="decimal"
+                      min={MIN_HORSE_WEIGHT_KG}
+                      max={MAX_HORSE_WEIGHT_KG}
+                      step="1"
                       value={weight}
-                      onChange={(e) => setWeight(e.target.value)}
-                      placeholder="480 kg"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface text-sm font-semibold text-text-primary"
+                      onKeyDown={(e) => {
+                        if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
+                      }}
+                      onChange={(e) => setWeight(e.target.value.replace(/[^0-9.]/g, ''))}
+                      placeholder="480"
+                      className={`w-full pl-3.5 pr-11 py-2.5 rounded-xl border bg-surface text-sm font-semibold text-text-primary ${
+                        isWeightInvalid ? 'border-danger focus:border-danger' : 'border-border'
+                      }`}
                     />
+                    <span className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-xs font-bold text-text-muted pointer-events-none">
+                      kg
+                    </span>
                   </div>
+                  <p className={`mt-1 text-[11px] font-medium ${isWeightInvalid ? 'text-danger' : 'text-text-muted'}`}>
+                    {language === 'en'
+                      ? `Valid range: ${MIN_HORSE_WEIGHT_KG} – ${MAX_HORSE_WEIGHT_KG} kg (numbers only)`
+                      : `Khoảng hợp lệ: ${MIN_HORSE_WEIGHT_KG} – ${MAX_HORSE_WEIGHT_KG} kg (chỉ nhập số)`}
+                  </p>
                 </div>
 
                 <div className="sm:col-span-2">
