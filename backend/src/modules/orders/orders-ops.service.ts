@@ -92,6 +92,9 @@ export class OrdersOpsService {
   }
 
   async getDisbursements(user: AuthenticatedUser, shipmentId: number): Promise<DisbursementItem[]> {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem dữ liệu tài chính / phí ứng trước.');
+    }
     const order = await this.opsStore.findOrderOwner(shipmentId);
     if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     if (user.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) {
@@ -101,6 +104,9 @@ export class OrdersOpsService {
   }
 
   async getAuthorizedDisbursementReceipt(user: AuthenticatedUser, disbursementId: number) {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem biên lai tài chính.');
+    }
     const item = await this.opsStore.findDisbursementById(disbursementId);
     if (!item) throw new NotFoundException(`Không tìm thấy biên lai ứng trước #${disbursementId}`);
     if (user.role === UserRole.CUSTOMER && item.customerId !== Number(user.id)) {
@@ -121,6 +127,9 @@ export class OrdersOpsService {
   }
 
   async listRefunds(user: AuthenticatedUser, shipmentId?: number): Promise<RefundRecordItem[]> {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem hồ sơ hoàn tiền.');
+    }
     if (shipmentId !== undefined) {
       const order = await this.opsStore.findOrderOwner(shipmentId);
       if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
@@ -215,6 +224,9 @@ export class OrdersOpsService {
   }
 
   async getAuthorizedRefundReceipt(user: AuthenticatedUser, refundId: number) {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem ủy nhiệm chi hoàn tiền.');
+    }
     const item = await this.opsStore.findRefundById(refundId);
     if (!item) throw new NotFoundException(`Không tìm thấy hồ sơ hoàn tiền #${refundId}`);
     if (user.role === UserRole.CUSTOMER && item.customerId !== Number(user.id)) {
@@ -235,11 +247,11 @@ export class OrdersOpsService {
   }
 
   async upgradeCharter(user: AuthenticatedUser, shipmentId: number, dto: UpgradeCharterDto) {
+    if (![UserRole.LOGISTICS_MANAGER, UserRole.ADMIN].includes(user.role)) {
+      throw new ForbiddenException('Chỉ Logistics Manager hoặc Admin mới có quyền thực hiện nâng cấp bao nguyên xe.');
+    }
     const order = await this.opsStore.findOrderOwner(shipmentId);
     if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
-    if (user.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) {
-      throw new ForbiddenException('Bạn chỉ được nâng cấp đơn hàng của chính mình.');
-    }
 
     const res = await this.opsStore.upgradeCharter(Number(user.id), shipmentId, dto.charterTransportCost, dto.reason);
     const code = `REQ-${String(shipmentId).padStart(3, '0')}`;
@@ -263,13 +275,23 @@ export class OrdersOpsService {
     return res;
   }
 
-  async rescheduleShared(user: AuthenticatedUser, shipmentId: number, dto: RescheduleSharedDto) {
+  async rescheduleShared(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    dto: RescheduleSharedDto,
+    options?: { requireSharedStall?: boolean },
+  ) {
+    if (![UserRole.LOGISTICS_MANAGER, UserRole.ADMIN].includes(user.role)) {
+      throw new ForbiddenException('Chỉ Logistics Manager hoặc Admin mới có quyền dời lịch chuyến ghép.');
+    }
     const order = await this.opsStore.findOrderOwner(shipmentId);
     if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
-    if (user.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) {
-      throw new ForbiddenException('Bạn chỉ được dời lịch đơn hàng của chính mình.');
-    }
-    const res = await this.opsStore.rescheduleSharedOrder(shipmentId, dto.newDepartureDate, dto.reason);
+    const res = await this.opsStore.rescheduleSharedOrder(
+      shipmentId,
+      dto.newDepartureDate,
+      dto.reason,
+      options,
+    );
     const code = `REQ-${String(shipmentId).padStart(3, '0')}`;
     await this.notificationsService.createNotification(
       res.customerId,
@@ -299,10 +321,15 @@ export class OrdersOpsService {
       if (!dto.newDepartureDate) {
         throw new BadRequestException('Phương án dời lịch chuyến (reschedule_free) bắt buộc có newDepartureDate.');
       }
-      await this.rescheduleShared(user, shipmentId, {
-        newDepartureDate: dto.newDepartureDate,
-        reason: dto.notes || 'Dời lịch do quá trần nhân sự BR-F3-06',
-      });
+      await this.rescheduleShared(
+        user,
+        shipmentId,
+        {
+          newDepartureDate: dto.newDepartureDate,
+          reason: dto.notes || 'Dời lịch do quá trần nhân sự BR-F3-06',
+        },
+        { requireSharedStall: false },
+      );
     } else if (dto.option === 'cancel_refund') {
       await this.operationalCancel(user, shipmentId, {
         category: CancellationCategory.COMPANY_FAULT,

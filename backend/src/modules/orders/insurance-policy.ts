@@ -33,7 +33,7 @@ export const packages = [
     minimumFeeVnd: 1000000,
     compensationBasisPoints: 8000,
     compensationCapVnd: null,
-    emergencyVetCovered: false,
+    emergencyVetCovered: true,
     emergencyVetCapVnd: 20000000,
   },
   {
@@ -178,11 +178,17 @@ export function calculateInsurance(
       maxCompensation = 50000000;
     } else {
       insuranceFee = Math.max(rawFee, policy.minimumFeeVnd);
+      const declaredVnd = Number(valueVndCents) / 100;
+      if (declaredVnd <= insuranceFee) {
+        throw new BadRequestException(
+          `Giá trị khai báo (${declaredVnd.toLocaleString('vi-VN')} VND) phải lớn hơn mức phí bảo hiểm tối thiểu (${insuranceFee.toLocaleString('vi-VN')} VND) của gói ${policy.name}. Vui lòng tăng giá trị khai báo hoặc chọn gói Cơ bản.`,
+        );
+      }
       if (insurancePackage === 'standard') {
-        maxCompensation = Math.round((Number(valueVndCents) / 100) * 0.8);
+        maxCompensation = Math.round(declaredVnd * 0.8);
       } else {
         // premium
-        maxCompensation = Number(valueVndCents) / 100;
+        maxCompensation = declaredVnd;
       }
     }
   }
@@ -219,6 +225,14 @@ export function suggestPayout(input: {
 }): { amount: number; explanation: string; maxAllowed: number } {
   const { rule, declaredValueVnd, vetCostVnd } = input;
   if (rule.payoutType === 'percent_of_value') {
+    if (declaredValueVnd <= 0 && rule.packageCode === 'basic' && rule.capVnd != null) {
+      const capAmount = Math.round((rule.capVnd * (rule.percentBps ?? 0)) / 10000);
+      return {
+        amount: capAmount,
+        explanation: `Ngựa chưa khai báo giá trị (> 0 VND) — mức hỗ trợ tối đa gói Cơ bản đến ${capAmount.toLocaleString('vi-VN')} VND (cần chứng từ giá trị thực tế)`,
+        maxAllowed: capAmount,
+      };
+    }
     const rawAmount = Math.round((declaredValueVnd * (rule.percentBps ?? 0)) / 10000);
     const amount = rule.capVnd != null ? Math.min(rawAmount, rule.capVnd) : rawAmount;
     const explanation =

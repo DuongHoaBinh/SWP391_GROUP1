@@ -50,7 +50,7 @@ export interface OrderHorse {
 
 export interface TransportOrder {
   transportMode?: 'road' | 'air' | 'sea' | null;
-  seaMode?: 'ferry' | 'vessel' | null;
+  seaMode?: 'vessel' | null;
   quoteId?: number | null;
   pricingSnapshot?: any | null;
   distanceKm?: number | null;
@@ -122,4 +122,10 @@ export interface TransportOrder {
   feasibilityNote?: string | null;
   returnRescheduleFee?: number | null;
   customerProposedPrice?: number | null;
+  deferredDocuments?: Array<{
+    horseId: number;
+    documentTypeCode: string;
+    documentTypeName?: string;
+    submitDeadline?: string | null;
+  }>;
 }

@@ -67,7 +67,7 @@ async function main() {
     const hTables = harnessMeta.tables.map((t) => t.TABLE_NAME);
     const sTables = schemaMeta.tables.map((t) => t.TABLE_NAME);
 
-    assert.equal(sTables.length, 60, `Expected 60 tables in schema.mysql.sql, got ${sTables.length}`);
+    assert.equal(sTables.length, 62, `Expected 62 tables in schema.mysql.sql, got ${sTables.length}`);
     assert.deepEqual(hTables, sTables, 'Harness DB table list must match schema.mysql.sql 100%');
 
     const mapCols = (cols) => new Map(cols.map((c) => [`${c.TABLE_NAME}.${c.COLUMN_NAME}`, c]));

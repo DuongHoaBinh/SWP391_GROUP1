@@ -69,7 +69,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={isDisabled}
         aria-busy={loading || undefined}
         className={cn(
-          'inline-flex items-center justify-center gap-2 font-semibold relative select-none cursor-pointer',
+          'inline-flex items-center justify-center gap-2 whitespace-nowrap font-semibold relative select-none cursor-pointer',
           'transition-all duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]',
           'hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.97]',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1',
@@ -83,14 +83,18 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           <Loader2 className="w-4 h-4 animate-spin text-current shrink-0" aria-hidden="true" />
         ) : (
           icon && iconPosition === 'left' && (
-            <span className="flex items-center shrink-0" aria-hidden="true">
+            <span className="inline-flex items-center shrink-0" aria-hidden="true">
               {icon}
             </span>
           )
         )}
-        {hasChildren && <span>{children}</span>}
+        {hasChildren && (
+          <span className="inline-flex items-center justify-center gap-2 whitespace-nowrap">
+            {children}
+          </span>
+        )}
         {!loading && icon && iconPosition === 'right' && (
-          <span className="flex items-center shrink-0" aria-hidden="true">
+          <span className="inline-flex items-center shrink-0" aria-hidden="true">
             {icon}
           </span>
         )}

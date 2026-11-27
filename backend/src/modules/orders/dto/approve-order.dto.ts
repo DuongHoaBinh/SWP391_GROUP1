@@ -50,11 +50,11 @@ export class ApproveOrderDto {
   transportMode?: 'road' | 'air' | 'sea';
 
   @ApiPropertyOptional({
-    example: 'ferry',
-    enum: ['ferry', 'vessel'],
-    description: 'Hình thức đường thủy (ferry hoặc vessel)',
+    example: 'vessel',
+    enum: ['vessel'],
+    description: 'Hình thức đường thủy (tàu biển chuyên dụng)',
   })
   @IsOptional()
-  @IsIn(['ferry', 'vessel'])
-  seaMode?: 'ferry' | 'vessel';
+  @IsIn(['vessel'])
+  seaMode?: 'vessel';
 }

@@ -18,23 +18,43 @@ import {
   Pin,
   PinOff,
   ChevronDown,
+  Search,
 } from 'lucide-react';
 import { getAuthToken, getCurrentUser, logout } from '@/lib/auth';
 import { getDashboardRouteForRole } from '@/lib/auth-redirect';
 import { LogoutConfirmModal } from '@/components/layout/LogoutConfirmModal';
 import { HelpSupportModal } from '@/components/layout/HelpSupportModal';
 import { PortalLoadingSkeleton } from '@/components/layout/PortalLoadingSkeleton';
+import { CommandPalette } from '@/components/ui/CommandPalette';
 import { apiClient } from '@/lib/api-client';
 import { AmbientCanvas } from '@/components/layout/AmbientCanvas';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
-import { FleetRouteStoreProvider } from '@/lib/fleet-route-store';
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ReactNode;
   badge?: number;
+}
+
+function computeStaffInitials(rawName: string, fallback: string): string {
+  const cleaned = rawName
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b(BS|TS|ThS|Dr|Mr|Ms|Mrs)\.?\b/gi, ' ')
+    .trim();
+  const words = cleaned
+    .split(/\s+/)
+    .filter((w) => /\p{L}/u.test(w));
+  if (words.length >= 2) {
+    const firstChar = Array.from(words[0])[0] || '';
+    const lastChar = Array.from(words[words.length - 1])[0] || '';
+    return `${firstChar}${lastChar}`.toLocaleUpperCase('vi-VN');
+  }
+  if (words.length === 1) {
+    return Array.from(words[0]).slice(0, 2).join('').toLocaleUpperCase('vi-VN');
+  }
+  return fallback;
 }
 
 export default function DriverLayout({
@@ -209,28 +229,52 @@ export default function DriverLayout({
       icon: <LayoutDashboard size={18} aria-hidden="true" />,
     },
     {
-      label: t('driver.nav.myTrips', language === 'en' ? 'My Trips' : 'Chuyến đi của tôi'),
+      label: t('driver.nav.myTrips', language === 'en' ? 'My Trips' : 'Chuyến đi'),
       href: `${basePath}/trips`,
       icon: <Truck size={18} aria-hidden="true" />,
     },
     {
-      label: t('driver.nav.tripStatus', language === 'en' ? 'Trip Status' : 'Cập nhật lộ trình'),
+      label: t('driver.nav.tripStatus', language === 'en' ? 'Check-in Console' : 'Điều hành chuyến'),
       href: `${basePath}/status`,
       icon: <Crosshair size={18} aria-hidden="true" />,
     },
-    ...(isEscortRole
-      ? [
-          {
-            label: t('driver.nav.health', language === 'en' ? 'Horse Health' : 'Sức khỏe ngựa'),
-            href: `${basePath}/health`,
-            icon: <Stethoscope size={18} aria-hidden="true" />,
-          },
-        ]
-      : []),
     {
-      label: t('driver.nav.incidents', language === 'en' ? 'Incident Reports' : 'Báo cáo sự cố'),
+      label: t('driver.nav.health', language === 'en' ? 'Equine Health' : 'Sức khỏe ngựa'),
+      href: `${basePath}/health`,
+      icon: <Stethoscope size={18} aria-hidden="true" />,
+    },
+    {
+      label: t('driver.nav.incidents', language === 'en' ? 'Incidents' : 'Báo cáo sự cố'),
       href: `${basePath}/incidents`,
       icon: <AlertTriangle size={18} aria-hidden="true" />,
+    },
+  ];
+
+  const mobileBottomNavItems: NavItem[] = [
+    {
+      label: language === 'en' ? 'Home' : 'Tổng quan',
+      href: basePath,
+      icon: <LayoutDashboard size={19} aria-hidden="true" />,
+    },
+    {
+      label: language === 'en' ? 'Trips' : 'Chuyến đi',
+      href: `${basePath}/trips`,
+      icon: <Truck size={19} aria-hidden="true" />,
+    },
+    {
+      label: language === 'en' ? 'Check-in' : 'Check-in',
+      href: `${basePath}/status`,
+      icon: <Crosshair size={19} aria-hidden="true" />,
+    },
+    {
+      label: language === 'en' ? 'Health' : 'Sức khỏe',
+      href: `${basePath}/health`,
+      icon: <Stethoscope size={19} aria-hidden="true" />,
+    },
+    {
+      label: language === 'en' ? 'Incidents' : 'Sự cố',
+      href: `${basePath}/incidents`,
+      icon: <AlertTriangle size={19} aria-hidden="true" />,
     },
   ];
 
@@ -254,28 +298,100 @@ export default function DriverLayout({
     }
     const driverVariant = href.replace(/^\/escort/, '/driver');
     const escortVariant = href.replace(/^\/driver/, '/escort');
+    if (driverVariant === '/driver/status' && /^\/(driver|escort)\/trips\/\d+/.test(pathname || '')) {
+      return true;
+    }
+    if (driverVariant === '/driver/trips' && /^\/(driver|escort)\/trips\/\d+/.test(pathname || '')) {
+      return false;
+    }
     return Boolean(
-      pathname?.startsWith(href) ||
-        pathname?.startsWith(driverVariant) ||
-        pathname?.startsWith(escortVariant)
+      pathname === href ||
+        pathname?.startsWith(`${href}/`) ||
+        pathname === driverVariant ||
+        pathname?.startsWith(`${driverVariant}/`) ||
+        pathname === escortVariant ||
+        pathname?.startsWith(`${escortVariant}/`),
     );
   };
 
-  const roleTitleText = isEscortRole
-    ? t('driver.escortRole', language === 'en' ? 'Equine Vet / Escort' : 'Bác sĩ Thú y / Hộ tống')
-    : t('driver.driverRole', language === 'en' ? 'Vehicle Driver' : 'Tài xế Lái xe');
+  const getDynamicHeaderMeta = (): { title: string; subtitle: string } => {
+    const normalized = (pathname || '').replace(/^\/escort/, '/driver');
+    const isEn = language === 'en';
+    if (/^\/driver\/trips\/\d+/.test(normalized) || normalized.startsWith('/driver/status')) {
+      return {
+        title: isEn ? 'Field Trip Console' : 'Điều Hành Chuyến & Check-in',
+        subtitle: isEn
+          ? 'Live route milestones, GPS map, equine vitals & handover.'
+          : 'Check-in mốc lộ trình, bản đồ GPS, sinh hiệu ngựa & bàn giao.',
+      };
+    }
+    if (normalized.startsWith('/driver/trips')) {
+      return {
+        title: isEn ? 'Assigned Trips' : 'Danh Sách Chuyến Đi',
+        subtitle: isEn
+          ? 'Accept dispatch assignments and review transport itineraries.'
+          : 'Xác nhận nhận chuyến và xem chi tiết các chặng vận chuyển.',
+      };
+    }
+    if (normalized.startsWith('/driver/health')) {
+      return {
+        title: isEn ? 'Equine Health & Vitals' : 'Sức Khỏe & Sinh Hiệu Ngựa',
+        subtitle: isEn
+          ? 'Log temperature, heart rate, respiration and clinical observations.'
+          : 'Ghi nhận thân nhiệt, nhịp tim, nhịp thở và quan sát lâm sàng.',
+      };
+    }
+    if (normalized.startsWith('/driver/incidents')) {
+      return {
+        title: isEn ? 'Incident & Emergency Reports' : 'Báo Cáo Sự Cố Thực Địa',
+        subtitle: isEn
+          ? 'Report traffic delays, vehicle faults, border issues or equine emergencies.'
+          : 'Khai báo kẹt xe, hỏng xe, cửa khẩu hoặc cấp cứu thú y khẩn cấp.',
+      };
+    }
+    if (normalized.startsWith('/driver/notifications')) {
+      return {
+        title: isEn ? 'Dispatch Notifications' : 'Thông Báo Điều Phối',
+        subtitle: isEn
+          ? 'Trip assignments, schedule changes and urgent operational alerts.'
+          : 'Lệnh phân công chuyến, cập nhật lịch trình và cảnh báo khẩn.',
+      };
+    }
+    if (normalized.startsWith('/driver/profile')) {
+      return {
+        title: isEn ? 'Crew Profile & Security' : 'Hồ Sơ Nhân Sự',
+        subtitle: isEn
+          ? 'Contact information, field specialization and password settings.'
+          : 'Thông tin liên hệ, chuyên môn thực địa và bảo mật tài khoản.',
+      };
+    }
+    return {
+      title: isEn ? 'Field Operations' : 'Tổng Quan Thực Địa',
+      subtitle: isEn
+        ? 'Assigned trips, active milestone check-ins, and equine care.'
+        : 'Theo dõi chuyến được giao, check-in mốc và chăm sóc ngựa.',
+    };
+  };
 
-  const userDisplayName =
-    activeUser?.fullName || activeUser?.name || roleTitleText;
-  const userInitials =
-    activeUser?.initials ||
-    userDisplayName
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase() ||
-    (isEscortRole ? 'VE' : 'DR');
+  const headerMeta = getDynamicHeaderMeta();
+
+  const roleTitleText = isEscortRole
+    ? language === 'en'
+      ? 'Equine Vet / Escort'
+      : 'Bác sĩ thú y / Áp tải'
+    : language === 'en'
+    ? 'Driver'
+    : 'Tài xế';
+
+  const rawUserName = (activeUser?.fullName || activeUser?.name || '')
+    .replace(/\s*\((Tài xế|Driver|Bác sĩ thú y|Áp tải|Escort|Vet|Equine Vet)\)\s*/gi, '')
+    .trim();
+  const userDisplayName = rawUserName || roleTitleText;
+  const showRoleUnderName = userDisplayName.toLowerCase() !== roleTitleText.toLowerCase();
+  const userInitials = computeStaffInitials(
+    userDisplayName,
+    isEscortRole ? 'BS' : 'TX',
+  );
 
   const handleLogoutConfirm = () => {
     setShowLogoutModal(false);
@@ -283,19 +399,19 @@ export default function DriverLayout({
   };
 
   return (
-    <FleetRouteStoreProvider>
-      <div
-        style={{
-          display: 'flex',
-          height: '100dvh',
-          maxHeight: '100dvh',
-          overflow: 'hidden',
-          backgroundColor: '#F4F1E9',
-          fontFamily: "'Inter', sans-serif",
-          position: 'relative',
-        }}
-      >
-        <AmbientCanvas />
+    <div
+      style={{
+        display: 'flex',
+        height: '100dvh',
+        maxHeight: '100dvh',
+        overflow: 'hidden',
+        backgroundColor: '#F4F1E9',
+        fontFamily: "'Inter', sans-serif",
+        position: 'relative',
+      }}
+    >
+      <AmbientCanvas />
+      <CommandPalette />
 
         <LogoutConfirmModal
           isOpen={showLogoutModal}
@@ -387,8 +503,20 @@ export default function DriverLayout({
                     ? 'bg-[#C4B38E]/25 text-[#C4B38E] border border-[#C4B38E]/40 shadow-sm'
                     : 'text-[#94a3b8] hover:text-white hover:bg-white/10'
                 }`}
-                title={isPinned ? t('coordinator.unpinTooltip', 'Unpin sidebar') : t('coordinator.pinTooltip', 'Pin sidebar')}
-                aria-label={isPinned ? 'Unpin sidebar' : 'Pin sidebar'}
+                title={
+                  isPinned
+                    ? t('coordinator.unpinTooltip', language === 'en' ? 'Unpin sidebar' : 'Bỏ ghim thanh bên')
+                    : t('coordinator.pinTooltip', language === 'en' ? 'Pin sidebar' : 'Ghim thanh bên')
+                }
+                aria-label={
+                  isPinned
+                    ? language === 'en'
+                      ? 'Unpin sidebar'
+                      : 'Bỏ ghim thanh bên'
+                    : language === 'en'
+                    ? 'Pin sidebar'
+                    : 'Ghim thanh bên'
+                }
               >
                 {isPinned ? <Pin size={15} className="rotate-45 text-[#C4B38E]" aria-hidden="true" /> : <PinOff size={15} aria-hidden="true" />}
               </button>
@@ -975,43 +1103,51 @@ export default function DriverLayout({
             }}
           >
             {/* Left: Mobile Menu + Portal Subtitle */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(true)}
                 aria-label={language === 'en' ? 'Open mobile navigation' : 'Mở menu điều hướng'}
-                className="lg:hidden w-11 h-11 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex items-center justify-center cursor-pointer shrink-0 hover:bg-[#F3EFE4]"
+                className="lg:hidden w-9 h-9 sm:w-11 sm:h-11 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] flex items-center justify-center cursor-pointer shrink-0 hover:bg-[#F3EFE4]"
               >
-                <Menu size={20} className="text-[#181A17]" aria-hidden="true" />
+                <Menu size={18} className="text-[#181A17]" aria-hidden="true" />
               </button>
-              <div style={{ minWidth: 0 }}>
-                <p style={{ fontSize: '15px', fontWeight: 700, color: '#181A17', margin: 0, lineHeight: 1.2 }} className="truncate">
-                  {t('nav.dashboard', language === 'en' ? 'Field Operations' : 'Điều Hành Thực Địa')}
-                </p>
-                <p className="hidden sm:block text-xs text-[#57564E] mt-0.5 mb-0 font-medium truncate">
-                  {t(
-                    'driver.subtitle',
-                    language === 'en'
-                      ? 'Assigned trips, milestone check-ins, and equine care.'
-                      : 'Theo dõi chuyến được giao, mốc hành trình và chăm sóc ngựa.'
-                  )}
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <p style={{ fontWeight: 700, color: '#181A17', margin: 0, lineHeight: 1.2 }} className="text-[14px] sm:text-[15px] truncate">
+                  {headerMeta.title}
                 </p>
               </div>
             </div>
 
-            {/* Right: Language Switcher + Bell + User Menu */}
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              <LanguageSwitcher variant="pill" />
+            {/* Right: Quick Search + Language Switcher + Bell + User Menu */}
+            <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('open-command-palette'))}
+                aria-label={language === 'en' ? 'Quick search (Ctrl+K)' : 'Tìm nhanh (Ctrl+K)'}
+                title={language === 'en' ? 'Quick search (Ctrl+K)' : 'Tìm nhanh (Ctrl+K)'}
+                className="min-h-[36px] sm:min-h-[40px] px-2 sm:px-3 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] hover:bg-[#F3EFE4] text-[#57564E] hover:text-[#181A17] inline-flex items-center gap-2 text-xs font-semibold cursor-pointer transition-colors shrink-0"
+              >
+                <Search size={15} className="text-[#A67C2E]" aria-hidden="true" />
+                <span className="hidden md:inline">{language === 'en' ? 'Quick search' : 'Tìm nhanh'}</span>
+                <kbd className="hidden xl:inline-flex items-center px-1.5 py-0.5 rounded bg-white border border-[#D8CEBE] text-[10px] font-mono text-[#747D88]">
+                  ⌘K
+                </kbd>
+              </button>
+
+              <div className="hidden sm:block">
+                <LanguageSwitcher variant="pill" />
+              </div>
 
               <button
                 type="button"
                 onClick={() => router.push(`${basePath}/notifications`)}
                 aria-label={t('common.notifications', language === 'en' ? 'Notifications' : 'Thông báo')}
-                className="w-11 h-11 rounded-full border border-[#D8CEBE] flex items-center justify-center text-[#181A17] bg-white hover:bg-[#FAF8F4] relative cursor-pointer transition-colors shrink-0"
+                className="w-9 h-9 sm:w-11 sm:h-11 rounded-full border border-[#D8CEBE] flex items-center justify-center text-[#181A17] bg-white hover:bg-[#FAF8F4] relative cursor-pointer transition-colors shrink-0"
               >
-                <Bell size={18} aria-hidden="true" />
+                <Bell size={17} aria-hidden="true" />
                 {unreadNotifs > 0 && (
-                  <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-[#9E3B3B] ring-2 ring-white" />
+                  <span className="absolute top-2 right-2 sm:top-2.5 sm:right-2.5 w-2 h-2 rounded-full bg-[#9E3B3B] ring-2 ring-white" />
                 )}
               </button>
 
@@ -1022,7 +1158,7 @@ export default function DriverLayout({
                   aria-expanded={showUserMenu}
                   aria-haspopup="menu"
                   aria-label={t('common.accountMenu', language === 'en' ? 'Account menu' : 'Menu tài khoản')}
-                  className="min-h-[44px] flex items-center gap-2 bg-[#FAF8F4] hover:bg-[#F3EFE4] border border-[#D8CEBE] rounded-full py-1 pl-1.5 pr-2.5 cursor-pointer transition-colors"
+                  className="min-h-[36px] sm:min-h-[44px] flex items-center gap-1.5 sm:gap-2 bg-[#FAF8F4] hover:bg-[#F3EFE4] border border-[#D8CEBE] rounded-full py-0.5 sm:py-1 pl-1 sm:pl-1.5 pr-1.5 sm:pr-2.5 cursor-pointer transition-colors"
                 >
                   <div
                     className={`w-8 h-8 rounded-full text-[#C4B38E] flex items-center justify-center text-xs font-bold shrink-0 ${
@@ -1032,12 +1168,14 @@ export default function DriverLayout({
                     {userInitials}
                   </div>
                   <div className="text-left leading-tight hidden md:block">
-                    <p className="text-xs font-semibold text-[#181A17] m-0 max-w-[120px] truncate">
+                    <p className="text-xs font-semibold text-[#181A17] m-0 max-w-[140px] truncate">
                       {userDisplayName}
                     </p>
-                    <p className="text-[10px] font-bold m-0" style={{ color: isEscortRole ? '#2D5A3F' : '#A67C2E' }}>
-                      {roleTitleText}
-                    </p>
+                    {showRoleUnderName && (
+                      <p className="text-[10px] font-bold m-0" style={{ color: isEscortRole ? '#2D5A3F' : '#A67C2E' }}>
+                        {roleTitleText}
+                      </p>
+                    )}
                   </div>
                   <ChevronDown size={13} className="text-[#57564E]" aria-hidden="true" />
                 </button>
@@ -1090,13 +1228,43 @@ export default function DriverLayout({
           </header>
 
           {/* Content Container */}
-          <div style={{ flex: 1, overflowY: 'auto', backgroundColor: 'transparent' }} className="p-3.5 sm:p-5 lg:p-6">
+          <div
+            style={{ flex: 1, overflowY: 'auto', backgroundColor: 'transparent' }}
+            className="p-3.5 sm:p-5 lg:p-6 pb-24 lg:pb-6"
+          >
             <div style={{ maxWidth: '1200px', margin: '0 auto' }}>{children}</div>
           </div>
+
+          {/* STICKY MOBILE BOTTOM NAVIGATION BAR */}
+          <nav
+            aria-label={language === 'en' ? 'Mobile quick navigation' : 'Điều hướng nhanh di động'}
+            className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#D8CEBE] shadow-[0_-4px_16px_rgba(24,26,23,0.08)] px-1.5 py-1"
+            style={{ paddingBottom: 'max(0.25rem, env(safe-area-inset-bottom))' }}
+          >
+            <div className="grid grid-cols-5 gap-0.5 max-w-lg mx-auto">
+              {mobileBottomNavItems.map((item) => {
+                const active = isNavItemActive(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? 'page' : undefined}
+                    className={`min-h-[48px] flex flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1 no-underline transition-colors ${
+                      active
+                        ? 'bg-[#181A17] text-[#C4B38E] font-bold'
+                        : 'text-[#5F6977] hover:text-[#181A17] hover:bg-[#FAF8F4] font-medium'
+                    }`}
+                  >
+                    <span>{item.icon}</span>
+                    <span className="text-[10px] leading-tight truncate max-w-full">{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
         </main>
 
         <HelpSupportModal isOpen={showSupportModal} onClose={() => setShowSupportModal(false)} />
       </div>
-    </FleetRouteStoreProvider>
   );
 }

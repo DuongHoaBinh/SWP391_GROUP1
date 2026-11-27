@@ -42,11 +42,11 @@ export const ROUTE_NETWORK_DEFAULTS = {
   restStopHours: 1,
   /** Phạt mỗi lần tàu ghé cảng trung chuyển */
   portCallPenaltyHours: 12,
-  ferryBoardingHours: 1,
   flightGroundHours: 2,
   transitLayoverHours: 3,
   flightSpeedKmh: 750,
-  maxFerryHours: 12,
+  /** Thời gian hành trình biển tối đa cho ngựa đua sống (7 ngày = 168h) */
+  maxVesselHours: 168,
   /** Bán kính tìm cảng/sân bay quanh điểm đi/đến (chim bay) */
   hubSearchKm: 900,
 };
@@ -215,8 +215,8 @@ function findRoadPath(
   opts: Opts,
   config: { ferry?: boolean; requireFerry?: boolean; allowed?: Set<string> } = {},
 ): RoadPath | null {
-  const nodes = [from, to, ...buildRoadNodes(net, Boolean(config.ferry), config.allowed)];
-  const ferryLanes = config.ferry ? net.seaLanes.filter((l) => l.seaMode === 'ferry' && l.typicalHours <= opts.maxFerryHours) : [];
+  const nodes = [from, to, ...buildRoadNodes(net, false, config.allowed)];
+  const ferryLanes: NetworkSeaLane[] = [];
   const portIdToNode = new Map<number, RoadNode>();
   for (const n of nodes) if (n.port) portIdToNode.set(n.port.id, n);
 
@@ -248,16 +248,6 @@ function findRoadPath(
         else if (!fallback) continue;
       }
       out.push({ from: u, to: v, kind: 'road', km, hours: roadHours(km) + (v.kind === 'gate' ? v.clearanceHours : 0) });
-    }
-    if (u.port) {
-      for (const lane of ferryLanes) {
-        const forward = lane.fromPortId === u.port.id;
-        const backward = lane.toPortId === u.port.id;
-        if (!forward && !backward) continue;
-        const other = portIdToNode.get(forward ? lane.toPortId : lane.fromPortId);
-        if (!other) continue;
-        out.push({ from: u, to: other, kind: 'ferry', km: lane.distanceKm, hours: lane.typicalHours + opts.ferryBoardingHours, lane, reversed: backward && !forward });
-      }
     }
     return out;
   };
@@ -400,35 +390,6 @@ function roadPathToLegs(path: RoadPath, opts: Opts, firstSeq: number): LegBuild 
   };
 
   for (const edge of path.edges) {
-    if (edge.kind === 'ferry' && edge.lane) {
-      closeRoadLeg();
-      const lane = edge.lane;
-      const via = edge.reversed ? [...lane.viaPoints].reverse() : lane.viaPoints;
-      legs.push({
-        sequenceNo: seq++,
-        type: 'sea',
-        seaMode: 'ferry',
-        fromName: edge.from.name,
-        toName: edge.to.name,
-        fromCode: edge.from.code,
-        toCode: edge.to.code,
-        fromCoords: edge.from.coords,
-        toCoords: edge.to.coords,
-        distanceKm: Math.round(lane.distanceKm),
-        durationHours: round1(edge.hours),
-        countryCodes: edge.from.countries,
-        geometry: [edge.from.coords, ...via, edge.to.coords],
-        stops: [],
-        borderCrossingCount: 0,
-        vehicleLabelVi: 'Phà RoRo (ngựa ở trên xe)',
-        vehicleLabelEn: 'RoRo ferry (horses stay on truck)',
-        noteVi: `${lane.notes ?? 'Phà RoRo'}: xe chở ngựa lên phà, ngựa ở nguyên trong thùng xe có thông gió.`,
-        noteEn: `${lane.notes ?? 'RoRo ferry'}: the horse truck drives aboard; horses stay in the ventilated trailer.`,
-      });
-      legNodes = [edge.to];
-      legEdges = [];
-      continue;
-    }
     legEdges.push(edge);
     legNodes.push(edge.to);
     if (edge.to.kind === 'gate') {
@@ -475,36 +436,14 @@ function planRoad(net: TransportNetwork, o: Endpoint, d: Endpoint, opts: Opts): 
     if (o.landmass !== d.landmass) {
       throw new RoutePlanningError(
         'ROAD_DIFFERENT_LANDMASS',
-        'Điểm đi và điểm đến không cùng khối đất liền (cách biển), xe chở ngựa không thể chạy thẳng. Hãy chọn Đường thủy (phà/tàu) hoặc Hàng không.',
-        'Origin and destination are separated by sea; a horse truck cannot drive there. Choose Sea (ferry/vessel) or Air.',
+        'Điểm đi và điểm đến không cùng khối đất liền (cách biển), xe chở ngựa không thể chạy thẳng. Hãy chọn Đường thủy (tàu biển chuyên dụng) hoặc Hàng không.',
+        'Origin and destination are separated by sea; a horse truck cannot drive there. Choose Sea (dedicated vessel) or Air.',
       );
     }
     throw new RoutePlanningError(
       'ROAD_NO_CORRIDOR',
       'Chưa có hành lang đường bộ/cửa khẩu nhận động vật sống nối hai địa điểm này. Hãy chọn Hàng không hoặc Đường thủy.',
       'No road corridor or live-animal border crossing connects these locations. Choose Air or Sea.',
-    );
-  }
-  return { legs: built.legs, warnings: built.warnings, notices: [], transitStops: 0 };
-}
-
-function planFerry(net: TransportNetwork, o: Endpoint, d: Endpoint, opts: Opts): PartialPlan {
-  const domestic = Boolean(o.cc) && o.cc === d.cc;
-  const allowed = domestic ? new Set([o.cc]) : undefined;
-  const built = roadSegment(net, endpointNode(o, 'origin'), endpointNode(d, 'destination'), opts, 1, { ferry: true, requireFerry: true, allowed });
-  if (!built || !built.legs.some((l) => l.seaMode === 'ferry')) {
-    const roadOnly = roadSegment(net, endpointNode(o, 'origin'), endpointNode(d, 'destination'), opts, 1, { allowed });
-    if (roadOnly) {
-      throw new RoutePlanningError(
-        'FERRY_NOT_APPLICABLE',
-        'Tuyến này không có chặng biển cần phà RoRo – xe chở ngựa đi thẳng đường bộ được. Hãy chọn Đường bộ (hoặc Tàu biển chuyên dụng nếu muốn đi biển đường dài).',
-        'This route has no sea crossing that needs a RoRo ferry – the horse truck can drive the whole way. Choose Road (or a dedicated vessel for long-haul sea).',
-      );
-    }
-    throw new RoutePlanningError(
-      'FERRY_NO_ROUTE',
-      'Không có tuyến phà RoRo (≤ 12h) phù hợp. Phà chỉ áp dụng cho chặng biển ngắn như Rạch Giá/Hà Tiên – Phú Quốc, Hải An – Hải Khẩu, Merak – Bakauheni... Hãy chọn Tàu biển chuyên dụng hoặc Hàng không.',
-      'No suitable RoRo ferry crossing (≤ 12h). Ferries only cover short crossings such as Rach Gia/Ha Tien – Phu Quoc, Hai\'an – Haikou, Merak – Bakauheni... Choose a dedicated vessel or Air.',
     );
   }
   return { legs: built.legs, warnings: built.warnings, notices: [], transitStops: 0 };
@@ -728,6 +667,18 @@ function planVessel(net: TransportNetwork, o: Endpoint, d: Endpoint, opts: Opts)
     cursor = p.from;
   }
 
+  const totalSeaHours = hops.reduce(
+    (sum, h, idx) => sum + h.lane.typicalHours + (idx > 0 ? opts.portCallPenaltyHours : 0),
+    0,
+  );
+  if (totalSeaHours > opts.maxVesselHours) {
+    throw new RoutePlanningError(
+      'SEA_DURATION_EXCEEDED',
+      `Hành trình tàu biển dự kiến ~${Math.round(totalSeaHours)}h vượt giới hạn phúc lợi ngựa đua sống (${opts.maxVesselHours}h / 7 ngày). Vui lòng chọn Hàng không.`,
+      `Estimated sea voyage (~${Math.round(totalSeaHours)}h) exceeds the live thoroughbred welfare limit (${opts.maxVesselHours}h / 7 days). Please choose Air.`,
+    );
+  }
+
   const legs: PlannedLeg[] = [];
   const warnings: RouteMessage[] = [];
   const notices: RouteMessage[] = [];
@@ -887,18 +838,14 @@ function buildWaypoints(legs: PlannedLeg[], o: Endpoint, d: Endpoint, net: Trans
         labelEn: transship ? 'Port call' : leg.type === 'road' ? 'Departure port' : 'Arrival port',
         detailsVi: transship
           ? 'Tàu ghé cảng, ngựa ở lại trên tàu, tiếp nước và thức ăn.'
-          : next?.seaMode === 'ferry' || leg.seaMode === 'ferry'
-            ? 'Bến phà RoRo: xe chở ngựa lên/xuống phà, thú y kiểm tra thông gió và nước uống.'
-            : leg.type === 'road'
-              ? 'Làm thủ tục cảng, đưa ngựa vào ô chuồng cố định trên tàu.'
-              : 'Thú y và hải quan cảng đến đối soát chứng từ, kiểm dịch nhập cảnh.',
+          : leg.type === 'road'
+            ? 'Làm thủ tục cảng, đưa ngựa vào ô chuồng cố định trên tàu.'
+            : 'Thú y và hải quan cảng đến đối soát chứng từ, kiểm dịch nhập cảnh.',
         detailsEn: transship
           ? 'Port call; horses stay aboard and are re-supplied with water and feed.'
-          : next?.seaMode === 'ferry' || leg.seaMode === 'ferry'
-            ? 'RoRo ferry terminal: the horse truck boards/leaves; ventilation and water checked.'
-            : leg.type === 'road'
-              ? 'Port formalities; horses loaded into fixed pens on board.'
-              : 'Veterinary and customs clearance at the arrival port.',
+          : leg.type === 'road'
+            ? 'Port formalities; horses loaded into fixed pens on board.'
+            : 'Veterinary and customs clearance at the arrival port.',
       });
     }
   });
@@ -988,7 +935,7 @@ function finalize(
       airKm: legs.filter((l) => l.type === 'air').reduce((s, l) => s + l.distanceKm, 0),
       seaKm: legs.filter((l) => l.type === 'sea').reduce((s, l) => s + l.distanceKm, 0),
       borderCrossings,
-      ferryCrossings: legs.filter((l) => l.seaMode === 'ferry').length,
+      ferryCrossings: 0,
       restStops: legs.reduce((s, l) => s + l.stops.length, 0),
       transitStops: partial.transitStops,
     },
@@ -1001,14 +948,17 @@ function planOnce(net: TransportNetwork, input: PlanRouteInput, o: Endpoint, d: 
   if (haversine(o.coords, d.coords) < 1) {
     throw new RoutePlanningError('SAME_LOCATION', 'Điểm đi và điểm đến trùng nhau.', 'Origin and destination are the same place.');
   }
-  const seaMode: SeaMode | null = input.mode === 'sea' ? input.seaMode ?? 'vessel' : null;
+  if (input.mode === 'sea' && input.seaMode && (input.seaMode as string) !== 'vessel') {
+    throw new RoutePlanningError(
+      'FERRY_NOT_SUPPORTED',
+      'Phương thức đường thủy chỉ hỗ trợ tàu biển chuyên dụng (vessel), không hỗ trợ phà RoRo.',
+      'Sea transport only supports dedicated livestock vessels; RoRo ferries are not supported.',
+    );
+  }
+  const seaMode: SeaMode | null = input.mode === 'sea' ? 'vessel' : null;
 
   if (input.mode === 'road') {
     return finalize('road', 'road', null, o, d, planRoad(net, o, d, opts), net, opts);
-  }
-
-  if (input.mode === 'sea' && seaMode === 'ferry') {
-    return finalize('sea', 'sea', 'ferry', o, d, planFerry(net, o, d, opts), net, opts);
   }
 
   const partial = input.mode === 'air' ? planAir(net, o, d, opts) : planVessel(net, o, d, opts);
@@ -1052,7 +1002,6 @@ export function planNetworkRoute(net: TransportNetwork, input: PlanRouteInput): 
       { mode: 'road' },
       { mode: 'air' },
       { mode: 'sea', seaMode: 'vessel' },
-      { mode: 'sea', seaMode: 'ferry' },
     ];
     const suggestions = alternatives.filter((alt) => {
       if (alt.mode === input.mode && (alt.mode !== 'sea' || alt.seaMode === (input.seaMode ?? 'vessel'))) return false;

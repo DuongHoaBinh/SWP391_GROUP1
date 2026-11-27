@@ -15,6 +15,7 @@ export interface DeliveryHandoverRecord {
   shipmentId: number;
   requestCode: string;
   shipmentHorseId: number;
+  direction: 'outbound' | 'return';
   horseId: number | null;
   horseName: string;
   microchipNo: string | null;
@@ -110,6 +111,7 @@ export class HandoverStore implements OnModuleInit, OnModuleDestroy {
       shipmentId: sid,
       requestCode: `REQ-${String(sid).padStart(3, '0')}`,
       shipmentHorseId: Number(r.shipment_horse_id),
+      direction: (r.direction === 'return' ? 'return' : 'outbound') as 'outbound' | 'return',
       horseId: r.horse_id ? Number(r.horse_id) : null,
       horseName: r.horse_name || 'Ngựa đua',
       microchipNo: r.microchip_no ?? null,
@@ -180,13 +182,17 @@ export class HandoverStore implements OnModuleInit, OnModuleDestroy {
   ): Promise<{
     customerId: number;
     shipmentStatus: string;
+    originLocation: string;
     destinationLocation: string;
+    tripType: string;
+    returnStatus: string;
     horseId: number;
     horseName: string;
     maxCompensation: number;
   } | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT s.customer_id, s.status AS shipment_status, s.destination_location,
+      `SELECT s.customer_id, s.status AS shipment_status, s.origin_location, s.destination_location,
+              s.trip_type, s.return_status,
               sh.horse_id, h.name AS horse_name, sh.max_compensation
        FROM shipment s
        JOIN shipment_horse sh ON sh.shipment_id = s.shipment_id
@@ -200,11 +206,28 @@ export class HandoverStore implements OnModuleInit, OnModuleDestroy {
     return {
       customerId: Number(r.customer_id),
       shipmentStatus: String(r.shipment_status),
+      originLocation: String(r.origin_location || ''),
       destinationLocation: String(r.destination_location || ''),
+      tripType: String(r.trip_type || 'one_way'),
+      returnStatus: String(r.return_status || 'not_applicable'),
       horseId: Number(r.horse_id),
       horseName: String(r.horse_name),
       maxCompensation: Number(r.max_compensation || 0),
     };
+  }
+
+  async sumExistingClaimCompensation(shipmentHorseId: number): Promise<number> {
+    try {
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(COALESCE(approved_amount, requested_amount)), 0) AS total_claimed
+         FROM insurance_claim
+         WHERE shipment_horse_id = ? AND status IN ('submitted', 'under_review', 'approved', 'pending_second_approval', 'approved_for_transfer', 'transferred')`,
+        [shipmentHorseId],
+      );
+      return Number(rows[0]?.total_claimed || 0);
+    } catch {
+      return 0;
+    }
   }
 
   async findHandoversByShipment(shipmentId: number): Promise<DeliveryHandoverRecord[]> {
@@ -238,6 +261,7 @@ export class HandoverStore implements OnModuleInit, OnModuleDestroy {
   async createHandover(data: {
     shipmentId: number;
     shipmentHorseId: number;
+    direction?: 'outbound' | 'return';
     handedOverBy: number;
     receivedByName: string;
     handoverLocation: string;
@@ -249,26 +273,28 @@ export class HandoverStore implements OnModuleInit, OnModuleDestroy {
     notes: string | null;
     evidenceUrls: string[];
   }): Promise<DeliveryHandoverRecord> {
+    const direction = data.direction === 'return' ? 'return' : 'outbound';
     return this.tx(async (db) => {
       const [existing] = await db.execute<RowDataPacket[]>(
-        'SELECT handover_id FROM delivery_handover WHERE shipment_id = ? AND shipment_horse_id = ? LIMIT 1 FOR UPDATE',
-        [data.shipmentId, data.shipmentHorseId],
+        'SELECT handover_id FROM delivery_handover WHERE shipment_id = ? AND shipment_horse_id = ? AND direction = ? LIMIT 1 FOR UPDATE',
+        [data.shipmentId, data.shipmentHorseId, direction],
       );
       if (existing.length > 0) {
         throw new ConflictException(
-          `Biên bản bàn giao cho ngựa #${data.shipmentHorseId} trong chuyến #${data.shipmentId} đã tồn tại.`,
+          `Biên bản bàn giao chiều ${direction === 'return' ? 'về' : 'đi'} cho ngựa #${data.shipmentHorseId} trong chuyến #${data.shipmentId} đã tồn tại.`,
         );
       }
 
       const [res] = await db.execute<ResultSetHeader>(
         `INSERT INTO delivery_handover (
-          shipment_id, shipment_horse_id, handed_over_by, received_by_name, handover_location,
+          shipment_id, shipment_horse_id, direction, handed_over_by, received_by_name, handover_location,
           handover_datetime, delivered_quantity, horse_condition_at_handover,
           identity_verified, documents_handed_over, evidence_urls_json, notes, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           data.shipmentId,
           data.shipmentHorseId,
+          direction,
           data.handedOverBy,
           data.receivedByName,
           data.handoverLocation,

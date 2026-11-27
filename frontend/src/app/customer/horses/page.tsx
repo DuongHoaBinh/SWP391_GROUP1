@@ -13,6 +13,7 @@ import {
   Truck,
   Navigation,
   FileText,
+  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
@@ -25,38 +26,56 @@ import { useLanguage } from '@/lib/i18n/LanguageContext';
 const getFallbackHorsePhoto = () =>
   'https://images.unsplash.com/photo-1598974357801-cbca100e65d3?auto=format&fit=crop&w=800&q=80';
 
+const TERMINAL_ORDER_STATUSES = new Set([
+  'COMPLETED',
+  'DELIVERED',
+  'CANCELLED',
+  'CANCELLED_OPERATIONAL',
+  'REJECTED',
+  'REFUNDED',
+  'REFUND_REQUESTED',
+]);
+
 function formatHorseLocation(loc?: string, availabilityStatus?: string, lang: string = 'vi'): string {
   const isTransit = (availabilityStatus || '').toLowerCase().includes('transit');
   if (isTransit) {
     return lang === 'en' ? 'In transit' : 'Đang vận chuyển';
   }
-  if (!loc || loc.toLowerCase() === 'stable') {
-    return lang === 'en' ? 'Cu Chi Stable & Training Facility, HCMC' : 'Trại Huấn Luyện Củ Chi, TP.HCM';
+  const trimmed = (loc || '').trim();
+  if (!trimmed) {
+    return lang === 'en' ? 'Not updated' : 'Chưa cập nhật';
   }
-  return loc;
+  if (trimmed.toLowerCase() === 'stable') {
+    return lang === 'en' ? 'Registered Stable' : 'Tại chuồng đăng ký';
+  }
+  return trimmed;
 }
 
 export default function HorsesPage() {
   const router = useRouter();
-  const { t, language, translateBreed, translateGender, translateStatus, translateHealthStatus } = useLanguage();
+  const { t, language, translateBreed, translateGender, translateStatus, translateHealthStatus } =
+    useLanguage();
   const isEn = language === 'en';
-  const { horses, requests, refreshHorses } = useCustomerStore();
+  const { horses, requests, refreshHorses, refreshRequests } = useCustomerStore();
 
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddHorseModalOpen, setIsAddHorseModalOpen] = useState(false);
   const [editingHorse, setEditingHorse] = useState<Horse | null>(null);
   const [deletingHorse, setDeletingHorse] = useState<Horse | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'AVAILABLE' | 'IN_TRANSIT' | 'SCHEDULED'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'AVAILABLE' | 'IN_TRANSIT' | 'SCHEDULED'>(
+    'ALL',
+  );
+  const [selectedHorseIds, setSelectedHorseIds] = useState<string[]>([]);
 
   const loadHorses = useCallback(async () => {
     setIsLoading(true);
     try {
-      await refreshHorses();
+      await Promise.allSettled([refreshHorses(), refreshRequests()]);
     } finally {
       setIsLoading(false);
     }
-  }, [refreshHorses]);
+  }, [refreshHorses, refreshRequests]);
 
   useEffect(() => {
     void loadHorses();
@@ -69,38 +88,45 @@ export default function HorsesPage() {
         String(r.horseId) === String(horse.id) ||
         String(r.horse?.id) === String(horse.id) ||
         (horse.backendId && String(r.horseId) === String(horse.backendId)) ||
-        (r.horses && r.horses.some((h: any) => String(h.horse?.id) === String(horse.id) || String(h.id) === String(horse.id))) ||
-        (r.horse?.name && horse.name && r.horse.name.toLowerCase().trim() === horse.name.toLowerCase().trim());
+        (r.horses &&
+          r.horses.some(
+            (h: any) =>
+              String(h.horse?.id) === String(horse.id) ||
+              String(h.horseId) === String(horse.id) ||
+              (horse.backendId &&
+                (String(h.horse?.id) === String(horse.backendId) ||
+                  String(h.horseId) === String(horse.backendId))),
+          )) ||
+        (r.horse?.name &&
+          horse.name &&
+          r.horse.name.toLowerCase().trim() === horse.name.toLowerCase().trim());
 
-      const upper = String(r.status || '').toUpperCase();
-      const isFinished = upper === 'COMPLETED' || upper === 'CANCELLED' || upper === 'REJECTED';
+      const rawUpper = String(r.statusLabel || r.status || '').toUpperCase();
+      const statusUpper = String(r.status || '').toUpperCase();
+      const isFinished =
+        TERMINAL_ORDER_STATUSES.has(rawUpper) || TERMINAL_ORDER_STATUSES.has(statusUpper);
       return match && !isFinished;
     });
   };
 
   // Exclude soft-deleted/retired horses
   const displayHorses = horses.filter(
-    (h) => (h as any).status !== 'retired' && (h as any).status !== 'deleted'
+    (h) => (h as any).status !== 'retired' && (h as any).status !== 'deleted',
   );
 
   const classifyHorse = (h: Horse) => {
     const activeOrder = getHorseActiveOrder(h);
-    const orderStatusStr = String(activeOrder?.status || '').toLowerCase();
-    const isTransit =
-      (h.availabilityStatus || '').toLowerCase().includes('transit') ||
-      (h.status || '').toLowerCase().includes('transit') ||
-      orderStatusStr.includes('transit');
-    const isScheduled =
-      !isTransit &&
-      Boolean(activeOrder) &&
-      (orderStatusStr.includes('approved') ||
-        orderStatusStr.includes('review') ||
-        orderStatusStr.includes('planning') ||
-        orderStatusStr.includes('submit') ||
-        orderStatusStr.includes('request') ||
-        orderStatusStr.includes('confirmed') ||
-        orderStatusStr.includes('ready'));
-    const isAvailable = !isTransit && !isScheduled && (h.medicalStatus || 'Healthy') === 'Healthy';
+    const orderStatusStr = String(activeOrder?.statusLabel || activeOrder?.status || '').toLowerCase();
+    // Only mark In Transit when the linked order is genuinely in_transit or return_pending
+    // (unpaid awaiting_payment / planning / confirmed orders hold the horse as Scheduled/Reserved)
+    const isTransit = activeOrder
+      ? (orderStatusStr.includes('in_transit') || orderStatusStr === 'return_pending')
+      : ((h.availabilityStatus || '').toLowerCase().includes('transit') || (h.status || '').toLowerCase().includes('transit'));
+    const isScheduled = !isTransit && Boolean(activeOrder);
+    const medLower = (h.medicalStatus || '').toLowerCase();
+    const isMedicallyBlocked =
+      medLower.includes('attention') || medLower.includes('not cleared') || medLower.includes('injured');
+    const isAvailable = !isTransit && !isScheduled && !isMedicallyBlocked;
     return { activeOrder, isTransit, isScheduled, isAvailable };
   };
 
@@ -113,7 +139,7 @@ export default function HorsesPage() {
       if (c.isScheduled) acc.SCHEDULED += 1;
       return acc;
     },
-    { ALL: 0, AVAILABLE: 0, IN_TRANSIT: 0, SCHEDULED: 0 }
+    { ALL: 0, AVAILABLE: 0, IN_TRANSIT: 0, SCHEDULED: 0 },
   );
 
   const filteredHorses = displayHorses.filter((h) => {
@@ -133,67 +159,87 @@ export default function HorsesPage() {
     return true;
   });
 
-  const getStatusColor = (status?: string) => {
-    switch (status) {
-      case 'In Transit':
-      case 'in_transit':
-      case 'Scheduled':
-      case 'Approved':
-      case 'approved':
-        return { bg: 'bg-[#FAF8F4] border-[#EAE5DA] text-[#181A17]', dot: 'bg-[#181A17]' };
-      case 'Available':
-      case 'Healthy':
-      case 'Valid':
-        return { bg: 'bg-emerald-50 border-emerald-200 text-emerald-700', dot: 'bg-emerald-500' };
-      case 'Not Cleared':
-      case 'Medical Attention':
-      case 'Missing':
-        return { bg: 'bg-rose-50 text-rose-700 border-rose-200', dot: 'bg-rose-500' };
-      case 'Monitoring':
-      case 'Requires Review':
-      case 'Expiring Soon':
-        return { bg: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500' };
-      default:
-        return { bg: 'bg-[#F0EEE8] text-[#273244] border-[#D8CEBE]', dot: 'bg-[#747D88]' };
+  const toggleSelectHorse = (horseId: string) => {
+    setSelectedHorseIds((prev) =>
+      prev.includes(horseId) ? prev.filter((id) => id !== horseId) : [...prev, horseId],
+    );
+  };
+
+  const getHealthDot = (status?: string) => {
+    const s = (status || '').toLowerCase();
+    if (!s) return 'bg-slate-400';
+    if (s.includes('attention') || s.includes('not cleared') || s.includes('missing')) {
+      return 'bg-rose-500';
     }
+    if (s.includes('monitor') || s.includes('review') || s.includes('expiring')) {
+      return 'bg-amber-500';
+    }
+    return 'bg-emerald-500';
   };
 
   return (
     <div className="space-y-6 pb-10 animate-fade-in font-sans">
       {/* Editorial Header */}
-      <header className="border-b border-[#E5DDD0] pb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
-            {t('customer.myHorses', isEn ? 'My Horses' : 'Quản Lý Ngựa Đua')}
-          </h1>
-          <p className="text-sm text-[#5F6977] m-0 mt-1 max-w-3xl">
-            {t(
-              'customer.horses.subtitle',
-              isEn
-                ? 'Manage equine profiles, FEI passports, RFID microchips, and quarantine clearances.'
-                : 'Quản lý hồ sơ ngựa đua, hộ chiếu FEI, vi mạch RFID và giấy tờ kiểm dịch.'
-            )}
-          </p>
-        </div>
+      <header className="border-b border-[#E5DDD0] pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h1 className="text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
+          {t('customer.myHorses', isEn ? 'My Horses' : 'Quản Lý Ngựa Đua')}
+        </h1>
 
-        <Button
-          variant="primary"
-          onClick={() => setIsAddHorseModalOpen(true)}
-          className="px-4 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] border-0 font-bold shadow-sm transition-colors inline-flex items-center gap-1.5 text-xs self-start sm:self-auto"
-        >
-          <Plus size={15} className="stroke-[2.5] text-[#C4B38E]" aria-hidden="true" />
-          <span>{t('customer.horses.addNew', isEn ? 'Add Horse' : 'Thêm ngựa mới')}</span>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
+          {selectedHorseIds.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setSelectedHorseIds([])}
+                className="px-3 py-2 rounded-xl border border-[#D8CEBE] bg-white text-xs font-semibold text-[#5F6977] hover:text-[#181A17] cursor-pointer"
+              >
+                {isEn ? 'Clear selection' : 'Bỏ chọn'}
+              </button>
+              <Button
+                variant="primary"
+                onClick={() =>
+                  router.push(`/customer/requests/new?horseIds=${selectedHorseIds.join(',')}`)
+                }
+                className="px-4 py-2.5 rounded-xl bg-[#A67C2E] hover:bg-[#8E6925] text-white border-0 font-bold shadow-sm transition-colors inline-flex items-center gap-1.5 text-xs"
+              >
+                <Truck size={15} aria-hidden="true" />
+                <span>
+                  {isEn
+                    ? `Book Trip for ${selectedHorseIds.length} Horse${selectedHorseIds.length > 1 ? 's' : ''}`
+                    : `Đặt chuyến cho ${selectedHorseIds.length} ngựa`}
+                </span>
+              </Button>
+            </>
+          )}
+          <Button
+            variant="primary"
+            onClick={() => setIsAddHorseModalOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] border-0 font-bold shadow-sm transition-colors inline-flex items-center gap-1.5 text-xs"
+          >
+            <Plus size={15} className="stroke-[2.5] text-[#C4B38E]" aria-hidden="true" />
+            <span>{t('customer.horses.addNew', isEn ? 'Add Horse' : 'Thêm ngựa mới')}</span>
+          </Button>
+        </div>
       </header>
 
       {/* Filters & Status Tabs */}
       <div className="bg-white border border-[#E5DDD0] shadow-sm p-3 rounded-2xl flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
         <div className="relative w-full lg:max-w-xs">
-          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#747D88]" aria-hidden="true" />
+          <Search
+            size={15}
+            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#747D88]"
+            aria-hidden="true"
+          />
           <input
             type="text"
-            aria-label={t('customer.horses.searchPlaceholder', isEn ? 'Search by name, code, breed...' : 'Tìm theo tên, mã số, giống ngựa...')}
-            placeholder={t('customer.horses.searchPlaceholder', isEn ? 'Search by name, code, breed...' : 'Tìm theo tên, mã số, giống ngựa...')}
+            aria-label={t(
+              'customer.horses.searchPlaceholder',
+              isEn ? 'Search by name, code, breed...' : 'Tìm theo tên, mã số, giống ngựa...',
+            )}
+            placeholder={t(
+              'customer.horses.searchPlaceholder',
+              isEn ? 'Search by name, code, breed...' : 'Tìm theo tên, mã số, giống ngựa...',
+            )}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-4 py-2 rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] focus:bg-white text-xs font-medium text-[#181A17] focus:outline-none focus:border-[#A67C2E] transition-colors"
@@ -203,9 +249,21 @@ export default function HorsesPage() {
         <div className="flex items-center gap-1.5 overflow-x-auto w-full lg:w-auto no-scrollbar pb-0.5">
           {[
             { key: 'ALL', label: t('common.all', isEn ? 'All' : 'Tất cả'), count: tabCounts.ALL },
-            { key: 'AVAILABLE', label: t('customer.ready', isEn ? 'Ready' : 'Sẵn sàng'), count: tabCounts.AVAILABLE },
-            { key: 'SCHEDULED', label: t('status.scheduled', isEn ? 'Scheduled' : 'Đã xếp lịch'), count: tabCounts.SCHEDULED },
-            { key: 'IN_TRANSIT', label: t('customer.inFlight', isEn ? 'In Transit' : 'Đang vận chuyển'), count: tabCounts.IN_TRANSIT },
+            {
+              key: 'AVAILABLE',
+              label: t('customer.ready', isEn ? 'Ready' : 'Sẵn sàng'),
+              count: tabCounts.AVAILABLE,
+            },
+            {
+              key: 'SCHEDULED',
+              label: t('status.scheduled', isEn ? 'Scheduled' : 'Đã xếp lịch'),
+              count: tabCounts.SCHEDULED,
+            },
+            {
+              key: 'IN_TRANSIT',
+              label: t('customer.inFlight', isEn ? 'In Transit' : 'Đang vận chuyển'),
+              count: tabCounts.IN_TRANSIT,
+            },
           ].map((tab) => {
             const isActive = statusFilter === tab.key;
             return (
@@ -269,8 +327,18 @@ export default function HorsesPage() {
           </p>
           <p className="text-xs text-[#5F6977] mt-1.5 mb-5 max-w-md mx-auto">
             {displayHorses.length === 0
-              ? t('customer.registerHorseToStart', isEn ? 'Register your first racehorse dossier to start booking transport.' : 'Đăng ký hồ sơ ngựa để bắt đầu đặt lịch vận chuyển.')
-              : t('common.clearAllFiltersHint', isEn ? 'Try adjusting your search keywords or clearing status filters.' : 'Hãy thử thay đổi từ khóa hoặc xóa bộ lọc trạng thái.')}
+              ? t(
+                  'customer.registerHorseToStart',
+                  isEn
+                    ? 'Register your first racehorse dossier to start booking transport.'
+                    : 'Đăng ký hồ sơ ngựa để bắt đầu đặt lịch vận chuyển.',
+                )
+              : t(
+                  'common.clearAllFiltersHint',
+                  isEn
+                    ? 'Try adjusting your search keywords or clearing status filters.'
+                    : 'Hãy thử thay đổi từ khóa hoặc xóa bộ lọc trạng thái.',
+                )}
           </p>
           {displayHorses.length === 0 ? (
             <Button
@@ -298,6 +366,7 @@ export default function HorsesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {filteredHorses.map((horse) => {
             const { activeOrder, isTransit, isScheduled, isAvailable } = classifyHorse(horse);
+            const isSelected = selectedHorseIds.includes(String(horse.id));
 
             const dynamicStatusLabel = isTransit
               ? `${translateStatus('in_transit')}${activeOrder?.requestCode ? ` (${activeOrder.requestCode})` : ''}`
@@ -311,18 +380,22 @@ export default function HorsesPage() {
                 : { bg: 'bg-white/95 border-emerald-200 text-emerald-700', dot: 'bg-emerald-500' };
 
             const dynamicLocation = isTransit
-              ? `${activeOrder?.origin || 'SGN'} → ${activeOrder?.destination || 'DEST'}`
+              ? `${activeOrder?.origin?.split(',')[0] || 'Origin'} → ${activeOrder?.destination?.split(',')[0] || 'Dest'}`
               : isScheduled
-                ? `${t('customer.transitHub', 'Kho trung chuyển')} (${activeOrder?.requestCode || ''})`
+                ? `${isEn ? 'Scheduled order' : 'Đang theo đơn'} ${activeOrder?.requestCode || ''}`.trim()
                 : formatHorseLocation(horse.location, horse.availabilityStatus, language);
 
-            const healthBadge = getStatusColor(horse.medicalStatus);
-            const docBadge = getStatusColor(horse.documentStatus);
+            const hasValidAge = horse.age !== null && horse.age !== undefined && Number(horse.age) > 0;
+            const hasPassport = Boolean(horse.passportNumber && horse.passportNumber.trim());
 
             return (
               <div
                 key={horse.id}
-                className="bg-white border border-[#E5DDD0] rounded-2xl overflow-hidden hover:shadow-lg hover:border-[#C5B6A0] transition-all duration-300 flex flex-col group shadow-sm"
+                className={`bg-white border rounded-2xl overflow-hidden hover:shadow-lg transition-all duration-300 flex flex-col group shadow-sm ${
+                  isSelected
+                    ? 'border-[#A67C2E] ring-2 ring-[#A67C2E]/25'
+                    : 'border-[#E5DDD0] hover:border-[#C5B6A0]'
+                }`}
               >
                 {/* Clean Photo Container */}
                 <div className="h-48 bg-[#181A17] relative overflow-hidden">
@@ -335,9 +408,43 @@ export default function HorsesPage() {
                     }}
                   />
 
+                  {/* Multi-Select Checkbox for Available Horses */}
+                  {isAvailable && (
+                    <button
+                      type="button"
+                      onClick={() => toggleSelectHorse(String(horse.id))}
+                      aria-pressed={isSelected}
+                      aria-label={
+                        isSelected
+                          ? isEn
+                            ? `Deselect ${horse.name}`
+                            : `Bỏ chọn ${horse.name}`
+                          : isEn
+                            ? `Select ${horse.name} for trip booking`
+                            : `Chọn ${horse.name} để đặt chuyến`
+                      }
+                      className={`absolute top-3 left-3 h-7 px-2.5 rounded-full text-[11px] font-bold border backdrop-blur-sm flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors ${
+                        isSelected
+                          ? 'bg-[#A67C2E] border-[#A67C2E] text-white'
+                          : 'bg-white/90 border-[#D8CEBE] text-[#181A17] hover:bg-white'
+                      }`}
+                    >
+                      <span
+                        className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+                          isSelected
+                            ? 'bg-white text-[#A67C2E] border-white'
+                            : 'border-[#8C7A5B] bg-white'
+                        }`}
+                      >
+                        {isSelected && <Check size={10} strokeWidth={3} aria-hidden="true" />}
+                      </span>
+                      <span>{isSelected ? (isEn ? 'Selected' : 'Đã chọn') : isEn ? 'Select' : 'Chọn'}</span>
+                    </button>
+                  )}
+
                   {/* Single Status Pill */}
                   <div
-                    className={`absolute top-3 right-3 max-w-[70%] text-[11px] font-bold px-2.5 py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 shadow-sm ${dynamicStatusBadge.bg}`}
+                    className={`absolute top-3 right-3 max-w-[62%] text-[11px] font-bold px-2.5 py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 shadow-sm ${dynamicStatusBadge.bg}`}
                   >
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dynamicStatusBadge.dot}`} aria-hidden="true" />
                     <span className="truncate">{dynamicStatusLabel}</span>
@@ -359,7 +466,11 @@ export default function HorsesPage() {
                       </div>
                       <p className="text-xs text-[#5F6977] mt-0.5 mb-0 truncate">
                         {translateBreed(horse.breed)}
-                        {horse.gender ? ` • ${translateGender(horse.gender)}` : ''} • {horse.age} {t('common.yearsOld', 'tuổi')}{horse.requiresPrivateStall ? ` • ${t('horses.privateStallShort', 'Chuồng riêng')}` : ''}
+                        {horse.gender ? ` • ${translateGender(horse.gender)}` : ''}
+                        {hasValidAge ? ` • ${horse.age} ${t('common.yearsOld', isEn ? 'yrs' : 'tuổi')}` : ''}
+                        {horse.requiresPrivateStall
+                          ? ` • ${t('horses.privateStallShort', isEn ? 'Private stall' : 'Chuồng riêng')}`
+                          : ''}
                       </p>
                     </div>
 
@@ -375,9 +486,18 @@ export default function HorsesPage() {
                       </button>
                       <button
                         type="button"
-                        title={t('horse.archiveOrDelete', isEn ? 'Delete / Archive Profile' : 'Xóa / Lưu trữ hồ sơ')}
-                        onClick={() => setDeletingHorse(horse)}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-transparent hover:border-[#E5B8B8] text-[#747D88] hover:text-[#B33E3E] hover:bg-[#F8EAEA] transition-colors cursor-pointer"
+                        disabled={isTransit || isScheduled}
+                        title={
+                          isTransit || isScheduled
+                            ? (isEn ? 'Cannot delete a horse tied to an active order' : 'Không thể xóa ngựa đang gắn với đơn vận chuyển hoạt động')
+                            : t('horse.archiveOrDelete', isEn ? 'Delete / Archive Profile' : 'Xóa / Lưu trữ hồ sơ')
+                        }
+                        onClick={() => !(isTransit || isScheduled) && setDeletingHorse(horse)}
+                        className={`w-8 h-8 flex items-center justify-center rounded-lg border border-transparent transition-colors ${
+                          isTransit || isScheduled
+                            ? 'text-[#CBD5E1] cursor-not-allowed opacity-50'
+                            : 'text-[#747D88] hover:border-[#E5B8B8] hover:text-[#B33E3E] hover:bg-[#F8EAEA] cursor-pointer'
+                        }`}
                         aria-label={`${t('common.delete', isEn ? 'Delete' : 'Xóa')} ${horse.name}`}
                       >
                         <Trash2 size={15} aria-hidden="true" />
@@ -400,18 +520,28 @@ export default function HorsesPage() {
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[#747D88] shrink-0">{isEn ? 'Health' : 'Sức khỏe'}</span>
                       <span className="inline-flex items-center gap-1.5 font-semibold text-[#181A17] truncate">
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${healthBadge.dot}`} aria-hidden="true" />
-                        {translateHealthStatus(horse.medicalStatus) || t('common.qualified', 'Đạt chuẩn')}
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${getHealthDot(horse.medicalStatus)}`}
+                          aria-hidden="true"
+                        />
+                        {horse.medicalStatus
+                          ? translateHealthStatus(horse.medicalStatus)
+                          : (isEn ? 'Pending Verification' : 'Chưa xác minh thú y')}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[#747D88] shrink-0">{isEn ? 'FEI Passport' : 'Hộ chiếu FEI'}</span>
                       <span className="inline-flex items-center gap-1.5 font-semibold text-[#181A17] truncate">
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${docBadge.dot}`} aria-hidden="true" />
-                        {horse.passportNumber
-                          ? t('horses.feiPassportValid', 'Hợp lệ')
-                          : t('horses.awaitingFeiCode', 'Chờ cấp mã')}
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            hasPassport ? 'bg-emerald-500' : 'bg-amber-500'
+                          }`}
+                          aria-hidden="true"
+                        />
+                        {hasPassport
+                          ? horse.passportNumber
+                          : t('horses.awaitingFeiCode', isEn ? 'Pending code' : 'Chờ cấp mã')}
                       </span>
                     </div>
                   </div>
@@ -434,14 +564,14 @@ export default function HorsesPage() {
                         onClick={() =>
                           router.push(
                             activeOrder
-                              ? `/customer/tracking?requestId=${activeOrder.id}&horseId=${horse.id}`
-                              : `/customer/tracking?horseId=${horse.id}`
+                              ? `/customer/tracking?shipmentId=${activeOrder.id}&horseId=${horse.id}`
+                              : `/customer/tracking?horseId=${horse.id}`,
                           )
                         }
                         title={t('customer.trackTrip', isEn ? 'Track Trip' : 'Theo Dõi Chuyến')}
                       >
                         <Navigation size={13} className="text-white" aria-hidden="true" />
-                        <span>{t('customer.trackTrip', 'Theo Dõi Chuyến')}</span>
+                        <span>{t('customer.trackTrip', isEn ? 'Track Trip' : 'Theo Dõi Chuyến')}</span>
                       </Button>
                     ) : isScheduled ? (
                       <Button
@@ -452,14 +582,15 @@ export default function HorsesPage() {
                       >
                         <FileText size={13} className="text-[#C4B38E]" aria-hidden="true" />
                         <span>
-                          {t('horses.viewRequest', 'Xem Đơn')} {activeOrder?.requestCode || ''}
+                          {t('horses.viewRequest', isEn ? 'View Order' : 'Xem Đơn')}{' '}
+                          {activeOrder?.requestCode || ''}
                         </span>
                       </Button>
                     ) : isAvailable ? (
                       <Button
                         variant="primary"
                         className="flex-1 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] border-0 text-[#FBF9F5] font-bold transition-all text-xs py-2 shadow-sm"
-                        onClick={() => router.push(`/customer/requests/new?horseId=${horse.id}`)}
+                        onClick={() => router.push(`/customer/requests/new?horseIds=${horse.id}`)}
                       >
                         <Truck size={13} className="text-[#C4B38E]" aria-hidden="true" />
                         <span>{t('horse.bookTripShort', isEn ? 'Book Trip' : 'Đặt Chuyến')}</span>

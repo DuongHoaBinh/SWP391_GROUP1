@@ -145,7 +145,7 @@ test('5. jetStallCount và vesselPenCount', () => {
   assert.equal(jetStallCount([{ quantity: 4, requiresPrivateStall: false }]), 2);
   assert.equal(jetStallCount([{ quantity: 2, requiresPrivateStall: false }, { quantity: 1, requiresPrivateStall: true }]), 2);
   assert.equal(jetStallCount([{ quantity: 1, requiresPrivateStall: true }]), 1);
-  assert.equal(vesselPenCount([{ quantity: 2 }, { quantity: 1, requiresPrivateStall: true }]), 3);
+  assert.equal(vesselPenCount([{ quantity: 2 }, { quantity: 1, requiresPrivateStall: true }]), 4);
 });
 
 const HCM = {

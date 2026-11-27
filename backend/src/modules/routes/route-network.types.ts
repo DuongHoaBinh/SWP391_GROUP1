@@ -4,7 +4,7 @@
  */
 
 export type NetworkMode = 'road' | 'air' | 'sea';
-export type SeaMode = 'ferry' | 'vessel';
+export type SeaMode = 'vessel';
 export type LatLng = [number, number];
 export type AirRole = 'hub' | 'gateway' | 'regional';
 

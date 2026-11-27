@@ -1,13 +1,13 @@
 'use client';
 
 import React from 'react';
-import { Plane, Truck } from 'lucide-react';
+import { Plane, Truck, Ship } from 'lucide-react';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface RouteDisplayProps {
   origin?: string;
   destination?: string;
-  mode?: 'air' | 'road' | 'multimodal';
+  mode?: 'air' | 'road' | 'sea' | 'multimodal';
   variant?: 'compact' | 'ticket' | 'hero';
   className?: string;
 }
@@ -115,21 +115,28 @@ export function FlightyRouteDisplay({
   const orig = inferHubInfo(origin, isEn);
   const dest = inferHubInfo(destination, isEn);
 
-  const isAirTransport = mode === 'air' || (mode !== 'road' && (orig.isIntl || dest.isIntl));
+  const isSeaTransport = mode === 'sea';
+  const isAirTransport = mode === 'air' || (mode !== 'road' && mode !== 'sea' && (orig.isIntl || dest.isIntl));
   const modeLabel =
     mode === 'multimodal'
       ? isEn
         ? 'Multimodal'
         : 'Đa chặng'
-      : isAirTransport
+      : isSeaTransport
         ? isEn
-          ? 'Air Cargo'
-          : 'Hàng không'
-        : isEn
-          ? 'Overland'
-          : 'Đường bộ';
+          ? 'Sea Freight'
+          : 'Đường thủy'
+        : isAirTransport
+          ? isEn
+            ? 'Air Cargo'
+            : 'Hàng không'
+          : isEn
+            ? 'Overland'
+            : 'Đường bộ';
 
-  const transportIcon = isAirTransport ? (
+  const transportIcon = isSeaTransport ? (
+    <Ship className="w-3 h-3 text-[#0E7490] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+  ) : isAirTransport ? (
     <Plane className="w-3 h-3 text-[#A67C2E] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
   ) : (
     <Truck className="w-3 h-3 text-[#287653] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />

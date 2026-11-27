@@ -65,6 +65,7 @@ export class HorsesController {
   }
 
   @Post()
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Tạo mới một con ngựa' })
   createHorse(
     @CurrentUser() user: AuthenticatedUser,
@@ -74,6 +75,7 @@ export class HorsesController {
   }
 
   @Put(':id')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật thông tin con ngựa' })
   updateHorse(
     @CurrentUser() user: AuthenticatedUser,
@@ -84,6 +86,7 @@ export class HorsesController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xóa hoặc chuyển trạng thái retired cho con ngựa' })
   deleteHorse(
     @CurrentUser() user: AuthenticatedUser,
@@ -93,6 +96,7 @@ export class HorsesController {
   }
 
   @Post(':id/avatar')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('file', {
       fileFilter: imageFileFilter,
@@ -124,7 +128,7 @@ export class HorsesController {
   }
 
   @Post('upload-photo')
-  @Roles(UserRole.CUSTOMER, UserRole.ADMIN)
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('file', {
       fileFilter: imageFileFilter,

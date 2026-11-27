@@ -20,11 +20,23 @@ import {
   MapPin,
   CreditCard,
   ArrowRight,
+  Route as RouteIcon,
+  Radio,
+  FileCheck2,
+  Eye,
+  ExternalLink,
 } from 'lucide-react';
 import useSWR from 'swr';
 import toast from 'react-hot-toast';
 import { apiClient } from '@/lib/api-client';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
+import { ManagerSectionTabs } from '@/components/layout/ManagerSectionTabs';
+import { getShipmentStatusMeta } from '@/features/orders/shipment-status';
+import { DocumentReviewModal } from '@/features/documents/components/DocumentReviewModal';
+import { ReservedVehiclesPanel } from '@/features/fleet/components/ReservedVehiclesPanel';
+import { routesApi, RouteDetail } from '@/features/routes/api/routes.api';
+import { trackingApi } from '@/features/tracking/api/tracking.api';
+import { VerticalTimeline, buildTimeline } from '@/features/tracking/timeline';
 import { InsuranceSummary } from '@/features/orders/components/InsuranceSummary';
 import { SnapshotBreakdown } from '@/features/orders/components/SnapshotBreakdown';
 import {
@@ -111,7 +123,7 @@ export default function ManagerRequestDetailPage() {
   const [activeModal, setActiveModal] = useState<'NONE' | 'APPROVE' | 'REJECT' | 'CHANGE'>('NONE');
   const [inputValue, setInputValue] = useState('');
   const [costCurrency, setCostCurrency] = useState<'VND' | 'USD'>('VND');
-  const [selectedTransportMode, setSelectedTransportMode] = useState<'road' | 'air'>('road');
+  const [selectedTransportMode, setSelectedTransportMode] = useState<'road' | 'air' | 'sea'>('road');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Feasibility review modal state
@@ -119,6 +131,18 @@ export default function ManagerRequestDetailPage() {
   const [cannotFulfilReason, setCannotFulfilReason] = useState<string>('no_vehicle_available');
   const [cannotFulfilNote, setCannotFulfilNote] = useState<string>('');
   const [feasibilitySubmitting, setFeasibilitySubmitting] = useState(false);
+
+  // Lifecycle workspace tab
+  const [activeTab, setActiveTab] = useState<'overview' | 'compliance' | 'route' | 'tracking'>('overview');
+  const [reviewDoc, setReviewDoc] = useState<{
+    id: string;
+    numericDocId: number;
+    horseName: string;
+    docTitle: string;
+    fileUrl?: string;
+    microchip?: string | null;
+    passport?: string | null;
+  } | null>(null);
 
   // Fetch order details
   const {
@@ -131,10 +155,33 @@ export default function ManagerRequestDetailPage() {
   });
 
   // Fetch compliance checklist
-  const { data: checklist } = useSWR(
+  const { data: checklist, mutate: mutateChecklist } = useSWR(
     requestId ? `/documents/order/${requestId}/checklist` : null,
     fetcher,
     { revalidateOnFocus: true }
+  );
+
+  // Fetch route plan for Route & Fleet tab
+  const numericOrderId = Number(requestId);
+  const { data: routePlan } = useSWR<RouteDetail | null>(
+    Number.isFinite(numericOrderId) && numericOrderId > 0
+      ? `route-detail-${numericOrderId}`
+      : null,
+    () => routesApi.findRouteByShipmentId(numericOrderId).catch(() => null),
+    { revalidateOnFocus: false }
+  );
+
+  // Fetch timeline for Tracking & Handover tab
+  const { data: timelineData } = useSWR(
+    activeTab === 'tracking' && Number.isFinite(numericOrderId) && numericOrderId > 0
+      ? `shipment-timeline-${numericOrderId}`
+      : null,
+    () => trackingApi.getShipmentTimeline(numericOrderId).catch(() => null),
+    { revalidateOnFocus: false }
+  );
+  const timelineItems = React.useMemo(
+    () => (timelineData ? buildTimeline({ timelineData, viewer: 'manager' }) : []),
+    [timelineData]
   );
 
   // Fetch SePay payment info
@@ -149,7 +196,7 @@ export default function ManagerRequestDetailPage() {
   const usdToVndRate = Number(insurancePolicy?.usdToVnd) > 0 ? Number(insurancePolicy.usdToVnd) : 25400;
 
   const statusKey = String(order?.status || 'requested').toLowerCase();
-  const statusMeta = STATUS_CONFIG[statusKey] || STATUS_CONFIG.requested;
+  const statusMeta = STATUS_CONFIG[statusKey] || getShipmentStatusMeta(statusKey);
   const statusLabel = isEn ? statusMeta.en : statusMeta.vi;
 
   // Determine transportation type
@@ -178,9 +225,11 @@ export default function ManagerRequestDetailPage() {
     ? t('manager.detail.typeDomestic', 'Nội địa (Domestic)')
     : t('manager.detail.typeInternational', 'Quốc tế (International)');
 
-  const effectiveMode: 'road' | 'air' =
-    order?.transportMode === 'road' || order?.transportMode === 'air'
+  const effectiveMode: 'road' | 'air' | 'sea' =
+    order?.transportMode === 'road' || order?.transportMode === 'air' || order?.transportMode === 'sea'
       ? order.transportMode
+      : specialReqLower.includes('đường thủy') || specialReqLower.includes('tàu biển') || specialReqLower.includes('sea')
+      ? 'sea'
       : specialReqLower.includes('hàng không') || specialReqLower.includes('air')
       ? 'air'
       : 'road';
@@ -194,7 +243,7 @@ export default function ManagerRequestDetailPage() {
     return buildEquineRoute(order.originLocation, order.destinationLocation, mode);
   }, [order?.originLocation, order?.destinationLocation, activeModal, selectedTransportMode, effectiveMode]);
 
-  const applyModeAndSuggestedQuote = (mode: 'road' | 'air', forceRecalculate = false) => {
+  const applyModeAndSuggestedQuote = (mode: 'road' | 'air' | 'sea', forceRecalculate = false) => {
     setSelectedTransportMode(mode);
     const metrics =
       order?.originLocation && order?.destinationLocation
@@ -236,9 +285,14 @@ export default function ManagerRequestDetailPage() {
   const handleOpenModal = (type: 'APPROVE' | 'REJECT' | 'CHANGE') => {
     setActiveModal(type);
     if (type === 'APPROVE') {
-      const mode: 'road' | 'air' =
-        order?.transportMode ??
-        (isDomestic && !specialReqLower.includes('hàng không') ? 'road' : 'air');
+      const mode: 'road' | 'air' | 'sea' =
+        order?.transportMode === 'road' || order?.transportMode === 'air' || order?.transportMode === 'sea'
+          ? order.transportMode
+          : specialReqLower.includes('đường thủy') || specialReqLower.includes('tàu biển') || specialReqLower.includes('sea')
+            ? 'sea'
+            : isDomestic && !specialReqLower.includes('hàng không')
+              ? 'road'
+              : 'air';
       setCostCurrency('VND');
       setSelectedTransportMode(mode);
       const metrics =
@@ -517,34 +571,21 @@ export default function ManagerRequestDetailPage() {
             <ArrowLeft size={18} />
           </Link>
           <div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-[#7E867B] font-semibold mb-0.5">
-              <Link href="/manager" className="hover:text-[#181A17] no-underline text-[#7E867B]">
-                {t('nav.dashboard', 'Tổng Quan')}
-              </Link>
-              <ChevronRight size={12} />
-              <Link href="/manager/requests" className="hover:text-[#181A17] no-underline text-[#7E867B]">
-                {t('manager.nav.requests', 'Yêu Cầu Vận Chuyển')}
-              </Link>
-              <ChevronRight size={12} />
-              <span className="text-[#181A17] font-bold">{requestCode}</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-xl sm:text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
-                {t('manager.detail.heading', `Chi Tiết Đơn Vận Chuyển ${requestCode}`, {
-                  code: requestCode,
-                })}
-              </h1>
-              <span
-                className="px-3 py-1 rounded-full text-xs font-bold border"
-                style={{
-                  backgroundColor: statusMeta.bg,
-                  color: statusMeta.color,
-                  borderColor: statusMeta.border,
-                }}
-              >
-                {statusLabel}
-              </span>
-            </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-xl sm:text-2xl font-extrabold text-[#181A17] tracking-tight m-0">
+                  {requestCode}
+                </h1>
+                <span
+                  className="px-3 py-1 rounded-full text-xs font-bold border"
+                  style={{
+                    backgroundColor: statusMeta.bg,
+                    color: statusMeta.color,
+                    borderColor: statusMeta.border,
+                  }}
+                >
+                  {statusLabel}
+                </span>
+              </div>
           </div>
         </div>
 
@@ -646,18 +687,344 @@ export default function ManagerRequestDetailPage() {
                 </div>
                 <div className={`h-1 flex-1 rounded-full ${st.done ? 'bg-[#287653]' : 'bg-[#EAE5DA]'}`} />
               </div>
-              <div>
-                <p className={`text-xs font-bold m-0 ${st.done ? 'text-[#181A17]' : 'text-[#7E867B]'}`}>
-                  {st.title}
-                </p>
-                <p className="text-[11px] text-[#7E867B] m-0">{st.desc}</p>
-              </div>
+              <p className={`text-xs font-bold m-0 ${st.done ? 'text-[#181A17]' : 'text-[#7E867B]'}`}>
+                {st.title}
+              </p>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Main Grid: 2 Columns */}
+      {/* Unified Lifecycle Workspace Tabs */}
+      <ManagerSectionTabs
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as 'overview' | 'compliance' | 'route' | 'tracking')}
+        ariaLabel={isEn ? 'Order lifecycle workspace' : 'Khu vực xử lý vòng đời đơn hàng'}
+        tabs={[
+          {
+            key: 'overview',
+            label: isEn ? 'Overview & Feasibility' : 'Tổng quan & Khả thi',
+            icon: <FileText size={14} />,
+          },
+          {
+            key: 'compliance',
+            label: isEn ? 'Compliance & Docs' : 'Hồ sơ & Kiểm dịch',
+            icon: <FileCheck2 size={14} />,
+            badge:
+              checklist?.totalRequiredDocuments !== undefined
+                ? `${checklist?.approvedDocumentsCount || 0}/${checklist.totalRequiredDocuments}`
+                : undefined,
+            badgeTone: checklist?.isFullyCompliant ? 'success' : 'amber',
+          },
+          {
+            key: 'route',
+            label: isEn ? 'Route & Vehicles' : 'Lộ trình & Phương tiện',
+            icon: <RouteIcon size={14} />,
+            badge: routePlan?.legs?.length ? `${routePlan.legs.length} chặng` : undefined,
+          },
+          {
+            key: 'tracking',
+            label: isEn ? 'Tracking & Handover' : 'Theo dõi & Bàn giao',
+            icon: <Radio size={14} />,
+          },
+        ]}
+      />
+
+      {activeTab === 'compliance' && (
+        <div className="bg-white rounded-2xl border border-[#D8CEBE] shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-[#EAE5DA] flex flex-wrap items-center justify-between gap-3 bg-[#FAF9F5]">
+            <div>
+              <h2 className="text-base font-extrabold text-[#181A17] m-0 flex items-center gap-2">
+                <ShieldCheck size={18} className="text-[#A67C2E]" />
+                {isEn ? 'Order Quarantine & Legal Checklist' : 'Kiểm duyệt Hồ sơ Pháp lý & Kiểm dịch của Đơn'}
+              </h2>
+              <p className="text-xs text-[#5C6658] mt-0.5 mb-0">
+                {isEn
+                  ? 'Review submitted documents directly here without leaving this order.'
+                  : 'Thẩm định trực tiếp từng giấy tờ của các cá thể ngựa trong đơn mà không cần chuyển trang.'}
+              </p>
+            </div>
+            <Link
+              href="/manager/compliance/orders"
+              className="no-underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:bg-[#FAF8F4] text-xs font-bold text-[#181A17] whitespace-nowrap"
+            >
+              <span>{isEn ? 'Open Compliance Hub' : 'Mở Trung tâm Kiểm dịch'}</span>
+              <ExternalLink size={13} />
+            </Link>
+          </div>
+
+          <div className="p-6 space-y-5">
+            {!checklist || !Array.isArray(checklist.horses) || checklist.horses.length === 0 ? (
+              <div className="text-center py-10 text-sm text-[#5C6658] bg-[#FAF9F5] rounded-xl border border-dashed border-[#D8CEBE]">
+                {isEn ? 'No compliance requirements generated for this order yet.' : 'Chưa có danh mục giấy tờ kiểm dịch cho đơn hàng này.'}
+              </div>
+            ) : (
+              checklist.horses.map((horse: any) => (
+                <div key={horse.horseId} className="rounded-xl border border-[#D8CEBE] overflow-hidden">
+                  <div className="px-4 py-3 bg-[#FAF8F4] border-b border-[#EAE5DA] flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-sm text-[#181A17]">🏇 {horse.horseName}</span>
+                      {horse.microchipNo && (
+                        <span className="text-[11px] font-mono text-[#5C6658] bg-white px-2 py-0.5 rounded border border-[#E5DDD0]">
+                          Chip: {horse.microchipNo}
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                        horse.isCompliant
+                          ? 'bg-[#E8F2EB] text-[#287653] border-[#B7DBC4]'
+                          : 'bg-[#F8F0DF] text-[#966516] border-[#DFCA9A]'
+                      }`}
+                    >
+                      {horse.isCompliant
+                        ? isEn ? 'Compliant' : 'Đủ hồ sơ'
+                        : isEn ? 'Action needed' : 'Cần xử lý'}
+                    </span>
+                  </div>
+
+                  <div className="p-4 space-y-2.5">
+                    {Array.from(
+                      new Map(
+                        (horse.documents || []).map((d: any) => [String(d.id ?? `${d.regulationId}-${d.docType}`), d]),
+                      ).values(),
+                    ).map((doc: any, docIdx: number) => {
+                      const st = String(doc.status || '').toLowerCase();
+                      return (
+                        <div
+                          key={`${doc.id}-${doc.regulationId ?? 'none'}-${docIdx}`}
+                          className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl border border-[#EAE5DA] bg-white"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-[#181A17] m-0">
+                              {doc.regulationTitle || doc.regulationDocType || doc.docType}
+                            </p>
+                            <p className="text-xs text-[#5C6658] mt-0.5 mb-0">
+                              {doc.expiryDate
+                                ? `${isEn ? 'Expires:' : 'Hết hạn:'} ${formatDate(doc.expiryDate, locale)}`
+                                : isEn ? 'No expiry date' : 'Chưa cập nhật hạn dùng'}
+                              {doc.reviewerNotes ? ` · ${doc.reviewerNotes}` : ''}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span
+                              className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border whitespace-nowrap ${
+                                st === 'approved'
+                                  ? 'bg-[#E8F2EB] text-[#287653] border-[#B7DBC4]'
+                                  : st === 'rejected' || st === 'expired'
+                                  ? 'bg-[#F8EAEA] text-[#B33E3E] border-[#E5B8B8]'
+                                  : 'bg-[#F8F0DF] text-[#966516] border-[#DFCA9A]'
+                              }`}
+                            >
+                              {st === 'approved'
+                                ? isEn ? 'Approved' : 'Đã duyệt'
+                                : st === 'rejected'
+                                ? isEn ? 'Rejected' : 'Từ chối'
+                                : st === 'expired'
+                                ? isEn ? 'Expired' : 'Hết hạn'
+                                : isEn ? 'Pending review' : 'Chờ thẩm định'}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setReviewDoc({
+                                  id: `DOC-${doc.id}`,
+                                  numericDocId: Number(doc.id),
+                                  horseName: horse.horseName,
+                                  docTitle: doc.regulationTitle || doc.regulationDocType || doc.docType || 'Document',
+                                  fileUrl: doc.fileUrl,
+                                  microchip: horse.microchipNo,
+                                  passport: horse.passportNo,
+                                })
+                              }
+                            >
+                              <Eye size={13} />
+                              {isEn ? 'Inspect' : 'Thẩm định'}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {(horse.missingRegulations || []).map((reg: any, idx: number) => {
+                      const deferredMatch = Array.isArray((order as any).deferredDocuments)
+                        ? (order as any).deferredDocuments.find(
+                            (d: any) =>
+                              Number(d.horseId) === Number(horse.horseId) &&
+                              String(d.documentTypeCode || '').toLowerCase() ===
+                                String(reg.documentType || '').toLowerCase(),
+                          )
+                        : null;
+                      const isOverdue = Boolean(
+                        deferredMatch?.submitDeadline &&
+                          String(deferredMatch.submitDeadline).slice(0, 10) < new Date().toISOString().slice(0, 10),
+                      );
+                      return (
+                      <div
+                        key={`${reg.id}-${idx}`}
+                        className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl border border-dashed border-[#E5B8B8] bg-[#FDF6F6]"
+                      >
+                        <div>
+                          <p className="text-sm font-bold text-[#B33E3E] m-0">
+                            {reg.description || reg.documentType}
+                          </p>
+                          <p className="text-xs text-[#9E3B3B] mt-0.5 mb-0">
+                            {deferredMatch
+                              ? isEn
+                                ? `Customer marked "Submit later" (Due: ${deferredMatch.submitDeadline || 'before departure'})`
+                                : `Khách chọn "Nộp sau" (Hạn nộp: ${deferredMatch.submitDeadline || 'trước xuất phát'})`
+                              : isEn
+                                ? 'Missing required regulation document'
+                                : 'Chưa nộp giấy tờ bắt buộc theo quy định'}
+                          </p>
+                        </div>
+                        <span
+                          className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border whitespace-nowrap ${
+                            deferredMatch && !isOverdue
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : 'bg-[#F8EAEA] text-[#B33E3E] border-[#E5B8B8]'
+                          }`}
+                        >
+                          {deferredMatch
+                            ? isOverdue
+                              ? isEn ? 'Deferred · Overdue' : 'Nộp sau · Quá hạn'
+                              : isEn ? `Submit later · ${deferredMatch.submitDeadline || ''}` : `Nộp sau · ${deferredMatch.submitDeadline || ''}`
+                            : isEn ? 'Missing' : 'Còn thiếu'}
+                        </span>
+                      </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'route' && (
+        <div className="flex flex-col gap-6">
+          {Number.isFinite(numericOrderId) && numericOrderId > 0 && (
+            <ReservedVehiclesPanel
+              shipmentId={numericOrderId}
+              onChanged={() => {
+                void mutateOrder();
+              }}
+            />
+          )}
+
+          <div className="bg-white rounded-2xl border border-[#D8CEBE] shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#EAE5DA] flex flex-wrap items-center justify-between gap-3 bg-[#FAF9F5]">
+              <div>
+                <h2 className="text-base font-extrabold text-[#181A17] m-0 flex items-center gap-2">
+                  <RouteIcon size={18} className="text-[#A67C2E]" />
+                  {isEn ? 'Planned Route Legs & Dispatch' : 'Kế Hoạch Lộ Trình & Điều Phối'}
+                </h2>
+                <p className="text-xs text-[#5C6658] mt-0.5 mb-0">
+                  {routePlan
+                    ? `${routePlan.routeName || requestCode} · ${routePlan.legs?.length || 0} chặng · ${routePlan.planStatus || 'draft'}`
+                    : isEn
+                    ? 'No detailed route plan has been created yet.'
+                    : 'Chưa khởi tạo kế hoạch lộ trình chi tiết cho đơn hàng này.'}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href="/manager/planning"
+                  className="no-underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-white hover:bg-[#FAF8F4] text-xs font-bold text-[#181A17] whitespace-nowrap"
+                >
+                  <span>{isEn ? 'Planning Queue' : 'Kế hoạch chuyến đi'}</span>
+                </Link>
+                <Link
+                  href={`/manager/dispatch/routes?shipmentId=${order.id}`}
+                  className="no-underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#181A17] hover:bg-[#2A2D28] text-xs font-bold text-[#FAF8F4] whitespace-nowrap"
+                >
+                  <RouteIcon size={13} />
+                  <span>{isEn ? 'Edit Route Legs' : 'Dựng / Sửa lộ trình'}</span>
+                </Link>
+              </div>
+            </div>
+
+            <div className="p-6">
+              {routePlan && Array.isArray(routePlan.legs) && routePlan.legs.length > 0 ? (
+                <div className="space-y-3">
+                  {routePlan.legs.map((leg: any, idx: number) => (
+                    <div
+                      key={leg.id || idx}
+                      className="p-4 rounded-xl border border-[#EAE5DA] bg-[#FAF9F5] flex flex-wrap items-center justify-between gap-3"
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold uppercase text-[#966516]">
+                          Chặng {idx + 1} · {leg.legType || leg.transportMode || 'road'}
+                        </span>
+                        <p className="text-sm font-bold text-[#181A17] mt-0.5 mb-0">
+                          {leg.originLocation || leg.origin || '—'} → {leg.destinationLocation || leg.destination || '—'}
+                        </p>
+                      </div>
+                      <div className="text-xs text-[#5C6658] font-semibold">
+                        {leg.plannedDeparture ? formatDate(leg.plannedDeparture, locale) : '—'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-sm text-[#5C6658] bg-[#FAF9F5] rounded-xl border border-dashed border-[#D8CEBE]">
+                  {isEn
+                    ? 'Click "Edit Route Legs" above to build legs, assign vehicles and confirm the dispatch plan.'
+                    : 'Nhấn "Dựng / Sửa lộ trình" ở trên để thiết lập các chặng, trạm dừng và xác nhận kế hoạch xuất phát.'}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'tracking' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-[#D8CEBE] shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#EAE5DA] flex flex-wrap items-center justify-between gap-3 bg-[#FAF9F5]">
+              <div>
+                <h2 className="text-base font-extrabold text-[#181A17] m-0 flex items-center gap-2">
+                  <Radio size={18} className="text-[#A67C2E]" />
+                  {isEn ? 'Live Progress Timeline' : 'Timeline Tiến Độ Hành Trình'}
+                </h2>
+                <p className="text-xs text-[#5C6658] mt-0.5 mb-0">
+                  {isEn ? 'Synchronized milestones and vital alerts.' : 'Đồng bộ mốc kiểm soát thực địa và sinh hiệu ngựa.'}
+                </p>
+              </div>
+              <Link
+                href={`/manager/monitoring?shipmentId=${order.id}`}
+                className="no-underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#181A17] hover:bg-[#2A2D28] text-xs font-bold text-[#FAF8F4] whitespace-nowrap"
+              >
+                <Radio size={13} />
+                <span>{isEn ? 'Open Live GPS Map' : 'Mở Bản đồ GPS trực tuyến'}</span>
+              </Link>
+            </div>
+            <div className="p-6">
+              <VerticalTimeline
+                items={timelineItems}
+                viewer="manager"
+                emptyText={isEn ? 'No tracking milestones recorded yet.' : 'Chưa có mốc hành trình nào được ghi nhận.'}
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-6">
+            {order && Number(order.id || requestId) > 0 && (
+              <DeliveryHandoverPanel
+                role="manager"
+                shipmentId={Number(order.id || requestId)}
+                shipmentStatus={statusKey}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main Grid: 2 Columns (Overview Tab) */}
+      {activeTab === 'overview' && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: 2 Spans */}
         <div className="lg:col-span-2 flex flex-col gap-6">
@@ -725,7 +1092,9 @@ export default function ManagerRequestDetailPage() {
                     <strong className="text-[#181A17] font-bold">
                       {effectiveMode === 'air'
                         ? t('manager.detail.modeAirLong', 'Đường Hàng Không')
-                        : t('manager.detail.modeRoadLong', 'Đường Bộ Liên Vận')}
+                        : effectiveMode === 'sea'
+                          ? t('manager.detail.modeSeaLong', isEn ? 'Sea Freight (Dedicated Vessel)' : 'Đường Thủy (Tàu Biển Chuyên Dụng)')
+                          : t('manager.detail.modeRoadLong', 'Đường Bộ Liên Vận')}
                     </strong>
                   </span>
                 </div>
@@ -844,6 +1213,7 @@ export default function ManagerRequestDetailPage() {
                   transportCost={order.transportCost ?? null}
                   insuranceFee={Number(order.insuranceFee ?? 0)}
                   totalCost={Number(order.totalCost ?? 0)}
+                  showCostSummary={false}
                 />
               </div>
               {Array.isArray(order.horses) && order.horses.length > 0 ? (
@@ -1056,13 +1426,6 @@ export default function ManagerRequestDetailPage() {
                   <span className="font-semibold text-[#181A17]">{formatDate(paidAt, locale)}</span>
                 </div>
               )}
-
-              <div className="p-3 bg-[#FAF9F5] border border-[#EAE5DA] rounded-xl text-xs text-[#5C6658] leading-relaxed">
-                {t(
-                  'manager.detail.sepayDesc',
-                  'Phương thức thanh toán tích hợp tự động qua SePay VietQR. Khách hàng quét mã QR chuyển khoản, hệ thống tự động xác nhận sau khi giao dịch hoàn tất.'
-                )}
-              </div>
             </div>
           </div>
 
@@ -1109,11 +1472,6 @@ export default function ManagerRequestDetailPage() {
                   await mutateOrder();
                 }}
               />
-              <DeliveryHandoverPanel
-                role="manager"
-                shipmentId={Number(order.id || requestId)}
-                shipmentStatus={statusKey}
-              />
               <RoundTripPanel
                 order={order}
                 userRole="manager"
@@ -1125,6 +1483,27 @@ export default function ManagerRequestDetailPage() {
           )}
         </div>
       </div>
+      )}
+
+      {/* Inline Document Review Modal from Compliance Tab */}
+      {reviewDoc && (
+        <DocumentReviewModal
+          isOpen={true}
+          onClose={() => setReviewDoc(null)}
+          documentId={reviewDoc.id}
+          numericDocId={reviewDoc.numericDocId}
+          horseName={reviewDoc.horseName}
+          docTitle={reviewDoc.docTitle}
+          fileUrl={reviewDoc.fileUrl}
+          horseMicrochip={reviewDoc.microchip}
+          horsePassport={reviewDoc.passport}
+          onSuccess={() => {
+            setReviewDoc(null);
+            void mutateChecklist();
+            void mutateOrder();
+          }}
+        />
+      )}
 
       {/* Action Modal (Approve / Reject / Change) */}
       {activeModal !== 'NONE' && (
@@ -1202,6 +1581,17 @@ export default function ManagerRequestDetailPage() {
                           }`}
                         >
                           {t('manager.requests.modeAir', 'Hàng không')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyModeAndSuggestedQuote('sea', true)}
+                          className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer transition-colors ${
+                            selectedTransportMode === 'sea'
+                              ? 'bg-[#0E7490] text-white shadow-sm'
+                              : 'text-[#5C6658] hover:text-[#181A17]'
+                          }`}
+                        >
+                          {t('manager.requests.modeSea', isEn ? 'Sea Freight' : 'Đường thủy')}
                         </button>
                       </div>
                     </div>

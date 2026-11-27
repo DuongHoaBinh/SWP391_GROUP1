@@ -14,7 +14,6 @@ export interface SeaportNode {
   city: string;
   coords: [number, number]; // [lat, lng]
   isInternational: boolean;
-  supportsFerry: boolean;
   supportsVessel: boolean;
   hasQuarantine: boolean;
 }
@@ -22,7 +21,7 @@ export interface SeaportNode {
 export interface SeaCorridorEdge {
   fromCode: string;
   toCode: string;
-  seaMode: 'ferry' | 'vessel';
+  seaMode: 'vessel';
   distanceKm: number;
   typicalHours: number;
   viaPoints: [number, number][];
@@ -33,70 +32,57 @@ export interface SeaCorridorEdge {
 export interface SeaPathResult {
   fromPort: SeaportNode;
   toPort: SeaportNode;
-  effectiveSeaMode: 'ferry' | 'vessel';
+  effectiveSeaMode: 'vessel';
   transitPorts: SeaportNode[];
   pathCoords: [number, number][];
   distanceKm: number;
   durationHours: number;
   corridorNotesVi: string;
   corridorNotesEn: string;
-  fellBackFromFerryToVessel: boolean;
 }
 
 export const ASEAN_CHINA_SEAPORTS: SeaportNode[] = [
   // Việt Nam
-  { code: 'VN-CLI', name: 'Cảng Cát Lái (TP.HCM)', nameEn: 'Cat Lai Port (HCMC)', country: 'Việt Nam', countryCode: 'VN', city: 'Hồ Chí Minh', coords: [10.7617, 106.7894], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'VN-VUT', name: 'Cảng Cái Mép – Thị Vải (Vũng Tàu)', nameEn: 'Cai Mep – Thi Vai Port', country: 'Việt Nam', countryCode: 'VN', city: 'Bà Rịa – Vũng Tàu', coords: [10.5256, 107.0185], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'VN-DAD', name: 'Cảng Tiên Sa (Đà Nẵng)', nameEn: 'Tien Sa Port (Da Nang)', country: 'Việt Nam', countryCode: 'VN', city: 'Đà Nẵng', coords: [16.1219, 108.2194], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'VN-HPH', name: 'Cảng Lạch Huyện (Hải Phòng)', nameEn: 'Lach Huyen Port (Hai Phong)', country: 'Việt Nam', countryCode: 'VN', city: 'Hải Phòng', coords: [20.8449, 106.8891], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'VN-RGI', name: 'Cảng Rạch Giá (Kiên Giang)', nameEn: 'Rach Gia Ferry Port', country: 'Việt Nam', countryCode: 'VN', city: 'Kiên Giang', coords: [10.0125, 105.0809], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
-  { code: 'VN-HTN', name: 'Bến phà Hà Tiên (Kiên Giang)', nameEn: 'Ha Tien Ferry Terminal', country: 'Việt Nam', countryCode: 'VN', city: 'Kiên Giang', coords: [10.379, 104.487], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
-  { code: 'VN-PQC', name: 'Cảng Bãi Vòng (Phú Quốc)', nameEn: 'Bai Vong Port (Phu Quoc)', country: 'Việt Nam', countryCode: 'VN', city: 'Phú Quốc', coords: [10.1557, 104.0402], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
+  { code: 'VN-CLI', name: 'Cảng Cát Lái (TP.HCM)', nameEn: 'Cat Lai Port (HCMC)', country: 'Việt Nam', countryCode: 'VN', city: 'Hồ Chí Minh', coords: [10.7617, 106.7894], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'VN-VUT', name: 'Cảng Cái Mép – Thị Vải (Vũng Tàu)', nameEn: 'Cai Mep – Thi Vai Port', country: 'Việt Nam', countryCode: 'VN', city: 'Bà Rịa – Vũng Tàu', coords: [10.5256, 107.0185], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'VN-DAD', name: 'Cảng Tiên Sa (Đà Nẵng)', nameEn: 'Tien Sa Port (Da Nang)', country: 'Việt Nam', countryCode: 'VN', city: 'Đà Nẵng', coords: [16.1219, 108.2194], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'VN-HPH', name: 'Cảng Lạch Huyện (Hải Phòng)', nameEn: 'Lach Huyen Port (Hai Phong)', country: 'Việt Nam', countryCode: 'VN', city: 'Hải Phòng', coords: [20.8449, 106.8891], isInternational: true, supportsVessel: true, hasQuarantine: true },
 
   // Campuchia
-  { code: 'KH-KOS', name: 'Cảng tự trị Sihanoukville (Campuchia)', nameEn: 'Sihanoukville Autonomous Port', country: 'Campuchia', countryCode: 'KH', city: 'Sihanoukville', coords: [10.6462, 103.5015], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
+  { code: 'KH-KOS', name: 'Cảng tự trị Sihanoukville (Campuchia)', nameEn: 'Sihanoukville Autonomous Port', country: 'Campuchia', countryCode: 'KH', city: 'Sihanoukville', coords: [10.6462, 103.5015], isInternational: true, supportsVessel: true, hasQuarantine: true },
 
   // Thái Lan
-  { code: 'TH-LCB', name: 'Cảng Laem Chabang (Thái Lan)', nameEn: 'Laem Chabang Port (Thailand)', country: 'Thái Lan', countryCode: 'TH', city: 'Chonburi', coords: [13.0827, 100.883], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'TH-DSK', name: 'Bến phà Donsak (Surat Thani)', nameEn: 'Donsak Ferry Pier', country: 'Thái Lan', countryCode: 'TH', city: 'Surat Thani', coords: [9.326, 99.692], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
-  { code: 'TH-SMI', name: 'Bến phà Lipa Noi (Koh Samui)', nameEn: 'Lipa Noi Ferry Pier (Koh Samui)', country: 'Thái Lan', countryCode: 'TH', city: 'Koh Samui', coords: [9.513, 99.937], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
+  { code: 'TH-LCB', name: 'Cảng Laem Chabang (Thái Lan)', nameEn: 'Laem Chabang Port (Thailand)', country: 'Thái Lan', countryCode: 'TH', city: 'Chonburi', coords: [13.0827, 100.883], isInternational: true, supportsVessel: true, hasQuarantine: true },
 
   // Malaysia
-  { code: 'MY-PKG', name: 'Cảng Port Klang (Malaysia)', nameEn: 'Port Klang (Westports)', country: 'Malaysia', countryCode: 'MY', city: 'Selangor', coords: [2.9999, 101.3928], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'MY-PEN', name: 'Cảng Penang (Butterworth)', nameEn: 'Penang Port (Butterworth)', country: 'Malaysia', countryCode: 'MY', city: 'Penang', coords: [5.41, 100.365], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'MY-KCH', name: 'Cảng Senari (Kuching)', nameEn: 'Senari Port (Kuching)', country: 'Malaysia', countryCode: 'MY', city: 'Kuching', coords: [1.57, 110.42], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'MY-BKI', name: 'Cảng Sepanggar (Kota Kinabalu)', nameEn: 'Sepanggar Port (Kota Kinabalu)', country: 'Malaysia', countryCode: 'MY', city: 'Kota Kinabalu', coords: [6.08, 116.12], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: false },
+  { code: 'MY-PKG', name: 'Cảng Port Klang (Malaysia)', nameEn: 'Port Klang (Westports)', country: 'Malaysia', countryCode: 'MY', city: 'Selangor', coords: [2.9999, 101.3928], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'MY-PEN', name: 'Cảng Penang (Butterworth)', nameEn: 'Penang Port (Butterworth)', country: 'Malaysia', countryCode: 'MY', city: 'Penang', coords: [5.41, 100.365], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'MY-KCH', name: 'Cảng Senari (Kuching)', nameEn: 'Senari Port (Kuching)', country: 'Malaysia', countryCode: 'MY', city: 'Kuching', coords: [1.57, 110.42], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'MY-BKI', name: 'Cảng Sepanggar (Kota Kinabalu)', nameEn: 'Sepanggar Port (Kota Kinabalu)', country: 'Malaysia', countryCode: 'MY', city: 'Kota Kinabalu', coords: [6.08, 116.12], isInternational: true, supportsVessel: true, hasQuarantine: false },
 
   // Singapore
-  { code: 'SG-PSA', name: 'Cảng Pasir Panjang (Singapore)', nameEn: 'Pasir Panjang Terminal (Singapore)', country: 'Singapore', countryCode: 'SG', city: 'Singapore', coords: [1.2737, 103.7909], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
+  { code: 'SG-PSA', name: 'Cảng Pasir Panjang (Singapore)', nameEn: 'Pasir Panjang Terminal (Singapore)', country: 'Singapore', countryCode: 'SG', city: 'Singapore', coords: [1.2737, 103.7909], isInternational: true, supportsVessel: true, hasQuarantine: true },
 
   // Indonesia
-  { code: 'ID-JKT', name: 'Cảng Tanjung Priok (Jakarta)', nameEn: 'Tanjung Priok Port (Jakarta)', country: 'Indonesia', countryCode: 'ID', city: 'Jakarta', coords: [-6.104, 106.88], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'ID-SUB', name: 'Cảng Tanjung Perak (Surabaya)', nameEn: 'Tanjung Perak Port (Surabaya)', country: 'Indonesia', countryCode: 'ID', city: 'Surabaya', coords: [-7.2, 112.73], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'ID-BLW', name: 'Cảng Belawan (Medan)', nameEn: 'Belawan Port (Medan)', country: 'Indonesia', countryCode: 'ID', city: 'Medan', coords: [3.785, 98.69], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'ID-MRK', name: 'Bến phà Merak (Java)', nameEn: 'Merak Ferry Port (Java)', country: 'Indonesia', countryCode: 'ID', city: 'Banten', coords: [-5.93, 105.995], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
-  { code: 'ID-BKH', name: 'Bến phà Bakauheni (Sumatra)', nameEn: 'Bakauheni Ferry Port (Sumatra)', country: 'Indonesia', countryCode: 'ID', city: 'Lampung', coords: [-5.87, 105.75], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
-  { code: 'ID-KTP', name: 'Bến phà Ketapang (Java)', nameEn: 'Ketapang Ferry Port (Java)', country: 'Indonesia', countryCode: 'ID', city: 'Banyuwangi', coords: [-8.143, 114.399], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
-  { code: 'ID-GLM', name: 'Bến phà Gilimanuk (Bali)', nameEn: 'Gilimanuk Ferry Port (Bali)', country: 'Indonesia', countryCode: 'ID', city: 'Bali', coords: [-8.162, 114.437], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
+  { code: 'ID-JKT', name: 'Cảng Tanjung Priok (Jakarta)', nameEn: 'Tanjung Priok Port (Jakarta)', country: 'Indonesia', countryCode: 'ID', city: 'Jakarta', coords: [-6.104, 106.88], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'ID-SUB', name: 'Cảng Tanjung Perak (Surabaya)', nameEn: 'Tanjung Perak Port (Surabaya)', country: 'Indonesia', countryCode: 'ID', city: 'Surabaya', coords: [-7.2, 112.73], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'ID-BLW', name: 'Cảng Belawan (Medan)', nameEn: 'Belawan Port (Medan)', country: 'Indonesia', countryCode: 'ID', city: 'Medan', coords: [3.785, 98.69], isInternational: true, supportsVessel: true, hasQuarantine: true },
 
   // Philippines, Brunei, Myanmar
-  { code: 'PH-MNL', name: 'Cảng Manila South Harbor (Philippines)', nameEn: 'Manila South Harbor', country: 'Philippines', countryCode: 'PH', city: 'Manila', coords: [14.585, 120.965], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'PH-BTG', name: 'Cảng Batangas (Luzon)', nameEn: 'Batangas Port (Luzon)', country: 'Philippines', countryCode: 'PH', city: 'Batangas', coords: [13.756, 121.045], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
-  { code: 'PH-CLP', name: 'Cảng Calapan (Mindoro)', nameEn: 'Calapan Port (Mindoro)', country: 'Philippines', countryCode: 'PH', city: 'Calapan', coords: [13.425, 121.185], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
-  { code: 'BN-MUA', name: 'Cảng Muara (Brunei)', nameEn: 'Muara Port (Brunei)', country: 'Brunei', countryCode: 'BN', city: 'Muara', coords: [5.025, 115.07], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'MM-RGN', name: 'Cảng Thilawa (Yangon, Myanmar)', nameEn: 'Thilawa Port (Yangon)', country: 'Myanmar', countryCode: 'MM', city: 'Yangon', coords: [16.66, 96.27], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
+  { code: 'PH-MNL', name: 'Cảng Manila South Harbor (Philippines)', nameEn: 'Manila South Harbor', country: 'Philippines', countryCode: 'PH', city: 'Manila', coords: [14.585, 120.965], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'BN-MUA', name: 'Cảng Muara (Brunei)', nameEn: 'Muara Port (Brunei)', country: 'Brunei', countryCode: 'BN', city: 'Muara', coords: [5.025, 115.07], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'MM-RGN', name: 'Cảng Thilawa (Yangon, Myanmar)', nameEn: 'Thilawa Port (Yangon)', country: 'Myanmar', countryCode: 'MM', city: 'Yangon', coords: [16.66, 96.27], isInternational: true, supportsVessel: true, hasQuarantine: true },
 
   // Hồng Kông & Trung Quốc
-  { code: 'HK-HKG', name: 'Cảng Kwai Tsing (Hồng Kông)', nameEn: 'Kwai Tsing Terminals (Hong Kong)', country: 'Hồng Kông', countryCode: 'HK', city: 'Hong Kong', coords: [22.3456, 114.1228], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'CN-FCG', name: 'Cảng Phòng Thành (Quảng Tây, TQ)', nameEn: 'Fangchenggang Port (Guangxi)', country: 'Trung Quốc', countryCode: 'CN', city: 'Fangchenggang', coords: [21.6, 108.34], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'CN-NSA', name: 'Cảng Nam Sa (Quảng Châu, TQ)', nameEn: 'Nansha Port (Guangzhou)', country: 'Trung Quốc', countryCode: 'CN', city: 'Guangzhou', coords: [22.65, 113.67], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'CN-SHK', name: 'Cảng Xà Khẩu (Thâm Quyến, TQ)', nameEn: 'Shekou Port (Shenzhen)', country: 'Trung Quốc', countryCode: 'CN', city: 'Shenzhen', coords: [22.47, 113.9], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'CN-XMN', name: 'Cảng Hạ Môn (Phúc Kiến, TQ)', nameEn: 'Xiamen Port (China)', country: 'Trung Quốc', countryCode: 'CN', city: 'Xiamen', coords: [24.45, 118.07], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'CN-SHA', name: 'Cảng Dương Sơn (Thượng Hải, TQ)', nameEn: 'Yangshan Port (Shanghai)', country: 'Trung Quốc', countryCode: 'CN', city: 'Shanghai', coords: [30.62, 122.07], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'CN-TAO', name: 'Cảng Thanh Đảo (Sơn Đông, TQ)', nameEn: 'Qingdao Port (China)', country: 'Trung Quốc', countryCode: 'CN', city: 'Qingdao', coords: [36.07, 120.32], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'CN-TSN', name: 'Cảng Thiên Tân (Bắc Kinh – Thiên Tân)', nameEn: 'Tianjin Port (Beijing Gateway)', country: 'Trung Quốc', countryCode: 'CN', city: 'Tianjin', coords: [38.97, 117.8], isInternational: true, supportsFerry: false, supportsVessel: true, hasQuarantine: true },
-  { code: 'CN-HAK', name: 'Cảng Tú Anh (Hải Khẩu, Hải Nam)', nameEn: 'Xiuying Port (Haikou, Hainan)', country: 'Trung Quốc', countryCode: 'CN', city: 'Haikou', coords: [20.02, 110.27], isInternational: true, supportsFerry: true, supportsVessel: true, hasQuarantine: true },
-  { code: 'CN-HAN', name: 'Cảng Hải An (Từ Văn, Quảng Đông)', nameEn: 'Haian Port (Xuwen, Guangdong)', country: 'Trung Quốc', countryCode: 'CN', city: 'Xuwen', coords: [20.26, 110.18], isInternational: false, supportsFerry: true, supportsVessel: false, hasQuarantine: false },
+  { code: 'HK-HKG', name: 'Cảng Kwai Tsing (Hồng Kông)', nameEn: 'Kwai Tsing Terminals (Hong Kong)', country: 'Hồng Kông', countryCode: 'HK', city: 'Hong Kong', coords: [22.3456, 114.1228], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'CN-FCG', name: 'Cảng Phòng Thành (Quảng Tây, TQ)', nameEn: 'Fangchenggang Port (Guangxi)', country: 'Trung Quốc', countryCode: 'CN', city: 'Fangchenggang', coords: [21.6, 108.34], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'CN-NSA', name: 'Cảng Nam Sa (Quảng Châu, TQ)', nameEn: 'Nansha Port (Guangzhou)', country: 'Trung Quốc', countryCode: 'CN', city: 'Guangzhou', coords: [22.65, 113.67], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'CN-SHK', name: 'Cảng Xà Khẩu (Thâm Quyến, TQ)', nameEn: 'Shekou Port (Shenzhen)', country: 'Trung Quốc', countryCode: 'CN', city: 'Shenzhen', coords: [22.47, 113.9], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'CN-XMN', name: 'Cảng Hạ Môn (Phúc Kiến, TQ)', nameEn: 'Xiamen Port (China)', country: 'Trung Quốc', countryCode: 'CN', city: 'Xiamen', coords: [24.45, 118.07], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'CN-SHA', name: 'Cảng Dương Sơn (Thượng Hải, TQ)', nameEn: 'Yangshan Port (Shanghai)', country: 'Trung Quốc', countryCode: 'CN', city: 'Shanghai', coords: [30.62, 122.07], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'CN-TAO', name: 'Cảng Thanh Đảo (Sơn Đông, TQ)', nameEn: 'Qingdao Port (China)', country: 'Trung Quốc', countryCode: 'CN', city: 'Qingdao', coords: [36.07, 120.32], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'CN-TSN', name: 'Cảng Thiên Tân (Bắc Kinh – Thiên Tân)', nameEn: 'Tianjin Port (Beijing Gateway)', country: 'Trung Quốc', countryCode: 'CN', city: 'Tianjin', coords: [38.97, 117.8], isInternational: true, supportsVessel: true, hasQuarantine: true },
+  { code: 'CN-HAK', name: 'Cảng Tú Anh (Hải Khẩu, Hải Nam)', nameEn: 'Xiuying Port (Haikou, Hainan)', country: 'Trung Quốc', countryCode: 'CN', city: 'Haikou', coords: [20.02, 110.27], isInternational: true, supportsVessel: true, hasQuarantine: true },
 ];
 
 export const ASEAN_CHINA_SEA_ROUTES: SeaCorridorEdge[] = [
@@ -142,15 +128,6 @@ export const ASEAN_CHINA_SEA_ROUTES: SeaCorridorEdge[] = [
   { fromCode: 'CN-XMN', toCode: 'CN-SHA', seaMode: 'vessel', distanceKm: 941, typicalHours: 42, viaPoints: [[24.38, 118.1], [25.2, 120.1], [27, 121.3], [29.9, 122.95], [30.45, 122.35]], notesVi: 'Eo biển Đài Loan – Thượng Hải', notesEn: 'Taiwan Strait – Shanghai maritime route' },
   { fromCode: 'CN-SHA', toCode: 'CN-TAO', seaMode: 'vessel', distanceKm: 719, typicalHours: 34, viaPoints: [[30.45, 122.35], [30.9, 122.55], [32.5, 122.7], [35.6, 120.8]], notesVi: 'Hoàng Hải (Thượng Hải – Thanh Đảo)', notesEn: 'Yellow Sea (Shanghai – Qingdao)' },
   { fromCode: 'CN-TAO', toCode: 'CN-TSN', seaMode: 'vessel', distanceKm: 845, typicalHours: 39, viaPoints: [[35.8, 120.7], [36.6, 122.8], [37.4, 123], [38.5, 121.2], [38.7, 119]], notesVi: 'Vòng bán đảo Sơn Đông vào vịnh Bột Hải (Thanh Đảo – Thiên Tân)', notesEn: 'Rounding Shandong Peninsula into Bohai Sea (Qingdao – Tianjin)' },
-
-  // Tuyến phà Ro-Ro ngắn (<= 12h)
-  { fromCode: 'VN-RGI', toCode: 'VN-PQC', seaMode: 'ferry', distanceKm: 115, typicalHours: 6, viaPoints: [[10.05, 104.7], [10.15, 104.2]], notesVi: 'Phà Ro-Ro Rạch Giá – Phú Quốc', notesEn: 'Rach Gia – Phu Quoc Ro-Ro Ferry' },
-  { fromCode: 'VN-HTN', toCode: 'VN-PQC', seaMode: 'ferry', distanceKm: 55, typicalHours: 3.5, viaPoints: [[10.3, 104.25]], notesVi: 'Phà Ro-Ro Hà Tiên – Phú Quốc', notesEn: 'Ha Tien – Phu Quoc Ro-Ro Ferry' },
-  { fromCode: 'TH-DSK', toCode: 'TH-SMI', seaMode: 'ferry', distanceKm: 35, typicalHours: 2.5, viaPoints: [[9.45, 99.8]], notesVi: 'Phà Ro-Ro Donsak – Koh Samui', notesEn: 'Donsak – Koh Samui Ro-Ro Ferry' },
-  { fromCode: 'CN-HAN', toCode: 'CN-HAK', seaMode: 'ferry', distanceKm: 28, typicalHours: 2, viaPoints: [[20.14, 110.22]], notesVi: 'Phà Ro-Ro eo Quỳnh Châu (Hải An – Hải Khẩu)', notesEn: 'Qiongzhou Strait Ro-Ro Ferry' },
-  { fromCode: 'ID-MRK', toCode: 'ID-BKH', seaMode: 'ferry', distanceKm: 28, typicalHours: 2, viaPoints: [[-5.9, 105.87]], notesVi: 'Phà Ro-Ro eo Sunda (Java – Sumatra)', notesEn: 'Sunda Strait Ro-Ro Ferry' },
-  { fromCode: 'ID-KTP', toCode: 'ID-GLM', seaMode: 'ferry', distanceKm: 5, typicalHours: 1, viaPoints: [], notesVi: 'Phà Ro-Ro eo Bali (Java – Bali)', notesEn: 'Bali Strait Ro-Ro Ferry' },
-  { fromCode: 'PH-BTG', toCode: 'PH-CLP', seaMode: 'ferry', distanceKm: 42, typicalHours: 2.5, viaPoints: [[13.6, 121.05]], notesVi: 'Phà Ro-Ro Batangas – Calapan (Luzon – Mindoro)', notesEn: 'Batangas – Calapan Ro-Ro Ferry' },
 ];
 
 function haversineKm(a: [number, number], b: [number, number]): number {
@@ -171,11 +148,10 @@ const PORT_BY_CODE = new Map<string, SeaportNode>(ASEAN_CHINA_SEAPORTS.map((p) =
 export function findNearestSeaport(
   coords: [number, number],
   country: string,
-  options: { seaMode: 'ferry' | 'vessel'; internationalOnly: boolean }
+  options: { internationalOnly: boolean }
 ): SeaportNode {
   const filterPort = (p: SeaportNode) => {
     if (options.internationalOnly && !p.isInternational) return false;
-    if (options.seaMode === 'ferry') return p.supportsFerry;
     return p.supportsVessel;
   };
 
@@ -207,14 +183,13 @@ interface GraphAdj {
 
 function findShortestSeaEdges(
   startCode: string,
-  endCode: string,
-  seaMode: 'ferry' | 'vessel'
+  endCode: string
 ): GraphAdj[] | null {
   if (startCode === endCode) return [];
 
   const adj = new Map<string, GraphAdj[]>();
   for (const edge of ASEAN_CHINA_SEA_ROUTES) {
-    if (edge.seaMode !== seaMode) continue;
+    if (edge.seaMode !== 'vessel') continue;
     if (!adj.has(edge.fromCode)) adj.set(edge.fromCode, []);
     if (!adj.has(edge.toCode)) adj.set(edge.toCode, []);
     adj.get(edge.fromCode)!.push({ to: edge.toCode, edge, reversed: false });
@@ -262,89 +237,43 @@ function findShortestSeaEdges(
 }
 
 /**
- * Resolves the optimal maritime corridor between origin and destination using real offshore via_points.
- * Automatically falls back from short-range ferry to dedicated vessel when no direct ferry exists.
+ * Resolves the optimal dedicated-vessel maritime corridor within ASEAN + China using real offshore via_points.
+ * Returns null if either endpoint is outside the ASEAN+China vessel port radius (> 450 km) or shares the same port.
  */
 export function resolveAseanChinaSeaCorridor(
   originCoords: [number, number],
   originCountry: string,
   destCoords: [number, number],
   destCountry: string,
-  requestedSeaMode: 'ferry' | 'vessel',
   isDomestic: boolean
 ): SeaPathResult | null {
-  let effectiveSeaMode: 'ferry' | 'vessel' = requestedSeaMode;
-  let fellBackFromFerryToVessel = false;
-
-  // 1. Try direct ferry corridor if requested
-  if (requestedSeaMode === 'ferry') {
-    const oFerry = findNearestSeaport(originCoords, originCountry, {
-      seaMode: 'ferry',
-      internationalOnly: false,
-    });
-    const dFerry = findNearestSeaport(destCoords, destCountry, {
-      seaMode: 'ferry',
-      internationalOnly: false,
-    });
-    const ferryOriginDist = haversineKm(originCoords, oFerry.coords);
-    const ferryDestDist = haversineKm(destCoords, dFerry.coords);
-    const ferrySteps =
-      oFerry.code !== dFerry.code && ferryOriginDist < 450 && ferryDestDist < 450
-        ? findShortestSeaEdges(oFerry.code, dFerry.code, 'ferry')
-        : null;
-
-    if (ferrySteps && ferrySteps.length > 0) {
-      return assembleSeaPathResult(oFerry, dFerry, ferrySteps, 'ferry', false);
-    }
-
-    // No viable short-range ferry -> automatically upgrade to dedicated vessel
-    effectiveSeaMode = 'vessel';
-    fellBackFromFerryToVessel = true;
-  }
-
-  // 2. Find international/coastal vessel seaports & shortest offshore route
   const oVessel = findNearestSeaport(originCoords, originCountry, {
-    seaMode: 'vessel',
     internationalOnly: !isDomestic,
   });
   const dVessel = findNearestSeaport(destCoords, destCountry, {
-    seaMode: 'vessel',
     internationalOnly: !isDomestic,
   });
+
+  if (haversineKm(originCoords, oVessel.coords) > 450 || haversineKm(destCoords, dVessel.coords) > 450) {
+    return null;
+  }
 
   if (oVessel.code === dVessel.code || haversineKm(oVessel.coords, dVessel.coords) < 5) {
     return null;
   }
 
-  const vesselSteps = findShortestSeaEdges(oVessel.code, dVessel.code, 'vessel');
+  const vesselSteps = findShortestSeaEdges(oVessel.code, dVessel.code);
   if (vesselSteps && vesselSteps.length > 0) {
-    return assembleSeaPathResult(oVessel, dVessel, vesselSteps, effectiveSeaMode, fellBackFromFerryToVessel);
+    return assembleSeaPathResult(oVessel, dVessel, vesselSteps);
   }
 
-  // Fallback for destinations outside ASEAN + China graph (still returns valid vessel route)
-  const rawKm = haversineKm(oVessel.coords, dVessel.coords);
-  const distKm = Math.max(80, Math.round(rawKm * 1.25));
-  const hours = Math.max(4, Math.round((distKm / 24 + 4) * 10) / 10);
-  return {
-    fromPort: oVessel,
-    toPort: dVessel,
-    effectiveSeaMode,
-    transitPorts: [],
-    pathCoords: [oVessel.coords, dVessel.coords],
-    distanceKm: distKm,
-    durationHours: hours,
-    corridorNotesVi: `Hải trình tàu biển chuyên dụng từ ${oVessel.name} đến ${dVessel.name}`,
-    corridorNotesEn: `Dedicated equine maritime voyage from ${oVessel.nameEn} to ${dVessel.nameEn}`,
-    fellBackFromFerryToVessel,
-  };
+  return null;
 }
 
 function assembleSeaPathResult(
   fromPort: SeaportNode,
   toPort: SeaportNode,
-  steps: GraphAdj[],
-  effectiveSeaMode: 'ferry' | 'vessel',
-  fellBackFromFerryToVessel: boolean
+  steps: GraphAdj[]
 ): SeaPathResult {
   const pathCoords: [number, number][] = [fromPort.coords];
   const transitPorts: SeaportNode[] = [];
@@ -375,13 +304,12 @@ function assembleSeaPathResult(
   return {
     fromPort,
     toPort,
-    effectiveSeaMode,
+    effectiveSeaMode: 'vessel',
     transitPorts,
     pathCoords,
     distanceKm: Math.round(distanceKm),
     durationHours: Math.round(durationHours * 10) / 10,
     corridorNotesVi: notesVi.join(' → '),
     corridorNotesEn: notesEn.join(' → '),
-    fellBackFromFerryToVessel,
   };
 }

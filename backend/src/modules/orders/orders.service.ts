@@ -87,19 +87,6 @@ export class OrdersService {
       throw new BadRequestException('Ngày khởi hành dự kiến không được nằm trong quá khứ');
     }
 
-    // Step 8: Document lead time validation across country regulations & horse profiles
-    if (!(context as any)?.isLegacySeed && this.documentsService && typeof this.documentsService.assertDocumentLeadTime === 'function') {
-      await this.documentsService.assertDocumentLeadTime({
-        departDate: requestedDate,
-        destinationLocation: context?.destinationLocation,
-        originLocation: context?.originLocation,
-        transportMode: (context as any)?.transportMode ?? null,
-        transportationType: context?.transportationType ?? null,
-        bookingType: context?.bookingType,
-        horseIds: (context as any)?.horseIds,
-      });
-    }
-
     const policy = await this.getOrderCutoffPolicy(context || {});
     const now = new Date();
     const earliestUtc =
@@ -112,7 +99,7 @@ export class OrdersService {
     );
     if (requestedDayUtc < earliestUtc) {
       throw new UnprocessableEntityException({
-        message: `Ngày khởi hành dự kiến quá sát hạn đặt đơn (Order Cutoff). Tuyến đến ${policy.destinationCountry} yêu cầu đặt trước tối thiểu ${policy.minLeadDays} ngày (sớm nhất: ${policy.earliestDepartureDate}).`,
+        message: `Ngày khởi hành dự kiến quá sát hạn đặt đơn. Tuyến đến ${policy.destinationCountry} yêu cầu đặt trước tối thiểu ${policy.minLeadDays} ngày (sớm nhất: ${policy.earliestDepartureDate}).`,
         code: 'ORDER_CUTOFF_VIOLATION',
         minLeadDays: policy.minLeadDays,
         maxTierALead: policy.maxTierALead,
@@ -251,7 +238,7 @@ export class OrdersService {
     await this.notificationsService.createNotification(
       order.customerId,
       `Đơn vận chuyển ${customerCode} đã được phê duyệt`,
-      `Yêu cầu vận chuyển ${customerCode} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được duyệt sơ bộ. Báo giá hiện tại là dự kiến. Quý khách chưa cần thanh toán; hóa đơn và cổng thanh toán sẽ mở sau khi lộ trình chi tiết được xác nhận. Chuyên viên kiểm dịch sẽ gửi danh mục hồ sơ cần nộp.`,
+      `Yêu cầu vận chuyển ${customerCode} từ "${order.originLocation}" đến "${order.destinationLocation}" đã được duyệt sơ bộ. Báo giá hiện tại là dự kiến. Quý khách chưa cần thanh toán; hóa đơn và cổng thanh toán sẽ mở sau khi lộ trình chi tiết được xác nhận. Quản lý vận hành sẽ gửi danh mục hồ sơ cần nộp.`,
       'status_update',
       orderId,
     );
@@ -405,7 +392,12 @@ export class OrdersService {
     if (![UserRole.LOGISTICS_MANAGER, UserRole.ADMIN, UserRole.DRIVER_ESCORT].includes(user.role)) {
       throw new ForbiddenException('Bạn không có quyền hoàn tất chuyến');
     }
-    if (![ShipmentStatus.IN_TRANSIT, ShipmentStatus.RETURN_PENDING, ShipmentStatus.COMPLETED].includes(order.status)) {
+    if (order.status === ShipmentStatus.RETURN_PENDING) {
+      const retStatus = String(order.returnStatus || '').toLowerCase();
+      if (!['completed', 'cancelled', 'no_show'].includes(retStatus)) {
+        throw new ConflictException('Không thể hoàn tất đơn khi chặng về chưa hoàn thành hoặc chưa bị hủy');
+      }
+    } else if (![ShipmentStatus.IN_TRANSIT, ShipmentStatus.COMPLETED].includes(order.status)) {
       throw new ConflictException('Chỉ được hoàn tất chuyến đã xuất phát');
     }
     const changed = await this.ordersStore.completeShipment(orderId, Number(user.id), user.role === UserRole.DRIVER_ESCORT);
@@ -509,6 +501,14 @@ export class OrdersService {
     if (order.returnStatus !== 'scheduled') {
       throw new ConflictException(`Không thể hủy chặng về ở trạng thái "${order.returnStatus}"`);
     }
+    const activePaidStatuses = ['paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending'];
+    if (!activePaidStatuses.includes(order.status)) {
+      throw new ConflictException(
+        order.status === 'awaiting_payment'
+          ? 'Đơn hàng chưa thanh toán — vui lòng hủy đơn và đặt lại chuyến một chiều thay vì hủy chặng về'
+          : `Không thể hủy chặng về khi đơn đang ở trạng thái "${order.status}"`,
+      );
+    }
 
     const policy = order.returnPolicySnapshot || currentReturnPolicy();
     const refund = calculateReturnCancellationRefund({
@@ -558,6 +558,14 @@ export class OrdersService {
     }
     if (order.returnStatus !== 'scheduled') {
       throw new ConflictException(`Không thể hủy chặng về ở trạng thái "${order.returnStatus}"`);
+    }
+    const activePaidStatuses = ['paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending'];
+    if (!activePaidStatuses.includes(order.status)) {
+      throw new ConflictException(
+        order.status === 'awaiting_payment'
+          ? 'Đơn hàng chưa thanh toán — vui lòng hủy đơn và đặt lại chuyến một chiều thay vì hủy chặng về'
+          : `Không thể hủy chặng về khi đơn đang ở trạng thái "${order.status}"`,
+      );
     }
 
     const policy = order.returnPolicySnapshot || currentReturnPolicy();

@@ -111,13 +111,14 @@ export class InsuranceClaimStore implements OnModuleInit, OnModuleDestroy {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT s.shipment_id, s.customer_id, s.status AS shipment_status, s.updated_at AS shipment_updated_at,
               sh.shipment_horse_id, sh.declared_value_vnd, sh.insurance_package,
-              sh.insurance_policy_version, h.name AS horse_name,
+              sh.insurance_policy_version, sh.max_compensation, h.name AS horse_name,
               dh.handover_id, dh.handover_datetime
        FROM shipment s
        JOIN shipment_horse sh ON sh.shipment_id = s.shipment_id AND sh.shipment_horse_id = ?
        JOIN horse h ON h.horse_id = sh.horse_id
        LEFT JOIN delivery_handover dh ON dh.shipment_id = s.shipment_id AND dh.shipment_horse_id = sh.shipment_horse_id
        WHERE s.shipment_id = ?
+       ORDER BY dh.handover_datetime DESC
        LIMIT 1`,
       [shipmentHorseId, shipmentId],
     );
@@ -133,6 +134,7 @@ export class InsuranceClaimStore implements OnModuleInit, OnModuleDestroy {
       declaredValueVnd: Number(r.declared_value_vnd || 0),
       insurancePackage: (r.insurance_package || 'basic') as InsurancePackage,
       insurancePolicyVersion: (r.insurance_policy_version || 'equine-v2') as string,
+      maxCompensation: Number(r.max_compensation || 0),
       horseName: String(r.horse_name || ''),
       handoverId: r.handover_id ? Number(r.handover_id) : null,
       handoverDatetime: r.handover_datetime ? new Date(r.handover_datetime) : null,
@@ -170,6 +172,25 @@ export class InsuranceClaimStore implements OnModuleInit, OnModuleDestroy {
       [shipmentHorseId],
     );
     return rows && rows.length > 0;
+  }
+
+  async sumPriorCompensationForHorse(shipmentHorseId: number): Promise<{ claimTotal: number; handoverTotal: number }> {
+    const [claimRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(COALESCE(approved_amount, requested_amount)), 0) AS claim_total
+       FROM insurance_claim
+       WHERE shipment_horse_id = ? AND status IN ('approved', 'pending_second_approval', 'approved_for_transfer', 'transferred')`,
+      [shipmentHorseId],
+    );
+    const [handoverRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(compensation_amount), 0) AS handover_total
+       FROM delivery_handover
+       WHERE shipment_horse_id = ?`,
+      [shipmentHorseId],
+    );
+    return {
+      claimTotal: Number(claimRows[0]?.claim_total || 0),
+      handoverTotal: Number(handoverRows[0]?.handover_total || 0),
+    };
   }
 
   async createClaim(data: {

@@ -8,7 +8,7 @@ export interface QuoteLeg {
   to: string;
   distanceKm: number;
   durationHours: number;
-  source: 'ors' | 'estimated' | 'table';
+  source: 'ors' | 'osrm' | 'air' | 'table' | 'estimated';
 }
 
 export interface FreightLine {
@@ -98,7 +98,7 @@ export interface QuoteResult {
   quoteId: number | null;
   expiresAt: string;
   transportMode: 'road' | 'air' | 'sea';
-  seaMode?: 'ferry' | 'vessel' | null;
+  seaMode?: 'vessel' | null;
   tripType?: 'one_way' | 'round_trip';
   returnDepartureAt?: string | null;
   legs: QuoteLeg[];
@@ -151,7 +151,7 @@ export interface CreateQuoteRequest {
   /** Step 9: 'YYYY-MM-DDTHH:mm' giờ Việt Nam */
   pickupAt?: string;
   transportMode: 'road' | 'air' | 'sea';
-  seaMode?: 'ferry' | 'vessel' | null;
+  seaMode?: 'vessel' | null;
   tripType?: 'one_way' | 'round_trip';
   returnDepartureAt?: string;
   horses: Array<{

@@ -9,6 +9,7 @@ import {
   CheckCircle,
   Truck,
   Plane,
+  Ship,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -43,12 +44,17 @@ import {
   type BookingType,
 } from '@/features/orders/booking-policy';
 import { buildEquineRoute } from '@/lib/geo-corridors';
+import {
+  formatShipmentStatusLabel,
+  getShipmentStatusMeta,
+} from '@/features/orders/shipment-status';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 type ShipmentStatus =
   | 'requested'
   | 'awaiting_payment'
   | 'paid_pending_review'
+  | 'paid_pending_feasibility'
   | 'refund_requested'
   | 'refunded'
   | 'change_requested'
@@ -59,8 +65,13 @@ type ShipmentStatus =
   | 'confirmed'
   | 'ready_to_depart'
   | 'in_transit'
+  | 'return_pending'
+  | 'return_in_transit'
   | 'completed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'cancelled_operational'
+  | 'payment_overdue'
+  | string;
 
 const STATUS_LABELS: Record<ShipmentStatus, string> = {
   requested: 'Pending Approval',
@@ -137,7 +148,7 @@ interface TransportOrder {
   internalNotes?: string | null;
   rejectionReason?: string | null;
   transportMode?: 'road' | 'air' | 'sea' | null;
-  seaMode?: 'ferry' | 'vessel' | null;
+  seaMode?: 'vessel' | null;
   quoteId?: string | number | null;
   pricingSnapshot?: any | null;
   distanceKm?: number | null;
@@ -155,39 +166,7 @@ type SortOrder = 'asc' | 'desc';
 
 // Helper for status config
 function getStatusBadgeConfig(status: ShipmentStatus): { variant: BadgeVariant } {
-  switch (status) {
-    case 'requested':
-      return { variant: 'info' };
-    case 'awaiting_payment':
-      return { variant: 'pending' };
-    case 'paid_pending_review':
-      return { variant: 'info' };
-    case 'refund_requested':
-      return { variant: 'danger' };
-    case 'refunded':
-      return { variant: 'neutral' };
-    case 'under_review':
-      return { variant: 'pending' };
-    case 'approved':
-      return { variant: 'success' };
-    case 'rejected':
-      return { variant: 'danger' };
-    case 'planning':
-      return { variant: 'info' };
-    case 'confirmed':
-      return { variant: 'info' };
-    case 'ready_to_depart':
-      return { variant: 'success' };
-    case 'change_requested':
-      return { variant: 'pending' };
-    case 'in_transit':
-      return { variant: 'transit' };
-    case 'completed':
-      return { variant: 'success' };
-    case 'cancelled':
-    default:
-      return { variant: 'neutral' };
-  }
+  return { variant: getShipmentStatusMeta(status).variant };
 }
 
 // ─── Formatters ────────────────────────────────────────────────────────────────
@@ -433,8 +412,8 @@ export default function ManagerRequestsPage() {
   const [requestChangeReason, setRequestChangeReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Road/Air transport mode & USD/VND currency states for approval
-  const [selectedTransportMode, setSelectedTransportMode] = useState<'road' | 'air'>('road');
+  // Road/Air/Sea transport mode & USD/VND currency states for approval
+  const [selectedTransportMode, setSelectedTransportMode] = useState<'road' | 'air' | 'sea'>('road');
   const [costCurrency, setCostCurrency] = useState<'USD' | 'VND'>('VND');
   const [usdToVndRate, setUsdToVndRate] = useState<number>(25400);
 
@@ -458,10 +437,12 @@ export default function ManagerRequestsPage() {
       (dStr.includes('vietnam') || dStr.includes('việt nam') || dStr.includes('hà nội') || dStr.includes('ha noi'));
     const isRoadRequested = reqNotes.includes('đường bộ') || reqNotes.includes('road') || isDomestic;
 
-    const initialMode: 'road' | 'air' =
-      order.transportMode === 'air' || order.transportMode === 'road'
+    const initialMode: 'road' | 'air' | 'sea' =
+      order.transportMode === 'air' || order.transportMode === 'road' || order.transportMode === 'sea'
         ? order.transportMode
-        : (reqNotes.includes('hàng không') || reqNotes.includes('air')
+        : (reqNotes.includes('đường thủy') || reqNotes.includes('tàu biển') || reqNotes.includes('sea')
+        ? 'sea'
+        : reqNotes.includes('hàng không') || reqNotes.includes('air')
         ? 'air'
         : isRoadRequested
         ? 'road'
@@ -488,7 +469,7 @@ export default function ManagerRequestsPage() {
     setOperatingCostInput(String(suggestion.suggestedOperatingCostVnd));
   };
 
-  const handleModeToggle = (newMode: 'road' | 'air') => {
+  const handleModeToggle = (newMode: 'road' | 'air' | 'sea') => {
     if (!approveOrder || newMode === selectedTransportMode) return;
     setSelectedTransportMode(newMode);
     const routeInfo = buildEquineRoute(approveOrder.originLocation || '', approveOrder.destinationLocation || '', newMode);
@@ -743,74 +724,63 @@ export default function ManagerRequestsPage() {
   };
 
   const translateStatus = (s: ShipmentStatus): string => {
-    switch (s) {
-      case 'requested':
-        return t('manager.requests.statusRequested', 'Mới tạo');
-      case 'awaiting_payment':
-        return t('manager.requests.statusAwaitingPayment', 'Chờ thanh toán');
-      case 'paid_pending_review':
-        return t('manager.requests.statusPaidPendingReview', 'Đã thanh toán, chờ duyệt');
-      case 'refund_requested':
-        return t('manager.requests.statusRefundRequested', 'Chờ hoàn tiền');
-      case 'refunded':
-        return t('manager.requests.statusRefunded', 'Đã hoàn tiền');
-      case 'under_review':
-        return t('manager.requests.statusUnderReview', 'Đang thẩm định');
-      case 'approved':
-        return t('manager.requests.statusApproved', 'Đã duyệt / Báo giá');
-      case 'rejected':
-        return t('manager.requests.statusRejected', 'Đã từ chối');
-      case 'planning':
-        return t('manager.requests.statusPlanning', 'Đang lập tuyến');
-      case 'change_requested':
-        return t('manager.requests.statusChangeRequested', 'Yêu cầu chỉnh sửa');
-      case 'confirmed':
-        return t('manager.requests.statusConfirmed', 'Đã xác nhận chuyến');
-      case 'ready_to_depart':
-        return t('manager.requests.statusReadyToDepart', 'Sẵn sàng xuất phát');
-      case 'in_transit':
-        return t('manager.requests.statusInTransit', 'Đang vận chuyển');
-      case 'completed':
-        return t('manager.requests.statusCompleted', 'Đã hoàn tất');
-      case 'cancelled':
-        return t('manager.requests.statusCancelled', 'Đã hủy');
-      default:
-        return s;
-    }
+    return formatShipmentStatusLabel(s, isEn);
   };
 
   return (
     <div className="flex flex-col gap-6 max-w-[1600px] mx-auto pb-16">
-      {/* ─── Header & Breadcrumbs ────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-slate-500 font-semibold mb-1">
-            <span>{t('manager.requests.breadcrumbDashboard', 'Quản Trị Vận Hành')}</span>
-            <span>/</span>
-            <span className="text-slate-900">{t('manager.requests.breadcrumbTitle', 'Yêu Cầu Vận Chuyển')}</span>
-          </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
-            {t('manager.requests.pageTitle', 'Quản Lý Yêu Cầu Vận Chuyển')}
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#F3EFE4] text-[#181A17] font-bold">
-              {pagination.total} {t('manager.requests.totalUnit', 'đơn')}
-            </span>
-          </h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {t('manager.requests.pageSubtitle', 'Thẩm định hồ sơ ban đầu, định giá cước và phê duyệt các yêu cầu vận chuyển ngựa đua.')}
-          </p>
-        </div>
+      {/* ─── Compact Header ────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5 flex-wrap m-0">
+          {filterStatus === 'all'
+            ? isEn
+              ? 'Transport Orders'
+              : 'Quản Lý Đơn Vận Chuyển'
+            : `${isEn ? 'Orders' : 'Đơn Vận Chuyển'}: ${translateStatus(filterStatus)}`}
+          <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#F3EFE4] text-[#181A17] font-bold">
+            {pagination.total} {t('manager.requests.totalUnit', 'đơn')}
+          </span>
+        </h1>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => fetchOrders()}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer shadow-sm transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#D8CEBE] bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer shadow-sm transition-colors whitespace-nowrap shrink-0"
           >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            {t('manager.requests.btnRefresh', 'Làm mới')}
+            <RefreshCw size={14} className={loading ? 'animate-spin shrink-0' : 'shrink-0'} />
+            <span>{t('manager.requests.btnRefresh', 'Làm mới')}</span>
           </button>
         </div>
+      </div>
+
+      {/* Quick Core Status Pills */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {[
+          { key: 'all', label: isEn ? 'All' : 'Tất cả' },
+          { key: 'paid_pending_review', label: isEn ? 'Paid · Review' : 'Đã TT · Chờ duyệt' },
+          { key: 'awaiting_payment', label: isEn ? 'Awaiting Pay' : 'Chờ thanh toán' },
+          { key: 'in_transit', label: isEn ? 'In Transit' : 'Đang vận chuyển' },
+          { key: 'completed', label: isEn ? 'Completed' : 'Hoàn tất' },
+          { key: 'refund_requested', label: isEn ? 'Refunds' : 'Chờ hoàn tiền' },
+        ].map((pill) => (
+          <button
+            key={pill.key}
+            type="button"
+            onClick={() => {
+              setFilterStatus(pill.key);
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+              filterStatus === pill.key
+                ? 'bg-[#181A17] text-[#FAF8F4] border-[#181A17]'
+                : 'bg-white text-[#5F6977] border-[#E5DDD0] hover:bg-[#FAF8F4] hover:text-[#181A17]'
+            }`}
+          >
+            {pill.label}
+          </button>
+        ))}
       </div>
 
       {/* ─── Search & Filters Bar ────────────────────────────────────────────── */}
@@ -856,8 +826,10 @@ export default function ManagerRequestsPage() {
               <option value="confirmed">{t('manager.requests.statusConfirmed', 'Đã xác nhận chuyến')}</option>
               <option value="ready_to_depart">{t('manager.requests.statusReadyToDepart', 'Sẵn sàng xuất phát')}</option>
               <option value="in_transit">{t('manager.requests.statusInTransit', 'Đang vận chuyển')}</option>
+              <option value="return_pending">{isEn ? 'Return Leg Pending' : 'Chờ chặng về'}</option>
               <option value="completed">{t('manager.requests.statusCompleted', 'Đã hoàn tất')}</option>
               <option value="cancelled">{t('manager.requests.statusCancelled', 'Đã hủy')}</option>
+              <option value="cancelled_operational">{isEn ? 'Cancelled (Operational)' : 'Đã hủy vận hành'}</option>
             </select>
           </div>
 
@@ -934,39 +906,36 @@ export default function ManagerRequestsPage() {
       {/* ─── Requests Table ──────────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-[#D8CEBE] shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-sm min-w-[920px]">
+          <table className="w-full text-left border-collapse text-sm">
             <thead>
               <tr className="bg-[#FAF9F5] border-b border-[#D8CEBE]">
                 <th
                   aria-sort={sortBy === 'id' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                   onClick={() => handleSort('id')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
+                  className="py-3 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
                 >
                   <div className="flex items-center gap-1">
                     {t('manager.requests.colId', 'MÃ ĐƠN')}
                     <SortIcon field="id" />
                   </div>
                 </th>
-                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 whitespace-nowrap">
+                <th className="py-3 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 whitespace-nowrap">
                   {t('manager.requests.colCustomer', 'KHÁCH HÀNG')}
-                </th>
-                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 whitespace-nowrap">
-                  {t('manager.requests.colRoute', 'LỘ TRÌNH VẬN CHUYỂN')}
                 </th>
                 <th
                   aria-sort={sortBy === 'requestedDate' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                   onClick={() => handleSort('requestedDate')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
+                  className="py-3 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
                 >
                   <div className="flex items-center gap-1">
-                    {t('manager.requests.colDeparture', 'NGÀY KHỞI HÀNH')}
+                    {isEn ? 'ROUTE & DEPARTURE' : 'LỘ TRÌNH & KHỞI HÀNH'}
                     <SortIcon field="requestedDate" />
                   </div>
                 </th>
                 <th
                   aria-sort={sortBy === 'totalCost' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                   onClick={() => handleSort('totalCost')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
+                  className="py-3 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
                 >
                   <div className="flex items-center gap-1">
                     {t('manager.requests.colPrice', 'BÁO GIÁ')}
@@ -976,24 +945,14 @@ export default function ManagerRequestsPage() {
                 <th
                   aria-sort={sortBy === 'status' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                   onClick={() => handleSort('status')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
+                  className="py-3 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
                 >
                   <div className="flex items-center gap-1">
                     {t('manager.requests.colStatus', 'TRẠNG THÁI')}
                     <SortIcon field="status" />
                   </div>
                 </th>
-                <th
-                  aria-sort={sortBy === 'createdAt' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  onClick={() => handleSort('createdAt')}
-                  className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 cursor-pointer select-none whitespace-nowrap"
-                >
-                  <div className="flex items-center gap-1">
-                    {t('manager.requests.colCreated', 'NGÀY TẠO')}
-                    <SortIcon field="createdAt" />
-                  </div>
-                </th>
-                <th className="py-3 px-4 text-xs font-bold uppercase tracking-wider text-slate-600 text-right whitespace-nowrap">
+                <th className="py-3 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-600 text-right whitespace-nowrap">
                   {t('manager.requests.colActions', 'THAO TÁC')}
                 </th>
               </tr>
@@ -1001,7 +960,7 @@ export default function ManagerRequestsPage() {
             <tbody className="divide-y divide-[#F0EEE8]">
               {displayedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center text-slate-500 text-sm">
+                  <td colSpan={6} className="py-16 text-center text-slate-500 text-sm">
                     {loading ? (
                       <div className="flex flex-col items-center justify-center gap-2">
                         <RefreshCw size={24} className="animate-spin text-[#A67C2E]" />
@@ -1016,58 +975,72 @@ export default function ManagerRequestsPage() {
                 displayedOrders.map((order) => {
                   const statusConfig = getStatusBadgeConfig(order.status);
                   const orderCode = order.requestCode || `#${order.id}`;
+                  const fullRouteText = `${order.originLocation} → ${order.destinationLocation}`;
                   return (
                     <tr key={order.id} className="hover:bg-[#FAF9F5] transition-colors">
-                      <td className="py-3.5 px-4 font-bold text-[#181A17]">
-                        <Link href={`/manager/requests/${order.id}`} className="hover:underline">
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <Link href={`/manager/requests/${order.id}`} className="font-bold text-[#181A17] hover:text-[#A67C2E] no-underline hover:underline block text-[13px]">
                           {orderCode}
                         </Link>
+                        <span className="text-[11px] text-slate-400 font-medium tabular-nums">
+                          {formatDate(order.createdAt)}
+                        </span>
                       </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-bold text-slate-900">{order.contactName || '—'}</div>
-                        <div className="text-xs text-slate-500">
+                      <td className="py-3 px-3 max-w-[155px]">
+                        <div className="font-bold text-slate-900 truncate text-[13px]" title={order.contactName || ''}>
+                          {order.contactName || '—'}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate" title={order.customerEmail || order.contactEmail || ''}>
                           {order.customerEmail || order.contactEmail}
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 text-slate-700 font-medium">
-                        <div>
-                          {order.originLocation} → {order.destinationLocation}
+                      <td className="py-3 px-3 text-slate-700 font-medium min-w-[200px] max-w-[250px]">
+                        <div className="line-clamp-2 text-[12.5px] leading-snug" title={fullRouteText}>
+                          {fullRouteText}
                         </div>
-                        <div className="mt-1 text-xs font-semibold text-[#7A591C]">
-                          {order.bookingType === 'dedicated_charter'
-                            ? isEn
-                              ? 'Dedicated Charter'
-                              : 'Bao chuyến'
-                            : isEn
-                            ? 'Shared Stall'
-                            : 'Ghép ô chuồng'}
+                        <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 tabular-nums">
+                          <span className="font-semibold text-[#7A591C]">
+                            {order.bookingType === 'dedicated_charter'
+                              ? isEn
+                                ? 'Charter'
+                                : 'Bao chuyến'
+                              : isEn
+                              ? 'Shared'
+                              : 'Ghép ô'}
+                          </span>
+                          <span>•</span>
+                          <span>{isEn ? 'Dep:' : 'Đi:'} {formatDate(order.requestedDate)}</span>
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 text-slate-600">{formatDate(order.requestedDate)}</td>
-                      <td className="py-3.5 px-4 font-extrabold text-slate-900">
+                      <td className="py-3 px-3 font-extrabold text-slate-900 whitespace-nowrap tabular-nums text-[12.5px]">
                         {order.totalCost > 0 ? (
                           <span className="text-emerald-700">{formatCurrency(order.totalCost)}</span>
                         ) : (
-                          <span className="text-slate-500 font-normal">{t('manager.requests.notQuoted', 'Chưa báo giá')}</span>
+                          <span className="text-slate-500 font-normal text-xs">{t('manager.requests.notQuoted', 'Chưa báo giá')}</span>
                         )}
                       </td>
-                      <td className="py-3.5 px-4">
+                      <td className="py-3 px-3 whitespace-nowrap">
                         <StatusBadge label={translateStatus(order.status)} variant={statusConfig.variant} />
                       </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-500">
-                        {formatDate(order.createdAt)}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex gap-1.5 justify-end flex-wrap items-center">
-                          {/* View Detail Modal */}
-                          <button
-                            type="button"
-                            onClick={() => setViewOrder(order)}
-                            title={t('manager.requests.btnViewDetail', 'Xem chi tiết')}
-                            className="px-2.5 py-1.5 rounded-lg border border-[#D8CEBE] bg-white text-slate-700 hover:bg-slate-50 font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
+                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                        <div className="inline-flex gap-1 justify-end items-center">
+                          {/* Open Full Lifecycle Workspace */}
+                          <Link
+                            href={`/manager/requests/${order.id}`}
+                            title={t('manager.requests.btnOpenWorkspace', 'Mở chi tiết & xử lý đơn')}
+                            className="no-underline px-2.5 py-1.5 rounded-lg border border-[#D8CEBE] bg-white text-slate-700 hover:bg-[#FAF8F4] hover:border-[#A67C2E] font-bold text-xs inline-flex items-center gap-1 transition-colors whitespace-nowrap"
                           >
-                            <Eye size={13} /> {t('manager.requests.btnViewDetail', 'Xem')}
-                          </button>
+                            <Eye size={13} />
+                            <span>
+                              {order.status === 'paid_pending_review'
+                                ? isEn
+                                  ? 'Review'
+                                  : 'Duyệt'
+                                : isEn
+                                ? 'Open'
+                                : 'Xem'}
+                            </span>
+                          </Link>
 
                           {/* Print Quotation PDF */}
                           <button
@@ -1081,7 +1054,7 @@ export default function ManagerRequestsPage() {
                             }
                             aria-label={t('manager.requests.btnPrintQuotation', 'In Báo Giá PDF')}
                             title={t('manager.requests.btnPrintQuotation', 'In Báo Giá PDF')}
-                            className="px-2 py-1.5 rounded-lg border border-[#D8CEBE] bg-white text-slate-600 hover:text-[#181A17] hover:bg-[#FAF8F4] font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
+                            className="p-1.5 rounded-lg border border-[#D8CEBE] bg-white text-slate-600 hover:text-[#181A17] hover:bg-[#FAF8F4] font-bold text-xs inline-flex items-center cursor-pointer transition-colors"
                           >
                             <Download size={13} />
                           </button>
@@ -1092,9 +1065,9 @@ export default function ManagerRequestsPage() {
                               type="button"
                               onClick={() => openApproveModal(order)}
                               title={t('manager.requests.btnApprove', 'Phê duyệt')}
-                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                              className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs inline-flex items-center cursor-pointer transition-colors shadow-sm"
                             >
-                              <CheckCircle size={13} /> {t('manager.requests.btnApprove', 'Phê duyệt')}
+                              <CheckCircle size={13} />
                             </button>
                           )}
 
@@ -1107,9 +1080,9 @@ export default function ManagerRequestsPage() {
                                 setRejectReason('');
                               }}
                               title={t('manager.requests.btnReject', 'Từ chối')}
-                              className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                              className="p-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs inline-flex items-center cursor-pointer transition-colors shadow-sm"
                             >
-                              <XCircle size={13} /> {t('manager.requests.btnReject', 'Từ chối')}
+                              <XCircle size={13} />
                             </button>
                           )}
                         </div>
@@ -1404,6 +1377,15 @@ export default function ManagerRequestsPage() {
                           }`}
                         >
                           <Plane size={12} /> {t('manager.requests.modeAir', 'Hàng không')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleModeToggle('sea')}
+                          className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                            selectedTransportMode === 'sea' ? 'bg-[#0E7490] text-white shadow-sm' : 'text-slate-600 hover:text-[#181A17]'
+                          }`}
+                        >
+                          <Ship size={12} /> {t('manager.requests.modeSea', isEn ? 'Sea Freight' : 'Đường thủy')}
                         </button>
                       </div>
                     </div>

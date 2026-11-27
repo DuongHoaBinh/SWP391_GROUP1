@@ -9,13 +9,88 @@ import {
   TransportRequest,
 } from './types';
 import { apiClient, resolveAssetUrl } from './api-client';
-
 import { getCurrentUser } from './auth';
 
 export const getFullPhotoUrl = (url?: string | null): string | undefined => resolveAssetUrl(url);
 
+const TERMINAL_ORDER_STATUSES = new Set([
+  'completed',
+  'cancelled',
+  'cancelled_operational',
+  'rejected',
+  'refunded',
+]);
+
+function mapBackendOrderToStoreRequest(o: any): TransportRequest {
+  const rawStatus = String(o.status || 'requested').toLowerCase();
+  const statusUpper =
+    rawStatus === 'completed'
+      ? 'COMPLETED'
+      : rawStatus === 'cancelled' || rawStatus === 'cancelled_operational' || rawStatus === 'rejected' || rawStatus === 'refunded'
+        ? 'CANCELLED'
+        : rawStatus === 'in_transit' || rawStatus === 'return_pending'
+          ? 'IN_TRANSIT'
+          : rawStatus === 'approved' || rawStatus === 'planning' || rawStatus === 'confirmed' || rawStatus === 'ready_to_depart'
+            ? 'APPROVED'
+            : rawStatus === 'paid_pending_review' || rawStatus === 'under_review'
+              ? 'IN_REVIEW'
+              : 'SUBMITTED';
+
+  const firstHorse = Array.isArray(o.horses) && o.horses.length > 0 ? o.horses[0] : null;
+  const fallbackHorse: Horse = {
+    id: String(firstHorse?.horseId || firstHorse?.id || '0'),
+    code: firstHorse?.passportNo || `HR-${String(firstHorse?.horseId || 0).padStart(5, '0')}`,
+    name: firstHorse?.name || 'Horse',
+    breed: firstHorse?.breed || 'Thoroughbred',
+    age: Number(firstHorse?.age) || 0,
+    microchipNumber: firstHorse?.microchipNo || '',
+    passportNumber: firstHorse?.passportNo || '',
+    availabilityStatus: 'Available',
+    documentStatus: 'Valid',
+    ownerName: o.customerName || o.contactName || '',
+  };
+
+  return {
+    id: String(o.id),
+    requestCode: o.requestCode || `REQ-${String(o.id).padStart(3, '0')}`,
+    title: `${o.originLocation || ''} → ${o.destinationLocation || ''}`,
+    transportationType: o.transportationType || o.transportMode || 'Domestic',
+    createdDate: o.createdAt || new Date().toISOString(),
+    horseId: fallbackHorse.id,
+    horse: fallbackHorse,
+    horses: (o.horses || []).map((h: any) => ({
+      horseId: String(h.horseId || h.id),
+      horse: {
+        ...fallbackHorse,
+        id: String(h.horseId || h.id),
+        name: h.name || 'Horse',
+        breed: h.breed || 'Thoroughbred',
+      },
+      medicalStatus: h.medicalStatus || '',
+      docsSummary: '',
+      isComplete: true,
+    })),
+    origin: o.originLocation || '',
+    originCode: (o.originLocation || '').slice(0, 3).toUpperCase(),
+    destination: o.destinationLocation || '',
+    destinationCode: (o.destinationLocation || '').slice(0, 3).toUpperCase(),
+    departureDate: o.departureDate || o.requestedDate || '',
+    estimatedArrivalDate: o.expectedArrivalDate || '',
+    status: statusUpper as any,
+    statusLabel: rawStatus,
+    activeStepIndex: 1,
+    totalSteps: 7,
+    pendingDocumentsCount: 0,
+    notes: o.specialRequirements || '',
+    timeline: [],
+    documents: [],
+    activities: [],
+  };
+}
+
 interface CustomerStoreContextType {
   requests: TransportRequest[];
+  rawOrders: any[];
   horses: Horse[];
   notifications: NotificationItem[];
   documents: DocumentItem[];
@@ -41,24 +116,20 @@ interface CustomerStoreContextType {
   updateHorse: (horseId: string, data: Partial<Horse>) => void;
   deleteHorse: (horseId: string) => void;
   refreshHorses: () => Promise<void>;
+  refreshRequests: () => Promise<void>;
+  refreshNotifications: () => Promise<void>;
   uploadHorseAvatar: (horseId: string, file: File) => Promise<string>;
   uploadStandalonePhoto: (file: File) => Promise<string>;
 }
 
 const CustomerStoreContext = createContext<CustomerStoreContextType | null>(null);
 
-const getStorageKey = (key: string) => {
-  const user = getCurrentUser();
-  const userId = user?.id || 'guest';
-  return `equitransit_store_u${userId}_${key}`;
-};
-
 export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [requests, setRequests] = useState<TransportRequest[]>([]);
+  const [rawOrders, setRawOrders] = useState<any[]>([]);
   const [horses, setHorses] = useState<Horse[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [documents, setDocuments] = useState<DocumentItem[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [documents] = useState<DocumentItem[]>([]);
 
   const refreshHorses = useCallback(async () => {
     try {
@@ -67,37 +138,37 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
         const backendMapped: Horse[] = data
           .filter((item) => item.status !== 'retired' && item.status !== 'deleted')
           .map((item) => ({
-          id: String(item.id || item.horse_id),
-          backendId: item.id || item.horse_id,
-          code: item.passportNo || `HR-${String(item.id || item.horse_id).padStart(5, '0')}`,
-          name: item.name,
-          breed: item.breed || 'Thoroughbred',
-          gender: item.gender || undefined,
-          age: Number(item.age) || 4,
-          requiresPrivateStall: Boolean(item.requiresPrivateStall),
-          temperament: item.temperament || 'normal',
-          microchipNumber: item.microchipNo || '',
-          passportNumber: item.passportNo || '',
-          ownerName: 'You',
-          photoUrl: getFullPhotoUrl(item.photoUrl),
-          avatarUrl: getFullPhotoUrl(item.photoUrl),
-          availabilityStatus:
-            item.status === 'in_transit'
-              ? 'In Transit'
-              : item.status === 'active'
-              ? 'Available'
-              : 'Not Cleared',
-          status: item.status || 'active',
-          medicalStatus: item.medicalStatus || item.medical_status || 'Healthy',
-          specialRequirements: item.specialRequirements || item.special_requirements || '',
-          documentStatus: 'Valid',
-          color: item.color || 'Bay',
-          weight: item.weight || '480 kg',
-          location: 'Stable',
-          quantity: item.quantity !== undefined && item.quantity !== null ? Number(item.quantity) : 1,
-          documents: [],
-          medicalHistory: [],
-        }));
+            id: String(item.id || item.horse_id),
+            backendId: item.id || item.horse_id,
+            code: item.passportNo || `HR-${String(item.id || item.horse_id).padStart(5, '0')}`,
+            name: item.name,
+            breed: item.breed || 'Thoroughbred',
+            gender: item.gender || undefined,
+            age: item.age != null && Number(item.age) > 0 ? Number(item.age) : 0,
+            requiresPrivateStall: Boolean(item.requiresPrivateStall),
+            temperament: item.temperament || 'normal',
+            microchipNumber: item.microchipNo || '',
+            passportNumber: item.passportNo || '',
+            ownerName: getCurrentUser()?.name || '',
+            photoUrl: getFullPhotoUrl(item.photoUrl),
+            avatarUrl: getFullPhotoUrl(item.photoUrl),
+            availabilityStatus:
+              item.status === 'in_transit'
+                ? 'In Transit'
+                : item.status === 'active'
+                  ? 'Available'
+                  : 'Not Cleared',
+            status: item.status || 'active',
+            medicalStatus: item.medicalStatus || item.medical_status || '',
+            specialRequirements: item.specialRequirements || item.special_requirements || '',
+            documentStatus: 'Valid',
+            color: item.color || '',
+            weight: item.weight || '',
+            location: item.location || '',
+            quantity: item.quantity !== undefined && item.quantity !== null ? Number(item.quantity) : 1,
+            documents: [],
+            medicalHistory: [],
+          }));
         setHorses(backendMapped);
       }
     } catch {
@@ -105,51 +176,91 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
-  // Load from localStorage on client mount (user-scoped)
-  useEffect(() => {
+  const refreshRequests = useCallback(async () => {
     try {
-      const user = getCurrentUser();
-      if (!user) {
-        setIsLoaded(true);
-        return;
+      const data = await apiClient<any[]>('/orders/my-orders');
+      if (Array.isArray(data)) {
+        setRawOrders(data);
+        setRequests(data.map(mapBackendOrderToStoreRequest));
       }
-      const savedRequests = localStorage.getItem(getStorageKey('requests'));
-      const savedHorses = localStorage.getItem(getStorageKey('horses'));
-      const savedNotifs = localStorage.getItem(getStorageKey('notifs'));
-      const savedDocs = localStorage.getItem(getStorageKey('docs'));
-
-      if (savedRequests) setRequests(JSON.parse(savedRequests));
-      if (savedHorses) setHorses(JSON.parse(savedHorses));
-      if (savedNotifs) setNotifications(JSON.parse(savedNotifs));
-      if (savedDocs) setDocuments(JSON.parse(savedDocs));
     } catch {
-      // Ignore parse errors
+      // Ignore network/auth error
     }
-    setIsLoaded(true);
-    void refreshHorses();
-  }, [refreshHorses]);
+  }, []);
 
-  // Save to localStorage whenever state changes (user-scoped)
-  useEffect(() => {
-    if (!isLoaded) return;
+  const refreshNotifications = useCallback(async () => {
     try {
-      const user = getCurrentUser();
-      if (!user) return;
-      localStorage.setItem(getStorageKey('requests'), JSON.stringify(requests));
-      localStorage.setItem(getStorageKey('horses'), JSON.stringify(horses));
-      localStorage.setItem(getStorageKey('notifs'), JSON.stringify(notifications));
-      localStorage.setItem(getStorageKey('docs'), JSON.stringify(documents));
+      const data = await apiClient<
+        Array<{
+          id: string | number;
+          notifType?: string;
+          title: string;
+          message: string;
+          createdAt?: string;
+          isRead?: boolean;
+          shipmentId?: number | string;
+        }>
+      >('/notifications');
+      if (Array.isArray(data)) {
+        setNotifications(
+          data.map((item) => ({
+            id: String(item.id),
+            type:
+              item.notifType === 'health_alert' || item.notifType === 'incident'
+                ? 'CRITICAL'
+                : 'INFO',
+            title: item.title,
+            message: item.message,
+            timeAgo: item.createdAt || '',
+            isRead: Boolean(item.isRead),
+            relatedRequestCode: item.shipmentId ? `REQ-${String(item.shipmentId).padStart(3, '0')}` : undefined,
+            actionUrl: item.shipmentId ? `/customer/requests/${item.shipmentId}` : undefined,
+          })),
+        );
+      }
     } catch {
-      // Storage full or unavailable
+      // Ignore
     }
-  }, [requests, horses, notifications, documents, isLoaded]);
+  }, []);
 
-  // Derived Metrics
-  const activeRequests = requests.filter((r) => r.status !== 'COMPLETED' && r.status !== 'CANCELLED').length;
-  const pendingApproval = requests.filter((r) => r.status === 'IN_REVIEW' || r.status === 'SUBMITTED').length;
-  const inTransit = requests.filter((r) => r.status === 'IN_TRANSIT').length;
-  const pendingDocuments = requests.reduce((acc, r) => acc + (r.pendingDocumentsCount || 0), 0);
-  const completedTrips = requests.filter((r) => r.status === 'COMPLETED').length;
+  useEffect(() => {
+    const user = getCurrentUser();
+    if (!user?.id) return;
+    void Promise.allSettled([refreshHorses(), refreshRequests(), refreshNotifications()]);
+
+    const handleNotifUpdate = () => {
+      void refreshNotifications();
+    };
+    const handleOrdersUpdate = () => {
+      void refreshRequests();
+      void refreshHorses();
+    };
+    window.addEventListener('notifications-updated', handleNotifUpdate);
+    window.addEventListener('customer-orders-updated', handleOrdersUpdate);
+    return () => {
+      window.removeEventListener('notifications-updated', handleNotifUpdate);
+      window.removeEventListener('customer-orders-updated', handleOrdersUpdate);
+    };
+  }, [refreshHorses, refreshRequests, refreshNotifications]);
+
+  // Derived Metrics from real API orders
+  const activeRequests = rawOrders.filter(
+    (o) => !TERMINAL_ORDER_STATUSES.has(String(o.status || '').toLowerCase()),
+  ).length;
+  const pendingApproval = rawOrders.filter((o) =>
+    ['requested', 'awaiting_payment', 'paid_pending_review', 'under_review', 'change_requested'].includes(
+      String(o.status || '').toLowerCase(),
+    ),
+  ).length;
+  const inTransit = rawOrders.filter((o) =>
+    ['in_transit', 'return_pending'].includes(String(o.status || '').toLowerCase()),
+  ).length;
+  const pendingDocuments = rawOrders.filter((o) =>
+    ['approved', 'planning', 'confirmed'].includes(String(o.status || '').toLowerCase()),
+  ).length;
+  const completedTrips = rawOrders.filter(
+    (o) => String(o.status || '').toLowerCase() === 'completed',
+  ).length;
 
   const metrics: DashboardMetrics = {
     activeRequests,
@@ -159,23 +270,19 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     completedTrips,
   };
 
-  const getHorseById = (id: string) => {
-    return horses.find(
+  const getHorseById = (id: string) =>
+    horses.find(
       (h) =>
         h.id === id ||
         (h.backendId && String(h.backendId) === id) ||
         h.code?.toLowerCase() === id.toLowerCase() ||
-        h.name.toLowerCase() === id.toLowerCase()
+        h.name.toLowerCase() === id.toLowerCase(),
     );
-  };
 
-  const getRequestById = (id: string) => {
-    return requests.find(
-      (r) =>
-        r.id === id ||
-        r.requestCode.toLowerCase() === id.toLowerCase()
+  const getRequestById = (id: string) =>
+    requests.find(
+      (r) => r.id === id || r.requestCode.toLowerCase() === id.toLowerCase(),
     );
-  };
 
   const createRequest = ({
     title,
@@ -197,171 +304,43 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     specialReqs?: string;
   }) => {
     const primaryHorse = horses.find((h) => h.id === horseIds[0]) || horses[0];
-    const selectedHorseObjects = horses.filter((h) => horseIds.includes(h.id));
-
     const num = Math.floor(100 + Math.random() * 900);
-    const requestCode = `TR-2026-${num}`;
-    const id = `tr-${num}`;
-
+    const requestCode = `REQ-${num}`;
     const newRequest: TransportRequest = {
-      id,
+      id: String(num),
       requestCode,
-      title: title || `${origin} to ${destination} Transport`,
+      title: title || `${origin} → ${destination}`,
       transportationType: transportType,
-      createdDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ', 10:00',
-      horseId: primaryHorse.id,
+      createdDate: new Date().toISOString(),
+      horseId: primaryHorse?.id || '0',
       horse: primaryHorse,
-      horses: selectedHorseObjects.map((h) => ({
-        horse: h,
-        medicalStatus: h.medicalStatus || 'Healthy',
-        docsSummary: 'Pending Verification',
-        isComplete: false,
-      })),
+      horses: [],
       origin,
-      originCode: origin.slice(0, 3).toUpperCase() + ', VN',
-      transitPoint: 'BKK, TH',
-      transitName: 'Border / Transit Checkpoint',
+      originCode: origin.slice(0, 3).toUpperCase(),
       destination,
-      destinationCode: destination.slice(0, 3).toUpperCase() + ', SG',
+      destinationCode: destination.slice(0, 3).toUpperCase(),
       departureDate,
       estimatedArrivalDate: arrivalDate || departureDate,
       status: 'SUBMITTED',
-      statusLabel: 'Pending Approval',
+      statusLabel: 'awaiting_payment',
       activeStepIndex: 1,
       totalSteps: 7,
-      pendingDocumentsCount: 2,
-      notes: specialReqs || 'Standard climate controlled transport.',
-      timeline: [
-        { stage: 1, name: 'Request Created', status: 'completed' },
-        { stage: 2, name: 'Docs Submitted', status: 'active' },
-        { stage: 3, name: 'Document Review', status: 'pending' },
-        { stage: 4, name: 'Request Approved', status: 'pending' },
-        { stage: 5, name: 'Trip Planned', status: 'pending' },
-        { stage: 6, name: 'In Transit', status: 'pending' },
-        { stage: 7, name: 'Handover Completed', status: 'pending' },
-      ],
-      documents: [
-        { id: `doc-${Date.now()}-1`, title: 'Horse Passport', status: 'Approved', uploadedDate: departureDate },
-        { id: `doc-${Date.now()}-2`, title: 'Medical Certificate', status: 'Under Review' },
-        { id: `doc-${Date.now()}-3`, title: 'Import / Export Permit', status: 'Missing', warning: 'Additional document required.' },
-      ],
-      activities: [
-        {
-          id: `act-${Date.now()}`,
-          timestamp: 'Just now',
-          description: `Transport request ${requestCode} created.`,
-          actor: 'By Customer (John Doe)',
-          type: 'customer',
-        },
-      ],
+      pendingDocumentsCount: 0,
+      notes: specialReqs || '',
+      timeline: [],
+      documents: [],
+      activities: [],
     };
-
-    setRequests((prev) => [newRequest, ...prev]);
-
-    // Add notification
-    const newNotif: NotificationItem = {
-      id: `notif-${Date.now()}`,
-      type: 'SUCCESS',
-      title: 'Request Created',
-      message: `Your transport request ${requestCode} for ${selectedHorseObjects.map((h) => h.name).join(', ')} has been created.`,
-      timeAgo: 'Just now',
-      isRead: false,
-      relatedRequestCode: requestCode,
-    };
-    setNotifications((prev) => [newNotif, ...prev]);
-
+    void refreshRequests();
     return newRequest;
   };
 
-  const uploadDocumentForRequest = (requestCode: string, docTitle: string) => {
-    setRequests((prev) =>
-      prev.map((r) => {
-        if (r.requestCode === requestCode) {
-          const updatedDocs = r.documents?.map((d) =>
-            d.title.toLowerCase().includes(docTitle.toLowerCase()) || docTitle.toLowerCase().includes(d.title.toLowerCase())
-              ? { ...d, status: 'Under Review' as const, warning: undefined, uploadedDate: 'Today' }
-              : d
-          );
-
-          // Push into Specialist Review Queue via localStorage
-          try {
-            const currentPendingRaw = localStorage.getItem('equitransit_spec_pending_docs_v1');
-            const currentPending = currentPendingRaw ? JSON.parse(currentPendingRaw) : [];
-            const primaryHorseName = r.horse?.name || 'Horse';
-            const newPendingDoc = {
-              id: `DOC-2026-${Math.floor(100 + Math.random() * 900)}`,
-              reqCode: requestCode,
-              horseName: primaryHorseName,
-              type: docTitle,
-              iconType: docTitle.toLowerCase().includes('vaccin') ? 'vaccination' : docTitle.toLowerCase().includes('medic') ? 'medical' : 'other',
-              date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-              status: 'PENDING',
-              customerName: 'Customer',
-              submittedAt: new Date().toISOString(),
-            };
-            localStorage.setItem('equitransit_spec_pending_docs_v1', JSON.stringify([newPendingDoc, ...currentPending]));
-          } catch {
-            // ignore
-          }
-
-          return {
-            ...r,
-            documents: updatedDocs,
-            pendingDocumentsCount: (r.pendingDocumentsCount || 0),
-            activities: [
-              {
-                id: `act-${Date.now()}`,
-                timestamp: 'Just now',
-                description: `${docTitle} uploaded. Awaiting Transport Specialist verification.`,
-                actor: 'By Customer (John Doe)',
-                type: 'customer',
-              },
-              ...(r.activities || []),
-            ],
-          };
-        }
-        return r;
-      })
-    );
-
-    // Also update any matching horse documents
-    setHorses((prev) =>
-      prev.map((h) => ({
-        ...h,
-        documents: h.documents?.map((d) =>
-          d.title.toLowerCase().includes(docTitle.toLowerCase()) || docTitle.toLowerCase().includes(d.title.toLowerCase())
-            ? { ...d, status: 'Approved', uploadedDate: 'Today' }
-            : d
-        ),
-      }))
-    );
-
-    // Mark missing notification as read
-    setNotifications((prev) =>
-      prev.map((n) =>
-        n.relatedRequestCode === requestCode && n.type === 'CRITICAL'
-          ? { ...n, isRead: true, actionText: undefined, message: `${docTitle} has been uploaded successfully.` }
-          : n
-      )
-    );
+  const uploadDocumentForRequest = () => {
+    void refreshRequests();
   };
 
-  const uploadDocumentForHorse = (horseId: string, docTitle: string) => {
-    setHorses((prev) =>
-      prev.map((h) => {
-        if (h.id === horseId) {
-          return {
-            ...h,
-            documents: h.documents?.map((d) =>
-              d.title.toLowerCase().includes(docTitle.toLowerCase()) || docTitle.toLowerCase().includes(d.title.toLowerCase())
-                ? { ...d, status: 'Approved', uploadedDate: 'Today' }
-                : d
-            ),
-          };
-        }
-        return h;
-      })
-    );
+  const uploadDocumentForHorse = () => {
+    void refreshHorses();
   };
 
   const cancelRequest = async (requestId: string) => {
@@ -371,23 +350,9 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     setRequests((prev) =>
       prev.map((r) =>
         r.id === requestId || r.requestCode === requestId
-          ? {
-              ...r,
-              status: 'CANCELLED',
-              statusLabel: 'Cancelled',
-              activities: [
-                {
-                  id: `act-${Date.now()}`,
-                  timestamp: 'Just now',
-                  description: 'Request was cancelled by customer.',
-                  actor: 'By Customer (John Doe)',
-                  type: 'customer',
-                },
-                ...(r.activities || []),
-              ],
-            }
-          : r
-      )
+          ? { ...r, status: 'CANCELLED', statusLabel: 'cancelled' }
+          : r,
+      ),
     );
 
     if (horseIds.length > 0) {
@@ -395,16 +360,12 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
         prev.map((h) =>
           horseIds.includes(String(h.id))
             ? { ...h, status: 'active', availabilityStatus: 'Available' }
-            : h
-        )
+            : h,
+        ),
       );
     }
 
-    try {
-      await refreshHorses();
-    } catch {
-      // ignore
-    }
+    await Promise.allSettled([refreshRequests(), refreshHorses()]);
   };
 
   const markAllNotificationsRead = async () => {
@@ -442,20 +403,20 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
       name: horseData.name || 'New Horse',
       breed: horseData.breed || 'Thoroughbred',
       gender: horseData.gender || undefined,
-      age: horseData.age || 4,
+      age: horseData.age || 0,
       requiresPrivateStall: Boolean(horseData.requiresPrivateStall),
       temperament: horseData.temperament || 'normal',
-      location: horseData.location || 'Ho Chi Minh City, Vietnam',
+      location: horseData.location || '',
       availabilityStatus: 'Available',
-      medicalStatus: horseData.medicalStatus || 'Healthy',
+      medicalStatus: horseData.medicalStatus || undefined,
       documentStatus: 'Valid',
-      color: horseData.color || 'Bay',
-      weight: horseData.weight || '480 kg',
+      color: horseData.color || '',
+      weight: horseData.weight || '',
       specialRequirements: horseData.specialRequirements || '',
       quantity: horseData.quantity !== undefined ? horseData.quantity : 1,
-      microchipNumber: horseData.microchipNumber || `985141001248${Math.floor(100 + Math.random() * 900)}`,
-      passportNumber: horseData.passportNumber || `FEI-VN-2026-${Math.floor(100 + Math.random() * 900)}`,
-      ownerName: horseData.ownerName || 'Nguyễn Bình',
+      microchipNumber: horseData.microchipNumber || '',
+      passportNumber: horseData.passportNumber || '',
+      ownerName: horseData.ownerName || getCurrentUser()?.name || '',
       photoUrl: horseData.photoUrl || horseData.avatarUrl,
       avatarUrl: horseData.avatarUrl || horseData.photoUrl,
     };
@@ -471,13 +432,13 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
           return { ...h, ...updatedFields };
         }
         return h;
-      })
+      }),
     );
   };
 
   const deleteHorse = (horseId: string) => {
     setHorses((prev) =>
-      prev.filter((h) => h.id !== horseId && (!h.backendId || String(h.backendId) !== horseId))
+      prev.filter((h) => h.id !== horseId && (!h.backendId || String(h.backendId) !== horseId)),
     );
   };
 
@@ -516,6 +477,7 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
     <CustomerStoreContext.Provider
       value={{
         requests,
+        rawOrders,
         horses,
         notifications,
         documents,
@@ -532,6 +494,8 @@ export const CustomerStoreProvider: React.FC<{ children: React.ReactNode }> = ({
         updateHorse,
         deleteHorse,
         refreshHorses,
+        refreshRequests,
+        refreshNotifications,
         uploadHorseAvatar,
         uploadStandalonePhoto,
       }}

@@ -36,12 +36,24 @@ export async function paymentGate(db: Pool | PoolConnection, shipmentId: number)
   const isPrepaid = row?.payment_flow === 'prepaid';
 
   if (isPrepaid) {
-    const effectiveDueAt = row.payment_due_at || row.shipment_payment_due_at;
-    if (row.status !== 'awaiting_payment') {
+    const hasUnpaidSupplemental = Boolean(row?.supp_invoice_id && row.supp_status !== 'paid');
+    const isSupplementalPayableStatus = hasUnpaidSupplemental && [
+      'paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed',
+    ].includes(row.status);
+    const effectiveDueAt = hasUnpaidSupplemental
+      ? (row.supp_payment_due_at || null)
+      : (row.payment_due_at || row.shipment_payment_due_at);
+    if (row.status !== 'awaiting_payment' && !isSupplementalPayableStatus) {
       blockedReason = 'Đơn hàng hiện không ở trạng thái chờ thanh toán.';
     } else if (effectiveDueAt && new Date(effectiveDueAt) < new Date()) {
       blockedReason = 'Đơn hàng đã quá hạn thanh toán.';
-    } else if (!row.invoice_id || !Number.isSafeInteger(amount) || amount <= 0 || invoicedTotal !== amount) {
+    } else if (
+      !row.invoice_id ||
+      !Number.isSafeInteger(amount) ||
+      amount <= 0 ||
+      (!isSupplementalPayableStatus && invoicedTotal !== amount) ||
+      (isSupplementalPayableStatus && Number(row.supp_amount ?? 0) <= 0)
+    ) {
       blockedReason = 'Hóa đơn chưa sẵn sàng hoặc báo giá đã thay đổi. Vui lòng liên hệ bộ phận vận chuyển để đối soát.';
     }
   } else {

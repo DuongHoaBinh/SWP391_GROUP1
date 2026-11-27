@@ -190,14 +190,13 @@ export default function CityRestrictionsPage() {
         </Button>
       </header>
 
-      {/* Cảnh báo đỏ cố định */}
-      <div role="alert" className="rounded-xl border-2 border-[#B33E3E] bg-[#FDF0F0] px-4 py-3 flex items-start gap-3 text-sm text-[#8A2C2C]">
-        <AlertOctagon className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
-        <span>
-          <strong>{isEn ? 'Demo data' : 'Dữ liệu demo'}</strong>
+      {/* Compact Demo Pill */}
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-900 font-bold">Demo</span>
+        <span className="text-[#5F6977]">
           {isEn
-            ? ' — verify against the original decisions of the People’s Committee / Department of Transport before real use.'
-            : ' — cần đối chiếu văn bản gốc của UBND/Sở GTVT trước khi dùng thật.'}
+            ? 'Verify against official local transport authority rules before real use.'
+            : 'Cần đối chiếu quy định UBND/Sở GTVT trước khi áp dụng thực tế.'}
         </span>
       </div>
 
@@ -357,7 +356,7 @@ export default function CityRestrictionsPage() {
 
           {rules && (
             <section className="flex flex-col gap-3">
-              <h2 className="m-0 text-base font-bold text-[#181A17]">{isEn ? 'Journey rest rules (B4)' : 'Tham số nghỉ dọc đường (B4)'}</h2>
+              <h2 className="m-0 text-base font-bold text-[#181A17]">{isEn ? 'Journey Rest Rules' : 'Tham số nghỉ dọc đường'}</h2>
               <p className="m-0 text-xs text-[#5B6779]">
                 {isEn
                   ? 'Reference: EU Regulation 1/2005 — water every 8 h, max 24 h journey then unload and rest at least 24 h. Used for ETA and suggested rest stops.'

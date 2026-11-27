@@ -377,6 +377,116 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     return rows;
   }
 
+  private async enrichAssignedTripRows(rows: any[]): Promise<any[]> {
+    if (!rows || rows.length === 0) return [];
+    const shipmentIds = Array.from(new Set(rows.map((r) => Number(r.shipment_id)).filter(Boolean)));
+    const routeIds = Array.from(new Set(rows.map((r) => Number(r.route_id)).filter(Boolean)));
+
+    const horsesByShipment = new Map<number, any[]>();
+    if (shipmentIds.length > 0) {
+      const ph = shipmentIds.map(() => '?').join(',');
+      try {
+        const [horseRows] = await this.pool.execute<any[]>(
+          `SELECT sh.shipment_id, sh.shipment_horse_id, h.horse_id, h.name, h.breed, h.microchip_no, h.passport_no
+           FROM shipment_horse sh
+           JOIN horse h ON sh.horse_id = h.horse_id
+           WHERE sh.shipment_id IN (${ph})
+           ORDER BY sh.shipment_horse_id ASC`,
+          shipmentIds,
+        );
+        for (const hr of horseRows) {
+          const sid = Number(hr.shipment_id);
+          if (!horsesByShipment.has(sid)) horsesByShipment.set(sid, []);
+          horsesByShipment.get(sid)!.push({
+            id: Number(hr.horse_id),
+            shipmentHorseId: hr.shipment_horse_id ? Number(hr.shipment_horse_id) : undefined,
+            name: hr.name,
+            breed: hr.breed,
+            microchipNo: hr.microchip_no,
+            passportNo: hr.passport_no,
+          });
+        }
+      } catch (err) {
+        this.logger.warn(`enrichAssignedTripRows horses query failed: ${(err as any)?.message}`);
+      }
+    }
+
+    const legsByRoute = new Map<number, any[]>();
+    const stopsByRoute = new Map<number, any[]>();
+    if (routeIds.length > 0) {
+      const ph = routeIds.map(() => '?').join(',');
+      try {
+        const [legRows] = await this.pool.execute<any[]>(
+          `SELECT rl.route_id, rl.leg_id, rl.sequence_no, rl.leg_type, rl.direction,
+                  rl.origin_location, rl.destination_location, rl.status,
+                  rl.planned_departure, rl.planned_arrival, rl.actual_departure, rl.actual_arrival,
+                  rl.airline_name, rl.flight_number, v.plate_or_code as vehicle_plate
+           FROM route_leg rl
+           LEFT JOIN vehicle v ON rl.vehicle_id = v.vehicle_id
+           WHERE rl.route_id IN (${ph})
+           ORDER BY rl.route_id ASC, rl.sequence_no ASC`,
+          routeIds,
+        );
+        for (const lr of legRows) {
+          const rid = Number(lr.route_id);
+          if (!legsByRoute.has(rid)) legsByRoute.set(rid, []);
+          legsByRoute.get(rid)!.push({
+            legId: Number(lr.leg_id),
+            sequenceNo: Number(lr.sequence_no),
+            legType: lr.leg_type || 'road',
+            direction: lr.direction || 'outbound',
+            originLocation: lr.origin_location,
+            destinationLocation: lr.destination_location,
+            status: lr.status || 'pending',
+            plannedDeparture: lr.planned_departure ? new Date(lr.planned_departure).toISOString() : null,
+            plannedArrival: lr.planned_arrival ? new Date(lr.planned_arrival).toISOString() : null,
+            actualDeparture: lr.actual_departure ? new Date(lr.actual_departure).toISOString() : null,
+            actualArrival: lr.actual_arrival ? new Date(lr.actual_arrival).toISOString() : null,
+            vehiclePlate: lr.vehicle_plate || null,
+            airlineName: lr.airline_name || null,
+            flightNumber: lr.flight_number || null,
+          });
+        }
+
+        const [stopRows] = await this.pool.execute<any[]>(
+          `SELECT rs.route_id, rs.route_stop_id, rs.leg_id, rs.sequence_no,
+                  rs.stop_type, rs.location_name, rs.country, rs.status,
+                  rs.planned_arrival, rs.actual_arrival, rs.actual_departure
+           FROM route_stop rs
+           WHERE rs.route_id IN (${ph})
+           ORDER BY rs.route_id ASC, rs.leg_id ASC, rs.sequence_no ASC`,
+          routeIds,
+        );
+        for (const sr of stopRows) {
+          const rid = Number(sr.route_id);
+          if (!stopsByRoute.has(rid)) stopsByRoute.set(rid, []);
+          stopsByRoute.get(rid)!.push({
+            routeStopId: Number(sr.route_stop_id),
+            legId: sr.leg_id ? Number(sr.leg_id) : null,
+            sequenceNo: Number(sr.sequence_no),
+            stopType: sr.stop_type,
+            locationName: sr.location_name,
+            country: sr.country || null,
+            status: sr.status || 'pending',
+          });
+        }
+      } catch (err) {
+        this.logger.warn(`enrichAssignedTripRows legs/stops query failed: ${(err as any)?.message}`);
+      }
+    }
+
+    return rows.map((row) => {
+      const sid = Number(row.shipment_id);
+      const rid = row.route_id ? Number(row.route_id) : 0;
+      return {
+        ...row,
+        horses: horsesByShipment.get(sid) || [],
+        legs: rid ? legsByRoute.get(rid) || [] : [],
+        stops: rid ? stopsByRoute.get(rid) || [] : [],
+      };
+    });
+  }
+
   async findMyAssignedTrips(userId: number, roleName: string): Promise<any[]> {
     const roleLower = roleName.toLowerCase();
     const isManagerOrCoordinator =
@@ -402,14 +512,17 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
                   CONCAT(s.origin_location, ' → ', s.destination_location)
                 ) as request_title,
                 s.contact_name, s.origin_location, s.destination_location,
-                s.status as shipment_status, s.requested_date, s.requested_horse_count,
-                r.route_id, r.route_name, r.plan_status as route_plan_status, r.total_distance_km
+                s.status as shipment_status, s.requested_date, s.departure_date,
+                s.expected_arrival_date, s.requested_horse_count,
+                s.trip_type, s.return_status, s.return_departure_at,
+                r.route_id, r.route_name, r.plan_status as route_plan_status,
+                r.total_distance_km, r.strategic_notes
          FROM shipment s
          LEFT JOIN route r ON r.shipment_id = s.shipment_id
          WHERE s.status IN ('ready_to_depart', 'in_transit', 'return_pending', 'arrived', 'completed')
          ORDER BY s.shipment_id DESC`,
       );
-      return rows;
+      return this.enrichAssignedTripRows(rows);
     }
 
     if (isCustomer) {
@@ -437,7 +550,9 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
                   CONCAT(s.origin_location, ' → ', s.destination_location)
                 ) as request_title,
                 s.contact_name, s.origin_location, s.destination_location,
-                s.status as shipment_status, s.requested_date, s.requested_horse_count,
+                s.status as shipment_status, s.requested_date, s.departure_date,
+                s.expected_arrival_date, s.requested_horse_count,
+                s.trip_type, s.return_status, s.return_departure_at,
                 r.route_id, r.route_name, r.plan_status as route_plan_status, r.total_distance_km
          FROM shipment s
          LEFT JOIN route r ON r.shipment_id = s.shipment_id
@@ -449,7 +564,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       return rows;
     }
 
-    // For Driver or Escort: only trips assigned to them
+    // For Driver or Escort: only trips assigned to them (including 'planning' so pending assignment confirmation shows up)
     const [rows] = await this.pool.execute<any[]>(
       `SELECT s.shipment_id,
               CASE
@@ -466,18 +581,28 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
                 CONCAT(s.origin_location, ' → ', s.destination_location)
               ) as request_title,
               s.contact_name, s.origin_location, s.destination_location,
-              s.status as shipment_status, s.requested_date, s.requested_horse_count,
-              r.route_id, r.route_name, r.plan_status as route_plan_status, r.total_distance_km,
-              sa.role_in_shipment, sa.is_confirmed
+              s.status as shipment_status, s.requested_date, s.departure_date,
+              s.expected_arrival_date, s.requested_horse_count,
+              s.trip_type, s.return_status, s.return_departure_at,
+              r.route_id, r.route_name, r.plan_status as route_plan_status,
+              r.total_distance_km, r.strategic_notes,
+              sa.role_in_shipment, sa.is_confirmed, sa.confirmed_at
        FROM shipment_assignment sa
        JOIN shipment s ON sa.shipment_id = s.shipment_id
        LEFT JOIN route r ON r.shipment_id = s.shipment_id
        WHERE sa.user_id = ?
-         AND s.status IN ('confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'arrived', 'completed')
-       ORDER BY s.shipment_id DESC`,
+         AND s.status IN ('planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'arrived', 'completed')
+       ORDER BY
+         CASE
+           WHEN s.status IN ('in_transit', 'return_pending') THEN 0
+           WHEN s.status = 'ready_to_depart' THEN 1
+           WHEN s.status IN ('planning', 'confirmed') THEN 2
+           ELSE 3
+         END ASC,
+         s.shipment_id DESC`,
       [userId],
     );
-    return rows;
+    return this.enrichAssignedTripRows(rows);
   }
 
   async updateLegStatus(
@@ -1037,6 +1162,66 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     return this.findActiveVitalConfig();
   }
 
+  async isEvidencePhotoAccessibleToUser(filename: string, userId: number, role: string): Promise<boolean> {
+    const upper = String(role || '').toUpperCase();
+    if (
+      upper.includes('MANAGER') ||
+      upper.includes('COORDINATOR') ||
+      upper.includes('SPECIALIST') ||
+      upper.includes('ADMIN')
+    ) {
+      return true;
+    }
+    const pattern = `%${filename}%`;
+    if (upper === 'CUSTOMER') {
+      const [tslRows] = await this.pool.execute<any[]>(
+        `SELECT 1 FROM trip_status_log tsl
+         JOIN shipment s ON s.shipment_id = tsl.shipment_id
+         WHERE s.customer_id = ? AND tsl.evidence_url LIKE ? LIMIT 1`,
+        [userId, pattern],
+      );
+      if (tslRows.length > 0) return true;
+
+      const [attRows] = await this.pool.execute<any[]>(
+        `SELECT 1 FROM attachment a
+         JOIN shipment s ON s.shipment_id = a.related_id
+         WHERE a.related_type = 'shipment' AND s.customer_id = ? AND a.file_url LIKE ? LIMIT 1`,
+        [userId, pattern],
+      );
+      return attRows.length > 0;
+    }
+
+    // Driver / Escort: check trip_status_log, attachment, or shipment_assignment via filename prefix ship-{id}-...
+    const [tslRows] = await this.pool.execute<any[]>(
+      `SELECT 1 FROM trip_status_log tsl
+       JOIN shipment_assignment sa ON sa.shipment_id = tsl.shipment_id
+       WHERE sa.user_id = ? AND tsl.evidence_url LIKE ? LIMIT 1`,
+      [userId, pattern],
+    );
+    if (tslRows.length > 0) return true;
+
+    const [attRows] = await this.pool.execute<any[]>(
+      `SELECT 1 FROM attachment a
+       JOIN shipment_assignment sa ON sa.shipment_id = a.related_id
+       WHERE a.related_type = 'shipment' AND sa.user_id = ? AND a.file_url LIKE ? LIMIT 1`,
+      [userId, pattern],
+    );
+    if (attRows.length > 0) return true;
+
+    const prefixMatch = filename.match(/^ship-(\d+)-/);
+    if (prefixMatch) {
+      const sid = Number(prefixMatch[1]);
+      if (Number.isInteger(sid) && sid > 0) {
+        const [saRows] = await this.pool.execute<any[]>(
+          'SELECT 1 FROM shipment_assignment WHERE shipment_id = ? AND user_id = ? LIMIT 1',
+          [sid, userId],
+        );
+        return saRows.length > 0;
+      }
+    }
+    return false;
+  }
+
   async isHealthPhotoAccessibleToUser(filename: string, userId: number, role: string): Promise<boolean> {
     const upper = String(role || '').toUpperCase();
     if (
@@ -1123,6 +1308,18 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     const [rows] = await this.pool.execute<any[]>(
       'SELECT 1 FROM horse WHERE horse_id = ? AND owner_id = ? LIMIT 1',
       [horseId, userId],
+    );
+    return rows.length > 0;
+  }
+
+  async isHorseAssignedToDriver(horseId: number, driverUserId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT 1
+       FROM shipment_horse sh
+       JOIN shipment_assignment sa ON sa.shipment_id = sh.shipment_id
+       WHERE sh.horse_id = ? AND sa.user_id = ?
+       LIMIT 1`,
+      [horseId, driverUserId],
     );
     return rows.length > 0;
   }
@@ -1439,12 +1636,22 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
   async findActiveShipmentsForLiveOverview(): Promise<any[]> {
     const [rows] = await this.pool.execute<any[]>(
       `SELECT s.shipment_id,
-              CASE
-                WHEN s.special_requirements LIKE 'REQ-%' THEN s.special_requirements
-                ELSE CONCAT('REQ-', LPAD(s.shipment_id, 3, '0'))
-              END as request_code,
+              CONCAT('REQ-', LPAD(s.shipment_id, 3, '0')) as request_code,
               s.contact_name, s.origin_location, s.destination_location,
-              s.status, r.route_id, r.total_distance_km
+              s.status, s.requested_horse_count, r.route_id, r.total_distance_km,
+              (SELECT u.full_name
+               FROM shipment_assignment sa
+               JOIN \`user\` u ON u.user_id = sa.user_id
+               WHERE sa.shipment_id = s.shipment_id AND sa.role_in_shipment = 'driver'
+               ORDER BY sa.assignment_id ASC LIMIT 1) AS driver_name,
+              (SELECT v.plate_or_code
+               FROM shipment_vehicle sv
+               JOIN vehicle v ON v.vehicle_id = sv.vehicle_id
+               WHERE sv.shipment_id = s.shipment_id
+               ORDER BY sv.shipment_vehicle_id ASC LIMIT 1) AS vehicle_plate,
+              (SELECT COALESCE(SUM(COALESCE(sh.quantity, 1)), 0)
+               FROM shipment_horse sh
+               WHERE sh.shipment_id = s.shipment_id) AS horses_count
        FROM shipment s
        LEFT JOIN route r ON r.shipment_id = s.shipment_id
        WHERE s.status IN ('ready_to_depart', 'in_transit', 'return_pending')

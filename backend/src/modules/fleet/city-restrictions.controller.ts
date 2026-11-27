@@ -63,6 +63,7 @@ export class CityRestrictionsController {
   }
 
   @Get('shipments/:id/reservations')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Phương án xe và các xe đang giữ chỗ của đơn (khách chỉ xem đơn của mình)' })
   reservations(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseIntPipe) id: number) {
     return this.allocation.getShipmentReservations(user, id);

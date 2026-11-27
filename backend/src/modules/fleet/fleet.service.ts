@@ -156,7 +156,7 @@ export class FleetService {
     return cls;
   }
 
-  /** Sức chứa lấy theo loại; loại không cố định (ferry_slot) thì dùng giá trị nhập. */
+  /** Sức chứa lấy theo loại; loại không cố định sức chứa thì dùng giá trị nhập. */
   private capacityForClass(cls: VehicleClass, requested?: number): number {
     if (cls.horseCapacity !== null) return cls.horseCapacity;
     if (!requested || requested < 1) {
@@ -285,7 +285,7 @@ export class FleetService {
     userId: number,
     dto: UpdateStaffShiftDto,
   ): Promise<{ success: boolean; userId: number; currentShift: string; dutyStatus: string; activeTrips: number }> {
-    const shouldRelease = dto.releaseActiveTrips === true || dto.dutyStatus === 'ON_DUTY';
+    const shouldRelease = dto.releaseActiveTrips === true && dto.dutyStatus !== 'ON_DUTY';
     const ok = await this.fleetStore.updateStaffShift(userId, dto.currentShift, dto.dutyStatus, shouldRelease);
     if (!ok) {
       throw new NotFoundException(`Không tìm thấy nhân sự #${userId}`);
@@ -315,6 +315,13 @@ export class FleetService {
       this.fleetStore.findAssignedStaff(shipmentId),
     ]);
 
+    if (user?.role === UserRole.DRIVER_ESCORT) {
+      const isAssigned = staff.some((s) => Number(s.userId) === Number(user.id));
+      if (!isAssigned) {
+        throw new ForbiddenException('Bạn chỉ được phép xem phân công của chuyến đi được phân công cho mình');
+      }
+    }
+
     return { vehicles, staff };
   }
 
@@ -343,9 +350,24 @@ export class FleetService {
     if (vehicles.length !== dto.vehicleIds.length) {
       throw new BadRequestException('Một hoặc nhiều phương tiện được chọn không tồn tại trong hệ thống');
     }
-    const ownVehicleIds = vehicles.some(v => v.status === VehicleStatus.IN_USE)
-      ? new Set((await this.fleetStore.findAssignedVehicles(shipmentId)).map(a => a.vehicleId)) : new Set<number>();
-    if (vehicles.some(v => v.status === VehicleStatus.MAINTENANCE || (v.status === VehicleStatus.IN_USE && !ownVehicleIds.has(v.id)))) {
+    const ownVehicleIds = new Set<number>();
+    if (vehicles.some((v) => v.status === VehicleStatus.IN_USE)) {
+      const assignedList = await this.fleetStore.findAssignedVehicles(shipmentId);
+      for (const a of assignedList) ownVehicleIds.add(a.vehicleId);
+      if (typeof this.fleetStore.findShipmentReservations === 'function') {
+        const reservedList = await this.fleetStore.findShipmentReservations(shipmentId);
+        for (const r of reservedList) {
+          if (r.status === 'active' || r.status === 'consumed') ownVehicleIds.add(r.vehicleId);
+        }
+      }
+    }
+    if (
+      vehicles.some(
+        (v) =>
+          v.status === VehicleStatus.MAINTENANCE ||
+          (v.status === VehicleStatus.IN_USE && !ownVehicleIds.has(v.id) && v.assignedShipmentId !== shipmentId),
+      )
+    ) {
       throw new BadRequestException('Xe đang được sử dụng hoặc bảo trì. Ghép chuyến phải chọn chuyến đường bộ trong kế hoạch để kiểm tra chỗ');
     }
 

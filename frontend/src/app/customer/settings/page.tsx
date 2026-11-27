@@ -302,8 +302,8 @@ export default function CustomerSettingsPage() {
             </div>
             <p className="text-xs text-[#747D88] mt-1.5 mb-0">
               {language === 'en'
-                ? 'This name is displayed on your Header, Sidebar, and transport certificates.'
-                : 'Tên này sẽ hiển thị trên Header, Sidebar và các chứng từ vận chuyển của bạn.'}
+                ? 'This name is displayed on your account header, invoices, and transport documents.'
+                : 'Tên này sẽ hiển thị trên thanh tài khoản, hóa đơn và các chứng từ vận chuyển của bạn.'}
             </p>
           </div>
 

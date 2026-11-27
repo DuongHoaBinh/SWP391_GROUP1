@@ -9,12 +9,12 @@ import {
   Truck,
   UserCheck,
   Info,
-  ChevronRight,
   Camera,
   Edit2,
   Trash2,
   Activity,
   Heart,
+  Navigation,
 } from 'lucide-react';
 import { useCustomerStore, getFullPhotoUrl } from '@/lib/customer-store';
 import { Horse } from '@/lib/types';
@@ -28,14 +28,45 @@ import { useLanguage } from '@/lib/i18n/LanguageContext';
 const getFallbackHorsePhoto = () =>
   'https://images.unsplash.com/photo-1598974357801-cbca100e65d3?auto=format&fit=crop&w=800&q=80';
 
+const TERMINAL_STATUSES = new Set([
+  'COMPLETED',
+  'DELIVERED',
+  'CANCELLED',
+  'CANCELLED_OPERATIONAL',
+  'REJECTED',
+  'REFUNDED',
+  'REFUND_REQUESTED',
+]);
+
+function formatExamDate(val: string | undefined | null, isEn: boolean): string | null {
+  if (!val) return null;
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return val;
+  return d.toLocaleDateString(isEn ? 'en-US' : 'vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+function formatLocationLabel(loc: string | undefined | null, isEn: boolean): string | null {
+  const trimmed = (loc || '').trim();
+  if (!trimmed) return null;
+  if (trimmed.toLowerCase() === 'stable') {
+    return isEn ? 'Registered Stable' : 'Tại chuồng đăng ký';
+  }
+  return trimmed;
+}
+
 export default function HorseDetailPage() {
-  const { t, language, translateBreed, translateGender, translateColor, translateHealthStatus } = useLanguage();
+  const { t, language, translateBreed, translateGender, translateColor, translateHealthStatus } =
+    useLanguage();
   const isEn = language === 'en';
   const params = useParams();
   const router = useRouter();
   const horseId = params?.id as string;
 
-  const { getHorseById, requests, uploadHorseAvatar } = useCustomerStore();
+  const { getHorseById, requests, refreshRequests, uploadHorseAvatar } = useCustomerStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -46,7 +77,7 @@ export default function HorseDetailPage() {
   const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Nhật ký sức khỏe trong chuyến
-    const [medicalLogs, setMedicalLogs] = useState<any[]>([]);
+  const [medicalLogs, setMedicalLogs] = useState<any[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
 
@@ -59,6 +90,12 @@ export default function HorseDetailPage() {
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (requests.length === 0) {
+      void refreshRequests();
+    }
+  }, [requests.length, refreshRequests]);
 
   const fetchHealthLogs = useCallback(() => {
     if (!horseId) return;
@@ -76,7 +113,9 @@ export default function HorseDetailPage() {
               hour: '2-digit',
               minute: '2-digit',
             }),
-            title: log.legName || (isEn ? 'Transit Checkpoint Health Check' : 'Kiểm tra sức khỏe trạm vận chuyển'),
+            title:
+              log.legName ||
+              (isEn ? 'Transit Checkpoint Health Check' : 'Kiểm tra sức khỏe trạm vận chuyển'),
             examiner: `${
               log.recordedByName || (isEn ? 'Veterinarian / Escort' : 'Nhân viên thú y / áp tải')
             }${log.recordedByRole ? ` (${log.recordedByRole})` : ''} • ${
@@ -95,7 +134,9 @@ export default function HorseDetailPage() {
         }
       })
       .catch((err: any) => {
-        setLogsError(err?.message || (isEn ? 'Could not load health logs.' : 'Không thể tải nhật ký sức khỏe.'));
+        setLogsError(
+          err?.message || (isEn ? 'Could not load health logs.' : 'Không thể tải nhật ký sức khỏe.'),
+        );
       })
       .finally(() => setIsLoadingLogs(false));
   }, [horseId, isEn]);
@@ -120,14 +161,19 @@ export default function HorseDetailPage() {
         setIsLoading(true);
         const res = await apiClient<any>(`/horses/${horseId}`);
         if (res && isMounted) {
+          const parsedAge = res.age != null && Number(res.age) > 0 ? Number(res.age) : 0;
           const mapped: Horse = {
+            ...res,
             id: String(res.id || horseId),
             backendId: res.id ? Number(res.id) : undefined,
-            code: res.code || res.passportNo || (res.id ? `HOR-2026-${String(res.id).padStart(3, '0')}` : undefined),
+            code:
+              res.code ||
+              res.passportNo ||
+              (res.id ? `HR-${String(res.id).padStart(5, '0')}` : undefined),
             name: res.name,
             breed: res.breed || 'Thoroughbred',
             gender: res.gender || undefined,
-            age: Number(res.age) || 5,
+            age: parsedAge,
             requiresPrivateStall: Boolean(res.requiresPrivateStall),
             temperament: res.temperament || 'normal',
             color: res.color || '',
@@ -135,7 +181,7 @@ export default function HorseDetailPage() {
             microchipNumber: res.microchipNumber || res.microchipNo || '',
             passportNumber: res.passportNumber || res.passportNo || '',
             ownerName: res.ownerName || '',
-            medicalStatus: res.medicalStatus || 'Healthy',
+            medicalStatus: res.medicalStatus || '',
             vaccinationStatus: res.vaccinationStatus || '',
             quarantineStatus: res.quarantineStatus || 'Pending',
             lastExamDate: res.lastExamDate || '',
@@ -143,8 +189,10 @@ export default function HorseDetailPage() {
             specialRequirements: res.specialRequirements || '',
             location: res.location || '',
             photoUrl: res.photoUrl || undefined,
-            documents: res.documents && res.documents.length > 0 ? res.documents : localAtFetch?.documents || [],
-            ...res,
+            documents:
+              res.documents && res.documents.length > 0
+                ? res.documents
+                : localAtFetch?.documents || [],
           };
           setHorse(mapped);
         }
@@ -166,21 +214,36 @@ export default function HorseDetailPage() {
         String(r.horseId) === String(h.id) ||
         String(r.horse?.id) === String(h.id) ||
         (h.backendId && String(r.horseId) === String(h.backendId)) ||
-        (r.horses && r.horses.some((item: any) => String(item.horse?.id) === String(h.id) || String(item.id) === String(h.id))) ||
-        (r.horse?.name && h.name && r.horse.name.toLowerCase().trim() === h.name.toLowerCase().trim());
+        (r.horses &&
+          r.horses.some(
+            (item: any) =>
+              String(item.horse?.id) === String(h.id) ||
+              String(item.horseId) === String(h.id) ||
+              (h.backendId &&
+                (String(item.horse?.id) === String(h.backendId) ||
+                  String(item.horseId) === String(h.backendId))),
+          )) ||
+        (r.horse?.name &&
+          h.name &&
+          r.horse.name.toLowerCase().trim() === h.name.toLowerCase().trim());
 
+      const rawUpper = String(r.statusLabel || r.status || '').toUpperCase();
       const upper = String(r.status || '').toUpperCase();
-      const isFinished = upper === 'COMPLETED' || upper === 'CANCELLED' || upper === 'REJECTED';
+      const isFinished = TERMINAL_STATUSES.has(rawUpper) || TERMINAL_STATUSES.has(upper);
       return match && !isFinished;
     });
   };
 
   const activeOrder = horse ? getHorseActiveOrder(horse) : undefined;
+  const activeOrderStatusLower = String(
+    activeOrder?.statusLabel || activeOrder?.status || '',
+  ).toLowerCase();
   const isTransit = horse
-    ? (horse.availabilityStatus || '').toLowerCase().includes('transit') ||
-      activeOrder?.status === 'IN_TRANSIT' ||
-      activeOrder?.status === 'in_transit'
+    ? (activeOrder
+        ? (activeOrderStatusLower.includes('in_transit') || activeOrderStatusLower === 'return_pending')
+        : (horse.availabilityStatus || '').toLowerCase().includes('transit'))
     : false;
+  const isScheduled = !isTransit && Boolean(activeOrder);
 
   const displayMedicalHistory = medicalLogs.length > 0 ? medicalLogs : horse?.medicalHistory || [];
 
@@ -191,11 +254,20 @@ export default function HorseDetailPage() {
       setIsUploadingAvatar(true);
       await uploadHorseAvatar(horse.id, file);
       showFeedback(
-        t('horse.avatarUpdateSuccess', isEn ? 'Horse avatar updated successfully!' : 'Cập nhật ảnh đại diện chiến mã thành công!'),
-        4000
+        t(
+          'horse.avatarUpdateSuccess',
+          isEn ? 'Horse avatar updated successfully!' : 'Cập nhật ảnh đại diện chiến mã thành công!',
+        ),
+        4000,
       );
     } catch (err: any) {
-      toast.error(err?.message || t('horse.avatarUpdateFail', isEn ? 'Could not upload avatar.' : 'Không thể tải lên ảnh đại diện. Vui lòng thử lại.'));
+      toast.error(
+        err?.message ||
+          t(
+            'horse.avatarUpdateFail',
+            isEn ? 'Could not upload avatar.' : 'Không thể tải lên ảnh đại diện. Vui lòng thử lại.',
+          ),
+      );
     } finally {
       setIsUploadingAvatar(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -206,7 +278,9 @@ export default function HorseDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px] gap-4">
         <div className="w-12 h-12 border-4 border-[#C4B38E] border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm font-semibold text-[#5F6977]">{t('horse.loadingProfile', 'Đang tải hồ sơ chiến mã...')}</p>
+        <p className="text-sm font-semibold text-[#5F6977]">
+          {t('horse.loadingProfile', isEn ? 'Loading horse profile...' : 'Đang tải hồ sơ chiến mã...')}
+        </p>
       </div>
     );
   }
@@ -217,16 +291,21 @@ export default function HorseDetailPage() {
         <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 mx-auto flex items-center justify-center mb-4">
           <Info size={32} aria-hidden="true" />
         </div>
-        <h1 className="text-xl font-bold text-[#181A17] m-0">{t('horse.notFoundTitle', 'Không tìm thấy thông tin cá thể ngựa')}</h1>
+        <h1 className="text-xl font-bold text-[#181A17] m-0">
+          {t('horse.notFoundTitle', isEn ? 'Horse Profile Not Found' : 'Không tìm thấy thông tin cá thể ngựa')}
+        </h1>
         <p className="text-sm text-[#5F6977] mt-2 mb-6">
-          {t('horse.notFoundDesc', 'Dữ liệu không tồn tại hoặc đã được chuyển vào mục lưu trữ.')}
+          {t(
+            'horse.notFoundDesc',
+            isEn ? 'This record does not exist or was archived.' : 'Dữ liệu không tồn tại hoặc đã được chuyển vào mục lưu trữ.',
+          )}
         </p>
         <Link
           href="/customer/horses"
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#181A17] text-white font-bold text-xs hover:bg-[#242722] transition-colors"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#181A17] text-white font-bold text-xs hover:bg-[#242722] transition-colors no-underline"
         >
           <ArrowLeft size={16} aria-hidden="true" />
-          <span>{t('horse.backToStable', isEn ? 'Back to Stable' : 'Quay lại danh sách')}</span>
+          <span>{t('horse.backToStable', isEn ? 'Back to My Horses' : 'Quay lại danh sách')}</span>
         </Link>
       </div>
     );
@@ -240,21 +319,22 @@ export default function HorseDetailPage() {
       ? 'bg-amber-100 text-amber-800'
       : 'bg-emerald-100 text-emerald-800';
   const notUpdatedText = t('common.notUpdated', isEn ? 'Not updated' : 'Chưa cập nhật');
+  const hasValidAge = horse.age !== null && horse.age !== undefined && Number(horse.age) > 0;
+  const displayLocation = formatLocationLabel(horse.location, isEn);
+  const displayLastExam = formatExamDate(horse.lastExamDate, isEn);
 
   return (
-    <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-10">
-      {/* Breadcrumb Navigation */}
-      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs font-medium text-[#747D88] flex-wrap">
-        <Link href="/customer" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
-          {t('nav.dashboard', 'Bảng điều khiển')}
+    <div className="flex flex-col gap-5 max-w-7xl mx-auto pb-10">
+      {/* Compact Back Link (Avoids double breadcrumb with Header) */}
+      <div>
+        <Link
+          href="/customer/horses"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-[#5F6977] hover:text-[#181A17] no-underline transition-colors"
+        >
+          <ArrowLeft size={14} aria-hidden="true" />
+          <span>{t('horse.backToStable', isEn ? 'Back to My Horses' : 'Quay lại danh sách ngựa')}</span>
         </Link>
-        <ChevronRight size={13} className="text-[#747D88]" aria-hidden="true" />
-        <Link href="/customer/horses" className="text-[#5F6977] hover:text-[#181A17] no-underline transition-colors">
-          {t('horse.fleetTitle', isEn ? 'My Horses' : 'Quản Lý Ngựa Đua')}
-        </Link>
-        <ChevronRight size={13} className="text-[#747D88]" aria-hidden="true" />
-        <span className="text-[#181A17] font-bold truncate max-w-[220px]">{horse.name}</span>
-      </nav>
+      </div>
 
       {feedbackSuccess && (
         <div
@@ -280,7 +360,10 @@ export default function HorseDetailPage() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              aria-label={t('horse.changeAvatarHint', isEn ? 'Change racehorse avatar' : 'Nhấp để thay đổi ảnh đại diện')}
+              aria-label={t(
+                'horse.changeAvatarHint',
+                isEn ? 'Change racehorse avatar' : 'Nhấp để thay đổi ảnh đại diện',
+              )}
               className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border border-[#E5DDD0] shadow-sm shrink-0 cursor-pointer group bg-[#FAF8F4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A67C2E]"
             >
               <img
@@ -290,7 +373,9 @@ export default function HorseDetailPage() {
               />
               <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex flex-col items-center justify-center text-white gap-1">
                 <Camera size={18} aria-hidden="true" />
-                <span className="text-[10px] font-bold uppercase tracking-wider">{t('horse.changePhoto', 'Đổi ảnh')}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider">
+                  {t('horse.changePhoto', isEn ? 'Change' : 'Đổi ảnh')}
+                </span>
               </div>
               <span
                 aria-hidden="true"
@@ -325,6 +410,10 @@ export default function HorseDetailPage() {
                     <Truck size={12} aria-hidden="true" />
                     <span>{t('customer.inFlight', isEn ? 'In Transit' : 'Đang vận chuyển')}</span>
                   </span>
+                ) : isScheduled ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#F8F0DF] text-[#966516] border border-[#DFCA9A]">
+                    ● {isEn ? 'Scheduled' : 'Đã xếp lịch'} ({activeOrder?.requestCode})
+                  </span>
                 ) : (
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#E8F2EB] text-[#287653] border border-[#B7DBC4]">
                     ● {t('horse.stableReady', isEn ? 'Ready in Stable' : 'Sẵn sàng tại chuồng')}
@@ -336,32 +425,44 @@ export default function HorseDetailPage() {
                 {horse.name}
               </h1>
 
-              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-xs text-[#5F6977] mt-2 font-medium">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-3 gap-y-1 text-xs text-[#5F6977] mt-2 font-medium">
                 <span>
-                  {t('horses.gender', 'Giới tính')}: <strong className="text-[#181A17]">{horse.gender ? translateGender(horse.gender) : '—'}</strong>
-                </span>
-                <span aria-hidden="true">•</span>
-                <span>
-                  {t('horses.age', 'Tuổi')}: <strong className="text-[#181A17]">{horse.age} {t('horse.yearsOld', 'tuổi')}</strong>
-                </span>
-                <span aria-hidden="true">•</span>
-                <span>
-                  {t('horses.temperament', 'Tính khí')}:{' '}
+                  {t('horses.gender', isEn ? 'Gender' : 'Giới tính')}:{' '}
                   <strong className="text-[#181A17]">
-                    {horse.temperament === 'calm'
-                      ? t('horses.temperament.calm', 'Điềm tĩnh')
-                      : horse.temperament === 'difficult'
-                        ? t('horses.temperament.difficult', 'Khó tính')
-                        : t('horses.temperament.normal', 'Bình thường')}
+                    {horse.gender ? translateGender(horse.gender) : '—'}
                   </strong>
                 </span>
                 <span aria-hidden="true">•</span>
                 <span>
-                  {t('horse.colorLabel', 'Màu lông')}: <strong className="text-[#181A17]">{horse.color ? translateColor(horse.color) : '—'}</strong>
+                  {t('horses.age', isEn ? 'Age' : 'Tuổi')}:{' '}
+                  <strong className="text-[#181A17]">
+                    {hasValidAge
+                      ? `${horse.age} ${t('horse.yearsOld', isEn ? 'yrs' : 'tuổi')}`
+                      : notUpdatedText}
+                  </strong>
                 </span>
                 <span aria-hidden="true">•</span>
                 <span>
-                  {t('horse.weightLabel', 'Thể trọng')}: <strong className="text-[#181A17]">{horse.weight || '—'}</strong>
+                  {t('horses.temperament', isEn ? 'Temperament' : 'Tính khí')}:{' '}
+                  <strong className="text-[#181A17]">
+                    {horse.temperament === 'calm'
+                      ? t('horses.temperament.calm', isEn ? 'Calm' : 'Điềm tĩnh')
+                      : horse.temperament === 'difficult'
+                        ? t('horses.temperament.difficult', isEn ? 'Spirited' : 'Khó tính')
+                        : t('horses.temperament.normal', isEn ? 'Normal' : 'Bình thường')}
+                  </strong>
+                </span>
+                <span aria-hidden="true">•</span>
+                <span>
+                  {t('horse.colorLabel', isEn ? 'Coat Color' : 'Màu lông')}:{' '}
+                  <strong className="text-[#181A17]">
+                    {horse.color ? translateColor(horse.color) : '—'}
+                  </strong>
+                </span>
+                <span aria-hidden="true">•</span>
+                <span>
+                  {t('horse.weightLabel', isEn ? 'Weight' : 'Thể trọng')}:{' '}
+                  <strong className="text-[#181A17]">{horse.weight || '—'}</strong>
                 </span>
               </div>
             </div>
@@ -370,19 +471,32 @@ export default function HorseDetailPage() {
           <div className="flex flex-wrap items-center justify-center md:justify-end gap-2 shrink-0 pt-4 md:pt-0 border-t md:border-t-0 border-[#EFEAE0]">
             {isTransit && activeOrder ? (
               <Link
+                href={`/customer/tracking?shipmentId=${activeOrder.id}&horseId=${horse.id}`}
+                className="px-4 py-2.5 rounded-xl bg-[#287653] hover:bg-[#1F5E42] text-white text-xs font-bold transition-colors shadow-sm inline-flex items-center gap-2 no-underline"
+              >
+                <Navigation size={14} aria-hidden="true" />
+                <span>
+                  {isEn ? 'Track Trip' : 'Theo Dõi Chuyến'} ({activeOrder.requestCode || `#${activeOrder.id}`})
+                </span>
+              </Link>
+            ) : isScheduled && activeOrder ? (
+              <Link
                 href={`/customer/requests/${activeOrder.id}`}
                 className="px-4 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold transition-colors shadow-sm inline-flex items-center gap-2 no-underline"
               >
                 <Truck size={14} className="text-[#C4B38E]" aria-hidden="true" />
-                <span>{t('horse.viewOrderBtn', 'Xem Đơn')} ({activeOrder.requestCode || `#${activeOrder.id}`})</span>
+                <span>
+                  {t('horse.viewOrderBtn', isEn ? 'View Order' : 'Xem Đơn')} (
+                  {activeOrder.requestCode || `#${activeOrder.id}`})
+                </span>
               </Link>
             ) : (
               <Link
-                href={`/customer/requests/new?horseId=${horse.id}`}
+                href={`/customer/requests/new?horseIds=${horse.id}`}
                 className="px-4 py-2.5 rounded-xl bg-[#181A17] hover:bg-[#2A2D27] text-[#FBF9F5] text-xs font-bold transition-colors shadow-sm inline-flex items-center gap-2 no-underline"
               >
                 <Truck size={14} className="text-[#C4B38E]" aria-hidden="true" />
-                <span>{t('horse.bookNewTripBtn', 'Tạo Chuyến Vận Chuyển')}</span>
+                <span>{t('horse.bookNewTripBtn', isEn ? 'Book Transport' : 'Tạo Chuyến Vận Chuyển')}</span>
               </Link>
             )}
 
@@ -392,16 +506,26 @@ export default function HorseDetailPage() {
               className="px-3.5 py-2.5 rounded-xl bg-white hover:border-[#B49A68] text-[#181A17] text-xs font-semibold transition-colors border border-[#D8CEBE] inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Edit2 size={13} aria-hidden="true" />
-              <span>{t('common.edit', 'Sửa')}</span>
+              <span>{t('common.edit', isEn ? 'Edit' : 'Sửa')}</span>
             </button>
 
             <button
               type="button"
-              onClick={() => setIsDeleteModalOpen(true)}
-              className="px-3.5 py-2.5 rounded-xl bg-[#F8EAEA]/60 hover:bg-[#F8EAEA] text-[#B33E3E] text-xs font-semibold transition-colors border border-[#E5B8B8] inline-flex items-center gap-1.5 cursor-pointer"
+              disabled={isTransit || isScheduled}
+              title={
+                isTransit || isScheduled
+                  ? (isEn ? 'Cannot delete a horse tied to an active order' : 'Không thể xóa ngựa đang gắn với đơn vận chuyển hoạt động')
+                  : undefined
+              }
+              onClick={() => !(isTransit || isScheduled) && setIsDeleteModalOpen(true)}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors border inline-flex items-center gap-1.5 ${
+                isTransit || isScheduled
+                  ? 'bg-[#F0EEE8] text-[#94A3B8] border-[#E5DDD0] cursor-not-allowed'
+                  : 'bg-[#F8EAEA]/60 hover:bg-[#F8EAEA] text-[#B33E3E] border-[#E5B8B8] cursor-pointer'
+              }`}
             >
               <Trash2 size={13} aria-hidden="true" />
-              <span>{t('common.delete', 'Xóa')}</span>
+              <span>{t('common.delete', isEn ? 'Delete' : 'Xóa')}</span>
             </button>
           </div>
         </div>
@@ -414,35 +538,51 @@ export default function HorseDetailPage() {
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-[#EFEAE0] mb-4">
               <h2 className="text-sm font-bold text-[#181A17] m-0">
-                {t('horse.studbookTitle', 'Hồ Sơ Nhận Diện & Phả Hệ')}
+                {t('horse.studbookTitle', isEn ? 'Identity & Studbook' : 'Hồ Sơ Nhận Diện & Phả Hệ')}
               </h2>
               <ShieldCheck size={17} className="text-[#287653] shrink-0" aria-hidden="true" />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div>
-                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.microchipLabel', 'Số Microchip ISO')}</span>
-                <div className="font-mono font-bold text-[#181A17] break-all">{horse.microchipNumber || notUpdatedText}</div>
-              </div>
-              <div>
-                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.passportLabel', 'Số Hộ Chiếu FEI')}</span>
-                <div className="font-mono font-bold text-[#181A17] break-all">{horse.passportNumber || notUpdatedText}</div>
-              </div>
-              <div>
-                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horses.requiresPrivateStall', 'Cần chuồng riêng')}</span>
-                <div className={`font-bold ${horse.requiresPrivateStall ? 'text-[#966516]' : 'text-[#181A17]'}`}>
-                  {horse.requiresPrivateStall ? t('common.yes', isEn ? 'Yes' : 'Có') : t('common.no', isEn ? 'No' : 'Không')}
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">
+                  {t('horse.microchipLabel', isEn ? 'ISO Microchip No.' : 'Số Microchip ISO')}
+                </span>
+                <div className="font-mono font-bold text-[#181A17] break-all">
+                  {horse.microchipNumber || notUpdatedText}
                 </div>
               </div>
               <div>
-                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.currentLocation', 'Địa điểm lưu trú hiện tại')}</span>
-                <div className="font-bold text-[#181A17]">{horse.location || notUpdatedText}</div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">
+                  {t('horse.passportLabel', isEn ? 'FEI Passport No.' : 'Số Hộ Chiếu FEI')}
+                </span>
+                <div className="font-mono font-bold text-[#181A17] break-all">
+                  {horse.passportNumber || notUpdatedText}
+                </div>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">
+                  {t('horses.requiresPrivateStall', isEn ? 'Private Stall Required' : 'Cần chuồng riêng')}
+                </span>
+                <div className={`font-bold ${horse.requiresPrivateStall ? 'text-[#966516]' : 'text-[#181A17]'}`}>
+                  {horse.requiresPrivateStall
+                    ? t('common.yes', isEn ? 'Yes' : 'Có')
+                    : t('common.no', isEn ? 'No' : 'Không')}
+                </div>
+              </div>
+              <div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">
+                  {t('horse.currentLocation', isEn ? 'Current Stable Location' : 'Địa điểm lưu trú hiện tại')}
+                </span>
+                <div className="font-bold text-[#181A17]">{displayLocation || notUpdatedText}</div>
               </div>
             </div>
           </div>
 
           <div className="mt-6 p-3.5 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] text-xs flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[#5F6977] font-medium">{t('horse.originFarmLabel', isEn ? 'Registered Owner:' : 'Chủ sở hữu đăng ký:')}</span>
+            <span className="text-[#5F6977] font-medium">
+              {t('horse.originFarmLabel', isEn ? 'Registered Owner:' : 'Chủ sở hữu đăng ký:')}
+            </span>
             <span className="font-bold text-[#181A17]">{horse.ownerName || notUpdatedText}</span>
           </div>
         </div>
@@ -452,45 +592,54 @@ export default function HorseDetailPage() {
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-[#EFEAE0] mb-4">
               <h2 className="text-sm font-bold text-[#181A17] m-0">
-                {t('horse.medicalQuarantineTitle', 'Hồ Sơ Y Tế & Kiểm Dịch')}
+                {t('horse.medicalQuarantineTitle', isEn ? 'Medical & Quarantine Profile' : 'Hồ Sơ Y Tế & Kiểm Dịch')}
               </h2>
               <Activity size={17} className="text-[#A67C2E] shrink-0" aria-hidden="true" />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs mb-4">
               <div>
-                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.fitnessLabel', 'Tình trạng thể lực')}</span>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">
+                  {t('horse.fitnessLabel', isEn ? 'Health Status' : 'Tình trạng thể lực')}
+                </span>
                 <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-bold text-[11px] ${medBadgeClass}`}>
-                  ● {translateHealthStatus(horse.medicalStatus || 'Healthy')}
+                  ● {horse.medicalStatus ? translateHealthStatus(horse.medicalStatus) : (isEn ? 'Pending Verification' : 'Chưa xác minh thú y')}
                 </div>
               </div>
               <div>
-                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.vaccineBookLabel', 'Tiêm chủng thú y')}</span>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">
+                  {t('horse.vaccineBookLabel', isEn ? 'Vaccination Status' : 'Tiêm chủng thú y')}
+                </span>
                 <div className="font-bold text-[#287653]">{horse.vaccinationStatus || notUpdatedText}</div>
               </div>
               <div>
-                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.lastExamLabel', 'Lần khám gần nhất')}</span>
-                <div className="font-bold text-[#181A17]">{horse.lastExamDate || notUpdatedText}</div>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">
+                  {t('horse.lastExamLabel', isEn ? 'Last Exam Date' : 'Lần khám gần nhất')}
+                </span>
+                <div className="font-bold text-[#181A17]">{displayLastExam || notUpdatedText}</div>
               </div>
               <div>
-                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">{t('horse.vetDoctorLabel', 'Bác sĩ thú y phụ trách')}</span>
+                <span className="text-[11px] font-semibold text-[#747D88] block mb-0.5">
+                  {t('horse.vetDoctorLabel', isEn ? 'Attending Veterinarian' : 'Bác sĩ thú y phụ trách')}
+                </span>
                 <div className="font-bold text-[#181A17]">{horse.veterinarian || notUpdatedText}</div>
               </div>
             </div>
 
             <div className="p-3.5 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] text-xs">
               <span className="text-[11px] font-bold text-[#A67C2E] uppercase tracking-wide block mb-1">
-                {t('horse.climateReqLabel', 'Ghi chú chăm sóc đặc biệt')}
+                {t('horse.climateReqLabel', isEn ? 'Special Handling Notes' : 'Ghi chú chăm sóc đặc biệt')}
               </span>
               <p className="text-[#181A17] font-medium m-0 leading-relaxed">
-                {horse.specialRequirements || (isEn ? 'No special handling notes recorded.' : 'Không có ghi chú chăm sóc đặc biệt.')}
+                {horse.specialRequirements ||
+                  (isEn ? 'No special handling notes recorded.' : 'Không có ghi chú chăm sóc đặc biệt.')}
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* KHO GIẤY TỜ CỦA NGỰA (Step 2) */}
+      {/* KHO GIẤY TỜ CỦA NGỰA */}
       <HorseDocumentVault horseId={horse.backendId ?? horseId} />
 
       {/* MEDICAL HISTORY TIMELINE */}
@@ -510,7 +659,10 @@ export default function HorseDetailPage() {
         </div>
 
         {logsError && (
-          <div role="alert" className="p-3 rounded-xl bg-[#F8EAEA] border border-[#B33E3E]/30 text-xs text-[#B33E3E] flex items-center justify-between gap-2">
+          <div
+            role="alert"
+            className="p-3 rounded-xl bg-[#F8EAEA] border border-[#B33E3E]/30 text-xs text-[#B33E3E] flex items-center justify-between gap-2"
+          >
             <span>{logsError}</span>
             <button type="button" onClick={fetchHealthLogs} className="font-bold underline cursor-pointer">
               {t('common.retry', isEn ? 'Retry' : 'Thử lại')}
@@ -572,7 +724,7 @@ export default function HorseDetailPage() {
               isEn
                 ? `Updated profile for "${updated.name}" successfully!`
                 : `Đã cập nhật thông tin chiến mã "${updated.name}" thành công!`,
-              5000
+              5000,
             );
           }}
         />

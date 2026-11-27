@@ -35,9 +35,12 @@ export interface Vehicle {
   lastInspection: string;
   location: string;
   assignedTripCode?: string;
+  assignedShipmentStatus?: string | null;
+  isReservedOnly?: boolean;
   /** Step 3: loại phương tiện (vehicle_class) và trạm xe */
   vehicleClassCode?: string | null;
   vehicleClassName?: string | null;
+  vehicleClassNameEn?: string | null;
   isHeavyTruck?: boolean;
   depotId?: number | null;
   depotName?: string | null;
@@ -231,7 +234,7 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
   const refreshVehicles = useCallback(async () => {
     const token = getAuthToken();
     const role = String(getCurrentUser()?.role || '').toUpperCase();
-    if (!token || role === 'CUSTOMER') return;
+    if (!token || !['LOGISTICS_MANAGER', 'ADMIN'].includes(role)) return;
 
     try {
       const backendVehicles = await apiClient<any[]>('/fleet/vehicles');
@@ -256,8 +259,11 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
             lastInspection: v.createdAt ? v.createdAt.split('T')[0] : '2026-10-01',
             location: v.status === 'in_use' ? `Active: ${v.assignedTripCode || 'On Road'} (${baseLoc})` : baseLoc,
             assignedTripCode: v.assignedTripCode || undefined,
+            assignedShipmentStatus: v.assignedShipmentStatus ?? null,
+            isReservedOnly: Boolean(v.isReservedOnly),
             vehicleClassCode: v.vehicleClassCode ?? null,
             vehicleClassName: v.vehicleClassName ?? null,
+            vehicleClassNameEn: v.vehicleClassNameEn ?? null,
             isHeavyTruck: Boolean(v.isHeavyTruck),
             depotId: v.depotId ?? null,
             depotName: v.depotName ?? null,

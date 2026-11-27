@@ -3,9 +3,10 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import { apiClient } from '@/lib/api-client';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { CustomerClaimModal } from './CustomerClaimModal';
 import { InsurancePackage, vnd } from '../insurance-policy';
-import { AlertCircle, CheckCircle, Clock, FileText, PlusCircle, ShieldAlert, XCircle } from 'lucide-react';
+import { CheckCircle, Clock, PlusCircle, ShieldAlert, XCircle } from 'lucide-react';
 
 export interface CustomerClaimsListProps {
   shipmentId: number;
@@ -20,12 +21,45 @@ export interface CustomerClaimsListProps {
   }>;
 }
 
-const statusBadge: Record<string, { label: string; color: string; icon: any }> = {
-  submitted: { label: 'Đã nộp · Chờ xem xét', color: 'bg-amber-50 text-amber-800 border-amber-200', icon: Clock },
-  under_review: { label: 'Đang thẩm định', color: 'bg-blue-50 text-blue-800 border-blue-200', icon: Clock },
-  approved: { label: 'Đã phê duyệt · Chờ chi trả', color: 'bg-emerald-50 text-emerald-800 border-emerald-200', icon: CheckCircle },
-  rejected: { label: 'Đã từ chối', color: 'bg-rose-50 text-rose-800 border-rose-200', icon: XCircle },
-  paid: { label: 'Đã chi trả bồi thường', color: 'bg-purple-50 text-purple-800 border-purple-200', icon: CheckCircle },
+const getStatusBadge = (status: string, isEn: boolean) => {
+  switch (status) {
+    case 'submitted':
+      return {
+        label: isEn ? 'Submitted · Awaiting review' : 'Đã nộp · Chờ xem xét',
+        color: 'bg-amber-50 text-amber-800 border-amber-200',
+        icon: Clock,
+      };
+    case 'under_review':
+      return {
+        label: isEn ? 'Under Review' : 'Đang thẩm định',
+        color: 'bg-blue-50 text-blue-800 border-blue-200',
+        icon: Clock,
+      };
+    case 'approved':
+      return {
+        label: isEn ? 'Approved · Pending payout' : 'Đã phê duyệt · Chờ chi trả',
+        color: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        icon: CheckCircle,
+      };
+    case 'rejected':
+      return {
+        label: isEn ? 'Rejected' : 'Đã từ chối',
+        color: 'bg-rose-50 text-rose-800 border-rose-200',
+        icon: XCircle,
+      };
+    case 'paid':
+      return {
+        label: isEn ? 'Compensation Paid' : 'Đã chi trả bồi thường',
+        color: 'bg-purple-50 text-purple-800 border-purple-200',
+        icon: CheckCircle,
+      };
+    default:
+      return {
+        label: status,
+        color: 'bg-gray-100 text-gray-800 border-gray-200',
+        icon: Clock,
+      };
+  }
 };
 
 export function CustomerClaimsList({
@@ -34,6 +68,9 @@ export function CustomerClaimsList({
   deliveredAt,
   horses,
 }: CustomerClaimsListProps) {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
+
   const [selectedHorse, setSelectedHorse] = useState<{
     shipmentHorseId: number;
     name: string;
@@ -46,35 +83,54 @@ export function CustomerClaimsList({
     (url: string) => apiClient<any[]>(url),
   );
 
+  const statusLower = String(shipmentStatus || '').toLowerCase();
   const isDeliveredOrCompleted =
-    Boolean(deliveredAt) || ['completed', 'in_transit'].includes(shipmentStatus);
+    Boolean(deliveredAt) ||
+    ['completed', 'delivered', 'in_transit', 'return_pending', 'return_in_transit'].includes(
+      statusLower,
+    );
 
   // 72h window check
   const deliveryMs = deliveredAt ? new Date(deliveredAt).getTime() : null;
   const isExpired = deliveryMs ? Date.now() - deliveryMs > 72 * 3600 * 1000 : false;
   const deadlineDate = deliveryMs ? new Date(deliveryMs + 72 * 3600 * 1000) : null;
+  const locale = isEn ? 'en-US' : 'vi-VN';
+
+  const packageLabel = (pkg?: InsurancePackage) => {
+    if (pkg === 'premium') return isEn ? 'Comprehensive' : 'Toàn diện';
+    if (pkg === 'standard') return isEn ? 'Standard' : 'Tiêu chuẩn';
+    return isEn ? 'Basic' : 'Cơ bản';
+  };
 
   return (
     <div className="space-y-4 rounded-xl border border-[#D8CEBE] bg-white p-5 text-[#181A17]">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E8E2D8] pb-3">
         <div>
-          <h4 className="font-bold text-base flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-[#8C7A5B]" />
-            Bảo hiểm & Yêu cầu bồi thường sự cố (Claims)
+          <h4 className="font-bold text-base flex items-center gap-2 m-0">
+            <ShieldAlert className="h-5 w-5 text-[#8C7A5B]" aria-hidden="true" />
+            <span>
+              {isEn
+                ? 'Insurance & Incident Claims'
+                : 'Bảo hiểm & Yêu cầu bồi thường sự cố (Claims)'}
+            </span>
           </h4>
-          <p className="text-xs text-[#5B6779] mt-0.5">
-            Thời hạn gửi yêu cầu: <strong>72 giờ</strong> sau khi bàn giao ngựa. Riêng sự cố tử vong (M4) cho phép gửi ngay trong hành trình.
+          <p className="text-xs text-[#5B6779] mt-0.5 mb-0">
+            {isEn ? 'Window: 72h after handover (M4 anytime in transit).' : 'Hạn gửi: 72h sau bàn giao (M4 gửi ngay khi đang chạy).'}
           </p>
         </div>
         {deadlineDate && (
           <div className="text-xs text-[#8C7A5B] bg-[#FAF3E0] px-3 py-1.5 rounded-lg border border-[#EAD8B1] self-start sm:self-auto">
             {isExpired ? (
               <span className="text-red-700 font-semibold">
-                Đã hết hạn khiếu nại lúc {deadlineDate.toLocaleTimeString('vi-VN')} {deadlineDate.toLocaleDateString('vi-VN')}
+                {isEn
+                  ? `Claim window closed at ${deadlineDate.toLocaleTimeString(locale)} ${deadlineDate.toLocaleDateString(locale)}`
+                  : `Đã hết hạn khiếu nại lúc ${deadlineDate.toLocaleTimeString(locale)} ${deadlineDate.toLocaleDateString(locale)}`}
               </span>
             ) : (
               <span>
-                Hạn chót: {deadlineDate.toLocaleTimeString('vi-VN')} ngày {deadlineDate.toLocaleDateString('vi-VN')}
+                {isEn
+                  ? `Deadline: ${deadlineDate.toLocaleTimeString(locale)} on ${deadlineDate.toLocaleDateString(locale)}`
+                  : `Hạn chót: ${deadlineDate.toLocaleTimeString(locale)} ngày ${deadlineDate.toLocaleDateString(locale)}`}
               </span>
             )}
           </div>
@@ -83,7 +139,7 @@ export function CustomerClaimsList({
 
       {/* Horse action buttons */}
       <div className="flex flex-wrap gap-2 pt-1">
-        {horses.map((h) => {
+        {horses.map((h, idx) => {
           const sHorseId = h.shipmentHorseId ?? h.horseId;
           const activeClaim = (claims || []).find(
             (c) => Number(c.shipmentHorseId) === sHorseId && ['submitted', 'under_review'].includes(c.status),
@@ -91,16 +147,14 @@ export function CustomerClaimsList({
 
           return (
             <div
-              key={sHorseId}
+              key={`${sHorseId}-${idx}`}
               className="flex items-center gap-2 rounded-lg border border-[#D8CEBE] bg-[#FAF8F5] px-3 py-2 text-xs"
             >
               <span className="font-semibold text-[#181A17]">{h.name}</span>
-              <span className="text-[11px] text-[#7D8A99]">
-                ({h.insurancePackage === 'premium' ? 'Toàn diện' : h.insurancePackage === 'standard' ? 'Tiêu chuẩn' : 'Cơ bản'})
-              </span>
+              <span className="text-[11px] text-[#7D8A99]">({packageLabel(h.insurancePackage)})</span>
               {activeClaim ? (
                 <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
-                  Đang xử lý claim #{activeClaim.id}
+                  {isEn ? `Processing claim #${activeClaim.id}` : `Đang xử lý claim #${activeClaim.id}`}
                 </span>
               ) : isDeliveredOrCompleted && !isExpired ? (
                 <button
@@ -115,13 +169,17 @@ export function CustomerClaimsList({
                   }
                   className="inline-flex items-center gap-1 rounded bg-[#181A17] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#242722] cursor-pointer"
                 >
-                  <PlusCircle className="h-3.5 w-3.5" />
-                  Yêu cầu bồi thường
+                  <PlusCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{isEn ? 'File Claim' : 'Yêu cầu bồi thường'}</span>
                 </button>
               ) : isExpired ? (
-                <span className="text-[11px] text-[#7D8A99] italic">Hết hạn khiếu nại</span>
+                <span className="text-[11px] text-[#7D8A99] italic">
+                  {isEn ? 'Claim window expired' : 'Hết hạn khiếu nại'}
+                </span>
               ) : (
-                <span className="text-[11px] text-[#7D8A99] italic">Mở sau khi bàn giao</span>
+                <span className="text-[11px] text-[#7D8A99] italic">
+                  {isEn ? 'Available after handover' : 'Mở sau khi bàn giao'}
+                </span>
               )}
             </div>
           );
@@ -131,66 +189,73 @@ export function CustomerClaimsList({
       {/* Existing claims list */}
       {claims && claims.length > 0 ? (
         <div className="space-y-3 pt-2">
-          <h5 className="font-bold text-xs uppercase tracking-wider text-[#5B6779]">
-            Hồ sơ khiếu nại đã gửi ({claims.length})
+          <h5 className="font-bold text-xs uppercase tracking-wider text-[#5B6779] m-0">
+            {isEn ? `Submitted Claims (${claims.length})` : `Hồ sơ khiếu nại đã gửi (${claims.length})`}
           </h5>
           <div className="divide-y divide-[#E8E2D8] border border-[#E8E2D8] rounded-xl overflow-hidden">
             {claims.map((c) => {
-              const badge = statusBadge[c.status] || {
-                label: c.status,
-                color: 'bg-gray-100 text-gray-800 border-gray-200',
-                icon: Clock,
-              };
+              const badge = getStatusBadge(c.status, isEn);
               const Icon = badge.icon;
               return (
                 <div key={c.id} className="p-4 bg-white space-y-2">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-sm text-[#181A17]">
-                        Hồ sơ #{c.id} · Ngựa {c.horseName || `#${c.shipmentHorseId}`}
+                        {isEn
+                          ? `Claim #${c.id} · Horse ${c.horseName || `#${c.shipmentHorseId}`}`
+                          : `Hồ sơ #${c.id} · Ngựa ${c.horseName || `#${c.shipmentHorseId}`}`}
                       </span>
                       <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-[#EAE5D9] text-[#181A17]">
-                        Mức {c.severity}
+                        {isEn ? `Level ${c.severity}` : `Mức ${c.severity}`}
                       </span>
                     </div>
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${badge.color}`}
                     >
-                      <Icon className="h-3.5 w-3.5" />
+                      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                       {badge.label}
                     </span>
                   </div>
 
-                  <p className="text-xs text-[#5B6779] line-clamp-2">
-                    <strong>Mô tả:</strong> {c.description}
+                  <p className="text-xs text-[#5B6779] line-clamp-2 m-0">
+                    <strong>{isEn ? 'Description:' : 'Mô tả:'}</strong> {c.description}
                   </p>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
                     <div>
-                      <span className="text-[11px] text-[#7D8A99] block">Số tiền yêu cầu:</span>
+                      <span className="text-[11px] text-[#7D8A99] block">
+                        {isEn ? 'Requested Amount:' : 'Số tiền yêu cầu:'}
+                      </span>
                       <span className="font-bold text-[#181A17]">{vnd(c.requestedAmount)}</span>
                     </div>
                     <div>
-                      <span className="text-[11px] text-[#7D8A99] block">Gợi ý theo rule:</span>
+                      <span className="text-[11px] text-[#7D8A99] block">
+                        {isEn ? 'Policy Suggestion:' : 'Gợi ý theo quy định:'}
+                      </span>
                       <span className="font-bold text-[#8C7A5B]">{vnd(c.suggestedAmount)}</span>
                     </div>
                     <div>
-                      <span className="text-[11px] text-[#7D8A99] block">Số tiền phê duyệt:</span>
+                      <span className="text-[11px] text-[#7D8A99] block">
+                        {isEn ? 'Approved Amount:' : 'Số tiền phê duyệt:'}
+                      </span>
                       <span className="font-bold text-emerald-700">
                         {c.approvedAmount !== null ? vnd(c.approvedAmount) : '—'}
                       </span>
                     </div>
                     <div>
-                      <span className="text-[11px] text-[#7D8A99] block">Thời gian tạo:</span>
+                      <span className="text-[11px] text-[#7D8A99] block">
+                        {isEn ? 'Submitted Date:' : 'Thời gian tạo:'}
+                      </span>
                       <span className="text-[#5B6779]">
-                        {new Date(c.createdAt).toLocaleDateString('vi-VN')}
+                        {new Date(c.createdAt).toLocaleDateString(locale)}
                       </span>
                     </div>
                   </div>
 
                   {c.decisionReason && (
                     <div className="mt-2 text-xs bg-[#F9F8F5] p-2.5 rounded-lg border border-[#E8E2D8]">
-                      <strong>Phản hồi từ quản lý:</strong> {c.decisionReason}
+                      <strong>{isEn ? 'Manager Response:' : 'Phản hồi từ quản lý:'}</strong>{' '}
+                      {c.decisionReason}
                       {c.rejectionReasonCode && (
                         <span className="ml-1 text-rose-700">({c.rejectionReasonCode})</span>
                       )}
@@ -203,7 +268,9 @@ export function CustomerClaimsList({
         </div>
       ) : (
         <div className="text-center py-4 text-xs text-[#7D8A99] bg-[#FAF8F5] rounded-lg border border-[#E8E2D8]">
-          Chưa có yêu cầu bồi thường nào được gửi cho đơn hàng này.
+          {isEn
+            ? 'No insurance claims have been submitted for this order.'
+            : 'Chưa có yêu cầu bồi thường nào được gửi cho đơn hàng này.'}
         </div>
       )}
 

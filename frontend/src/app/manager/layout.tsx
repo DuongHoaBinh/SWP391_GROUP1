@@ -21,18 +21,8 @@ import {
   Pin,
   PinOff,
   ShieldCheck,
-  ClipboardCheck,
-  Scale,
-  FolderOpen,
-  FileSignature,
-  FileX,
-  Navigation,
-  Map as MapIcon,
   Bus,
-  Building2,
   Radio,
-  Coins,
-  Timer,
   ShieldAlert,
 } from 'lucide-react';
 import { getAuthToken, clearAuthSession, getCurrentUser, logout } from '@/lib/auth';
@@ -55,6 +45,8 @@ interface NavItem {
   badgeColor?: 'danger' | 'brand';
   /** Chỉ active khi đúng đường dẫn (trang tổng quan của một nhóm có trang con). */
   exact?: boolean;
+  /** Các tiền tố URL bổ sung thuộc workspace hợp nhất này. */
+  matchPrefixes?: string[];
 }
 
 interface NavGroup {
@@ -211,7 +203,7 @@ export default function ManagerLayout({
     };
   }, [router]);
 
-  // Portal hợp nhất sau review 11/2026: Manager đảm nhận luôn việc của Specialist (hồ sơ) và Coordinator (điều phối).
+  // Portal hợp nhất sau review 11/2026: gom 26 trang con thành 12 workspace cốt lõi (vừa khít 1280x800).
   const navGroups: NavGroup[] = [
     {
       title: t('manager.navGroupOps', 'Điều Hành Vận Tải'),
@@ -223,103 +215,75 @@ export default function ManagerLayout({
           exact: true,
         },
         {
-          label: t('manager.nav.requests', 'Yêu Cầu Vận Chuyển'),
+          label: t('manager.nav.requests', 'Đơn Vận Chuyển'),
           href: '/manager/requests',
           icon: <Truck size={18} />,
         },
         {
-          label: t('manager.nav.planning', 'Kế Hoạch Chuyến Đi'),
-          href: '/manager/planning',
-          icon: <MapPin size={18} />,
+          label: t('manager.navGroupCompliance', 'Hồ Sơ & Kiểm Dịch'),
+          href: '/manager/compliance',
+          icon: <ShieldCheck size={18} />,
+          matchPrefixes: ['/manager/compliance'],
         },
         {
-          label: t('manager.nav.incidents', 'Xử Lý Sự Cố'),
+          label: t('manager.nav.planningHub', 'Lập Tuyến & Điều Phối'),
+          href: '/manager/planning',
+          icon: <MapPin size={18} />,
+          matchPrefixes: ['/manager/planning', '/manager/dispatch'],
+        },
+        {
+          label: t('nav.monitoring', 'Giám Sát Trực Tuyến'),
+          href: '/manager/monitoring',
+          icon: <Radio size={18} />,
+          exact: true,
+        },
+        {
+          label: t('manager.nav.incidents', 'Sự Cố & Cảnh Báo'),
           href: '/manager/incidents',
           icon: <AlertTriangle size={18} />,
+          matchPrefixes: ['/manager/incidents', '/manager/monitoring/alerts'],
+        },
+      ],
+    },
+    {
+      title: t('manager.navGroupResources', 'Tài Nguyên & Báo Cáo'),
+      items: [
+        {
+          label: t('manager.nav.fleetHub', 'Đội Xe & Trạm Xe'),
+          href: '/manager/fleet/vehicles',
+          icon: <Bus size={18} />,
+          matchPrefixes: ['/manager/fleet'],
+        },
+        {
+          label: t('manager.nav.staff', 'Nhân Sự & Ca Trực'),
+          href: '/manager/staff',
+          icon: <Users size={18} />,
         },
         {
           label: t('manager.nav.claims', 'Bồi Thường Bảo Hiểm'),
           href: '/manager/insurance/claims',
           icon: <ShieldAlert size={18} />,
-        },
-      ],
-    },
-    {
-      title: t('manager.navGroupCompliance', 'Hồ Sơ & Kiểm Dịch'),
-      items: [
-        {
-          label: t('manager.nav.complianceOverview', 'Tổng Quan Hồ Sơ'),
-          href: '/manager/compliance',
-          icon: <ShieldCheck size={18} />,
-          exact: true,
+          matchPrefixes: ['/manager/insurance'],
         },
         {
-          label: t('specialist.nav.complianceOrders', 'Đơn Kiểm Định Pháp Lý'),
-          href: '/manager/compliance/orders',
-          icon: <ClipboardCheck size={18} />,
-        },
-        {
-          label: t('specialist.nav.regulations', 'Quy Định Kiểm Dịch'),
-          href: '/manager/compliance/regulations',
-          icon: <Scale size={18} />,
-        },
-        {
-          label: t('specialist.nav.documents', 'Hồ Sơ Vận Chuyển'),
-          href: '/manager/compliance/documents',
-          icon: <FolderOpen size={18} />,
-        },
-        {
-          label: t('specialist.nav.approval', 'Thẩm Định Giấy Tờ'),
-          href: '/manager/compliance/approval',
-          icon: <FileSignature size={18} />,
-        },
-        {
-          label: t('specialist.nav.missing', 'Hồ Sơ Còn Thiếu'),
-          href: '/manager/compliance/missing',
-          icon: <FileX size={18} />,
-        },
-      ],
-    },
-    {
-      title: t('manager.navGroupDispatch', 'Đội Xe & Điều Phối'),
-      items: [
-        {
-          label: t('manager.nav.dispatchOverview', 'Tổng Quan Điều Phối'),
-          href: '/manager/dispatch',
-          icon: <Navigation size={18} />,
-          exact: true,
-        },
-        {
-          label: t('nav.routes', 'Lập lộ trình tuyến'),
-          href: '/manager/dispatch/routes',
-          icon: <MapIcon size={18} />,
-        },
-        {
-          label: t('nav.vehicles', 'Quản lý đội xe'),
-          href: '/manager/fleet/vehicles',
-          icon: <Bus size={18} />,
-        },
-        {
-          label: t('manager.nav.depots', 'Trạm xe'),
-          href: '/manager/fleet/depots',
-          icon: <Building2 size={18} />,
-        },
-        {
-          label: t('manager.nav.staff', 'Phân Bổ Ca Trực & Nhân Sự'),
-          href: '/manager/staff',
-          icon: <Users size={18} />,
-        },
-        {
-          label: t('nav.monitoring', 'Giám sát'),
-          href: '/manager/monitoring',
-          icon: <Radio size={18} />,
+          label: t('manager.nav.reports', 'Báo Cáo & Đối Soát'),
+          href: '/manager/reports',
+          icon: <BarChart3 size={18} />,
         },
       ],
     },
   ];
 
-  const isNavActive = (item: NavItem) =>
-    item.exact ? pathname === item.href : pathname === item.href || Boolean(pathname?.startsWith(`${item.href}/`));
+  const isNavActive = (item: NavItem) => {
+    if (!pathname) return false;
+    if (item.exact) return pathname === item.href;
+    if (item.matchPrefixes && item.matchPrefixes.length > 0) {
+      return item.matchPrefixes.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+      );
+    }
+    return pathname === item.href || pathname.startsWith(`${item.href}/`);
+  };
 
   const managementItems: NavItem[] = [
     {
@@ -330,21 +294,86 @@ export default function ManagerLayout({
       badgeColor: 'brand',
     },
     {
-      label: t('manager.nav.pricing', 'Bảng Giá & Định Mức'),
-      href: '/manager/settings/pricing',
-      icon: <Coins size={18} />,
-    },
-    {
-      label: t('manager.nav.cityRestrictions', 'Giờ Cấm Xe & Nghỉ'),
-      href: '/manager/settings/city-restrictions',
-      icon: <Timer size={18} />,
-    },
-    {
-      label: t('common.settings', 'Cài Đặt Hệ Thống'),
+      label: t('common.settings', 'Cấu Hình & Cài Đặt'),
       href: '/manager/settings',
       icon: <Settings size={18} />,
+      matchPrefixes: ['/manager/settings'],
     },
   ];
+
+  const headerMeta = (() => {
+    const p = pathname || '/manager';
+    if (p.startsWith('/manager/requests')) {
+      return {
+        title: t('manager.nav.requests', 'Đơn Vận Chuyển'),
+        subtitle: t('manager.header.requestsSub', 'Thẩm định khả thi, báo giá, hồ sơ và theo dõi vòng đời đơn'),
+      };
+    }
+    if (p.startsWith('/manager/compliance')) {
+      return {
+        title: t('manager.navGroupCompliance', 'Hồ Sơ & Kiểm Dịch'),
+        subtitle: t('manager.header.complianceSub', 'Thẩm định giấy tờ, hồ sơ còn thiếu và quy định cửa khẩu'),
+      };
+    }
+    if (p.startsWith('/manager/planning') || p.startsWith('/manager/dispatch')) {
+      return {
+        title: t('manager.nav.planningHub', 'Lập Tuyến & Điều Phối'),
+        subtitle: t('manager.header.planningSub', 'Lập khung tuyến, dựng lộ trình chi tiết và lịch xuất phát'),
+      };
+    }
+    if (p.startsWith('/manager/fleet')) {
+      return {
+        title: t('manager.nav.fleetHub', 'Đội Xe & Trạm Xe'),
+        subtitle: t('manager.header.fleetSub', 'Quản lý phương tiện chuyên dụng và trạm trung chuyển'),
+      };
+    }
+    if (p.startsWith('/manager/monitoring/alerts') || p.startsWith('/manager/incidents')) {
+      return {
+        title: t('manager.nav.incidents', 'Sự Cố & Cảnh Báo'),
+        subtitle: t('manager.header.incidentsSub', 'Cảnh báo trực tuyến, đề xuất đổi tuyến và tranh chấp bàn giao'),
+      };
+    }
+    if (p.startsWith('/manager/monitoring')) {
+      return {
+        title: t('nav.monitoring', 'Giám Sát Trực Tuyến'),
+        subtitle: t('manager.header.monitoringSub', 'Bản đồ định vị GPS, mốc hành trình và sinh hiệu ngựa'),
+      };
+    }
+    if (p.startsWith('/manager/insurance')) {
+      return {
+        title: t('manager.nav.claims', 'Bồi Thường Bảo Hiểm'),
+        subtitle: t('manager.header.claimsSub', 'Thẩm định hồ sơ bồi thường M1–M4 và đối soát hạn mức'),
+      };
+    }
+    if (p.startsWith('/manager/reports')) {
+      return {
+        title: t('manager.nav.reports', 'Báo Cáo & Đối Soát'),
+        subtitle: t('manager.header.reportsSub', 'Doanh thu thực thu, chi phí vận hành và chỉ số OTD'),
+      };
+    }
+    if (p.startsWith('/manager/staff')) {
+      return {
+        title: t('manager.nav.staff', 'Nhân Sự & Ca Trực'),
+        subtitle: t('manager.header.staffSub', 'Quản lý tài xế, bác sĩ thú y áp tải và lịch trực'),
+      };
+    }
+    if (p.startsWith('/manager/notifications')) {
+      return {
+        title: t('common.notifications', 'Thông Báo Hệ Thống'),
+        subtitle: t('manager.header.notificationsSub', 'Cập nhật đơn hàng, thanh toán và cảnh báo mới nhất'),
+      };
+    }
+    if (p.startsWith('/manager/settings')) {
+      return {
+        title: t('common.settings', 'Cấu Hình & Cài Đặt'),
+        subtitle: t('manager.header.settingsSub', 'Tài khoản, bảng giá cước, giờ cấm nội đô và định vị GPS'),
+      };
+    }
+    return {
+      title: t('manager.title', 'Tổng Quan Vận Hành'),
+      subtitle: t('manager.header.dashboardSub', 'Theo dõi chỉ số vận tải ngựa đua và yêu cầu cần xử lý'),
+    };
+  })();
 
   const handleLogout = () => {
     setShowLogoutModal(true);
@@ -502,7 +531,7 @@ export default function ManagerLayout({
                 </p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {managementItems.map((item) => {
-                    const isActive = pathname?.startsWith(item.href);
+                    const isActive = isNavActive(item);
                     return (
                       <Link
                         key={item.href}
@@ -631,10 +660,10 @@ export default function ManagerLayout({
               flex: 1,
               overflowY: 'auto',
               overflowX: 'hidden',
-              padding: !isExpanded ? '20px 8px' : '24px 16px',
+              padding: !isExpanded ? '16px 8px' : '16px 14px',
               display: 'flex',
               flexDirection: 'column',
-              gap: !isExpanded ? '16px' : '28px',
+              gap: !isExpanded ? '12px' : '18px',
             }}
           >
             {/* NAVIGATION GROUPS: Điều hành · Hồ sơ & Kiểm dịch · Đội xe & Điều phối */}
@@ -712,7 +741,7 @@ export default function ManagerLayout({
                       key={item.href}
                       href={item.href}
                       aria-current={isActive ? 'page' : undefined}
-                      className={`no-underline flex items-center justify-between px-3 py-2.5 rounded-lg text-[13.5px] transition-colors whitespace-nowrap ${
+                      className={`no-underline flex items-center justify-between px-3 py-2 rounded-lg text-[13px] transition-colors whitespace-nowrap ${
                         isActive
                           ? 'bg-[#A67C2E]/20 text-[#FAF8F4] border border-[#A67C2E]/35 font-semibold'
                           : 'text-[#A5ACA1] border border-transparent font-medium hover:bg-white/5 hover:text-white'
@@ -767,7 +796,7 @@ export default function ManagerLayout({
 
               <nav style={{ display: 'flex', flexDirection: 'column', gap: !isExpanded ? '6px' : '3px' }}>
                 {managementItems.map((item) => {
-                  const isActive = pathname?.startsWith(item.href);
+                  const isActive = isNavActive(item);
 
                   if (!isExpanded) {
                     return (
@@ -810,7 +839,7 @@ export default function ManagerLayout({
                       key={item.href}
                       href={item.href}
                       aria-current={isActive ? 'page' : undefined}
-                      className={`no-underline flex items-center justify-between px-3 py-2.5 rounded-lg text-[13.5px] transition-colors whitespace-nowrap ${
+                      className={`no-underline flex items-center justify-between px-3 py-2 rounded-lg text-[13px] transition-colors whitespace-nowrap ${
                         isActive
                           ? 'bg-[#A67C2E]/20 text-[#FAF8F4] border border-[#A67C2E]/35 font-semibold'
                           : 'text-[#A5ACA1] border border-transparent font-medium hover:bg-white/5 hover:text-white'
@@ -842,31 +871,8 @@ export default function ManagerLayout({
             </div>
           </div>
 
-          {/* Bottom Area */}
-          <div style={{ padding: !isExpanded ? '16px 8px' : '16px', borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {!isExpanded ? (
-              <Link
-                href="/manager/settings"
-                title={t('common.settings', 'Cài đặt hệ thống')}
-                className="relative group flex items-center justify-center py-1 no-underline"
-              >
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-[#A5ACA1] hover:text-white hover:bg-white/10 transition-all duration-200 group-hover:scale-110">
-                  <Settings size={18} />
-                </div>
-                <div className="absolute left-full ml-3 px-3 py-1.5 rounded-xl bg-[#181A17]/95 backdrop-blur-md text-[#FAF8F4] text-xs font-bold whitespace-nowrap shadow-xl border border-[#B49A68]/30 pointer-events-none opacity-0 group-hover:opacity-100 transition-all duration-150 z-50 -translate-x-1.5 group-hover:translate-x-0">
-                  <span>{t('common.settings', 'Cài đặt hệ thống')}</span>
-                </div>
-              </Link>
-            ) : (
-              <Link
-                href="/manager/settings"
-                className="no-underline flex items-center gap-3 px-3 py-2 text-[13px] text-[#A5ACA1] hover:text-white hover:bg-white/5 rounded-lg whitespace-nowrap transition-colors"
-              >
-                <Settings size={17} className="text-[#7E867B]" />
-                <span>{t('common.settings', 'Cài đặt hệ thống')}</span>
-              </Link>
-            )}
-
+          {/* Bottom Area (User Profile & Logout — Settings lives in Hệ Thống nav group) */}
+          <div style={{ padding: !isExpanded ? '12px 8px' : '12px 14px', borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {!isExpanded ? (
               <div className="flex flex-col items-center gap-2 pt-1">
                 <div
@@ -973,17 +979,14 @@ export default function ManagerLayout({
               <Menu size={22} />
             </button>
             <div className="min-w-0">
-              <p className="text-[15px] sm:text-[17px] font-bold text-[#181A17] m-0 leading-tight truncate">
-                {t('manager.title', 'Bảng Điều Khiển Quản Lý')}
-              </p>
-              <p className="hidden sm:block text-[13px] text-[#5C6658] m-0 mt-0.5 font-medium truncate">
-                {t('manager.subtitle', 'Tổng quan các hoạt động vận tải ngựa đua quốc tế và phân công vận hành.')}
+              <p className="text-[15px] sm:text-[16px] font-bold text-[#181A17] m-0 leading-tight truncate">
+                {headerMeta.title}
               </p>
             </div>
           </div>
 
           {/* Center: Search */}
-          <div className="hidden lg:flex items-center bg-white/80 border border-[#E5DFD3] rounded-lg px-3.5 py-2 w-72 xl:w-96 relative focus-within:border-[#A67C2E] focus-within:ring-2 focus-within:ring-[#A67C2E]/20 transition-all">
+          <div className="hidden lg:flex items-center bg-white/80 border border-[#E5DFD3] rounded-lg px-3 py-1.5 w-60 xl:w-72 relative focus-within:border-[#A67C2E] focus-within:ring-2 focus-within:ring-[#A67C2E]/20 transition-all">
             <Search size={15} className="text-[#7E867B] mr-2.5 shrink-0" />
             <input
               ref={searchInputRef}
@@ -1080,13 +1083,18 @@ export default function ManagerLayout({
                 >
                   {userInitials}
                 </div>
-                <div className="hidden sm:block text-left leading-tight">
-                  <p style={{ fontSize: '13px', fontWeight: 600, color: '#181A17', margin: 0 }}>
-                    {currentUser?.name || t('manager.roleLabel', 'Logistics Manager')}
-                  </p>
-                  <p style={{ fontSize: '10px', color: '#5C6658', margin: 0, fontWeight: 500, display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    {t('manager.roleLabel', 'Logistics Manager')} <ChevronDown size={10} />
-                  </p>
+                <div className="hidden sm:flex items-center gap-1.5 text-left leading-tight">
+                  <div>
+                    <p style={{ fontSize: '13px', fontWeight: 600, color: '#181A17', margin: 0 }}>
+                      {currentUser?.name || t('manager.roleLabel', 'Logistics Manager')}
+                    </p>
+                    {currentUser?.name && currentUser.name.trim().toLowerCase() !== t('manager.roleLabel', 'Logistics Manager').trim().toLowerCase() && (
+                      <p style={{ fontSize: '10px', color: '#5C6658', margin: 0, fontWeight: 500 }}>
+                        {t('manager.roleLabel', 'Logistics Manager')}
+                      </p>
+                    )}
+                  </div>
+                  <ChevronDown size={12} className="text-[#5C6658]" />
                 </div>
               </button>
 

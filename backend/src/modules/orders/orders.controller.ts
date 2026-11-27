@@ -218,6 +218,7 @@ export class OrdersController {
   }
 
   @Get(':id/invoice')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem hóa đơn vận chuyển điện tử (chỉ đọc từ snapshot phát hành)' })
   getOrderInvoice(
     @CurrentUser() user: AuthenticatedUser,
@@ -227,6 +228,7 @@ export class OrdersController {
   }
 
   @Get(':id/refund-form')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Lấy thông tin form hoàn tiền khi công ty không thể đáp ứng vận chuyển' })
   getRefundFormInfo(
     @CurrentUser() user: AuthenticatedUser,

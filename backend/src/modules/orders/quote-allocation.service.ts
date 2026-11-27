@@ -32,7 +32,7 @@ const SHORTAGE_LOOKAHEAD_DAYS = 14;
 
 export interface AllocationQuoteInput {
   mode: 'road' | 'air' | 'sea';
-  seaMode?: 'ferry' | 'vessel';
+  seaMode?: 'vessel';
   origin: GeoPoint & { address: string; country?: string };
   destination: GeoPoint & { address: string; country?: string };
   horses: Array<{ quantity: number; requiresPrivateStall: boolean }>;
@@ -123,10 +123,29 @@ export class QuoteAllocationService {
     ]);
     const journeyRules = normalizeJourneyRules(rulesRaw ?? DEFAULT_JOURNEY_RULES);
 
-    // ETA: chặng bộ được chèn nghỉ theo B4; chặng bay/biển cộng nguyên thời gian
-    const roadHours = ctx.legs.filter((l) => ['main', 'to_hub', 'from_hub'].includes(l.key)).reduce((s, l) => s + (l.durationHours || 0), 0);
+    // ETA: tính giờ nghỉ riêng cho từng chặng đường bộ (không gộp to_hub + from_hub qua chuyến bay/tàu); chặng bay/biển cộng nguyên thời gian (đã gồm thời gian thủ tục)
+    const roadLegs = ctx.legs.filter((l) => ['main', 'to_hub', 'from_hub'].includes(l.key));
     const otherHours = ctx.legs.filter((l) => !['main', 'to_hub', 'from_hub'].includes(l.key)).reduce((s, l) => s + (l.durationHours || 0), 0);
-    const journey = estimateJourney({ driveHours: roadHours, rules: journeyRules });
+    let totalRoadWithRest = 0;
+    let totalRestStops = 0;
+    let totalMandatoryRests = 0;
+    const journeyBreakdownParts: string[] = [];
+    for (const rl of roadLegs) {
+      if ((rl.durationHours || 0) <= 0) continue;
+      const seg = estimateJourney({ driveHours: rl.durationHours, rules: journeyRules });
+      totalRoadWithRest += seg.totalHours;
+      totalRestStops += seg.restStops;
+      totalMandatoryRests += seg.mandatoryRests;
+      if (seg.breakdownVi?.length) {
+        journeyBreakdownParts.push(...seg.breakdownVi);
+      }
+    }
+    const journey = {
+      totalHours: Number(totalRoadWithRest.toFixed(2)),
+      restStops: totalRestStops,
+      mandatoryRests: totalMandatoryRests,
+      breakdownVi: journeyBreakdownParts,
+    };
     const etaHours = Number((journey.totalHours + otherHours).toFixed(2));
 
     // Trạm đối tác gần điểm giao (chặng from_hub ở nước ngoài) + bảng giá PARTNER
@@ -152,11 +171,28 @@ export class QuoteAllocationService {
       }
     }
 
+    const resolveTimezone = (pt: GeoPoint & { country?: string; address?: string }): string => {
+      const text = `${pt.country || ''} ${pt.address || ''}`.toLowerCase();
+      if (text.includes('vietnam') || text.includes('việt nam') || text.includes('thailand') || text.includes('thái lan') || text.includes('cambodia') || text.includes('campuchia') || text.includes('laos') || text.includes('lào')) return 'Asia/Ho_Chi_Minh';
+      if (text.includes('singapore') || text.includes('malaysia') || text.includes('hong kong') || text.includes('taiwan') || text.includes('china') || text.includes('philippines')) return 'Asia/Singapore';
+      if (text.includes('japan') || text.includes('nhật bản') || text.includes('korea') || text.includes('hàn quốc')) return 'Asia/Tokyo';
+      if (text.includes('dubai') || text.includes('uae') || text.includes('abu dhabi')) return 'Asia/Dubai';
+      if (text.includes('qatar') || text.includes('saudi')) return 'Asia/Riyadh';
+      if (text.includes('australia') || text.includes('sydney') || text.includes('melbourne') || text.includes('úc')) return 'Australia/Sydney';
+      if (text.includes('new zealand') || text.includes('auckland')) return 'Pacific/Auckland';
+      if (text.includes('united kingdom') || text.includes('london') || text.includes('uk') || text.includes('ireland')) return 'Europe/London';
+      if (text.includes('france') || text.includes('germany') || text.includes('italy') || text.includes('netherlands') || text.includes('spain') || text.includes('paris')) return 'Europe/Paris';
+      if (text.includes('new york') || text.includes('miami') || text.includes('kentucky')) return 'America/New_York';
+      if (text.includes('los angeles') || text.includes('california') || text.includes('usa') || text.includes('mỹ')) return 'America/Los_Angeles';
+      return DEFAULT_TZ;
+    };
+
     const shiftFor = (heavy: boolean): ShiftInfo => {
-      const tz = DEFAULT_TZ;
-      const pickup = nextAllowedTime(input.pickupAt, input.origin, heavy, restrictions, exceptions, tz, journeyRules.nightWindow);
+      const pickupTz = resolveTimezone(input.origin);
+      const deliveryTz = resolveTimezone(input.destination);
+      const pickup = nextAllowedTime(input.pickupAt, input.origin, heavy, restrictions, exceptions, pickupTz, journeyRules.nightWindow);
       const arrival = new Date(pickup.allowedAt.getTime() + etaHours * HOUR);
-      const delivery = nextAllowedTime(arrival, input.destination, heavy, restrictions, exceptions, tz, journeyRules.nightWindow);
+      const delivery = nextAllowedTime(arrival, input.destination, heavy, restrictions, exceptions, deliveryTz, journeyRules.nightWindow);
       const pickupInZone = applicableRules(input.origin, heavy, restrictions).length > 0;
       const deliveryInZone = applicableRules(input.destination, heavy, restrictions).length > 0;
       const w: string[] = [];

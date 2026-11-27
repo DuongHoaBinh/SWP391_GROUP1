@@ -191,7 +191,7 @@ export function AddressAutocompleteInput({
               const ItemIcon = item.category === 'airport' ? Plane : MapPin;
               return (
                 <li
-                  key={item.id}
+                  key={`${item.id}-${idx}`}
                   id={`${listboxId}-opt-${idx}`}
                   role="option"
                   aria-selected={isHighlighted}

@@ -513,11 +513,11 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       toast.success(
         reuploadDocId
           ? language === 'en'
-            ? 'Document updated! Awaiting Specialist re-review.'
-            : 'Đã cập nhật lại hồ sơ thành công! Đang chờ chuyên viên duyệt lại.'
+            ? 'Document updated! Awaiting Logistics Manager re-review.'
+            : 'Đã cập nhật lại hồ sơ thành công! Đang chờ Quản lý vận hành duyệt lại.'
           : language === 'en'
-          ? 'Document uploaded and queued for Specialist review!'
-          : 'Hồ sơ đã được tải lên và chuyển đến Chuyên viên kiểm dịch xét duyệt!'
+          ? 'Document uploaded and queued for Logistics Manager review!'
+          : 'Hồ sơ đã được tải lên và chuyển đến Quản lý vận hành xét duyệt!'
       );
       onSuccess(updated);
 
@@ -557,7 +557,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       }
       subtitle={
         reuploadDocId
-          ? t('documents.reuploadSubtitle', 'Chọn tệp mới để cập nhật và gửi lại cho chuyên viên kiểm duyệt.')
+          ? t('documents.reuploadSubtitle', 'Chọn tệp mới để cập nhật và gửi lại cho Quản lý vận hành kiểm duyệt.')
           : t('documents.uploadSubtitle', 'Cung cấp các giấy chứng nhận kiểm dịch, hộ chiếu hoặc giấy phép vận chuyển.')
       }
       maxWidth="620px"

@@ -44,4 +44,4 @@ export interface SepayConfig {
   secret: string;
 }
 
-export const PAYABLE_SHIPMENT_STATUSES = ['awaiting_payment', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed'];
+export const PAYABLE_SHIPMENT_STATUSES = ['awaiting_payment', 'paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed'];

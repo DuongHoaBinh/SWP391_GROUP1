@@ -26,8 +26,7 @@ export interface AirTariff {
 }
 
 export interface SeaTariff {
-  ferry: { ticketPerVehicle: number };
-  vessel: { baseFeePerHorse: number; pricePerKmPerHorse: number };
+  vessel: { baseFeePerHorse: number; pricePerKmPerHorse: number; privateStallMultiplier?: number };
   roundingUnit: number;
 }
 
@@ -53,7 +52,7 @@ export interface RoadLegInput {
 
 export interface FreightInput {
   mode: 'road' | 'air' | 'sea';
-  seaMode?: 'ferry' | 'vessel';
+  seaMode?: 'vessel';
   horses: HorseQuoteInput[];
   vehicles: VehicleOptionInput[];
   roadLegs: RoadLegInput[];
@@ -62,8 +61,6 @@ export interface FreightInput {
   nightPickup?: boolean;
   /** Step 9: chạy rỗng từ trạm đối tác đến sân bay/cảng đến (chặng from_hub). Mặc định 0. */
   fromHubDeadheadKm?: number;
-  /** Số lượt qua phà RoRo trên tuyến (mạng lưới vận tải, migration 040). Mặc định 1. */
-  ferryCrossings?: number;
 }
 
 export interface FreightLine {
@@ -162,12 +159,6 @@ export function validateTariffParams(mode: 'road' | 'air' | 'sea', params: any):
       throw new BadRequestException('averageSpeedKmh phải là số dương');
     }
   } else if (mode === 'sea') {
-    if (!params.ferry || typeof params.ferry !== 'object') {
-      throw new BadRequestException('Cấu hình đường thủy thiếu mục ferry');
-    }
-    if (!Number.isFinite(params.ferry.ticketPerVehicle) || params.ferry.ticketPerVehicle < 0) {
-      throw new BadRequestException('ferry.ticketPerVehicle phải là số không âm');
-    }
     if (!params.vessel || typeof params.vessel !== 'object') {
       throw new BadRequestException('Cấu hình đường thủy thiếu mục vessel');
     }
@@ -473,63 +464,35 @@ export function calculateFreight(
     if (!tariffs.road) throw new BadRequestException('Thiếu cấu hình bảng giá đường bộ kết nối cảng');
 
     const seaTariff = tariffs.sea;
-    if (input.seaMode === 'ferry') {
-      // Ferry: xe lên phà, ngựa ở trên xe. Cước bộ tính như 1 chuyến liên tục trên tổng km bộ + vé phà × số xe
-      const toHubLeg = input.roadLegs.find((l) => l.key === 'to_hub');
-      const fromHubLeg = input.roadLegs.find((l) => l.key === 'from_hub');
-      const mainLeg = input.roadLegs.find((l) => l.key === 'main');
-
-      const totalRoadKm =
-        (toHubLeg?.distanceKm || 0) +
-        (fromHubLeg?.distanceKm || 0) +
-        (mainLeg?.distanceKm || 0);
-
-      appendRoadLegFreight(
-        lines,
-        'main',
-        totalRoadKm,
-        (toHubLeg?.borderCrossings || 0) + (fromHubLeg?.borderCrossings || 0) + (mainLeg?.borderCrossings || 0),
-        input.vehicles,
-        tariffs.road,
-        totalHorseCount,
-        true,
-        Boolean(input.nightPickup),
-      );
-
-      const crossings = Math.max(1, Math.round(Number(input.ferryCrossings) || 1));
-      const ticketQty = input.vehicles.length * crossings;
-      const ticketCost = Math.round(seaTariff.ferry.ticketPerVehicle * ticketQty);
-      lines.push({
-        code: 'sea_ferry_tickets',
-        label:
-          crossings > 1
-            ? `Vé phà RoRo chuyên chở xe tải ngựa (${input.vehicles.length} xe × ${crossings} lượt phà)`
-            : `Vé phà RoRo chuyên chở xe tải ngựa (${input.vehicles.length} xe)`,
-        quantity: ticketQty,
-        unit: 'xe',
-        unitPrice: seaTariff.ferry.ticketPerVehicle,
-        amount: ticketCost,
-        meta: { seaMode: 'ferry', vehicleCount: input.vehicles.length, ferryCrossings: crossings },
-      });
-    } else if (input.seaMode === 'vessel') {
-      // Vessel: tàu chở gia súc, ngựa đi ô chuồng
+    if (input.seaMode && input.seaMode !== 'vessel') {
+      throw new BadRequestException('Phương thức đường thủy chỉ hỗ trợ tàu biển chuyên dụng (vessel)');
+    }
+    if (input.seaMode === 'vessel' || !input.seaMode) {
+      // Vessel: tàu biển chuyên dụng, ngựa đi ô chuồng
       warnings.push('SEA_VESSEL_HEALTH_RISK');
       const seaKm = input.seaKm || 0;
 
+      const seaPrivateMult = Number(seaTariff.vessel.privateStallMultiplier) > 1
+        ? Number(seaTariff.vessel.privateStallMultiplier)
+        : 1.5;
+
       for (const h of input.horses) {
         const qty = h.quantity || 1;
-        const perHorseVesselCost =
+        const baseVesselCost =
           seaTariff.vessel.baseFeePerHorse + seaKm * seaTariff.vessel.pricePerKmPerHorse;
+        const perHorseVesselCost = h.requiresPrivateStall
+          ? baseVesselCost * seaPrivateMult
+          : baseVesselCost;
         const totalVesselCost = Math.round(perHorseVesselCost * qty);
 
         lines.push({
           code: `sea_vessel_horse_${h.horseId}`,
-          label: `Cước ô chuồng vận tải biển (${seaKm.toFixed(0)} km) — Ngựa #${h.horseId}${qty > 1 ? ` (×${qty})` : ''}`,
+          label: `Cước ô chuồng vận tải biển (${seaKm.toFixed(0)} km${h.requiresPrivateStall ? ` — Chuồng riêng ×${seaPrivateMult}` : ''}) — Ngựa #${h.horseId}${qty > 1 ? ` (×${qty})` : ''}`,
           quantity: qty,
           unit: 'ngựa',
           unitPrice: Math.round(perHorseVesselCost),
           amount: totalVesselCost,
-          meta: { horseId: h.horseId, seaKm },
+          meta: { horseId: h.horseId, seaKm, requiresPrivateStall: h.requiresPrivateStall },
         });
       }
 
@@ -564,8 +527,6 @@ export function calculateFreight(
           false,
         );
       }
-    } else {
-      throw new BadRequestException('Phương thức đường thủy phải chọn ferry (phà RoRo) hoặc vessel (tàu biển)');
     }
   }
 

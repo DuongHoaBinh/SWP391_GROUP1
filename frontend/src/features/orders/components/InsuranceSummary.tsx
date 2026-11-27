@@ -28,49 +28,63 @@ export function CostSummary({ transportCost, insuranceFee, totalCost }: { transp
   );
 }
 
-export function InsuranceSummary({ horses, transportCost, insuranceFee, totalCost }: { horses: InsuredHorse[]; transportCost: number | null; insuranceFee: number; totalCost?: number }) {
+export function InsuranceSummary({
+  horses,
+  transportCost,
+  insuranceFee,
+  totalCost,
+  showCostSummary = true,
+}: {
+  horses: InsuredHorse[];
+  transportCost: number | null;
+  insuranceFee: number;
+  totalCost?: number;
+  showCostSummary?: boolean;
+}) {
   const { t, language } = useLanguage();
 
   const getPackageLabel = (pkg?: 'basic' | 'standard' | 'premium') => {
     const code = pkg ?? 'basic';
     if (language === 'en') {
-      if (code === 'basic') return 'Basic Protection';
-      if (code === 'standard') return 'Standard Coverage';
-      return 'Premium Full Protection';
+      if (code === 'basic') return 'Basic';
+      if (code === 'standard') return 'Standard';
+      return 'Premium';
     }
     return insuranceNames[code];
   };
 
   return (
-    <section aria-label={t('insurance.summaryAriaLabel', 'Bảo hiểm vận chuyển')} className="space-y-4 rounded-2xl border border-[#D8CEBE] bg-white p-5 shadow-sm">
-      <h4 className="font-semibold text-[#181A17]">{t('insurance.declaredAndCoverageTitle', 'Giá trị khai báo & bảo hiểm')}</h4>
-      <ul className="divide-y divide-[#E8E2D8]">
+    <section aria-label={t('insurance.summaryAriaLabel', 'Bảo hiểm vận chuyển')} className="space-y-3 rounded-2xl border border-[#D8CEBE] bg-white p-4 sm:p-5 shadow-sm">
+      <h4 className="text-sm font-bold text-[#181A17] m-0">{t('insurance.declaredAndCoverageTitle', 'Bảo hiểm đàn ngựa')}</h4>
+      <ul className="divide-y divide-[#E8E2D8] m-0 p-0 list-none">
         {horses.map((h, index) => (
-          <li key={h.horseId ?? index} className="space-y-1 py-3 text-sm text-[#181A17]">
-            <p className="font-semibold text-[#181A17]">
-              {h.name} · {h.quantity ?? 1} {t('common.horsesUnit', 'ngựa')} · {t('insurance.packagePrefix', 'Gói')} {getPackageLabel(h.insurancePackage)}
-            </p>
-            <p>
-              {t('insurance.valuePerHorse', 'Giá trị / ngựa')}: {(h.declaredValue ?? 0).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN')} {h.declaredCurrency ?? 'VND'}
-              {h.declaredCurrency === 'USD'
-                ? ` (${t('insurance.savedExchangeRate', 'tỷ giá đã lưu')}: ${vnd(h.exchangeRate ?? 0)}/USD; ${t('insurance.equivalentLabel', 'tương đương')} ${vnd(h.declaredValueVnd ?? 0)})`
-                : ''}
-            </p>
-            <p>
-              {t('insurance.feePrefix', 'Phí')}: {vnd(h.insuranceFee ?? 0)} / {t('common.horseUnit', 'ngựa')} × {h.quantity ?? 1} = {vnd((h.insuranceFee ?? 0) * (h.quantity ?? 1))}
-            </p>
-            <p className="text-[#5B6779]">
-              {t('insurance.maxCompensationPrefix', 'Bồi thường tối đa / ngựa')}: {vnd(h.maxCompensation ?? 50000000)}
-              {h.emergencyVetCovered
-                ? t('insurance.vetEmergencyIncluded', ' + toàn bộ chi phí cấp cứu thú y trên đường.')
-                : h.insurancePackage === 'standard'
-                ? t('insurance.standardCapSuffix', ' (80% giá trị khai báo khi tổn thất/thương tích vĩnh viễn).')
-                : t('insurance.basicCapSuffix', ' theo quy định vận tải chung.')}
-            </p>
+          <li key={h.horseId ?? index} className="py-2.5 text-xs text-[#181A17] space-y-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 font-bold">
+                <span>{h.name}{(h.quantity ?? 1) > 1 ? ` ×${h.quantity}` : ''}</span>
+                <span className="px-2 py-0.5 rounded-md bg-[#FAF8F4] border border-[#E5DDD0] text-[11px] font-semibold text-[#8C6621]">
+                  {getPackageLabel(h.insurancePackage)}
+                </span>
+              </div>
+              <span className="font-mono font-bold text-[#181A17]">
+                {vnd((h.insuranceFee ?? 0) * (h.quantity ?? 1))}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[#5B6779]">
+              <span>
+                {language === 'en' ? 'Declared:' : 'Giá trị:'} {(h.declaredValue ?? 0).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN')} {h.declaredCurrency ?? 'VND'}
+              </span>
+              <span>
+                · {language === 'en' ? 'Max payout:' : 'Bồi thường tối đa:'} {vnd(h.maxCompensation ?? 50000000)}
+                {h.emergencyVetCovered ? (language === 'en' ? ' + Vet' : ' + Cấp cứu thú y') : ''}
+              </span>
+            </div>
           </li>
         ))}
       </ul>
-      <CostSummary transportCost={transportCost} insuranceFee={insuranceFee} totalCost={totalCost} />
+      {showCostSummary && (
+        <CostSummary transportCost={transportCost} insuranceFee={insuranceFee} totalCost={totalCost} />
+      )}
     </section>
   );
 }

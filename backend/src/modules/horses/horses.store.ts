@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, RowDataPacket } from 'mysql2/promise';
 import { HorseEntity, HorseGender, HorseStatus, HorseTemperament } from './horses.types';
 import { CreateHorseDto } from './dto/create-horse.dto';
@@ -80,74 +80,136 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
     return row ? this.mapHorseRow(row) : undefined;
   }
 
-  async create(ownerId: number, dto: CreateHorseDto): Promise<number> {
-    const [result] = await this.pool.execute(
-      `INSERT INTO horse (owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        ownerId,
-        dto.name,
-        dto.breed ?? null,
-        dto.gender ?? null,
-        dto.age ?? null,
-        dto.microchipNo ?? null,
-        dto.passportNo ?? null,
-        dto.color ?? null,
-        dto.weight ?? null,
-        dto.medicalStatus ?? null,
-        dto.specialRequirements ?? null,
-        dto.requiresPrivateStall ?? false,
-        dto.temperament ?? HorseTemperament.NORMAL,
-        dto.photoUrl ?? null,
-        dto.status ?? HorseStatus.ACTIVE,
-        dto.quantity ?? 1,
-      ],
+  async findByMicrochipNo(microchipNo: string): Promise<HorseEntity | undefined> {
+    const [rows] = await this.pool.execute<HorseRow[]>(
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
+       FROM horse
+       WHERE LOWER(TRIM(microchip_no)) = LOWER(TRIM(?))
+       LIMIT 1`,
+      [microchipNo],
     );
+    const row = rows[0];
+    return row ? this.mapHorseRow(row) : undefined;
+  }
 
-    return (result as { insertId: number }).insertId;
+  async findByPassportNo(passportNo: string): Promise<HorseEntity | undefined> {
+    const [rows] = await this.pool.execute<HorseRow[]>(
+      `SELECT horse_id, owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity, created_at
+       FROM horse
+       WHERE LOWER(TRIM(passport_no)) = LOWER(TRIM(?))
+       LIMIT 1`,
+      [passportNo],
+    );
+    const row = rows[0];
+    return row ? this.mapHorseRow(row) : undefined;
+  }
+
+  async isHorseAssignedToDriver(horseId: number, driverUserId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT 1
+       FROM shipment_horse sh
+       JOIN shipment_assignment sa ON sa.shipment_id = sh.shipment_id
+       WHERE sh.horse_id = ? AND sa.user_id = ?
+       LIMIT 1`,
+      [horseId, driverUserId],
+    );
+    return rows.length > 0;
+  }
+
+  private handleDuplicateError(err: any, dto: { microchipNo?: string; passportNo?: string }): never {
+    if (err?.code === 'ER_DUP_ENTRY' || err?.errno === 1062) {
+      const msg = String(err?.sqlMessage || err?.message || '').toLowerCase();
+      if (msg.includes('passport_no')) {
+        throw new ConflictException(
+          `Số hộ chiếu FEI "${dto.passportNo?.trim() || ''}" đã tồn tại trên một hồ sơ ngựa khác trong hệ thống.`,
+        );
+      }
+      if (msg.includes('microchip_no')) {
+        throw new ConflictException(
+          `Mã Microchip "${dto.microchipNo?.trim() || ''}" đã tồn tại trên một hồ sơ ngựa khác trong hệ thống.`,
+        );
+      }
+      throw new ConflictException('Mã Microchip hoặc Số hộ chiếu FEI đã tồn tại trong hệ thống.');
+    }
+    throw err;
+  }
+
+  async create(ownerId: number, dto: CreateHorseDto): Promise<number> {
+    try {
+      const [result] = await this.pool.execute(
+        `INSERT INTO horse (owner_id, name, breed, gender, age, microchip_no, passport_no, color, weight, medical_status, special_requirements, requires_private_stall, temperament, photo_url, status, quantity)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          ownerId,
+          dto.name,
+          dto.breed ?? null,
+          dto.gender ?? null,
+          dto.age ?? null,
+          dto.microchipNo ?? null,
+          dto.passportNo ?? null,
+          dto.color ?? null,
+          dto.weight ?? null,
+          dto.medicalStatus ?? null,
+          dto.specialRequirements ?? null,
+          dto.requiresPrivateStall ?? false,
+          dto.temperament ?? HorseTemperament.NORMAL,
+          dto.photoUrl ?? null,
+          dto.status ?? HorseStatus.ACTIVE,
+          dto.quantity ?? 1,
+        ],
+      );
+
+      return (result as { insertId: number }).insertId;
+    } catch (err) {
+      this.handleDuplicateError(err, dto);
+    }
   }
 
   async update(horseId: number, dto: UpdateHorseDto): Promise<boolean> {
-    const [result] = await this.pool.execute(
-      `UPDATE horse
-       SET
-         name = COALESCE(?, name),
-         breed = COALESCE(?, breed),
-         gender = COALESCE(?, gender),
-         age = COALESCE(?, age),
-         microchip_no = COALESCE(?, microchip_no),
-         passport_no = COALESCE(?, passport_no),
-         color = COALESCE(?, color),
-         weight = COALESCE(?, weight),
-         medical_status = COALESCE(?, medical_status),
-         special_requirements = COALESCE(?, special_requirements),
-         requires_private_stall = COALESCE(?, requires_private_stall),
-         temperament = COALESCE(?, temperament),
-         photo_url = COALESCE(?, photo_url),
-         status = COALESCE(?, status),
-         quantity = COALESCE(?, quantity)
-       WHERE horse_id = ?`,
-      [
-        dto.name ?? null,
-        dto.breed ?? null,
-        dto.gender ?? null,
-        dto.age ?? null,
-        dto.microchipNo ?? null,
-        dto.passportNo ?? null,
-        dto.color ?? null,
-        dto.weight ?? null,
-        dto.medicalStatus ?? null,
-        dto.specialRequirements ?? null,
-        dto.requiresPrivateStall ?? null,
-        dto.temperament ?? null,
-        dto.photoUrl ?? null,
-        dto.status ?? null,
-        dto.quantity !== undefined ? dto.quantity : null,
-        horseId,
-      ],
-    );
+    try {
+      const [result] = await this.pool.execute(
+        `UPDATE horse
+         SET
+           name = COALESCE(?, name),
+           breed = COALESCE(?, breed),
+           gender = COALESCE(?, gender),
+           age = COALESCE(?, age),
+           microchip_no = COALESCE(?, microchip_no),
+           passport_no = COALESCE(?, passport_no),
+           color = COALESCE(?, color),
+           weight = COALESCE(?, weight),
+           medical_status = COALESCE(?, medical_status),
+           special_requirements = COALESCE(?, special_requirements),
+           requires_private_stall = COALESCE(?, requires_private_stall),
+           temperament = COALESCE(?, temperament),
+           photo_url = COALESCE(?, photo_url),
+           status = COALESCE(?, status),
+           quantity = COALESCE(?, quantity)
+         WHERE horse_id = ?`,
+        [
+          dto.name ?? null,
+          dto.breed ?? null,
+          dto.gender ?? null,
+          dto.age ?? null,
+          dto.microchipNo ?? null,
+          dto.passportNo ?? null,
+          dto.color ?? null,
+          dto.weight ?? null,
+          dto.medicalStatus ?? null,
+          dto.specialRequirements ?? null,
+          dto.requiresPrivateStall ?? null,
+          dto.temperament ?? null,
+          dto.photoUrl ?? null,
+          dto.status ?? null,
+          dto.quantity !== undefined ? dto.quantity : null,
+          horseId,
+        ],
+      );
 
-    return (result as { affectedRows: number }).affectedRows > 0;
+      return (result as { affectedRows: number }).affectedRows > 0;
+    } catch (err) {
+      this.handleDuplicateError(err, dto);
+    }
   }
 
   async isHorseInShipments(horseId: number): Promise<boolean> {
@@ -181,9 +243,11 @@ export class HorsesStore implements OnModuleInit, OnModuleDestroy {
         ? HorseGender.MALE
         : rawGender === 'female'
           ? HorseGender.FEMALE
-          : rawGender === 'other' || rawGender === 'gelding'
-            ? HorseGender.OTHER
-            : null;
+          : rawGender === 'gelding'
+            ? HorseGender.GELDING
+            : rawGender === 'other'
+              ? HorseGender.OTHER
+              : null;
 
     return {
       id: row.horse_id,

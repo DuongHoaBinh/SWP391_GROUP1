@@ -1,8 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import {
   AlertTriangle,
+  ArrowRight,
   Clock,
   ExternalLink,
   MapPin,
@@ -18,6 +21,8 @@ import { ChangeRequestItem, incidentsApi, IncidentDetailItem } from '@/features/
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 export default function DriverIncidentsPage() {
+  const pathname = usePathname();
+  const basePath = pathname?.startsWith('/escort') ? '/escort' : '/driver';
   const { t, language, translateStatus, translateIncident, translateSeverity } = useLanguage();
   const isEn = language === 'en';
 
@@ -143,12 +148,9 @@ export default function DriverIncidentsPage() {
       });
 
       toast.success(
-        t(
-          'incidents.reportSuccess',
-          isEn
-            ? 'Incident report submitted to Coordinator & Logistics Manager!'
-            : 'Báo cáo sự cố thực địa đã gửi tới Điều phối viên Tuyến & Quản lý Logistics!',
-        ),
+        isEn
+          ? 'Incident report submitted to Logistics Manager!'
+          : 'Báo cáo sự cố thực địa đã gửi tới Quản lý Logistics!',
       );
 
       setIsAddOpen(false);
@@ -181,6 +183,24 @@ export default function DriverIncidentsPage() {
     }
   };
 
+  const changeTypeLabel = (ct: ChangeRequestItem['changeType']) => {
+    const map: Record<string, { vi: string; en: string }> = {
+      route: { vi: 'Đổi tuyến', en: 'Reroute' },
+      cost: { vi: 'Điều chỉnh chi phí', en: 'Cost Adjustment' },
+      schedule: { vi: 'Đổi lịch trình', en: 'Schedule Change' },
+      vehicle: { vi: 'Đổi phương tiện', en: 'Vehicle Swap' },
+      other: { vi: 'Thay đổi khác', en: 'Other Change' },
+    };
+    const m = map[ct];
+    return m ? (isEn ? m.en : m.vi) : ct;
+  };
+
+  const changeStatusLabel = (st: ChangeRequestItem['status']) => {
+    if (st === 'approved') return isEn ? 'Approved' : 'Đã duyệt';
+    if (st === 'rejected') return isEn ? 'Rejected' : 'Từ chối';
+    return isEn ? 'Pending approval' : 'Chờ duyệt';
+  };
+
   const renderChangeRequestSummary = (cr: ChangeRequestItem) => (
     <span
       key={cr.id}
@@ -192,27 +212,17 @@ export default function DriverIncidentsPage() {
           : 'bg-[#FAF5EB] text-[#966516] border-[#D4C5A3]'
       }`}
     >
-      #{cr.id} ({cr.changeType}) — {cr.status}
-      {cr.publishedAt ? (isEn ? ' • Published' : ' • Đã xuất bản') : ''}
+      #{cr.id} · {changeTypeLabel(cr.changeType)} — {changeStatusLabel(cr.status)}
+      {cr.publishedAt ? (isEn ? ' · Published' : ' · Đã áp dụng') : ''}
     </span>
   );
 
   return (
     <div className="flex flex-col gap-6 pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[#181A17] m-0">
-            {t('driver.incidents.title', isEn ? 'Route & Emergency Incident Reports' : 'Báo Cáo Sự Cố Tuyến Đường & Khẩn Cấp')}
-          </h1>
-          <p className="text-sm text-[#57564E] mt-1 mb-0">
-            {t(
-              'driver.incidents.subtitle',
-              isEn
-                ? 'Report vehicle breakdowns, border congestion, severe weather, or equine emergencies with field evidence.'
-                : 'Báo cáo hỏng hóc xe, ách tắc cửa khẩu, thời tiết xấu hoặc cấp cứu thú y kèm ảnh bằng chứng tới Điều phối viên & Quản lý.',
-            )}
-          </p>
-        </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-[#181A17] m-0">
+          {t('driver.incidents.title', isEn ? 'Incident Reports' : 'Báo Cáo Sự Cố')}
+        </h1>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <Button
@@ -373,6 +383,16 @@ export default function DriverIncidentsPage() {
                     {inc.changeRequests.map(renderChangeRequestSummary)}
                   </div>
                 )}
+
+                <div className="flex justify-end pt-2 border-t border-[#EAE5DA]">
+                  <Link
+                    href={`${basePath}/status?shipmentId=${inc.shipmentId}`}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#A67C2E] hover:text-[#181A17] hover:underline no-underline"
+                  >
+                    <span>{isEn ? 'Open Trip Console' : 'Mở bảng điều hành chuyến'}</span>
+                    <ArrowRight size={13} aria-hidden="true" />
+                  </Link>
+                </div>
               </div>
             );
           })}
@@ -390,14 +410,11 @@ export default function DriverIncidentsPage() {
         <form onSubmit={handleReport} className="flex flex-col gap-4 text-xs">
           <div className="p-3.5 bg-rose-50 border border-[#9E3B3B]/30 rounded-xl text-rose-900 leading-relaxed">
             <strong className="block text-xs uppercase font-extrabold text-[#9E3B3B] mb-0.5">
-              {t('driver.incidents.rescueProcessTitle', isEn ? 'Emergency Rescue & Change Request Flow 5' : 'Quy trình Cứu hộ & Điều chỉnh Lộ trình (Flow 5)')}
+              {isEn ? 'Emergency Rescue & Reroute Approval' : 'Quy trình Cứu hộ & Điều chỉnh Lộ trình'}
             </strong>
-            {t(
-              'driver.incidents.rescueProcessDesc',
-              isEn
-                ? 'Triggers a real-time incident report to Route Coordinator and Logistics Manager for 2-step detour/cost approval.'
-                : 'Tạo hồ sơ sự cố thực địa gửi Điều phối viên Tuyến lập phương án thay đổi và trình Quản lý Logistics duyệt 2 bước.',
-            )}
+            {isEn
+              ? 'Creates a live incident record for Logistics Manager to issue detour, backup vehicle, or veterinary support.'
+              : 'Tạo hồ sơ sự cố thực địa gửi Quản lý Logistics để điều phối xe dự phòng, hỗ trợ thú y hoặc duyệt phương án đổi tuyến.'}
           </div>
 
           <div>
@@ -501,12 +518,11 @@ export default function DriverIncidentsPage() {
               id="inc-desc-textarea"
               rows={3}
               required
-              placeholder={t(
-                'driver.incidents.situationPlaceholder',
+              placeholder={
                 isEn
                   ? 'Describe vehicle condition, congestion cause, or horse symptoms...'
-                  : 'Nêu rõ tình trạng xe, nguyên nhân ùn tắc hoặc biểu hiện bất thường của ngựa để Điều phối viên lên phương án...',
-              )}
+                  : 'Nêu rõ tình trạng xe, nguyên nhân ùn tắc hoặc biểu hiện bất thường của ngựa để Quản lý lên phương án...'
+              }
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               className="w-full p-3 rounded-xl border border-[#D8CEBE] text-xs outline-none focus:border-[#181A17] font-medium leading-relaxed"

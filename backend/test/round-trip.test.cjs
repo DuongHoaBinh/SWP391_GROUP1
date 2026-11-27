@@ -229,13 +229,13 @@ test('4. Báo giá khứ hồi: chặng về = giá đảo chiều × 0,9 làm t
   assert.equal(result.returnFreight, 18000000);
 
   // Insurance: one way standard for 100M VND = 1,500,000
-  // Round trip insurance: Math.round(1,500,000 * 2 * 0.9) = 2,700,000
-  assert.equal(result.insurance.total, 2700000);
+  // Round trip insurance (-10% return leg, matching freight): 1,500,000 + Math.round(1,500,000 * 0.9) = 2,850,000
+  assert.equal(result.insurance.total, 2850000);
   assert.equal(result.insurance.outboundTotal, 1500000);
-  assert.equal(result.insurance.returnTotal, 1200000);
+  assert.equal(result.insurance.returnTotal, 1350000);
 
-  // Grand total = 20,000,000 + 18,000,000 + 2,700,000 = 40,700,000
-  assert.equal(result.total, 40700000);
+  // Grand total = 20,000,000 + 18,000,000 + 2,850,000 = 40,850,000
+  assert.equal(result.total, 40850000);
 });
 
 // 5. Tạo đơn khứ hồi thiếu acceptReturnPolicy → 400; có → lưu snapshot

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -35,10 +36,13 @@ export class PricingController {
   @ApiQuery({ name: 'mode', enum: ['road', 'air', 'sea'], required: true })
   @ApiQuery({ name: 'region', required: false, example: 'VN' })
   getTariffHistory(
-    @Query('mode') mode: 'road' | 'air' | 'sea',
+    @Query('mode') mode?: string,
     @Query('region') region?: string,
   ) {
-    return this.pricingService.getTariffHistory(mode, region || 'VN');
+    if (!mode || !['road', 'air', 'sea'].includes(mode)) {
+      throw new BadRequestException('Tham số mode là bắt buộc và phải thuộc một trong các giá trị: road, air, sea');
+    }
+    return this.pricingService.getTariffHistory(mode as 'road' | 'air' | 'sea', region || 'VN');
   }
 
   @Post('tariffs')

@@ -148,12 +148,14 @@ export class SlaMonitorService implements OnModuleInit, OnModuleDestroy {
       }
 
       if ((sweep as any).prepaidAutoCancelled) {
+        const windowHours = Math.max(1, Math.round((Number(process.env.ORDER_PAYMENT_WINDOW_MINUTES) || 720) / 60));
         for (const pac of (sweep as any).prepaidAutoCancelled) {
+          autoCancelled++;
           const code = `REQ-${String(pac.shipmentId).padStart(3, '0')}`;
           await this.notificationsService.createNotification(
             pac.customerId,
             `Đơn hàng đã tự động hủy do hết hạn thanh toán (${code})`,
-            `Đơn hàng ${code} đã quá thời hạn thanh toán 24 giờ mà chưa ghi nhận giao dịch thành công. Đơn hàng đã tự động hủy và hoàn trả ngựa. Quý khách vui lòng tạo báo giá mới nếu muốn tiếp tục đặt chuyến.`,
+            `Đơn hàng ${code} đã quá thời hạn thanh toán ${windowHours} giờ mà chưa ghi nhận giao dịch thành công. Đơn hàng đã tự động hủy, giải phóng xe và hoàn trả ngựa. Quý khách vui lòng tạo báo giá mới nếu muốn tiếp tục đặt chuyến.`,
             'status_update',
             pac.shipmentId,
           );

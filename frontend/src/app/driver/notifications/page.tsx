@@ -7,6 +7,7 @@ import { Bell, Check, Clock, RefreshCw, ArrowRight, CheckCircle2, Loader2 } from
 import { Button } from '@/components/ui/Button';
 import toast from 'react-hot-toast';
 import { apiClient } from '@/lib/api-client';
+import { getCurrentUser } from '@/lib/auth';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface DriverNotification {
@@ -45,8 +46,17 @@ export default function DriverNotificationsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMarkingAll, setIsMarkingAll] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<ReturnType<typeof getCurrentUser> | null>(null);
 
-  const isEscort = Boolean(pathname?.startsWith('/escort'));
+  useEffect(() => {
+    setCurrentUser(getCurrentUser());
+  }, []);
+
+  const isEscort =
+    currentUser?.persona === 'escort' ||
+    currentUser?.specialization === 'escort' ||
+    currentUser?.email?.toLowerCase().includes('escort') ||
+    Boolean(pathname?.startsWith('/escort'));
   const basePath = isEscort ? '/escort' : '/driver';
 
   const fetchNotifications = useCallback(async () => {
@@ -136,28 +146,32 @@ export default function DriverNotificationsPage() {
 
   const getActionLink = (n: DriverNotification) => {
     const text = `${n.title} ${n.message}`.toLowerCase();
+    const qs = n.shipmentId ? `?shipmentId=${n.shipmentId}` : '';
     if (text.includes('sự cố') || text.includes('incident')) {
       return {
         href: `${basePath}/incidents`,
         label: language === 'en' ? 'View incident alerts' : 'Xem báo cáo sự cố',
       };
     }
-    if (isEscort && (text.includes('sức khỏe') || text.includes('health') || text.includes('thú y'))) {
+    if (text.includes('sức khỏe') || text.includes('health') || text.includes('thú y') || text.includes('sinh hiệu')) {
       return {
-        href: `${basePath}/health`,
+        href: `${basePath}/health${qs}`,
         label: language === 'en' ? 'Open equine health log' : 'Mở nhật ký sức khỏe ngựa',
       };
     }
-    if (
-      n.shipmentId &&
-      (text.includes('lộ trình') || text.includes('mốc') || text.includes('status') || text.includes('route') || text.includes('khởi hành'))
-    ) {
+    if (n.shipmentId && (text.includes('phân công') || text.includes('assign'))) {
       return {
-        href: `${basePath}/status?shipmentId=${n.shipmentId}`,
-        label: language === 'en' ? 'Check milestone timeline' : 'Cập nhật mốc hành trình',
+        href: `${basePath}/trips`,
+        label: language === 'en' ? 'Review & confirm trip' : 'Xem & xác nhận chuyến',
       };
     }
-    if (n.shipmentId || text.includes('phân công') || text.includes('chuyến') || text.includes('assign') || text.includes('trip')) {
+    if (n.shipmentId) {
+      return {
+        href: `${basePath}/status?shipmentId=${n.shipmentId}`,
+        label: language === 'en' ? 'Open trip console' : 'Mở bảng điều hành chuyến',
+      };
+    }
+    if (text.includes('phân công') || text.includes('chuyến') || text.includes('assign') || text.includes('trip')) {
       return {
         href: `${basePath}/trips`,
         label: language === 'en' ? 'View my trips' : 'Xem chuyến đi được phân công',
@@ -181,12 +195,9 @@ export default function DriverNotificationsPage() {
             )}
           </div>
           <p className="text-sm text-[#57564E] mt-1 mb-0">
-            {t(
-              'driver.notifications.subtitle',
-              language === 'en'
-                ? 'Trip assignments, schedule updates, and urgent dispatch notices.'
-                : 'Lịch phân công nhận chuyến, cập nhật lộ trình từ Logistics Manager & Fleet Coordinator.'
-            )}
+            {language === 'en'
+              ? 'Trip assignments, schedule updates, and urgent operational notices from Logistics Manager.'
+              : 'Lịch phân công nhận chuyến, cập nhật lộ trình và cảnh báo từ Quản lý Logistics.'}
           </p>
         </div>
 

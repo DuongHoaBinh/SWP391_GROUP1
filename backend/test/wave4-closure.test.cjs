@@ -312,20 +312,20 @@ test('Wave 5 Order Cutoff: createOrder & updateOrder reject violations with 422 
   );
   assert.equal(createdPayloads.length, 1);
 
-  // International Singapore (leadTimeDays=14 -> minLeadDays=16): +15d updateOrder rejects 422; +16d succeeds
+  // International Singapore uses standard 2-day minimum lead time: +1d updateOrder rejects 422; +2d succeeds
   await assert.rejects(
     () =>
       ordersService.updateOrder(
         { id: 6, role: UserRole.CUSTOMER, email: 'cust@test.local' },
         501,
-        { requestedDate: dayIso(15) },
+        { requestedDate: dayIso(1) },
       ),
     (err) => err instanceof UnprocessableEntityException && err.getStatus() === 422 && err.getResponse().code === 'ORDER_CUTOFF_VIOLATION',
   );
   const updated = await ordersService.updateOrder(
     { id: 6, role: UserRole.CUSTOMER, email: 'cust@test.local' },
     501,
-    { requestedDate: dayIso(16) },
+    { requestedDate: dayIso(2) },
   );
   assert.equal(updated.id, 501);
 });

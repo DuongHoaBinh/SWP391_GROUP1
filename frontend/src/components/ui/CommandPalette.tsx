@@ -15,13 +15,16 @@ import {
   FileText,
   Activity,
   Users,
-  Calendar,
   AlertTriangle,
   BarChart3,
   Stethoscope,
   Coins,
   Timer,
+  Bell,
+  Settings,
+  LayoutDashboard,
 } from 'lucide-react';
+import { apiClient } from '@/lib/api-client';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 interface PaletteItem {
@@ -46,6 +49,7 @@ export function CommandPalette() {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [liveCustomerItems, setLiveCustomerItems] = useState<PaletteItem[]>([]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -55,6 +59,57 @@ export function CommandPalette() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!isOpen || !pathname.startsWith('/customer')) return;
+    let active = true;
+    void (async () => {
+      try {
+        const [ordersRes, horsesRes] = await Promise.allSettled([
+          apiClient<any[]>('/orders/my-orders'),
+          apiClient<any[]>('/horses'),
+        ]);
+        if (!active) return;
+        const dynamic: PaletteItem[] = [];
+        if (ordersRes.status === 'fulfilled' && Array.isArray(ordersRes.value)) {
+          for (const o of ordersRes.value.slice(0, 12)) {
+            const code = o.customerRequestCode || o.requestCode || `REQ-${String(o.id).padStart(3, '0')}`;
+            dynamic.push({
+              id: `ord-${o.id}`,
+              category: 'shipments',
+              title: `${code} · ${(o.originLocation || '').split(',')[0]} → ${(o.destinationLocation || '').split(',')[0]}`,
+              subtitle: isEn
+                ? `Status: ${o.status} · ${o.horses?.length || o.requestedHorseCount || 1} horse(s)`
+                : `Trạng thái: ${o.status} · ${o.horses?.length || o.requestedHorseCount || 1} ngựa`,
+              badge: code,
+              icon: <Truck className="w-4 h-4 text-[#A67C2E]" />,
+              url: `/customer/requests/${o.id}`,
+            });
+          }
+        }
+        if (horsesRes.status === 'fulfilled' && Array.isArray(horsesRes.value)) {
+          for (const h of horsesRes.value.filter((x) => x.status !== 'retired' && x.status !== 'deleted').slice(0, 12)) {
+            const hid = h.id || h.horse_id;
+            dynamic.push({
+              id: `hrs-${hid}`,
+              category: 'horses',
+              title: h.name,
+              subtitle: [h.breed, h.passportNo, h.microchipNo].filter(Boolean).join(' · ') || (isEn ? 'Racehorse profile' : 'Hồ sơ chiến mã'),
+              badge: h.passportNo || `HR-${String(hid).padStart(3, '0')}`,
+              icon: <span className="text-[#8A6D3B] font-bold text-xs">♞</span>,
+              url: `/customer/horses/${hid}`,
+            });
+          }
+        }
+        setLiveCustomerItems(dynamic);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [isOpen, pathname, isEn]);
 
   const allItems: PaletteItem[] = useMemo(() => {
     // Portal Manager hợp nhất (review 11/2026): gồm lệnh điều hành + hồ sơ kiểm dịch + điều phối đội xe.
@@ -280,20 +335,19 @@ export function CommandPalette() {
           icon: <Activity className="w-4 h-4 text-[#A67C2E]" />,
           url: `${base}/status`,
         },
-        ...(base === '/escort'
-          ? [
-              {
-                id: 'drv-health',
-                category: 'actions' as const,
-                title: isEn ? 'Equine Health Logs' : 'Nhật ký sức khỏe ngựa đua',
-                subtitle: isEn
-                  ? 'Record temperature, heart rate & inspection photos'
-                  : 'Ghi nhận nhịp tim, thân nhiệt và ảnh kiểm tra thú y',
-                icon: <Stethoscope className="w-4 h-4 text-[#287653]" />,
-                url: `${base}/health`,
-              },
-            ]
-          : []),
+        {
+          id: 'drv-health',
+          category: 'actions',
+          title:
+            base === '/escort'
+              ? isEn ? 'Equine Health Logs' : 'Nhật ký sức khỏe ngựa đua'
+              : isEn ? 'Horse Health (Backup)' : 'Sức khỏe ngựa (Dự phòng)',
+          subtitle: isEn
+            ? 'Record temperature, heart rate, respiration & inspection photos'
+            : 'Ghi nhận thân nhiệt, nhịp tim, nhịp thở và ảnh kiểm tra thú y',
+          icon: <Stethoscope className="w-4 h-4 text-[#287653]" />,
+          url: `${base}/health`,
+        },
         {
           id: 'drv-inc',
           category: 'actions',
@@ -309,72 +363,98 @@ export function CommandPalette() {
 
     return [
       {
+        id: 'act-dashboard',
+        category: 'actions',
+        title: isEn ? 'Overview Dashboard' : 'Tổng quan (Dashboard)',
+        subtitle: isEn
+          ? 'Action Center, active shipments & 12h payment reminders'
+          : 'Trung tâm thao tác nhanh, đơn cần xử lý & theo dõi hoạt động',
+        icon: <LayoutDashboard className="w-4 h-4 text-[#A67C2E]" />,
+        url: '/customer',
+      },
+      {
         id: 'act-new-req',
         category: 'actions',
-        title: t('customer.requests.newRequestBtn', isEn ? 'New Transport Request' : 'Tạo yêu cầu vận chuyển mới'),
-        subtitle: t(
-          'customer.createInternationalTripDesc',
-          isEn
-            ? 'Initiate a specialized cross-border transport request for your racehorses'
-            : 'Khởi tạo hành lang vận chuyển chuyên dụng cho ngựa đua'
-        ),
+        title: isEn ? 'New Transport Order' : 'Tạo đơn vận chuyển mới',
+        subtitle: isEn
+          ? 'Initiate a dedicated charter transport request & instant quote'
+          : 'Tạo báo giá tự động và đặt chuyến vận chuyển chuyên dụng cho ngựa đua',
         icon: <Plus className="w-4 h-4 text-[#A67C2E]" />,
         url: '/customer/requests/new',
       },
       {
         id: 'act-requests',
         category: 'actions',
-        title: t('nav.requests', isEn ? 'Transport Requests' : 'Danh sách yêu cầu vận chuyển'),
-        subtitle: t(
-          'customer.requests.subtitle',
-          isEn
-            ? 'Track approvals, quotations, and active shipment statuses'
-            : 'Theo dõi tiến độ duyệt và trạng thái các chuyến vận chuyển'
-        ),
+        title: isEn ? 'Transport Orders' : 'Đơn vận chuyển',
+        subtitle: isEn
+          ? 'Track payments, approvals, quotations & active shipment statuses'
+          : 'Theo dõi thanh toán, tiến độ duyệt và trạng thái các chuyến vận chuyển',
         icon: <Plane className="w-4 h-4 text-[#A67C2E]" />,
         url: '/customer/requests',
       },
       {
+        id: 'act-reports',
+        category: 'actions',
+        title: isEn ? 'Reports & Statements' : 'Báo cáo & Sao kê',
+        subtitle: isEn
+          ? 'Financial statements, freight spending & completion analytics'
+          : 'Sao kê chi phí vận chuyển, bảo hiểm và thống kê tỷ lệ hoàn thành',
+        icon: <BarChart3 className="w-4 h-4 text-[#287653]" />,
+        url: '/customer/reports',
+      },
+      {
         id: 'act-horses',
         category: 'actions',
-        title: t('nav.horses', isEn ? 'My Racehorse Stable' : 'Quản lý đàn chiến mã'),
-        subtitle: t(
-          'horses.modal.addSubtitle',
-          isEn
-            ? 'Horse profiles, FEI digital passports & microchip records'
-            : 'Danh sách ngựa, hộ chiếu điện tử FEI và thông tin vi mạch'
-        ),
+        title: isEn ? 'Racehorse Stable' : 'Quản lý ngựa đua',
+        subtitle: isEn
+          ? 'Horse profiles, FEI digital passports & microchip records'
+          : 'Danh sách ngựa, hộ chiếu điện tử FEI và thông tin vi mạch',
         icon: <span className="text-[#8A6D3B] font-bold text-xs">♞</span>,
         url: '/customer/horses',
       },
       {
         id: 'act-tracking',
         category: 'actions',
-        title: t('nav.tracking', isEn ? 'Live GPS Tracking' : 'Theo dõi hành trình trực tiếp (GPS Tracking)'),
-        subtitle: t(
-          'palette.gotoTracking',
-          isEn
-            ? 'Monitor live GPS coordinates and horse vitals on route'
-            : 'Giám sát vị trí thời gian thực và sinh hiệu chiến mã trên đường'
-        ),
+        title: isEn ? 'Live GPS Tracking' : 'Theo dõi hành trình (GPS)',
+        subtitle: isEn
+          ? 'Monitor live GPS coordinates and vertical timeline on route'
+          : 'Giám sát vị trí thời gian thực và tiến độ hành trình chiến mã',
         icon: <Activity className="w-4 h-4 text-[#287653]" />,
         url: '/customer/tracking',
       },
       {
         id: 'act-documents',
         category: 'actions',
-        title: t('nav.documents', isEn ? 'Quarantine & Legal Documents' : 'Hồ sơ kiểm dịch & Chứng chỉ thú y'),
-        subtitle: t(
-          'documents.modal.uploadSubtitle',
-          isEn
-            ? 'Submit lab results, import/export permits, and quarantine certificates'
-            : 'Nộp giấy xét nghiệm, giấy phép xuất nhập cảnh và kiểm dịch'
-        ),
+        title: isEn ? 'Documents & Quarantine' : 'Hồ sơ & Kiểm dịch',
+        subtitle: isEn
+          ? 'Order dossiers & reusable horse document vault'
+          : 'Hồ sơ kiểm dịch theo đơn và kho giấy tờ chiến mã',
         icon: <ShieldCheck className="w-4 h-4 text-[#966516]" />,
         url: '/customer/documents',
       },
+      {
+        id: 'act-notifications',
+        category: 'actions',
+        title: isEn ? 'Notifications' : 'Thông báo',
+        subtitle: isEn
+          ? 'All order, compliance, and payment alerts'
+          : 'Tất cả thông báo đơn hàng, kiểm dịch và thanh toán',
+        icon: <Bell className="w-4 h-4 text-[#A67C2E]" />,
+        url: '/customer/notifications',
+      },
+      {
+        id: 'act-settings',
+        category: 'actions',
+        title: isEn ? 'Account Settings' : 'Cài đặt tài khoản',
+        subtitle: isEn
+          ? 'Profile contact details, password & language preference'
+          : 'Thông tin liên hệ, bảo mật mật khẩu và tùy chọn ngôn ngữ',
+        icon: <Settings className="w-4 h-4 text-[#5F6977]" />,
+        url: '/customer/settings',
+      },
+      ...liveCustomerItems,
     ];
-  }, [pathname, t, isEn]);
+  }, [pathname, t, isEn, liveCustomerItems]);
 
   const filteredItems = useMemo(
     () =>

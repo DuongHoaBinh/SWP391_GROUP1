@@ -51,11 +51,11 @@ export class RouteNetworkStore implements OnModuleInit, OnModuleDestroy {
     const [ports] = await this.pool.query<RowDataPacket[]>(
       `SELECT port_id, code, name, name_en, country, country_code, lat, lng,
               is_international, supports_ferry, supports_vessel, has_quarantine
-       FROM seaport WHERE is_active = TRUE`,
+       FROM seaport WHERE is_active = TRUE AND supports_vessel = TRUE`,
     );
     const [lanes] = await this.pool.query<RowDataPacket[]>(
       `SELECT sea_route_id, from_port_id, to_port_id, sea_mode, distance_km, typical_hours, via_points, notes
-       FROM sea_route WHERE is_active = TRUE`,
+       FROM sea_route WHERE is_active = TRUE AND sea_mode = 'vessel' AND typical_hours <= 168`,
     );
     const [airports] = await this.pool.query<RowDataPacket[]>(
       `SELECT airport_id, iata_code, name, city, country, country_code, has_quarantine_facility,
@@ -82,7 +82,7 @@ export class RouteNetworkStore implements OnModuleInit, OnModuleDestroy {
         lat: Number(r.lat),
         lng: Number(r.lng),
         isInternational: Boolean(r.is_international),
-        supportsFerry: Boolean(r.supports_ferry),
+        supportsFerry: false,
         supportsVessel: Boolean(r.supports_vessel),
         hasQuarantine: Boolean(r.has_quarantine),
       })),
@@ -90,7 +90,7 @@ export class RouteNetworkStore implements OnModuleInit, OnModuleDestroy {
         id: Number(r.sea_route_id),
         fromPortId: Number(r.from_port_id),
         toPortId: Number(r.to_port_id),
-        seaMode: r.sea_mode,
+        seaMode: 'vessel' as const,
         distanceKm: Number(r.distance_km),
         typicalHours: Number(r.typical_hours),
         viaPoints: parseViaPoints(r.via_points),

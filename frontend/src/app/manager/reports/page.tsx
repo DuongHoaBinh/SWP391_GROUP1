@@ -310,73 +310,32 @@ export default function ManagerReportsPage() {
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-14">
-      {/* 1. LUXURY EXECUTIVE HEADER */}
-      <div className="relative overflow-hidden rounded-2xl bg-[#181A17] p-6 sm:p-9 text-[#FAF8F4] border border-[#2C2F2A] shadow-sm">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <div className="flex flex-wrap items-center gap-2 mb-2.5">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#242722] border border-[#C4B38E]/35 text-[11px] font-bold uppercase tracking-wider text-[#C4B38E]">
-                <Activity className="w-3.5 h-3.5 text-[#C4B38E]" aria-hidden="true" />
-                {t('manager.reports.badge', 'Báo Cáo Tài Chính & Hiệu Quả Vận Hành')}
-              </span>
-              <span className="text-xs text-[#FAF8F4]/70 font-medium">
-                • {t('manager.reports.liveData', 'Dữ liệu đối soát trực tiếp từ MySQL')}
-              </span>
-            </div>
+      {/* 1. COMPACT EXECUTIVE HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E5DDD0]">
+        <h1 className="text-2xl font-extrabold tracking-tight text-[#181A17] m-0">
+          {isEn ? 'Reports & Financials' : 'Báo Cáo & Tài Chính'}
+        </h1>
 
-            <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white mb-2">
-              {isEn ? (
-                <>
-                  Transport Metrics & <span className="text-[#C4B38E]">Realized Revenue</span>
-                </>
-              ) : (
-                <>
-                  Chỉ Số Vận Tải & <span className="text-[#C4B38E]">Đối Soát Lợi Nhuận</span>
-                </>
-              )}
-            </h1>
-            <p className="text-sm sm:text-base text-[#FAF8F4]/80 max-w-2xl leading-relaxed mb-0">
-              {t('manager.reports.subtitle', 'Tổng hợp doanh thu ghi nhận, dòng tiền SePay thực thu thuần, chi phí vận hành theo chuyến và tỷ lệ giao ngựa đúng hạn SLA.')}
-            </p>
-
-            {metrics && (
-              <div className="flex flex-wrap items-center gap-2.5 mt-5">
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#242722] border border-[#C4B38E]/30 text-xs font-semibold text-[#FAF8F4]">
-                  <DollarSign className="w-4 h-4 text-[#C4B38E]" aria-hidden="true" />
-                  <span>{formatVND(metrics.grossProfit)} {isEn ? 'Gross Profit' : 'Lợi nhuận gộp'}</span>
-                </div>
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#242722] border border-[#C4B38E]/30 text-xs font-semibold text-[#FAF8F4]">
-                  <Clock className="w-4 h-4 text-[#C4B38E]" aria-hidden="true" />
-                  <span>{metrics.adjustedOnTimeDeliveryRate}% {isEn ? 'Adjusted OTD' : 'OTD Điều chỉnh'} (Gross: {metrics.grossOnTimeDeliveryRate}%)</span>
-                </div>
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#242722] border border-[#C4B38E]/30 text-xs font-semibold text-[#FAF8F4]">
-                  <span>♞ {metrics.totalHorsesTransported} {t('manager.reports.horsesCounted', 'Ngựa Vận Chuyển')}</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3 print:hidden">
-            <button
-              type="button"
-              onClick={handlePrintSummary}
-              disabled={!report || loading}
-              className="px-5 py-2.5 rounded-xl bg-[#FAF8F4] hover:bg-[#EAE5DA] disabled:opacity-50 text-[#181A17] text-xs font-extrabold shadow-sm border border-[#C4B38E]/50 flex items-center gap-2 transition-colors cursor-pointer"
-            >
-              <Download className="w-4 h-4 text-[#181A17]" aria-hidden="true" />
-              <span>{t('manager.reports.exportPDF', 'Xuất Báo Cáo PDF')}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => void fetchReports(true)}
-              disabled={refreshing}
-              aria-label={t('manager.reports.refreshTooltip', 'Làm mới số liệu')}
-              title={t('manager.reports.refreshTooltip', 'Làm mới số liệu')}
-              className="p-2.5 rounded-xl bg-[#242722] hover:bg-[#2F332C] text-[#C4B38E] border border-[#C4B38E]/35 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
-            </button>
-          </div>
+        <div className="flex items-center gap-2 print:hidden shrink-0">
+          <button
+            type="button"
+            onClick={handlePrintSummary}
+            disabled={!report || loading}
+            className="px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D28] disabled:opacity-50 text-[#FAF8F4] text-xs font-bold shadow-sm inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 text-[#C4B38E] shrink-0" aria-hidden="true" />
+            <span>{t('manager.reports.exportPDF', 'Xuất PDF')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void fetchReports(true)}
+            disabled={refreshing}
+            aria-label={t('manager.reports.refreshTooltip', 'Làm mới số liệu')}
+            title={t('manager.reports.refreshTooltip', 'Làm mới số liệu')}
+            className="p-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#5C6658] border border-[#D8CEBE] transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+          </button>
         </div>
       </div>
 
@@ -479,7 +438,10 @@ export default function ManagerReportsPage() {
               </div>
               <div className="mt-2 text-[11px] text-[#5F6977] space-y-0.5 font-medium">
                 <div>{isEn ? 'Horses:' : 'Số ngựa:'} <strong className="text-[#181A17]">{metrics?.totalHorsesTransported ?? 0}</strong> • {isEn ? 'Active:' : 'Đang chạy:'} {metrics?.activeShipments ?? 0}</div>
-                <div>{isEn ? 'Excused Delays:' : 'Miễn trừ OTD:'} {metrics?.excusedDelayCount ?? 0} • Total Orders: {metrics?.totalShipments ?? 0}</div>
+                <div>
+                  {isEn ? 'Excused Delays:' : 'Miễn trừ OTD:'} {metrics?.excusedDelayCount ?? 0} •{' '}
+                  {isEn ? 'Total Orders:' : 'Tổng số đơn:'} {metrics?.totalShipments ?? 0}
+                </div>
               </div>
             </div>
           </div>
@@ -553,7 +515,16 @@ export default function ManagerReportsPage() {
                     {t('manager.reports.noCorridors', 'Chưa có dữ liệu tuyến vận chuyển trong hệ thống.')}
                   </div>
                 ) : (
-                  corridorBreakdown.map((c, idx) => (
+                  corridorBreakdown.map((c, idx) => {
+                    const totalCorridorTrips =
+                      metrics?.totalShipments ||
+                      corridorBreakdown.reduce((s, item) => s + Number(item.trips || 0), 0) ||
+                      1;
+                    const sharePct = Math.min(
+                      100,
+                      Math.round((Number(c.trips || 0) / totalCorridorTrips) * 100),
+                    );
+                    return (
                     <div key={`${c.corridor}-${idx}`} className="p-4 rounded-2xl border border-[#D8CEBE] bg-[#FAF8F4]">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                         <div className="flex items-center gap-2 min-w-0">
@@ -563,8 +534,8 @@ export default function ManagerReportsPage() {
                           </span>
                         </div>
                         <div className="flex items-center gap-3 shrink-0">
-                          <span className="text-xs font-extrabold text-[#181A17]">{c.revenueFormatted}</span>
-                          <span className="text-xs font-bold text-[#2D5A3F] bg-[#E8F2EB] px-2 py-0.5 rounded-md border border-[#2D5A3F]/25">
+                          <span className="text-xs font-extrabold text-[#181A17] whitespace-nowrap">{c.revenueFormatted}</span>
+                          <span className="text-xs font-bold text-[#2D5A3F] bg-[#E8F2EB] px-2 py-0.5 rounded-md border border-[#2D5A3F]/25 whitespace-nowrap">
                             {c.completedTrips}/{c.trips} {t('manager.reports.completedLabel', 'hoàn tất')}
                           </span>
                         </div>
@@ -572,15 +543,16 @@ export default function ManagerReportsPage() {
                       <div className="w-full h-2.5 bg-[#EAE5DA] rounded-full overflow-hidden mb-2">
                         <div
                           className="h-full bg-[#181A17] rounded-full transition-all duration-300"
-                          style={{ width: c.percentage === 0 ? '0%' : `${Math.max(4, c.percentage)}%` }}
+                          style={{ width: sharePct === 0 ? '0%' : `${Math.max(4, sharePct)}%` }}
                         />
                       </div>
                       <div className="flex items-center justify-between text-xs text-[#5F6977]">
                         <span>{c.trips} {t('manager.reports.tripsRecorded', 'đơn trên tuyến')}</span>
-                        <span className="font-semibold text-[#181A17]">{c.percentage}% {t('manager.reports.relativeVolume', 'tỷ trọng chuyến')}</span>
+                        <span className="font-semibold text-[#181A17]">{sharePct}% {t('manager.reports.relativeVolume', 'tỷ trọng đơn')}</span>
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}

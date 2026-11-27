@@ -245,6 +245,14 @@ export default function SpecialistDashboardPage() {
     [complianceOrders]
   );
 
+  const computedMissingCount = useMemo(() => {
+    const fromOrders = complianceOrders.reduce((sum, o) => {
+      const missing = Math.max(0, Number(o.totalRequiredDocs || 0) - Number(o.approvedDocsCount || 0));
+      return sum + missing;
+    }, 0);
+    return Math.max(missingDocs.length, fromOrders);
+  }, [complianceOrders, missingDocs.length]);
+
   const isBusy = submittingAction !== null;
 
   // Phê duyệt bắt buộc qua DocumentReviewModal: checklist 4 tiêu chí + ngày hết hạn thật trên giấy.
@@ -352,160 +360,69 @@ export default function SpecialistDashboardPage() {
 
   return (
     <div className="flex flex-col gap-6 max-w-[1440px] mx-auto pb-10 font-sans">
-      {/* 1. EDITORIAL LIGHT HEADER */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-5 border-b border-[#E5DDD0]">
-        <div className="flex flex-col gap-1 min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#966516] m-0">
-            {t('specialist.headerTag', isEn ? 'Quarantine & Compliance Desk' : 'Thẩm Định Pháp Lý & Kiểm Dịch')}
-          </p>
-          <h1 className="text-2xl sm:text-3xl font-extrabold m-0 text-[#181A17] tracking-tight">
-            {t('specialist.workbenchTitle', 'Bàn Thẩm Định Hồ Sơ Kiểm Dịch')}
-          </h1>
-          <p className="text-sm text-[#5F6977] m-0">
-            {t(
-              'specialist.workbenchSubtitle',
-              'Đối soát chứng từ y tế, hộ chiếu và cấp phép vận chuyển cho từng đơn.'
-            )}
-          </p>
-        </div>
+      {/* 1. COMPACT HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-[#E5DDD0]">
+        <h1 className="text-2xl font-extrabold m-0 text-[#181A17] tracking-tight">
+          {t('specialist.workbenchTitle', 'Thẩm Định Hồ Sơ Kiểm Dịch')}
+        </h1>
 
-        {/* Quick Actions */}
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => void loadCorridors()}
-            disabled={isLoadingOrders}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE] text-xs font-bold cursor-pointer transition-colors disabled:opacity-60"
-          >
-            <RotateCcw size={13} className={isLoadingOrders ? 'animate-spin' : ''} />
-            <span>{t('common.refresh', isEn ? 'Refresh' : 'Làm mới')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push('/manager/compliance/regulations')}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE] text-xs font-bold cursor-pointer transition-colors"
-          >
-            <Scale size={14} className="text-[#966516]" />
-            <span>{t('specialist.lookupRegulations', 'Tra Cứu Quy Chuẩn')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push('/manager/compliance/documents')}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#181A17] hover:bg-[#2A2D28] text-white text-xs font-bold cursor-pointer shadow-sm transition-colors"
-          >
-            <FolderOpen size={14} className="text-[#D4C5A3]" />
-            <span>{t('specialist.viewAllDocs', 'Túi Hồ Sơ Vận Chuyển')}</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => void loadCorridors()}
+          disabled={isLoadingOrders}
+          className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-[#FAF8F4] text-[#181A17] border border-[#D8CEBE] text-xs font-bold cursor-pointer transition-colors disabled:opacity-60"
+        >
+          <RotateCcw size={13} className={isLoadingOrders ? 'animate-spin' : ''} />
+          <span>{t('common.refresh', isEn ? 'Refresh' : 'Làm mới')}</span>
+        </button>
       </div>
 
-      {/* 1.5 COMPLIANCE KPI SUMMARY (4 Clickable Cards) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 1.5 COMPACT STAT STRIP (Fixed KPI 4 route: /manager/compliance/orders) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <button
           type="button"
           onClick={() => {
             setFilterCorridor('ALL');
             setSearchTerm('');
           }}
-          className={`text-left rounded-2xl p-4 sm:p-5 border shadow-sm flex flex-col justify-between transition-all hover:shadow-md cursor-pointer ${
-            pendingDocs.length > 0 ? 'bg-[#FAF8F4] border-[#C4B38E]' : 'bg-white border-[#E5DDD0]'
-          }`}
+          className="text-left rounded-xl px-4 py-3 border border-[#E5DDD0] bg-white hover:border-[#C4B38E] flex items-center justify-between cursor-pointer transition-colors"
         >
-          <div className="flex items-center justify-between mb-2.5">
-            <span className="text-[11px] font-bold tracking-wider uppercase text-[#966516]">
-              {t('specialist.kpi.pendingReview', isEn ? 'Pending Review' : 'Chờ Thẩm Định')}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-[#F3ECE0] flex items-center justify-center text-[#966516]">
-              <Clock size={15} />
-            </div>
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-[#181A17] tracking-tight tabular-nums">
-            {String(pendingDocs.length).padStart(2, '0')}
-          </div>
-          <div className="mt-1.5 text-xs text-[#966516] font-semibold">
-            {groupedQueue.length} {t('specialist.kpi.ordersQueued', isEn ? 'orders in queue' : 'đơn hàng trong hàng đợi')}
-          </div>
+          <span className="text-xs font-bold text-[#966516]">
+            {t('specialist.kpi.pendingReview', isEn ? 'Pending Review' : 'Chờ thẩm định')}
+          </span>
+          <strong className="text-lg font-black text-[#181A17] tabular-nums">{pendingDocs.length}</strong>
         </button>
 
         <Link
           href="/manager/compliance/orders"
-          className="no-underline bg-white rounded-2xl p-4 sm:p-5 border border-[#E5DDD0] hover:border-[#C4B38E] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
+          className="no-underline rounded-xl px-4 py-3 border border-[#E5DDD0] bg-white hover:border-[#C4B38E] flex items-center justify-between transition-colors"
         >
-          <div className="flex items-center justify-between mb-2.5">
-            <span className="text-[11px] font-bold tracking-wider uppercase text-[#5F6977]">
-              {t('specialist.kpi.complianceOrders', isEn ? 'Compliance Orders' : 'Đơn Kiểm Dịch')}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-[#F4F1EA] flex items-center justify-center text-[#181A17]">
-              <FileCheck2 size={15} />
-            </div>
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-[#181A17] tracking-tight tabular-nums">
-            {String(complianceOrders.length).padStart(2, '0')}
-          </div>
-          <div className="mt-1.5 flex items-center justify-between text-xs text-[#5F6977] font-medium">
-            <span>{t('specialist.kpi.complianceOrdersSub', isEn ? 'Manage requirements' : 'Quản lý yêu cầu hồ sơ')}</span>
-            <ChevronRight size={13} className="text-[#966516]" />
-          </div>
+          <span className="text-xs font-bold text-[#5F6977]">
+            {t('specialist.kpi.complianceOrders', isEn ? 'Compliance Orders' : 'Đơn kiểm dịch')}
+          </span>
+          <strong className="text-lg font-black text-[#181A17] tabular-nums">{complianceOrders.length}</strong>
         </Link>
 
         <Link
           href="/manager/compliance/missing"
-          className={`no-underline rounded-2xl p-4 sm:p-5 border shadow-sm flex flex-col justify-between transition-all hover:shadow-md ${
-            missingDocs.length > 0
-              ? 'bg-[#FDF6F6] border-[#E5B8B8]'
-              : 'bg-white border-[#E5DDD0] hover:border-[#C4B38E]'
-          }`}
+          className="no-underline rounded-xl px-4 py-3 border border-[#E5DDD0] bg-white hover:border-[#E5B8B8] flex items-center justify-between transition-colors"
         >
-          <div className="flex items-center justify-between mb-2.5">
-            <span
-              className={`text-[11px] font-bold tracking-wider uppercase ${
-                missingDocs.length > 0 ? 'text-[#B33E3E]' : 'text-[#5F6977]'
-              }`}
-            >
-              {t('specialist.kpi.missingRejected', isEn ? 'Missing / Rejected' : 'Thiếu / Từ Chối')}
-            </span>
-            <div
-              className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                missingDocs.length > 0 ? 'bg-[#F8EAEA] text-[#B33E3E]' : 'bg-[#F4F1EA] text-[#5F6977]'
-              }`}
-            >
-              <AlertTriangle size={15} />
-            </div>
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-[#181A17] tracking-tight tabular-nums">
-            {String(missingDocs.length).padStart(2, '0')}
-          </div>
-          <div
-            className={`mt-1.5 flex items-center justify-between text-xs font-semibold ${
-              missingDocs.length > 0 ? 'text-[#B33E3E]' : 'text-[#5F6977]'
-            }`}
-          >
-            <span>{t('specialist.kpi.missingSub', isEn ? 'Follow up with owners' : 'Nhắc khách bổ sung')}</span>
-            <ChevronRight size={13} />
-          </div>
+          <span className={`text-xs font-bold ${computedMissingCount > 0 ? 'text-[#B33E3E]' : 'text-[#5F6977]'}`}>
+            {t('specialist.kpi.missingRejected', isEn ? 'Missing / Rejected' : 'Thiếu / Từ chối')}
+          </span>
+          <strong className={`text-lg font-black tabular-nums ${computedMissingCount > 0 ? 'text-[#B33E3E]' : 'text-[#181A17]'}`}>
+            {computedMissingCount}
+          </strong>
         </Link>
 
         <Link
-          href="/manager/compliance/approval"
-          className="no-underline bg-white rounded-2xl p-4 sm:p-5 border border-[#E5DDD0] hover:border-[#B7DBC4] shadow-sm flex flex-col justify-between transition-all hover:shadow-md"
+          href="/manager/compliance/orders"
+          className="no-underline rounded-xl px-4 py-3 border border-[#E5DDD0] bg-white hover:border-[#B7DBC4] flex items-center justify-between transition-colors"
         >
-          <div className="flex items-center justify-between mb-2.5">
-            <span className="text-[11px] font-bold tracking-wider uppercase text-[#287653]">
-              {t('specialist.kpi.compliantOrders', isEn ? 'Fully Compliant' : 'Đơn Đạt Chuẩn')}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-[#E8F2EB] flex items-center justify-center text-[#287653]">
-              <ShieldCheck size={15} />
-            </div>
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-[#287653] tracking-tight tabular-nums">
-            {String(compliantOrderCount).padStart(2, '0')}
-          </div>
-          <div className="mt-1.5 flex items-center justify-between text-xs text-[#287653] font-semibold">
-            <span>{t('specialist.kpi.compliantSub', isEn ? 'Final clearance desk' : 'Cấp phép thông quan')}</span>
-            <ChevronRight size={13} />
-          </div>
+          <span className="text-xs font-bold text-[#287653]">
+            {t('specialist.kpi.compliantOrders', isEn ? 'Fully Compliant' : 'Đơn đạt chuẩn')}
+          </span>
+          <strong className="text-lg font-black text-[#287653] tabular-nums">{compliantOrderCount}</strong>
         </Link>
       </div>
 

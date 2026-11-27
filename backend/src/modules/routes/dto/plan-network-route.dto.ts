@@ -41,10 +41,10 @@ export class PlanNetworkRouteDto {
   @IsIn(['road', 'air', 'sea'])
   mode!: 'road' | 'air' | 'sea';
 
-  @ApiPropertyOptional({ enum: ['ferry', 'vessel'], description: 'Bắt buộc ý nghĩa khi mode = sea (mặc định vessel)' })
+  @ApiPropertyOptional({ enum: ['vessel'], description: 'Hình thức đường thủy khi mode = sea (chỉ hỗ trợ tàu biển chuyên dụng vessel)' })
   @IsOptional()
-  @IsIn(['ferry', 'vessel'])
-  seaMode?: 'ferry' | 'vessel';
+  @IsIn(['vessel'])
+  seaMode?: 'vessel';
 
   @ApiProperty({ type: PlanEndpointDto })
   @ValidateNested()

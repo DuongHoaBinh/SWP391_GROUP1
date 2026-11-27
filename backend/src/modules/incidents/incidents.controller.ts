@@ -83,9 +83,23 @@ export class IncidentsController {
     @Query('shipmentId') shipmentId?: string,
     @Query('status') status?: string,
   ) {
+    let parsedIncidentId: number | undefined;
+    if (incidentId !== undefined && incidentId !== '') {
+      parsedIncidentId = Number(incidentId);
+      if (!Number.isInteger(parsedIncidentId) || parsedIncidentId <= 0) {
+        throw new BadRequestException('incidentId không hợp lệ');
+      }
+    }
+    let parsedShipmentId: number | undefined;
+    if (shipmentId !== undefined && shipmentId !== '') {
+      parsedShipmentId = Number(shipmentId);
+      if (!Number.isInteger(parsedShipmentId) || parsedShipmentId <= 0) {
+        throw new BadRequestException('shipmentId không hợp lệ');
+      }
+    }
     return this.incidentsService.listChangeRequests({
-      incidentId: incidentId ? Number(incidentId) : undefined,
-      shipmentId: shipmentId ? Number(shipmentId) : undefined,
+      incidentId: parsedIncidentId,
+      shipmentId: parsedShipmentId,
       status,
     });
   }

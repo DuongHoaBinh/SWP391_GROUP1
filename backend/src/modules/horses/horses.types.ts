@@ -1,6 +1,7 @@
 export enum HorseGender {
   MALE = 'male',
   FEMALE = 'female',
+  GELDING = 'gelding',
   OTHER = 'other',
 }
 

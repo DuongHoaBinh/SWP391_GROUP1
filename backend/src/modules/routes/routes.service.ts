@@ -89,6 +89,17 @@ export class RoutesService implements OnModuleInit {
     };
   }
 
+  private async assertDriverAssignedToShipment(shipmentId: number, userId: number, message: string): Promise<void> {
+    if (typeof this.fleetStore?.findAssignedStaff !== 'function') {
+      throw new ForbiddenException(message);
+    }
+    const assigned = await this.fleetStore.findAssignedStaff(shipmentId);
+    const isAssigned = assigned.some((s) => Number(s.userId) === Number(userId));
+    if (!isAssigned) {
+      throw new ForbiddenException(message);
+    }
+  }
+
   private async resolveRouteForViewer(
     shipmentId: number,
     user?: AuthenticatedUser,
@@ -99,6 +110,12 @@ export class RoutesService implements OnModuleInit {
       if (!order) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
       if (order.customerId !== Number(user.id)) throw new ForbiddenException('Bạn chỉ được xem lộ trình đơn của mình');
       customerOrder = order;
+    } else if (user?.role === UserRole.DRIVER_ESCORT) {
+      await this.assertDriverAssignedToShipment(
+        shipmentId,
+        Number(user.id),
+        'Bạn chỉ được phép xem lộ trình của chuyến đi được phân công cho mình',
+      );
     }
     const route = await this.routesStore.findRouteByShipmentId(shipmentId);
     if (!route) return null;
@@ -127,7 +144,16 @@ export class RoutesService implements OnModuleInit {
       throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
     }
 
-    if (user?.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) throw new ForbiddenException('Bạn chỉ được xem kế hoạch đơn của mình');
+    if (user?.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ được xem kế hoạch đơn của mình');
+    }
+    if (user?.role === UserRole.DRIVER_ESCORT) {
+      await this.assertDriverAssignedToShipment(
+        shipmentId,
+        Number(user.id),
+        'Bạn chỉ được phép xem kế hoạch của chuyến đi được phân công cho mình',
+      );
+    }
 
     const rawRoute = await this.routesStore.findRouteByShipmentId(shipmentId);
     const route = rawRoute && user?.role === UserRole.CUSTOMER ? this.redactRouteForCustomer(rawRoute, order) : rawRoute;
@@ -151,11 +177,15 @@ export class RoutesService implements OnModuleInit {
       missingRequirements.push('Cần dựng ít nhất 1 chặng vận chuyển cho kế hoạch');
     }
 
+    const requiredSlots = typeof this.fleetStore.findRequiredStallSlots === 'function'
+      ? await this.fleetStore.findRequiredStallSlots(shipmentId, order.requestedHorseCount)
+      : order.requestedHorseCount;
+
     if (assignedVehicles.length === 0 && (!route?.legs || route.legs.some((l) => l.legType === 'road'))) {
       missingRequirements.push('Chưa phân công phương tiện vận chuyển cho các chặng đường bộ');
-    } else if (totalCapacity < order.requestedHorseCount && totalCapacity > 0) {
+    } else if (totalCapacity < requiredSlots && totalCapacity > 0) {
       missingRequirements.push(
-        `Sức chứa của phương tiện (${totalCapacity} con) chưa đủ cho số lượng ngựa của đơn (${order.requestedHorseCount} con)`,
+        `Sức chứa của phương tiện (${totalCapacity} chỗ) chưa đủ cho nhu cầu chuồng của đơn (${requiredSlots} chỗ, gồm chuồng riêng tính 2 chỗ)`,
       );
     }
 
@@ -469,17 +499,13 @@ export class RoutesService implements OnModuleInit {
     await this.routesStore.updatePlanStatus(route.id, PlanStatus.PENDING_APPROVAL);
 
     const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
-    const staffList = await this.fleetStore.findAvailableStaff();
-    const managers = staffList.filter((s) => s.roleName.toLowerCase().includes('manager'));
-    for (const m of managers) {
-      await this.notificationsService.createNotification(
-        m.id,
-        `Yêu cầu phê duyệt kế hoạch chuyến đi - Đơn ${code}`,
-        `Coordinator ${user.email} đã hoàn thiện kế hoạch chi tiết cho đơn ${code} gồm ${route.legs.length} chặng. Vui lòng xem xét và phê duyệt.`,
-        'status_update',
-        shipmentId,
-      );
-    }
+    await this.notificationsService.notifyRole(
+      'Logistics Manager',
+      `Yêu cầu phê duyệt kế hoạch chuyến đi - Đơn ${code}`,
+      `Kế hoạch chi tiết cho đơn ${code} gồm ${route.legs.length} chặng đã hoàn thiện và sẵn sàng phê duyệt.`,
+      'status_update',
+      shipmentId,
+    );
 
     return (await this.routesStore.findRouteById(route.id))!;
   }
@@ -502,7 +528,15 @@ export class RoutesService implements OnModuleInit {
 
     const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
 
-    if (route.planStatus !== PlanStatus.PENDING_APPROVAL) throw new ConflictException('Chỉ phê duyệt kế hoạch đang chờ duyệt.');
+    const canApproveDirectly =
+      dto.status === 'approved' &&
+      route.planStatus === PlanStatus.DRAFT &&
+      (user.role === UserRole.LOGISTICS_MANAGER || user.role === UserRole.ADMIN) &&
+      route.legs &&
+      route.legs.length > 0;
+    if (route.planStatus !== PlanStatus.PENDING_APPROVAL && !canApproveDirectly) {
+      throw new ConflictException('Chỉ phê duyệt kế hoạch đang chờ duyệt.');
+    }
 
     if (dto.status === 'approved') {
       if (dto.transportCost !== undefined && dto.transportCost !== null) {
@@ -516,6 +550,15 @@ export class RoutesService implements OnModuleInit {
           nextTransportCost !== currentTransportCost &&
           typeof this.ordersStore.updatePricing === 'function'
         ) {
+          const isPaidPrepaid =
+            order.paymentFlow === 'prepaid' &&
+            (order.paymentStatus === 'succeeded' ||
+              ['paid_pending_review', 'approved', 'planning', 'confirmed', 'ready_to_depart', 'in_transit'].includes(order.status));
+          if (isPaidPrepaid) {
+            throw new ConflictException(
+              'Đơn hàng trả trước đã thanh toán — không thể chỉnh sửa giá cước gốc. Nếu phát sinh chi phí, vui lòng tạo hóa đơn phụ phí.',
+            );
+          }
           const insuranceFee = Math.round(Number(order.insuranceFee || 0));
           await this.ordersStore.updatePricing(
             shipmentId,
@@ -673,7 +716,16 @@ export class RoutesService implements OnModuleInit {
   ): Promise<TripPlanReadiness> {
     const order = await this.ordersStore.findById(shipmentId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn vận chuyển');
-    if (user.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) throw new ForbiddenException('Bạn chỉ được xem đơn của mình');
+    if (user.role === UserRole.CUSTOMER && order.customerId !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ được xem đơn của mình');
+    }
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      await this.assertDriverAssignedToShipment(
+        shipmentId,
+        Number(user.id),
+        'Bạn chỉ được phép xem trạng thái sẵn sàng của chuyến đi được phân công cho mình',
+      );
+    }
     return this.evaluateReadyToDepartGate(shipmentId);
   }
 
@@ -822,10 +874,21 @@ export class RoutesService implements OnModuleInit {
       throw new NotFoundException(`Không tìm thấy điểm dừng #${stopId}`);
     }
 
+    const route = await this.routesStore.findRouteById(stop.routeId);
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      if (!route) {
+        throw new ForbiddenException('Bạn chỉ được phép cập nhật điểm dừng thuộc chuyến đi được phân công cho mình');
+      }
+      await this.assertDriverAssignedToShipment(
+        route.shipmentId,
+        Number(user.id),
+        'Bạn chỉ được phép cập nhật điểm dừng thuộc chuyến đi được phân công cho mình',
+      );
+    }
+
     await this.routesStore.createStopUpdate(stopId, Number(user.id), dto);
 
     const updatedStop = (await this.routesStore.findStopById(stopId))!;
-    const route = await this.routesStore.findRouteById(stop.routeId);
 
     if (route) {
       const order = await this.ordersStore.findById(route.shipmentId);

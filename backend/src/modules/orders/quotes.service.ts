@@ -12,7 +12,6 @@ import { UserRole } from '../auth/auth.types';
 import { PricingService } from './pricing.service';
 import { DocumentsService } from '../documents/documents.service';
 import { haversineKm } from '../routes/geo-policy';
-import { isInServiceArea, SERVICE_AREA } from '../routes/route-network.geo';
 import { calculateInsurance, totalInsuranceFee } from './insurance-policy';
 import { currentReturnPolicy } from './return-policy';
 import { AllocationQuoteResult, QuoteAllocationService } from './quote-allocation.service';
@@ -48,17 +47,6 @@ export class QuotesService {
     // 3. Kiểm tra ngày khởi hành không ở quá khứ (theo múi giờ VN UTC+7)
     this.validateDepartureDate(dto.departureDate);
     const pickupAt = this.resolvePickupAt(dto);
-
-    // 3.5. Kiểm tra thời gian chuẩn bị hồ sơ kiểm dịch (Step 8 lead time)
-    if (this.documentsService && typeof this.documentsService.assertDocumentLeadTime === 'function') {
-      await this.documentsService.assertDocumentLeadTime({
-        departDate: dto.departureDate,
-        destinationLocation: dto.destination.address,
-        originLocation: dto.origin.address,
-        transportMode: dto.transportMode,
-        horseIds: dto.horses?.map((h) => h.horseId).filter((id): id is number => typeof id === 'number' && id > 0),
-      });
-    }
 
     // 4. Kiểm tra danh sách ngựa
     if (!dto.horses || !dto.horses.length) {
@@ -105,8 +93,8 @@ export class QuotesService {
       });
 
       const oneWayFee = insResult.insuranceFee;
-      const roundTripFee = Math.round(oneWayFee * 2 * 0.9);
-      const returnInsFee = roundTripFee - oneWayFee;
+      const returnInsFee = Math.round(oneWayFee * 0.9);
+      const roundTripFee = oneWayFee + returnInsFee;
 
       horseSnapshots.push({
         horseId: horse.horseId,
@@ -135,8 +123,11 @@ export class QuotesService {
     const insuranceTotal = isRoundTrip ? roundTripInsuranceTotal : oneWayInsuranceTotal;
 
     // 5. Kiểm tra phương thức
-    if (dto.transportMode === 'sea' && !dto.seaMode) {
-      throw new BadRequestException('Vui lòng chọn hình thức đường thủy (ferry hoặc vessel)');
+    if (dto.transportMode === 'sea') {
+      if (dto.seaMode && dto.seaMode !== 'vessel') {
+        throw new BadRequestException('Phương thức đường thủy chỉ hỗ trợ tàu biển chuyên dụng (vessel)');
+      }
+      dto.seaMode = 'vessel';
     }
 
     // 6. Tính toán cước chặng đi. Step 9: có QuoteAllocationService thì phân bổ xe thật (tối đa 3 phương án)
@@ -214,33 +205,81 @@ export class QuotesService {
     const returnDiscountPercent = 10;
 
     if (isRoundTrip) {
-      const estimatedHours = preview.legs.reduce((sum, leg) => sum + (leg.durationHours || 0), 0);
-      const departureTime = new Date(dto.departureDate).getTime();
-      const minReturnTime = departureTime + (estimatedHours + 12) * 3600 * 1000;
+      const estimatedHours = recommendedAlloc?.etaHours ?? preview.legs.reduce((sum, leg) => sum + (leg.durationHours || 0), 0);
+      const outboundArrivalMs = recommendedAlloc?.deliveryAt
+        ? new Date(recommendedAlloc.deliveryAt).getTime()
+        : pickupAt.getTime() + estimatedHours * 3600 * 1000;
+      const minReturnTime = outboundArrivalMs + 12 * 3600 * 1000;
       const returnDepartureTime = new Date(dto.returnDepartureAt!).getTime();
 
       if (returnDepartureTime < minReturnTime) {
         throw new BadRequestException(
-          `Thời điểm hẹn đón chặng về phải sau thời điểm khởi hành tối thiểu ${estimatedHours.toFixed(1)}h di chuyển + 12h nghỉ (sớm nhất là ${new Date(minReturnTime).toISOString()})`,
+          `Thời điểm hẹn đón chặng về phải sau thời điểm dự kiến đến nơi tối thiểu 12 giờ nghỉ hồi sức cho ngựa (sớm nhất là ${new Date(minReturnTime).toISOString()})`,
         );
       }
 
-      // Tính cước chặng về (điểm đi và điểm đến đảo ngược, deadhead tính từ trạm gần điểm giao chặng đi)
-      returnPreview = await this.pricingService.previewPricing({
-        mode: dto.transportMode,
-        seaMode: dto.seaMode,
-        sample: {
-          origin: dto.destination,
-          destination: dto.origin,
-          horses: horseSnapshots.map((h) => ({
-            quantity: h.quantity,
-            requiresPrivateStall: h.requiresPrivateStall,
-          })),
-        },
-      });
+      // Tính cước chặng về nhất quán với chặng đi: tránh kéo xe chạy rỗng từ VN ra nước ngoài làm cước về > cước đi
+      const reversedLegs = [...preview.legs].reverse().map((leg) => ({
+        ...leg,
+        key: leg.key === 'to_hub' ? 'from_hub' : leg.key === 'from_hub' ? 'to_hub' : leg.key,
+        from: leg.to,
+        to: leg.from,
+      }));
 
-      discountedReturnFreight = Math.ceil((returnPreview.total * (1 - returnDiscountPercent / 100)) / 1000) * 1000;
-      returnDiscountAmount = returnPreview.total - discountedReturnFreight;
+      let rawReturnTotal = preview.total;
+      let rawReturnSubtotal = preview.subtotal;
+      let rawReturnRounding = preview.rounding;
+      let rawReturnLines = preview.lines.map((l) => ({ ...l }));
+      let rawReturnWarnings: string[] = [];
+
+      // Nếu điểm đón chặng về trong nước và có allocationService, kiểm tra phân bổ xe thật cho ngày về
+      const destText = `${dto.destination.country || ''} ${dto.destination.address || ''}`.toLowerCase();
+      const isDomesticReturnOrigin = destText.includes('vietnam') || destText.includes('việt nam') || destText.includes('hồ chí minh') || destText.includes('hà nội') || destText.includes('đà nẵng') || destText.includes('cần thơ');
+      if (this.allocationService && isDomesticReturnOrigin) {
+        try {
+          const returnAlloc = await this.allocationService.allocate({
+            mode: dto.transportMode,
+            seaMode: dto.seaMode,
+            origin: dto.destination,
+            destination: dto.origin,
+            horses: horseSnapshots.map((h) => ({ quantity: h.quantity, requiresPrivateStall: h.requiresPrivateStall })),
+            pickupAt: new Date(dto.returnDepartureAt!),
+          });
+          const bestRet = returnAlloc.options.find((o) => o.optionCode === returnAlloc.recommendedOptionCode) ?? returnAlloc.options[0];
+          if (bestRet) {
+            rawReturnTotal = bestRet.freight.total;
+            rawReturnSubtotal = bestRet.freight.subtotal;
+            rawReturnRounding = bestRet.freight.rounding;
+            rawReturnLines = bestRet.freight.lines;
+            rawReturnWarnings = [...returnAlloc.warnings, ...bestRet.warnings];
+          }
+        } catch {
+          // Fallback to symmetrical outbound pricing if return allocation fails
+        }
+      }
+
+      // Đảm bảo cước gốc chặng về cùng tuyến không vô lý vượt quá cước chặng đi trước chiết khấu
+      if (rawReturnTotal > preview.total) {
+        rawReturnTotal = preview.total;
+        rawReturnSubtotal = preview.subtotal;
+        rawReturnRounding = preview.rounding;
+        rawReturnLines = preview.lines.map((l) => ({ ...l }));
+      }
+
+      returnPreview = {
+        legs: reversedLegs,
+        requiredStallSlots: preview.requiredStallSlots,
+        vehicles: preview.vehicles,
+        lines: rawReturnLines,
+        subtotal: rawReturnSubtotal,
+        rounding: rawReturnRounding,
+        total: rawReturnTotal,
+        tariffVersions: preview.tariffVersions,
+        warnings: rawReturnWarnings,
+      } as any;
+
+      discountedReturnFreight = Math.ceil((rawReturnTotal * (1 - returnDiscountPercent / 100)) / 1000) * 1000;
+      returnDiscountAmount = Math.max(0, rawReturnTotal - discountedReturnFreight);
     }
 
     const ttlMinutes = Number(process.env.QUOTE_TTL_MINUTES) || 30;
@@ -348,7 +387,10 @@ export class QuotesService {
           declaredValue: h.insurance.declaredValue,
           declaredCurrency: h.insurance.declaredCurrency,
           insurancePackage: h.insurance.insurancePackage,
+          oneWayFee: h.insurance.insuranceFee,
+          roundTripFee: h.roundTripInsuranceFee,
           insuranceFee: isRoundTrip ? h.roundTripInsuranceFee : h.insurance.insuranceFee,
+          totalFee: (isRoundTrip ? (h.roundTripInsuranceFee ?? 0) : h.insurance.insuranceFee) * h.quantity,
           maxCompensation: h.insurance.maxCompensation,
         })),
       },
@@ -420,14 +462,6 @@ export class QuotesService {
     }
     if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
       throw new BadRequestException(`${label}: kinh độ phải nằm trong khoảng [-180, 180]`);
-    }
-
-    // Ràng buộc khu vực phục vụ: Đông Nam Á + Trung Quốc (gồm Hồng Kông, Ma Cao) — xem route-network.geo
-    if (!isInServiceArea(lat, lng)) {
-      const a = SERVICE_AREA;
-      throw new BadRequestException(
-        `${label} nằm ngoài khu vực phục vụ của EquiTransit (Đông Nam Á & Trung Quốc: vĩ độ [${a.minLat}, ${a.maxLat}], kinh độ [${a.minLng}, ${a.maxLng}])`,
-      );
     }
   }
 

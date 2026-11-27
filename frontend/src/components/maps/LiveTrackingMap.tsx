@@ -3,6 +3,16 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Navigation } from 'lucide-react';
 import type { LiveTrackingDetails } from '@/features/tracking/api/tracking.api';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
+
+function escapeHtml(raw: unknown): string {
+  return String(raw ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 export interface LiveTrackingMapProps {
   details?: LiveTrackingDetails | null;
@@ -19,6 +29,8 @@ export function LiveTrackingMap({
   height = '480px',
   autoCenter = true,
 }: LiveTrackingMapProps) {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
   const activeDetails = liveData ?? details ?? null;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -49,9 +61,19 @@ export function LiveTrackingMap({
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 19,
-      }).addTo(map);
+      const primaryTiles = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19 },
+      ).addTo(map);
+
+      let fallbackAdded = false;
+      primaryTiles.on('tileerror', () => {
+        if (fallbackAdded || !mounted) return;
+        fallbackAdded = true;
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+        }).addTo(map);
+      });
 
       const pathGroup = L.layerGroup().addTo(map);
       const markersGroup = L.layerGroup().addTo(map);
@@ -64,13 +86,29 @@ export function LiveTrackingMap({
 
       timer = setTimeout(() => {
         if (mounted && map) map.invalidateSize();
-      }, 300);
+      }, 250);
+
+      let ro: ResizeObserver | null = null;
+      if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+        ro = new ResizeObserver(() => {
+          if (mounted && mapRef.current) {
+            mapRef.current.invalidateSize();
+          }
+        });
+        ro.observe(containerRef.current);
+        (map as any)._eqResizeObserver = ro;
+      }
     })();
 
     return () => {
       mounted = false;
       if (timer) clearTimeout(timer);
       if (mapRef.current) {
+        try {
+          (mapRef.current as any)._eqResizeObserver?.disconnect();
+        } catch {
+          // ignore
+        }
         mapRef.current.remove();
         mapRef.current = null;
       }
@@ -91,21 +129,41 @@ export function LiveTrackingMap({
 
     const boundsPoints: Array<[number, number]> = [];
 
-    // 1. Draw Legs / Polylines
+    const normalizePolylineCoords = (raw: unknown): Array<[number, number]> | null => {
+      if (!Array.isArray(raw) || raw.length === 0) return null;
+      const out: Array<[number, number]> = [];
+      for (const item of raw) {
+        if (Array.isArray(item) && item.length >= 2) {
+          const lat = Number(item[0]);
+          const lng = Number(item[1]);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) out.push([lat, lng]);
+        } else if (item && typeof item === 'object' && 'lat' in item && 'lng' in item) {
+          const lat = Number((item as { lat: unknown }).lat);
+          const lng = Number((item as { lng: unknown }).lng);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) out.push([lat, lng]);
+        }
+      }
+      return out.length > 1 ? out : null;
+    };
+
+    // 1. Draw Legs / Polylines (styled by leg type: road, flight, sea)
     for (const leg of activeDetails.legs || []) {
-      if (leg.polylineJson) {
+      let polyCoords: Array<[number, number]> | null = normalizePolylineCoords(leg.polyline);
+      if (!polyCoords && leg.polylineJson) {
         try {
-          const polyCoords = JSON.parse(leg.polylineJson);
-          if (Array.isArray(polyCoords) && polyCoords.length > 0) {
-            L.polyline(polyCoords, {
-              color: '#94A3B8',
-              weight: 3,
-              dashArray: '6, 6',
-              opacity: 0.8,
-            }).addTo(pathGroup);
-            polyCoords.forEach((pt: [number, number]) => boundsPoints.push(pt));
-          }
+          polyCoords = normalizePolylineCoords(JSON.parse(leg.polylineJson));
         } catch {}
+      }
+      if (polyCoords && polyCoords.length > 0) {
+        const legKind = leg.type || leg.legType || 'road';
+        const lineStyle =
+          legKind === 'sea'
+            ? { color: '#0E7490', weight: 3.5, dashArray: '6, 8', opacity: 0.92 }
+            : legKind === 'flight'
+              ? { color: '#B49A68', weight: 3, dashArray: '8, 8', opacity: 0.85 }
+              : { color: '#94A3B8', weight: 3, dashArray: '6, 6', opacity: 0.8 };
+        L.polyline(polyCoords, lineStyle).addTo(pathGroup);
+        polyCoords.forEach((pt: [number, number]) => boundsPoints.push(pt));
       }
     }
 
@@ -168,15 +226,56 @@ export function LiveTrackingMap({
       });
 
       const marker = L.marker([lat, lng], { icon }).addTo(markersGroup);
-      const stopLabel = stop.name || stop.locationName || `Trạm dừng #${stop.sequenceNo}`;
+      const stopLabel = escapeHtml(
+        stop.name || stop.locationName || (isEn ? `Stop #${stop.sequenceNo}` : `Trạm dừng #${stop.sequenceNo}`),
+      );
+      const stopTypeMap: Record<string, string> = isEn
+        ? {
+            rest: 'Rest Stop',
+            quarantine: 'Veterinary Quarantine',
+            border_check: 'Border / Customs',
+            refuel: 'Refuel Stop',
+            transfer_hub: 'Transfer Hub',
+            seaport: 'Seaport',
+          }
+        : {
+            rest: 'Trạm nghỉ ngựa',
+            quarantine: 'Kiểm dịch thú y',
+            border_check: 'Cửa khẩu / Hải quan',
+            refuel: 'Tiếp nhiên liệu',
+            transfer_hub: 'Trạm trung chuyển',
+            seaport: 'Cảng biển',
+          };
+      const rawType = String(stop.type || stop.stopType || '');
+      const stopTypeText = escapeHtml(stopTypeMap[rawType] || rawType || (isEn ? 'Checkpoint' : 'Trạm dừng'));
+      const stopStatusMap: Record<string, string> = isEn
+        ? {
+            pending: 'Pending',
+            arrived: 'Arrived',
+            customs_cleared: 'Customs Cleared',
+            cleared: 'Customs Cleared',
+            departed: 'Departed',
+            completed: 'Completed',
+          }
+        : {
+            pending: 'Chờ tới',
+            arrived: 'Đã tới trạm',
+            customs_cleared: 'Đã thông quan',
+            cleared: 'Đã thông quan',
+            departed: 'Đã rời trạm',
+            completed: 'Hoàn thành',
+          };
+      const stopStatusText = escapeHtml(
+        stopStatusMap[String(stop.status || '').toLowerCase()] || String(stop.status || '').toUpperCase(),
+      );
       marker.bindPopup(`
         <div style="font-family: inherit; font-size: 13px; line-height: 1.4;">
           <div style="font-weight: bold; color: #1E293B;">${stopLabel}</div>
-          <div style="color: #64748B; font-size: 11px; margin-top: 2px;">Loại: ${stop.type || stop.stopType || 'Trạm'}</div>
+          <div style="color: #64748B; font-size: 11px; margin-top: 2px;">${isEn ? 'Type' : 'Loại'}: ${stopTypeText}</div>
           <div style="margin-top: 4px; font-size: 12px;">
-            Trạng thái: <span style="font-weight: 600; color: ${stopColor};">${stop.status.toUpperCase()}</span>
+            ${isEn ? 'Status' : 'Trạng thái'}: <span style="font-weight: 600; color: ${stopColor};">${stopStatusText}</span>
           </div>
-          <div style="color: #64748B; font-size: 11px; margin-top: 2px;">Bán kính kiểm soát: ${radiusM}m</div>
+          <div style="color: #64748B; font-size: 11px; margin-top: 2px;">${isEn ? 'Geofence radius' : 'Bán kính kiểm soát'}: ${radiusM}m</div>
         </div>
       `);
     }
@@ -218,18 +317,33 @@ export function LiveTrackingMap({
       });
 
       const vMarker = L.marker([vLat, vLng], { icon: vIcon, zIndexOffset: 1000 }).addTo(markersGroup);
+      const vehicleTitle = isSim
+        ? isEn
+          ? '🚚 TRANSPORT VEHICLE (SIMULATED)'
+          : '🚚 XE VẬN CHUYỂN (GIẢ LẬP)'
+        : isEn
+        ? '🚚 TRANSPORT VEHICLE'
+        : '🚚 XE VẬN CHUYỂN';
+      const speedText = vehicle.speedKmh
+        ? `${Math.round(vehicle.speedKmh)} km/h`
+        : isEn
+        ? 'Stopped / updating'
+        : 'Đang dừng / cập nhật';
+      const updatedTimeText = escapeHtml(
+        new Date(vehicle.recordedAt).toLocaleTimeString(isEn ? 'en-US' : 'vi-VN'),
+      );
       vMarker.bindPopup(`
         <div style="font-family: inherit; font-size: 13px;">
           <div style="font-weight: bold; color: ${vehicleColor}; display: flex; align-items: center; gap: 4px;">
-            <span>${isSim ? '🚚 XE VẬN CHUYỂN (GIẢ LẬP)' : '🚚 XE VẬN CHUYỂN'}</span>
+            <span>${vehicleTitle}</span>
           </div>
           <div style="margin-top: 4px; color: #334155;">
-            Tốc độ: <b>${vehicle.speedKmh ? `${Math.round(vehicle.speedKmh)} km/h` : 'Đang dừng / cập nhật'}</b>
+            ${isEn ? 'Speed' : 'Tốc độ'}: <b>${escapeHtml(speedText)}</b>
           </div>
           <div style="color: #64748B; font-size: 11px; margin-top: 2px;">
-            Cập nhật: ${new Date(vehicle.recordedAt).toLocaleTimeString('vi-VN')}
+            ${isEn ? 'Updated' : 'Cập nhật'}: ${updatedTimeText}
           </div>
-          ${vehicle.accuracyM ? `<div style="color: #64748B; font-size: 11px;">Độ chính xác GPS: ±${Math.round(vehicle.accuracyM)}m</div>` : ''}
+          ${vehicle.accuracyM ? `<div style="color: #64748B; font-size: 11px;">${isEn ? 'GPS accuracy' : 'Độ chính xác GPS'}: ±${Math.round(vehicle.accuracyM)}m</div>` : ''}
         </div>
       `);
       vehicleMarkerRef.current = vMarker;
@@ -245,7 +359,7 @@ export function LiveTrackingMap({
         map.fitBounds(L.latLngBounds(boundsPoints), { padding: [40, 40], maxZoom: 14 });
       } catch {}
     }
-  }, [activeDetails, ready, following]);
+  }, [activeDetails, ready, following, isEn]);
 
   const handleCenterVehicle = useCallback(() => {
     const vehicle = activeDetails?.currentPosition || activeDetails?.vehiclePosition || activeDetails?.vehicle;
@@ -263,21 +377,21 @@ export function LiveTrackingMap({
       <div ref={containerRef} className="w-full h-full" />
 
       {/* Floating Header Badges */}
-      <div className="absolute top-3 left-3 z-[1000] flex flex-wrap gap-2 items-center">
+      <div className="absolute top-3 left-3 right-14 z-[1000] flex flex-wrap gap-2 items-center">
         {isSim && (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500 text-white shadow-md animate-pulse">
             <span className="w-2 h-2 rounded-full bg-white inline-block" />
-            ĐANG GIẢ LẬP (SIMULATION)
+            {isEn ? 'SIMULATION MODE' : 'ĐANG GIẢ LẬP'}
           </div>
         )}
         {activeDetails?.progressPct !== undefined && (
           <div className="px-3 py-1 rounded-full text-xs font-semibold bg-white/90 backdrop-blur-sm text-[#181A17] border border-[#D8CEBE] shadow-sm">
-            Tiến độ: <b className="text-[#A67C2E]">{activeDetails.progressPct}%</b>
+            {isEn ? 'Progress:' : 'Tiến độ:'} <b className="text-[#A67C2E]">{activeDetails.progressPct}%</b>
           </div>
         )}
         {activeDetails?.estimatedArrival && (
           <div className="px-3 py-1 rounded-full text-xs font-semibold bg-white/90 backdrop-blur-sm text-[#181A17] border border-[#D8CEBE] shadow-sm">
-            ETA: <b>{new Date(activeDetails.estimatedArrival).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</b>
+            ETA: <b>{new Date(activeDetails.estimatedArrival).toLocaleTimeString(isEn ? 'en-US' : 'vi-VN', { hour: '2-digit', minute: '2-digit' })}</b>
           </div>
         )}
       </div>
@@ -287,8 +401,9 @@ export function LiveTrackingMap({
         <button
           type="button"
           onClick={handleCenterVehicle}
-          title="Tập trung vào xe"
-          className={`p-2.5 rounded-xl shadow-md border transition-all ${
+          title={isEn ? 'Center on vehicle' : 'Tập trung vào xe'}
+          aria-label={isEn ? 'Center on vehicle' : 'Tập trung vào xe'}
+          className={`p-2.5 rounded-xl shadow-md border transition-all cursor-pointer ${
             following
               ? 'bg-[#A67C2E] text-white border-[#8c6521]'
               : 'bg-white text-[#181A17] border-[#D8CEBE] hover:bg-[#FDFCFB]'
@@ -300,23 +415,29 @@ export function LiveTrackingMap({
 
       {/* Legend / Status Pill at bottom */}
       <div className="absolute bottom-3 left-3 right-3 z-[1000] pointer-events-none flex justify-center">
-        <div className="pointer-events-auto bg-white/95 backdrop-blur-md px-4 py-2 rounded-xl border border-[#D8CEBE] shadow-lg flex items-center gap-4 text-xs font-medium text-[#181A17]">
+        <div className="pointer-events-auto bg-white/95 backdrop-blur-md px-3 sm:px-4 py-2 rounded-xl border border-[#D8CEBE] shadow-lg flex flex-wrap items-center justify-center gap-x-3.5 gap-y-1.5 text-[11px] sm:text-xs font-medium text-[#181A17] max-w-full">
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#10B981] inline-block" />
-            <span>Đã hoàn thành</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#10B981] inline-block shrink-0" />
+            <span>{isEn ? 'Completed' : 'Đã hoàn thành'}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#F59E0B] inline-block" />
-            <span>Đang diễn ra</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B] inline-block shrink-0" />
+            <span>{isEn ? 'In Progress' : 'Đang diễn ra'}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#64748B] inline-block" />
-            <span>Chờ tới</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#64748B] inline-block shrink-0" />
+            <span>{isEn ? 'Upcoming' : 'Chờ tới'}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-[#2563EB] inline-block" />
-            <span>Vệt đường thực tế</span>
+            <span className="w-3 h-0.5 bg-[#2563EB] inline-block shrink-0" />
+            <span>{isEn ? 'Live GPS Track' : 'Vệt đường thực tế'}</span>
           </div>
+          {(activeDetails?.legs || []).some((l) => (l.type || l.legType) === 'sea') && (
+            <div className="flex items-center gap-1.5">
+              <span className="w-4 h-0 border-t-2 border-dashed border-[#0E7490] inline-block shrink-0" />
+              <span>{isEn ? 'Maritime Route' : 'Tuyến đường thủy'}</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

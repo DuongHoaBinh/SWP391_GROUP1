@@ -44,6 +44,11 @@ export class CreateHandoverDto {
   @Min(1)
   shipmentHorseId!: number;
 
+  @ApiPropertyOptional({ enum: ['outbound', 'return'], default: 'outbound' })
+  @IsOptional()
+  @IsIn(['outbound', 'return'])
+  direction?: 'outbound' | 'return';
+
   @ApiProperty()
   @IsString()
   @IsNotEmpty()

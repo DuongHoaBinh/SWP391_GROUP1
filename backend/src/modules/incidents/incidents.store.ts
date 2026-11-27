@@ -133,13 +133,28 @@ export class IncidentsStore implements OnModuleInit, OnModuleDestroy {
     customerId: number;
     status: string;
     hasEmergencyVetCoverage: boolean;
+    emergencyVetCapVnd: number | null;
+    usedEmergencyVetCostVnd: number;
   } | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT s.shipment_id, s.customer_id, s.status,
               EXISTS(
                 SELECT 1 FROM shipment_horse sh
                 WHERE sh.shipment_id = s.shipment_id AND sh.emergency_vet_covered = TRUE
-              ) AS has_vet_cover
+              ) AS has_vet_cover,
+              EXISTS(
+                SELECT 1 FROM shipment_horse sh
+                WHERE sh.shipment_id = s.shipment_id
+                  AND sh.emergency_vet_covered = TRUE
+                  AND sh.insurance_package = 'premium'
+              ) AS has_premium_vet,
+              (
+                SELECT COALESCE(SUM(cr.estimated_extra_cost), 0)
+                FROM shipment_change_request cr
+                WHERE cr.shipment_id = s.shipment_id
+                  AND cr.cost_allocation = 'emergency_vet_covered'
+                  AND cr.status IN ('pending', 'approved')
+              ) AS used_vet_cost
        FROM shipment s
        WHERE s.shipment_id = ?
        LIMIT 1`,
@@ -147,11 +162,15 @@ export class IncidentsStore implements OnModuleInit, OnModuleDestroy {
     );
     const r = rows[0];
     if (!r) return null;
+    const hasVetCover = Boolean(r.has_vet_cover);
+    const hasPremiumVet = Boolean(r.has_premium_vet);
     return {
       shipmentId: Number(r.shipment_id),
       customerId: Number(r.customer_id),
       status: String(r.status),
-      hasEmergencyVetCoverage: Boolean(r.has_vet_cover),
+      hasEmergencyVetCoverage: hasVetCover,
+      emergencyVetCapVnd: hasPremiumVet ? null : hasVetCover ? 20_000_000 : 0,
+      usedEmergencyVetCostVnd: Number(r.used_vet_cost || 0),
     };
   }
 

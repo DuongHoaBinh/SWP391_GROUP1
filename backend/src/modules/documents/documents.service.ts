@@ -283,6 +283,9 @@ export class DocumentsService {
     user: AuthenticatedUser,
     documentId: number,
   ): Promise<TransportDocument> {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền truy cập hồ sơ kiểm dịch.');
+    }
     const doc = await this.documentsStore.findDocumentById(documentId);
     if (!doc) {
       throw new NotFoundException(`Tài liệu #${documentId} không tồn tại`);
@@ -299,6 +302,9 @@ export class DocumentsService {
     user: AuthenticatedUser,
     horseId: number,
   ): Promise<TransportDocument[]> {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền truy cập hồ sơ kiểm dịch của ngựa.');
+    }
     if (
       user.role === UserRole.CUSTOMER &&
       typeof this.documentsStore.isHorseOwnedByUser === 'function'
@@ -335,6 +341,9 @@ export class DocumentsService {
     status?: string,
     horseId?: number,
   ): Promise<TransportDocument[]> {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem danh sách hồ sơ kiểm dịch.');
+    }
     const filter: { ownerId?: number; status?: string; horseId?: number } = {};
     if (user.role === UserRole.CUSTOMER) {
       filter.ownerId = Number(user.id);
@@ -460,7 +469,7 @@ export class DocumentsService {
     destinationCountry: string;
     earliestDepartureDate: string;
   }> {
-    const baseCutoffDays = input.bookingType === 'dedicated_charter' ? 2 : 3;
+    const baseCutoffDays = 2;
     const destinationCountry = input.destinationLocation
       ? this.detectDestinationCountry(input.destinationLocation)
       : 'Vietnam';
@@ -470,11 +479,10 @@ export class DocumentsService {
       !explicitDom &&
       (destinationCountry !== originCountry ||
         destinationCountry !== 'Vietnam' ||
-        String(input.transportationType || '').toLowerCase().includes('international') ||
-        String(input.transportMode || '').toLowerCase() === 'air');
+        String(input.transportationType || '').toLowerCase().includes('international'));
 
     const normalizedMode =
-      input.transportMode === 'road' || input.transportMode === 'air'
+      input.transportMode === 'road' || input.transportMode === 'air' || input.transportMode === 'sea'
         ? input.transportMode
         : null;
     const gateTokens = input.destinationLocation ? [input.destinationLocation] : [];
@@ -488,7 +496,7 @@ export class DocumentsService {
     const tierARegs = applicableRegulations.filter((r) => (r.docTier || 'A') === 'A');
     const maxTierALead =
       tierARegs.length > 0 ? Math.max(...tierARegs.map((r) => Number(r.leadTimeDays ?? 2))) : 0;
-    const minLeadDays = Math.max(baseCutoffDays, maxTierALead + 2);
+    const minLeadDays = baseCutoffDays;
     const now = new Date();
     const earliestUtcMs =
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) +
@@ -621,6 +629,9 @@ export class DocumentsService {
     user: AuthenticatedUser,
     orderId: number,
   ): Promise<OrderComplianceChecklist> {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem bảng checklist hồ sơ kiểm dịch đơn hàng.');
+    }
     const order = await this.documentsStore.findOrderDetails(orderId);
     if (!order) {
       throw new NotFoundException(`Đơn vận chuyển mã #${orderId} không tồn tại`);
@@ -638,9 +649,8 @@ export class DocumentsService {
       !explicitDom &&
       (destinationCountry !== originCountry ||
         destinationCountry !== 'Vietnam' ||
-        String(order.transportation_type || '').toLowerCase().includes('international') ||
-        String(order.transport_mode || '').toLowerCase() === 'air');
-    const orderMode = (order.transport_mode as 'road' | 'air' | null) ?? null;
+        String(order.transportation_type || '').toLowerCase().includes('international'));
+    const orderMode = (order.transport_mode as 'road' | 'air' | 'sea' | null) ?? null;
 
     const gateTokens: string[] = [];
     if (order.arrival_airport_codes) {
@@ -657,8 +667,30 @@ export class DocumentsService {
       gateTokens.push(String(order.destination_location).trim());
     }
     // Lấy tất cả các quy định bắt buộc cho quốc gia đích và lọc theo mode + border_gate
-    const { applicableRegulations, isUsingGlobalBaseline, matchedBorderGates } =
+    const resolvedOutbound =
       await this.resolveApplicableRegulations(destinationCountry, orderMode, gateTokens, isInternational);
+    let applicableRegulations = [...resolvedOutbound.applicableRegulations];
+    const isUsingGlobalBaseline = resolvedOutbound.isUsingGlobalBaseline;
+    const matchedBorderGates = [...resolvedOutbound.matchedBorderGates];
+
+    // Nếu là chuyến khứ hồi quốc tế: gộp thêm quy định tái nhập cảnh về quốc gia xuất phát (tránh trùng loại giấy)
+    if (order.trip_type === 'round_trip' && isInternational && originCountry !== destinationCountry) {
+      const returnGateTokens = order.origin_location ? [String(order.origin_location).trim()] : [];
+      const resolvedReturn = await this.resolveApplicableRegulations(originCountry, orderMode, returnGateTokens, true);
+      const seenKey = new Set(
+        applicableRegulations.map((r) => String(r.documentTypeCode || r.documentType || '').trim().toLowerCase()),
+      );
+      for (const reg of resolvedReturn.applicableRegulations) {
+        const key = String(reg.documentTypeCode || reg.documentType || '').trim().toLowerCase();
+        if (!seenKey.has(key)) {
+          seenKey.add(key);
+          applicableRegulations.push({
+            ...reg,
+            documentType: `${reg.documentType} (Tái nhập cảnh ${originCountry})`,
+          });
+        }
+      }
+    }
     const complianceNotice: string | undefined = isUsingGlobalBaseline
       ? `Quốc gia đến "${destinationCountry}" hiện chưa có danh mục quy chế riêng. Hệ thống tự động áp dụng Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI.`
       : undefined;
@@ -1593,8 +1625,7 @@ export class DocumentsService {
       !explicitDom &&
       (destinationCountry !== originCountry ||
         destinationCountry !== 'Vietnam' ||
-        String(input.transportationType || '').toLowerCase().includes('international') ||
-        String(input.transportMode || '').toLowerCase() === 'air');
+        String(input.transportationType || '').toLowerCase().includes('international'));
 
     const orderMode =
       input.transportMode === 'road' || input.transportMode === 'air' || input.transportMode === 'sea'

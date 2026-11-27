@@ -52,7 +52,7 @@ export interface RouteLegItem {
   id?: number;
   sequenceNo: number;
   direction?: 'outbound' | 'return';
-  legType: 'road' | 'flight';
+  legType: 'road' | 'flight' | 'sea';
   originLocation: string;
   destinationLocation: string;
   distanceKm?: number | null;

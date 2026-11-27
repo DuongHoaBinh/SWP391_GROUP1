@@ -348,7 +348,9 @@ export default function ManagerStaffPage() {
 
   const roadDriversCount = staffList.filter((s) => s.role === 'Driver / Escort').length;
   const airMedicalEscortsCount = staffList.filter((s) => s.role === 'Equine Medical Escort').length;
-  const onRouteCount = staffList.filter((s) => s.dutyStatus === 'ON_ROUTE').length;
+  const onRouteCount = staffList.filter(
+    (s) => s.dutyStatus === 'ON_ROUTE' || s.activeTripsCount > 0 || Boolean(s.activeTrip),
+  ).length;
   const onDutyCount = staffList.filter((s) => s.dutyStatus === 'ON_DUTY').length;
 
   return (
@@ -592,28 +594,27 @@ export default function ManagerStaffPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[850px]">
+          <table className="w-full text-left text-xs">
             <thead>
               <tr className="bg-[#F0EEE8] border-b border-[#D8CEBE] text-[11px] font-bold text-[#5F6977] uppercase tracking-wider">
-                <th className="px-6 py-3.5">{t('manager.staff.colMember', 'Thành Viên Nhân Sự')}</th>
-                <th className="px-6 py-3.5">{t('manager.staff.colRole', 'Vị Trí & Chứng Chỉ')}</th>
-                <th className="px-6 py-3.5">{t('manager.staff.colShift', 'Ca Trực Phân Công')}</th>
-                <th className="px-6 py-3.5">{t('manager.staff.colStatus', 'Trạng Thái Trực')}</th>
-                <th className="px-6 py-3.5">{t('manager.staff.colActiveTrip', 'Chuyến Đi Đang Phụ Trách')}</th>
-                <th className="px-6 py-3.5 text-right">{t('manager.staff.colActions', 'Thao Tác Phân Ca')}</th>
+                <th className="px-3 py-3 whitespace-nowrap">{t('manager.staff.colMember', 'Nhân Sự')}</th>
+                <th className="px-3 py-3 whitespace-nowrap">{t('manager.staff.colRole', 'Vị Trí')}</th>
+                <th className="px-3 py-3 whitespace-nowrap">{language === 'en' ? 'Shift & Status' : 'Ca Trực & Trạng Thái'}</th>
+                <th className="px-3 py-3 whitespace-nowrap">{t('manager.staff.colActiveTrip', 'Chuyến Phụ Trách')}</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">{t('manager.staff.colActions', 'Thao Tác')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E8E2D8]">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-[#5F6977]">
+                  <td colSpan={5} className="py-12 text-center text-[#5F6977]">
                     <RefreshCw size={20} className="animate-spin inline-block mr-2 text-[#A67C2E]" aria-hidden="true" />
                     {t('manager.staff.loading', 'Đang nạp danh sách nhân sự...')}
                   </td>
                 </tr>
               ) : filteredStaff.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center text-[#5F6977]">
+                  <td colSpan={5} className="py-16 text-center text-[#5F6977]">
                     <Users size={32} className="mx-auto mb-2 text-[#8892A0]" aria-hidden="true" />
                     <p className="font-bold text-[#181A17] m-0 text-sm">
                       {t('manager.staff.noStaffFound', 'Không tìm thấy thành viên nhân sự nào')}
@@ -626,9 +627,9 @@ export default function ManagerStaffPage() {
               ) : (
                 filteredStaff.map((staff) => (
                   <tr key={staff.id} className="hover:bg-[#FAF8F4]/70 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-[#181A17] text-[#C4B38E] font-extrabold text-xs flex items-center justify-center shrink-0">
+                    <td className="px-3 py-3 max-w-[185px]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-[#181A17] text-[#C4B38E] font-extrabold text-[11px] flex items-center justify-center shrink-0">
                           {staff.name
                             .split(' ')
                             .filter(Boolean)
@@ -638,100 +639,89 @@ export default function ManagerStaffPage() {
                             .toUpperCase() || 'ST'}
                         </div>
                         <div className="min-w-0">
-                          <p className="font-bold text-[#181A17] text-sm m-0">{staff.name}</p>
-                          <p className="text-[11px] text-[#5F6977] flex items-center gap-1 m-0 mt-0.5">
+                          <p className="font-bold text-[#181A17] text-[13px] m-0 truncate" title={staff.name}>{staff.name}</p>
+                          <p className="text-[11px] text-[#5F6977] flex items-center gap-1 m-0 mt-0.5 truncate">
                             <Phone className="w-3 h-3 text-[#8892A0] shrink-0" aria-hidden="true" />{' '}
-                            <span>{staff.phone || staff.email || '—'}</span>
+                            <span className="truncate">{staff.phone || staff.email || '—'}</span>
                           </p>
                         </div>
                       </div>
                     </td>
 
-                    <td className="px-6 py-4">
-                      <span className="font-bold text-[#181A17] block">{getRoleDisplayName(staff.role)}</span>
-                      {getRoleOperationalScope(staff.role) && (
-                        <span className="text-[11px] text-[#966516] font-semibold block mt-0.5">
-                          {getRoleOperationalScope(staff.role)}
-                        </span>
-                      )}
-                      <span className="text-[11px] text-[#5F6977] font-mono">
+                    <td className="px-3 py-3 max-w-[190px]">
+                      <span className="font-bold text-[#181A17] block truncate" title={getRoleDisplayName(staff.role)}>{getRoleDisplayName(staff.role)}</span>
+                      <span className="text-[10.5px] text-[#5F6977] font-mono block truncate mt-0.5" title={staff.email || ''}>
                         {staff.email || '—'}
                       </span>
                     </td>
 
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#F0EEE8] text-[#181A17] font-semibold text-[11px]">
-                        <Clock className="w-3 h-3 text-[#5F6977]" aria-hidden="true" />
-                        {staff.currentShift === 'Morning (06:00 - 14:00)' &&
-                          t('manager.staff.shiftMorning', 'Ca Sáng (06:00 - 14:00)')}
-                        {staff.currentShift === 'Afternoon (14:00 - 22:00)' &&
-                          t('manager.staff.shiftAfternoon', 'Ca Chiều (14:00 - 22:00)')}
-                        {staff.currentShift === 'Night (22:00 - 06:00)' &&
-                          t('manager.staff.shiftNight', 'Ca Đêm (22:00 - 06:00)')}
-                        {staff.currentShift === 'Resting' &&
-                          t('manager.staff.shiftResting', 'Nghỉ Hồi Sức')}
-                        {![
-                          'Morning (06:00 - 14:00)',
-                          'Afternoon (14:00 - 22:00)',
-                          'Night (22:00 - 06:00)',
-                          'Resting',
-                        ].includes(staff.currentShift) && staff.currentShift}
-                      </span>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#F0EEE8] text-[#181A17] font-semibold text-[11px]">
+                          <Clock className="w-3 h-3 text-[#5F6977]" aria-hidden="true" />
+                          {staff.currentShift === 'Morning (06:00 - 14:00)' &&
+                            t('manager.staff.shiftMorning', 'Ca Sáng (06-14h)')}
+                          {staff.currentShift === 'Afternoon (14:00 - 22:00)' &&
+                            t('manager.staff.shiftAfternoon', 'Ca Chiều (14-22h)')}
+                          {staff.currentShift === 'Night (22:00 - 06:00)' &&
+                            t('manager.staff.shiftNight', 'Ca Đêm (22-06h)')}
+                          {staff.currentShift === 'Resting' &&
+                            t('manager.staff.shiftResting', 'Nghỉ Hồi Sức')}
+                          {![
+                            'Morning (06:00 - 14:00)',
+                            'Afternoon (14:00 - 22:00)',
+                            'Night (22:00 - 06:00)',
+                            'Resting',
+                          ].includes(staff.currentShift) && staff.currentShift}
+                        </span>
+                        {staff.dutyStatus === 'ON_ROUTE' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#FAF8F4] text-[#A67C2E] border border-[#C4B38E]/50">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#A67C2E]" aria-hidden="true" />{' '}
+                            {t('manager.staff.statusOnRoute', 'Đang trên tuyến')}
+                          </span>
+                        )}
+                        {staff.dutyStatus === 'ON_DUTY' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#E8F2EB] text-[#287653] border border-[#287653]/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#287653]" aria-hidden="true" />{' '}
+                            {t('manager.staff.statusOnDuty', 'Trực sẵn sàng')}
+                          </span>
+                        )}
+                        {staff.dutyStatus === 'STANDBY' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#FAF5EB] text-[#A67C2E] border border-[#A67C2E]/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#A67C2E]" aria-hidden="true" />{' '}
+                            {t('manager.staff.statusStandbyBadge', language === 'en' ? 'Standby' : 'Dự bị')}
+                          </span>
+                        )}
+                        {staff.dutyStatus === 'RESTING' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#F8F0DF] text-[#966516] border border-[#966516]/30">
+                            <Clock className="w-3 h-3 text-[#966516]" aria-hidden="true" />{' '}
+                            {t('manager.staff.statusResting', 'Nghỉ ngơi')}
+                          </span>
+                        )}
+                        {staff.dutyStatus === 'OFF_DUTY' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#F0EEE8] text-[#5F6977]">
+                            {t('manager.staff.statusOffDuty', 'Hết ca trực')}
+                          </span>
+                        )}
+                      </div>
                     </td>
 
-                    <td className="px-6 py-4">
-                      {staff.dutyStatus === 'ON_ROUTE' && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#FAF8F4] text-[#A67C2E] border border-[#C4B38E]/50">
-                          <span className="w-2 h-2 rounded-full bg-[#A67C2E]" aria-hidden="true" />{' '}
-                          {t('manager.staff.statusOnRoute', 'Đang trên tuyến')}
-                        </span>
-                      )}
-                      {staff.dutyStatus === 'ON_DUTY' && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#E8F2EB] text-[#287653] border border-[#287653]/30">
-                          <span className="w-2 h-2 rounded-full bg-[#287653]" aria-hidden="true" />{' '}
-                          {t('manager.staff.statusOnDuty', 'Trực sẵn sàng')}
-                        </span>
-                      )}
-                      {staff.dutyStatus === 'STANDBY' && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#FAF5EB] text-[#A67C2E] border border-[#A67C2E]/30">
-                          <span className="w-2 h-2 rounded-full bg-[#A67C2E]" aria-hidden="true" />{' '}
-                          {t('manager.staff.statusStandbyBadge', language === 'en' ? 'Standby Reserve' : 'Dự bị (Standby)')}
-                        </span>
-                      )}
-                      {staff.dutyStatus === 'RESTING' && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#F8F0DF] text-[#966516] border border-[#966516]/30">
-                          <Clock className="w-3 h-3 text-[#966516]" aria-hidden="true" />{' '}
-                          {t('manager.staff.statusResting', 'Nghỉ ngơi')}
-                        </span>
-                      )}
-                      {staff.dutyStatus === 'OFF_DUTY' && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-[#F0EEE8] text-[#5F6977]">
-                          {t('manager.staff.statusOffDuty', 'Hết ca trực')}
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="px-6 py-4">
+                    <td className="px-3 py-3 whitespace-nowrap">
                       {staff.activeTrip ? (
                         <span className="font-mono font-bold text-[#A67C2E] bg-[#FAF8F4] px-2 py-0.5 rounded border border-[#D4C5A3]">
                           {staff.activeTrip}
                         </span>
                       ) : staff.activeTripsCount > 0 ? (
-                        <span className="inline-flex items-center gap-1.5 font-bold text-xs whitespace-nowrap text-[#966516] bg-[#F8F0DF] px-2.5 py-1 rounded-lg border border-[#DFCA9A]">
-                          {staff.activeTripsCount}{' '}
-                          {language === 'en'
-                            ? staff.activeTripsCount > 1
-                              ? 'active trips'
-                              : 'active trip'
-                            : 'chuyến đang phụ trách'}
+                        <span className="inline-flex items-center gap-1 font-bold text-xs whitespace-nowrap text-[#966516] bg-[#F8F0DF] px-2 py-0.5 rounded-lg border border-[#DFCA9A]">
+                          {staff.activeTripsCount} {language === 'en' ? 'trips' : 'chuyến'}
                         </span>
                       ) : (
                         <span className="text-[#5F6977] font-medium whitespace-nowrap">— {t('manager.staff.standbyReady', 'Sẵn sàng')} —</span>
                       )}
                     </td>
 
-                    <td className="px-6 py-4 text-right">
-                      <div className="inline-flex items-center justify-end gap-2">
+                    <td className="px-3 py-3 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center justify-end gap-1.5">
                         {staff.activeTripsCount > 0 && (
                           <button
                             type="button"
@@ -766,17 +756,17 @@ export default function ManagerStaffPage() {
                                 );
                               }
                             }}
-                            className="px-3 py-1.5 bg-[#E8F2EB] border border-[#287653]/30 hover:bg-[#287653] text-[#287653] hover:text-white font-bold text-xs rounded-xl shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                            className="px-2.5 py-1.5 bg-[#E8F2EB] border border-[#287653]/30 hover:bg-[#287653] text-[#287653] hover:text-white font-bold text-[11px] rounded-lg shadow-sm transition-colors cursor-pointer whitespace-nowrap"
                           >
-                            {language === 'en' ? 'Set Available' : 'Chuyển về Rảnh'}
+                            {language === 'en' ? 'Release' : 'Về rảnh'}
                           </button>
                         )}
                         <button
                           type="button"
                           onClick={() => openShiftModal(staff)}
-                          className="px-3.5 py-1.5 bg-white border border-[#D8CEBE] hover:border-[#A67C2E] text-[#181A17] hover:text-[#A67C2E] font-bold text-xs rounded-xl shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                          className="px-2.5 py-1.5 bg-white border border-[#D8CEBE] hover:border-[#A67C2E] text-[#181A17] hover:text-[#A67C2E] font-bold text-[11px] rounded-lg shadow-sm transition-colors cursor-pointer whitespace-nowrap"
                         >
-                          {t('manager.staff.assignShiftBtn', 'Phân Ca Trực')}
+                          {language === 'en' ? 'Shift' : 'Phân ca'}
                         </button>
                       </div>
                     </td>

@@ -67,7 +67,9 @@ export class SepayPaymentStore implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException('Báo giá phải là số nguyên VND lớn hơn 0');
       }
 
-      const creatingSupp = Boolean(supp && existing.some((p) => p.status === 'succeeded'));
+      const creatingSupp = Boolean(
+        supp && supp.status !== 'paid' && (gate.invoice?.status === 'paid' || existing.some((p) => p.status === 'succeeded')),
+      );
       const payableAmount = creatingSupp ? Number(supp.amount) : totalOrderAmount;
       const targetInvoiceId = creatingSupp ? Number(supp.id) : (gate.invoice?.id ?? null);
       const relevantExisting = creatingSupp ? targetSuppPayment : existing[0];

@@ -141,42 +141,66 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async findAllVehicles(status?: VehicleStatus, type?: VehicleType, depotId?: number): Promise<VehicleEntity[]> {
-    let sql = `
-      SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity, v.current_location, v.vehicle_class_code, v.depot_id, vc.name_vi AS vehicle_class_name, vc.is_heavy_truck, d.name AS depot_name,
+  private getVehicleSelectSql(): string {
+    return `
+      SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity, v.status, v.current_location, v.vehicle_class_code, v.depot_id, vc.name_vi AS vehicle_class_name, vc.name_en AS vehicle_class_name_en, vc.is_heavy_truck, d.name AS depot_name,
              CASE 
-               WHEN active_leg.shipment_id IS NOT NULL THEN 'in_use'
-               WHEN active_sv.shipment_id IS NOT NULL THEN 'in_use'
-               WHEN active_res.shipment_id IS NOT NULL AND v.status <> 'maintenance' THEN 'in_use'
+               WHEN v.status = 'maintenance' THEN 'maintenance'
+               WHEN transit_leg.shipment_id IS NOT NULL OR transit_sv.shipment_id IS NOT NULL THEN 'in_use'
+               WHEN active_leg.shipment_id IS NOT NULL OR active_sv.shipment_id IS NOT NULL OR active_res.shipment_id IS NOT NULL THEN 'in_use'
                ELSE v.status
              END AS computed_status,
-             COALESCE(active_leg.shipment_id, active_sv.shipment_id, active_res.shipment_id) AS assigned_shipment_id,
+             CASE
+               WHEN transit_leg.shipment_id IS NOT NULL OR transit_sv.shipment_id IS NOT NULL THEN 0
+               WHEN active_leg.shipment_id IS NOT NULL OR active_sv.shipment_id IS NOT NULL OR active_res.shipment_id IS NOT NULL THEN 1
+               ELSE 0
+             END AS is_reserved_only,
+             COALESCE(transit_leg.shipment_id, transit_sv.shipment_id, active_leg.shipment_id, active_sv.shipment_id, active_res.shipment_id) AS assigned_shipment_id,
+             COALESCE(transit_leg.shipment_status, transit_sv.shipment_status, active_leg.shipment_status, active_sv.shipment_status, active_res.shipment_status) AS assigned_shipment_status,
              v.created_at
       FROM vehicle v
       LEFT JOIN (
-        SELECT rl.vehicle_id, MIN(r.shipment_id) as shipment_id
+        SELECT rl.vehicle_id, MIN(r.shipment_id) AS shipment_id, MIN(s.status) AS shipment_status
         FROM route_leg rl
         JOIN route r ON r.route_id = rl.route_id
         JOIN shipment s ON s.shipment_id = r.shipment_id
-        WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit', 'return_pending')
+        WHERE s.status IN ('in_transit', 'return_pending')
+          AND rl.vehicle_id IS NOT NULL
+          AND rl.status != 'completed'
+          AND rl.actual_arrival IS NULL
+        GROUP BY rl.vehicle_id
+      ) transit_leg ON transit_leg.vehicle_id = v.vehicle_id
+      LEFT JOIN (
+        SELECT sv.vehicle_id, MIN(sv.shipment_id) AS shipment_id, MIN(s.status) AS shipment_status
+        FROM shipment_vehicle sv
+        JOIN shipment s ON s.shipment_id = sv.shipment_id
+        WHERE s.status IN ('in_transit', 'return_pending')
+        GROUP BY sv.vehicle_id
+      ) transit_sv ON transit_sv.vehicle_id = v.vehicle_id
+      LEFT JOIN (
+        SELECT rl.vehicle_id, MIN(r.shipment_id) as shipment_id, MIN(s.status) AS shipment_status
+        FROM route_leg rl
+        JOIN route r ON r.route_id = rl.route_id
+        JOIN shipment s ON s.shipment_id = r.shipment_id
+        WHERE s.status IN ('planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending')
           AND rl.vehicle_id IS NOT NULL
           AND rl.status != 'completed'
           AND rl.actual_arrival IS NULL
         GROUP BY rl.vehicle_id
       ) active_leg ON active_leg.vehicle_id = v.vehicle_id
       LEFT JOIN (
-        SELECT sv.vehicle_id, MIN(sv.shipment_id) as shipment_id
+        SELECT sv.vehicle_id, MIN(sv.shipment_id) as shipment_id, MIN(s.status) AS shipment_status
         FROM shipment_vehicle sv
         JOIN shipment s ON s.shipment_id = sv.shipment_id
         LEFT JOIN route r ON r.shipment_id = s.shipment_id
         LEFT JOIN route_leg rl ON rl.route_id = r.route_id AND rl.vehicle_id = sv.vehicle_id
-        WHERE s.status IN ('planning', 'ready_to_depart', 'in_transit', 'return_pending')
+        WHERE s.status IN ('planning', 'confirmed', 'ready_to_depart', 'in_transit', 'return_pending')
           AND (rl.leg_id IS NULL OR (rl.status != 'completed' AND rl.actual_arrival IS NULL))
         GROUP BY sv.vehicle_id
       ) active_sv ON active_sv.vehicle_id = v.vehicle_id
       LEFT JOIN (
         -- Step 9: xe đang được giữ chỗ (đơn còn hoạt động, khung giờ chưa kết thúc)
-        SELECT vr.vehicle_id, MIN(vr.shipment_id) AS shipment_id
+        SELECT vr.vehicle_id, MIN(vr.shipment_id) AS shipment_id, MIN(s.status) AS shipment_status
         FROM vehicle_reservation vr
         JOIN shipment s ON s.shipment_id = vr.shipment_id
         WHERE vr.status IN ('active','consumed') AND vr.end_at > NOW()
@@ -187,6 +211,10 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
        LEFT JOIN depot d ON d.depot_id = v.depot_id
       WHERE 1=1
     `;
+  }
+
+  async findAllVehicles(status?: VehicleStatus, type?: VehicleType, depotId?: number): Promise<VehicleEntity[]> {
+    let sql = this.getVehicleSelectSql();
     const params: any[] = [];
 
     if (depotId) {
@@ -209,14 +237,8 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async findVehicleById(id: number): Promise<VehicleEntity | undefined> {
-    const [rows] = await this.pool.execute<VehicleRow[]>(
-      `SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity, v.status, v.current_location, v.created_at, v.vehicle_class_code, v.depot_id, vc.name_vi AS vehicle_class_name, vc.is_heavy_truck, d.name AS depot_name
-       FROM vehicle v
-       LEFT JOIN vehicle_class vc ON vc.code = v.vehicle_class_code
-       LEFT JOIN depot d ON d.depot_id = v.depot_id
-       WHERE v.vehicle_id = ? LIMIT 1`,
-      [id],
-    );
+    const sql = `${this.getVehicleSelectSql()} AND v.vehicle_id = ? LIMIT 1`;
+    const [rows] = await this.pool.execute<any[]>(sql, [id]);
     const r = rows[0];
     return r ? this.mapVehicleRow(r) : undefined;
   }
@@ -224,14 +246,8 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   async findVehiclesByIds(ids: number[]): Promise<VehicleEntity[]> {
     if (ids.length === 0) return [];
     const placeholders = ids.map(() => '?').join(',');
-    const [rows] = await this.pool.query<VehicleRow[]>(
-      `SELECT v.vehicle_id, v.vehicle_type, v.plate_or_code, v.capacity, v.status, v.current_location, v.created_at, v.vehicle_class_code, v.depot_id, vc.name_vi AS vehicle_class_name, vc.is_heavy_truck, d.name AS depot_name
-       FROM vehicle v
-       LEFT JOIN vehicle_class vc ON vc.code = v.vehicle_class_code
-       LEFT JOIN depot d ON d.depot_id = v.depot_id
-       WHERE v.vehicle_id IN (${placeholders})`,
-      ids,
-    );
+    const sql = `${this.getVehicleSelectSql()} AND v.vehicle_id IN (${placeholders})`;
+    const [rows] = await this.pool.query<any[]>(sql, ids);
     return rows.map((r) => this.mapVehicleRow(r));
   }
 
@@ -633,7 +649,7 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
          FROM shipment_assignment sa
          JOIN shipment s ON sa.shipment_id = s.shipment_id
          WHERE sa.user_id = ?
-           AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected')`,
+           AND s.status NOT IN ('in_transit', 'return_pending', 'completed', 'cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded')`,
         [userId],
       );
     }
@@ -717,7 +733,9 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
   }
 
   async findVehicleClasses(): Promise<VehicleClass[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>('SELECT * FROM vehicle_class ORDER BY sort_order, code');
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT * FROM vehicle_class WHERE code <> 'ferry_slot' ORDER BY sort_order, code",
+    );
     return rows.map((r) => this.mapVehicleClassRow(r));
   }
 
@@ -840,11 +858,14 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
       currentLocation: r.current_location || 'Fleet Operations Depot',
       vehicleClassCode: r.vehicle_class_code ?? null,
       vehicleClassName: r.vehicle_class_name ?? null,
+      vehicleClassNameEn: r.vehicle_class_name_en ?? null,
       isHeavyTruck: Boolean(r.is_heavy_truck),
       depotId: r.depot_id != null ? Number(r.depot_id) : null,
       depotName: r.depot_name ?? null,
       assignedShipmentId: assignedId,
       assignedTripCode: assignedId ? `REQ-${String(assignedId).padStart(3, '0')}` : null,
+      assignedShipmentStatus: r.assigned_shipment_status ?? null,
+      isReservedOnly: Boolean(Number(r.is_reserved_only ?? 0)),
     };
   }
 }

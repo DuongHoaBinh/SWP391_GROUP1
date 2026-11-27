@@ -622,7 +622,7 @@ export default function ComplianceOrdersPage() {
 
                             return (
                               <div
-                                key={doc.id || idx}
+                                key={`${doc.id ?? 'doc'}-${doc.regulationId ?? 'none'}-${idx}`}
                                 className="p-3 rounded-xl bg-white border border-[#D8CEBE] flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-[#B49A68] transition-colors shadow-sm"
                               >
                                 <div className="flex items-start gap-3 min-w-0">

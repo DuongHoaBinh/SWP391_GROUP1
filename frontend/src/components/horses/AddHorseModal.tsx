@@ -68,13 +68,13 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
   const [activeTab, setActiveTab] = useState<'identity' | 'passport'>('identity');
   const [name, setName] = useState('');
   const [breed, setBreed] = useState('Thoroughbred');
-  const [gender, setGender] = useState<'male' | 'female' | 'other'>('male');
+  const [gender, setGender] = useState<'male' | 'female' | 'gelding'>('male');
   const [age, setAge] = useState<number>(5);
   const [temperament, setTemperament] = useState<HorseTemperament>('normal');
   const [requiresPrivateStall, setRequiresPrivateStall] = useState(false);
   const [color, setColor] = useState('Bay');
   const [weight, setWeight] = useState('480 kg');
-  const [medicalStatus, setMedicalStatus] = useState<'Healthy' | 'Monitoring' | 'Requires Review' | 'Medical Attention'>('Healthy');
+  const [medicalStatus, setMedicalStatus] = useState<string>('');
   const [passportNumber, setPassportNumber] = useState('');
   const [microchipNumber, setMicrochipNumber] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -102,7 +102,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
     setRequiresPrivateStall(false);
     setColor('Bay');
     setWeight('480 kg');
-    setMedicalStatus('Healthy');
+    setMedicalStatus('');
     setPassportNumber('');
     setMicrochipNumber('');
     setPhotoFile(null);
@@ -156,7 +156,16 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
 
     const trimmedMicrochip = microchipNumber.trim();
     if (!trimmedMicrochip) {
-      setError('Vui lòng nhập Số vi mạch (Microchip).');
+      setError(language === 'en' ? 'Please enter Microchip Number.' : 'Vui lòng nhập Số vi mạch (Microchip).');
+      setActiveTab('passport');
+      return;
+    }
+    if (!/^[A-Za-z0-9-]{9,20}$/.test(trimmedMicrochip)) {
+      setError(
+        language === 'en'
+          ? 'Invalid Microchip format (ISO 11784/11785 requires 15 digits, min 9 alphanumeric characters).'
+          : 'Mã Microchip không hợp lệ (chuẩn ISO 11784/11785 gồm 15 chữ số, tối thiểu 9 ký tự chữ-số).'
+      );
       setActiveTab('passport');
       return;
     }
@@ -247,39 +256,29 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
       closeDisabled={isSubmitting}
       maxWidth="max-w-4xl"
       hideHeader
-      bodyClassName="p-0 overflow-y-auto max-h-[92vh]"
+      bodyClassName="p-0 overflow-hidden max-h-[88vh] flex flex-col"
     >
-      <form onSubmit={handleSubmit} className="flex flex-col bg-surface">
-        {/* Luxury Obsidian Header Banner */}
-        <div className="relative bg-gradient-to-r from-[#181A17] via-[#242722] to-[#181A17] px-6 sm:px-8 pt-7 pb-6 text-[#F7F7F4] overflow-hidden border-b border-[#2C2F2A]">
-          <div className="flex items-center justify-between gap-4 mb-4 relative z-10">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#B49A68]/20 text-[#E5C98E] border border-[#B49A68]/40">
-                <Sparkles size={13} className="text-[#B49A68]" aria-hidden="true" />
-                {t('horses.modal.addTitle', 'ĐĂNG KÝ CHIẾN MÃ MỚI')}
-              </span>
-            </div>
+      <form onSubmit={handleSubmit} className="flex flex-col bg-white max-h-[88vh]">
+        {/* Compact Modal Header */}
+        <div className="bg-[#181A17] px-6 py-4 text-[#F7F7F4] border-b border-[#2C2F2A] shrink-0">
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-white m-0">
+              {name ? `${t('common.racehorse', 'Chiến Mã')}: ${name}` : t('horses.modal.addTitle', 'Thêm Chiến Mã Mới')}
+            </h2>
 
             <button
               type="button"
               disabled={isSubmitting}
               onClick={handleClose}
-              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-50"
+              className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-50"
               aria-label={t('common.close', 'Đóng')}
             >
-              <X size={18} aria-hidden="true" />
+              <X size={17} aria-hidden="true" />
             </button>
           </div>
 
-          <div className="relative z-10">
-            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-              {name ? `${t('common.racehorse', 'Chiến Mã')}: ${name}` : t('horses.modal.addTitle', 'Thêm Chiến Mã Mới Vào Đội Đua')}
-              <span className="text-[#B49A68] text-lg sm:text-xl font-normal">✦</span>
-            </h2>
-          </div>
-
           {/* Visual Tabs Bar */}
-          <div className="flex items-center gap-2 sm:gap-4 mt-6 pt-3 border-t border-white/10 relative z-10 overflow-x-auto">
+          <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-white/10 overflow-x-auto">
             <button
               type="button"
               onClick={() => setActiveTab('identity')}
@@ -317,7 +316,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         )}
 
         {/* Tab Contents */}
-        <div className="p-6 sm:p-8 space-y-6">
+        <div className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1 min-h-0">
           {activeTab === 'identity' && (
             <div className="space-y-6 animate-fade-in">
               {/* Photo Studio Card */}
@@ -379,11 +378,6 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                         <h4 className="text-sm font-bold text-text-primary uppercase tracking-wide">
                           {t('horses.portraitPhoto', 'Ảnh Chân Dung Chiến Mã')}
                         </h4>
-                        <p className="text-xs text-text-secondary mt-0.5">
-                          {language === 'en'
-                            ? 'Upload an actual photo of your racehorse from your device (PNG, JPG, WEBP)'
-                            : 'Tải ảnh thực tế của chiến mã từ thiết bị (PNG, JPG, WEBP)'}
-                        </p>
                       </div>
                       <button
                         type="button"
@@ -468,9 +462,9 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
                   </label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
-                      { value: 'male' as const, label: language === 'en' ? 'Male' : 'Đực' },
-                      { value: 'female' as const, label: language === 'en' ? 'Female' : 'Cái' },
-                      { value: 'other' as const, label: language === 'en' ? 'Other' : 'Khác' },
+                      { value: 'male' as const, label: language === 'en' ? 'Stallion' : 'Đực giống' },
+                      { value: 'female' as const, label: language === 'en' ? 'Mare' : 'Cái' },
+                      { value: 'gelding' as const, label: language === 'en' ? 'Gelding' : 'Thiến' },
                     ].map((opt) => (
                       <button
                         key={opt.value}
@@ -572,7 +566,7 @@ export const AddHorseModal: React.FC<AddHorseModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="px-6 sm:px-8 py-4 bg-surface-muted border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="px-6 sm:px-8 py-3.5 bg-surface-muted border-t border-border flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 sticky bottom-0 z-10">
           <div className="flex items-center gap-2 text-xs text-text-secondary">
             <span className="w-2 h-2 rounded-full bg-success" />
             <span>{t('horses.autoSyncNotice', 'Hồ sơ tự động cập nhật vào danh sách chuồng nuôi cá nhân')}</span>

@@ -13,7 +13,7 @@ export interface TrackingMilestoneItem {
   plannedTime: string | null;
   actualTime: string | null;
   isCustomsBorder: boolean;
-  legType: 'road' | 'flight';
+  legType: 'road' | 'flight' | 'sea';
   responsibleRole: 'driver' | 'escort';
   notes: string | null;
   updatedBy: string | null;
@@ -33,6 +33,8 @@ export interface HorseHealthLogItem {
   conditionStatusVi?: string;
   temperatureC: number | null;
   heartRateBpm: number | null;
+  respiratoryRateBpm?: number | null;
+  routeStopId?: number | null;
   alertTier?: 'green' | 'amber_observational' | 'amber_escalatable' | 'red';
   alertReason?: string | null;
   notes: string | null;
@@ -159,11 +161,12 @@ export interface LiveTrackingLeg {
   legId: number;
   sequenceNo?: number;
   direction?: 'outbound' | 'return';
-  type?: 'road' | 'flight';
+  type?: 'road' | 'flight' | 'sea';
   legType?: string;
   originLocation?: string;
   destinationLocation?: string;
   status: string;
+  polyline?: Array<[number, number]>;
   polylineJson?: string | null;
 }
 
@@ -185,6 +188,7 @@ export interface LiveTrackingDetails {
   status: string;
   isSimulated?: boolean;
   simulation?: boolean;
+  simulationEnabled?: boolean;
   currentPosition?: LiveVehiclePosition | null;
   vehiclePosition?: LiveVehiclePosition | null;
   vehicle?: LiveVehiclePosition | null;
@@ -282,13 +286,53 @@ export interface AssignedTripSummary {
   destination_location: string;
   shipment_status: string;
   requested_date: string;
+  departure_date?: string | null;
+  expected_arrival_date?: string | null;
   requested_horse_count: number;
+  trip_type?: 'one_way' | 'round_trip' | string;
+  return_status?: string | null;
+  return_departure_at?: string | null;
   route_id: number;
   route_name: string;
   route_plan_status: string;
   total_distance_km: number | null;
+  strategic_notes?: string | null;
   role_in_shipment?: string;
   is_confirmed?: boolean | number;
+  confirmed_at?: string | null;
+  horses?: Array<{
+    id: number;
+    shipmentHorseId?: number;
+    name: string;
+    breed?: string;
+    microchipNo?: string;
+    passportNo?: string;
+  }>;
+  legs?: Array<{
+    legId: number;
+    sequenceNo: number;
+    legType: 'road' | 'flight' | 'sea' | string;
+    direction?: 'outbound' | 'return' | string;
+    originLocation: string;
+    destinationLocation: string;
+    status: string;
+    plannedDeparture?: string | null;
+    plannedArrival?: string | null;
+    actualDeparture?: string | null;
+    actualArrival?: string | null;
+    vehiclePlate?: string | null;
+    airlineName?: string | null;
+    flightNumber?: string | null;
+  }>;
+  stops?: Array<{
+    routeStopId: number;
+    legId?: number | null;
+    sequenceNo: number;
+    stopType: string;
+    locationName: string;
+    country?: string | null;
+    status: string;
+  }>;
 }
 
 export const trackingApi = {
@@ -373,6 +417,17 @@ export const trackingApi = {
     });
   },
 
+  uploadEvidencePhotos: async (shipmentId: number, files: File[]): Promise<{ files: string[] }> => {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+    return apiClient<{ files: string[] }>(`/tracking/shipments/${shipmentId}/evidence/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+
   uploadHealthPhotos: async (shipmentId: number, files: File[]): Promise<{ files: string[] }> => {
     const formData = new FormData();
     for (const file of files) {
@@ -393,6 +448,8 @@ export const trackingApi = {
       conditionStatus: 'stable' | 'not_eating' | 'stressed' | 'climate_change' | 'other';
       temperatureC?: number;
       heartRateBpm?: number;
+      respiratoryRate?: number;
+      routeStopId?: number;
       notes?: string;
       attachments?: string[];
       recordedAt?: string;

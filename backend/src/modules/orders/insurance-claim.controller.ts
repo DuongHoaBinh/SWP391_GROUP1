@@ -40,6 +40,7 @@ export class InsuranceClaimController {
   constructor(private readonly claimService: InsuranceClaimService) {}
 
   @Get('orders/:id/insurance/payout-table')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Bảng đền bù bằng tiền thật theo từng cá thể ngựa của đơn hàng' })
   getShipmentPayoutTable(
     @CurrentUser() user: AuthenticatedUser,
@@ -74,6 +75,7 @@ export class InsuranceClaimController {
   }
 
   @Get('orders/:id/claims')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem danh sách yêu cầu bồi thường của một đơn hàng' })
   listClaimsByShipment(
     @CurrentUser() user: AuthenticatedUser,
@@ -94,6 +96,7 @@ export class InsuranceClaimController {
   }
 
   @Get('insurance/claims/:claimId')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xem chi tiết yêu cầu bồi thường và lịch sử thẩm định' })
   getClaimById(
     @CurrentUser() user: AuthenticatedUser,
@@ -103,6 +106,7 @@ export class InsuranceClaimController {
   }
 
   @Get('insurance/claims/:claimId/evidence/:fileIndex')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Tải/Xem tệp bằng chứng bồi thường có phân quyền xác thực' })
   async getClaimEvidence(
     @CurrentUser() user: AuthenticatedUser,

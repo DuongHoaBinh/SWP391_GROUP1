@@ -6,9 +6,12 @@ import { apiClient } from '@/lib/api-client';
 import { InvoiceDocument, InvoiceDocumentData } from '@/features/orders/components/InvoiceDocument';
 import { Loader2, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
+import { useLanguage } from '@/lib/i18n/LanguageContext';
 
 export default function CustomerOrderInvoicePage() {
   const params = useParams();
+  const { language } = useLanguage();
+  const isEn = language === 'en';
   const id = params?.id as string;
   const [data, setData] = useState<InvoiceDocumentData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,19 +26,24 @@ export default function CustomerOrderInvoicePage() {
         setError(null);
       })
       .catch((err) => {
-        setError(err?.message || 'Không thể tải hóa đơn điện tử');
+        setError(
+          err?.message ||
+            (isEn ? 'Unable to load electronic invoice.' : 'Không thể tải hóa đơn điện tử.'),
+        );
       })
       .finally(() => {
         setLoading(false);
       });
-  }, [id]);
+  }, [id, isEn]);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
+      <div className="min-h-[60vh] flex items-center justify-center bg-[#F4F1E9] rounded-2xl">
         <div className="flex flex-col items-center space-y-3">
-          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
-          <p className="text-sm text-slate-500">Đang khởi tạo hóa đơn điện tử...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-[#A67C2E]" />
+          <p className="text-sm font-medium text-[#5F6977]">
+            {isEn ? 'Loading electronic invoice...' : 'Đang khởi tạo hóa đơn điện tử...'}
+          </p>
         </div>
       </div>
     );
@@ -43,23 +51,28 @@ export default function CustomerOrderInvoicePage() {
 
   if (error || !data) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
-        <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-xl shadow p-6 text-center border border-slate-200 dark:border-slate-700">
-          <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Chưa thể xem hóa đơn</h2>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-            {error || 'Hóa đơn chưa được phát hành hoặc bạn không có quyền xem hóa đơn này.'}
+      <div className="min-h-[60vh] flex items-center justify-center bg-[#F4F1E9] p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-sm p-6 text-center border border-[#D8CEBE]">
+          <AlertCircle className="w-12 h-12 text-[#B33E3E] mx-auto mb-3" />
+          <h2 className="text-lg font-extrabold text-[#181A17] mb-2">
+            {isEn ? 'Invoice Not Available' : 'Chưa thể xem hóa đơn'}
+          </h2>
+          <p className="text-sm text-[#5F6977] mb-6 leading-relaxed">
+            {error ||
+              (isEn
+                ? 'The invoice has not been issued yet or you do not have permission to view it.'
+                : 'Hóa đơn chưa được phát hành hoặc bạn không có quyền xem hóa đơn này.')}
           </p>
           <Link
-            href={`/customer/requests/${id}`}
-            className="inline-flex items-center justify-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm transition"
+            href={`/customer/requests/${id}?tab=payment`}
+            className="inline-flex items-center justify-center px-5 py-2.5 bg-[#181A17] hover:bg-[#2C2F2A] text-[#FAF8F4] font-bold rounded-xl text-sm transition no-underline"
           >
-            Quay lại chi tiết yêu cầu
+            {isEn ? 'Back to Order Details' : 'Quay lại chi tiết đơn hàng'}
           </Link>
         </div>
       </div>
     );
   }
 
-  return <InvoiceDocument data={data} backHref={`/customer/requests/${id}`} />;
+  return <InvoiceDocument data={data} backHref={`/customer/requests/${id}?tab=payment`} />;
 }

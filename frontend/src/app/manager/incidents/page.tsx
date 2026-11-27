@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { ManagerSectionTabs } from '@/components/layout/ManagerSectionTabs';
 import toast from 'react-hot-toast';
 import { useFleetRouteStore } from '@/lib/fleet-route-store';
 import { apiClient } from '@/lib/api-client';
@@ -43,6 +44,7 @@ export default function ManagerIncidentsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [filterMode, setFilterMode] = useState<'ALL' | 'CRITICAL' | 'UNACK'>('ALL');
+  const [activeTab, setActiveTab] = useState<'alerts' | 'proposals' | 'disputes'>('alerts');
   const [confirmAlert, setConfirmAlert] = useState<LiveOperationalAlert | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -206,23 +208,19 @@ export default function ManagerIncidentsPage() {
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-14">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-[#181A17] m-0">
-            {t('manager.incidents.title', 'Xử Lý Sự Cố Khẩn Cấp & Cảnh Báo Trực Tuyến')}
-          </h1>
-          <p className="text-sm text-[#5F6977] mt-1 mb-0">
-            {t('manager.incidents.subtitle', 'Xem xét sự cố trên đường đi, phê duyệt phương án chuyển hướng lộ trình và cấp phép ngân sách thú y khẩn cấp.')}
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-extrabold text-[#181A17] m-0">
+          {t('manager.incidents.title', 'Xử Lý Sự Cố & Cảnh Báo')}
+        </h1>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {activeTab === 'alerts' && (
           <div className="inline-flex rounded-xl border border-[#D8CEBE] bg-white p-1 text-xs">
             <button
               type="button"
               aria-pressed={filterMode === 'ALL'}
               onClick={() => setFilterMode('ALL')}
-              className={`min-h-[36px] px-3 rounded-lg font-semibold transition-colors cursor-pointer ${
+              className={`min-h-[34px] px-3 rounded-lg font-semibold transition-colors cursor-pointer ${
                 filterMode === 'ALL' ? 'bg-[#181A17] text-white' : 'text-[#5F6977] hover:text-[#181A17]'
               }`}
             >
@@ -232,31 +230,32 @@ export default function ManagerIncidentsPage() {
               type="button"
               aria-pressed={filterMode === 'UNACK'}
               onClick={() => setFilterMode('UNACK')}
-              className={`min-h-[36px] px-3 rounded-lg font-semibold transition-colors cursor-pointer ${
+              className={`min-h-[34px] px-3 rounded-lg font-semibold transition-colors cursor-pointer ${
                 filterMode === 'UNACK' ? 'bg-[#181A17] text-white' : 'text-[#5F6977] hover:text-[#181A17]'
               }`}
             >
-              {language === 'en' ? 'Unacknowledged' : 'Chờ xử lý'} (
+              {language === 'en' ? 'Pending' : 'Chờ xử lý'} (
               {combinedAlerts.filter((a) => !a.isAcknowledged).length})
             </button>
             <button
               type="button"
               aria-pressed={filterMode === 'CRITICAL'}
               onClick={() => setFilterMode('CRITICAL')}
-              className={`min-h-[36px] px-3 rounded-lg font-semibold transition-colors cursor-pointer ${
+              className={`min-h-[34px] px-3 rounded-lg font-semibold transition-colors cursor-pointer ${
                 filterMode === 'CRITICAL' ? 'bg-[#B33E3E] text-white' : 'text-[#5F6977] hover:text-[#181A17]'
               }`}
             >
-              CRITICAL ({combinedAlerts.filter((a) => a.severity === 'CRITICAL').length})
+              {language === 'en' ? 'Critical' : 'Nghiêm trọng'} ({combinedAlerts.filter((a) => a.severity === 'CRITICAL').length})
             </button>
           </div>
+          )}
 
           <Button
             variant="outline"
             size="sm"
             onClick={() => void fetchLiveAlerts()}
             disabled={loading}
-            className="min-h-[44px]"
+            className="min-h-[38px]"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
             {t('common.refresh', 'Làm mới')}
@@ -279,7 +278,34 @@ export default function ManagerIncidentsPage() {
         </div>
       )}
 
+      {/* Unified Incidents Hub Tabs */}
+      <ManagerSectionTabs
+        activeKey={activeTab}
+        onChange={(k) => setActiveTab(k as 'alerts' | 'proposals' | 'disputes')}
+        ariaLabel={language === 'en' ? 'Incidents & Alerts sections' : 'Các mục Sự cố & Cảnh báo'}
+        tabs={[
+          {
+            key: 'alerts',
+            label: language === 'en' ? 'Live Alerts & Incidents' : 'Cảnh Báo & Sự Cố',
+            icon: <ShieldAlert size={14} />,
+            badge: combinedAlerts.filter((a) => !a.isAcknowledged).length || undefined,
+            badgeTone: 'danger',
+          },
+          {
+            key: 'proposals',
+            label: language === 'en' ? 'Route & Cost Proposals' : 'Đề Xuất Đổi Tuyến & Chi Phí',
+            icon: <AlertTriangle size={14} />,
+          },
+          {
+            key: 'disputes',
+            label: language === 'en' ? 'Handover Disputes' : 'Tranh Chấp Bàn Giao',
+            icon: <CheckCircle size={14} />,
+          },
+        ]}
+      />
+
       {/* Critical & Live Fleet Alerts */}
+      {activeTab === 'alerts' && (
       <div className="flex flex-col gap-3">
         <h2 className="text-xs font-bold text-[#181A17] uppercase tracking-wider m-0 flex items-center gap-2">
           <ShieldAlert size={16} className="text-[#B33E3E]" aria-hidden="true" />
@@ -334,7 +360,15 @@ export default function ManagerIncidentsPage() {
                     )}
                     <span className="font-bold text-[#181A17] text-sm">• {translateIncident(alt.type)}</span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${severityBadgeClass(alt.severity)}`}>
-                      {translateSeverity(alt.severity)}
+                      {alt.severity === 'INFO'
+                        ? language === 'en'
+                          ? 'Info'
+                          : 'Thông tin'
+                        : alt.severity === 'WARNING'
+                          ? language === 'en'
+                            ? 'Warning'
+                            : 'Cảnh báo'
+                          : translateSeverity(alt.severity)}
                     </span>
                     <span className="text-xs text-[#5F6977]">
                       {alt.timeAgo ? translateTimeAgo(alt.timeAgo) : ''}
@@ -369,6 +403,7 @@ export default function ManagerIncidentsPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Confirmation Modal */}
       {confirmAlert && (
@@ -411,8 +446,8 @@ export default function ManagerIncidentsPage() {
         </Modal>
       )}
 
-      <IncidentChangeRequestsPanel mode="manager" />
-      <ManagerHandoverDisputesPanel />
+      {activeTab === 'proposals' && <IncidentChangeRequestsPanel mode="manager" hideDisputes />}
+      {activeTab === 'disputes' && <ManagerHandoverDisputesPanel />}
     </div>
   );
 }
