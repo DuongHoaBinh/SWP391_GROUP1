@@ -115,6 +115,8 @@ export const KNOWN_SEAPORTS: KnownSeaport[] = [
 
   // Trung Đông
   { code: 'AE-DXB', name: 'Cảng Jebel Ali (Dubai, UAE)', country: 'UAE', coords: [25.0112, 55.0612], international: true },
+  { code: 'AE-AUH', name: 'Cảng Khalifa (Abu Dhabi, UAE)', country: 'UAE', coords: [24.81, 54.65], international: true },
+  { code: 'OM-MCT', name: 'Cảng Sultan Qaboos (Muscat, Oman)', country: 'Oman', coords: [23.628, 58.57], international: true },
   { code: 'QA-DOH', name: 'Cảng Hamad (Doha, Qatar)', country: 'Qatar', coords: [25.025, 51.62], international: true },
   { code: 'SA-DMM', name: 'Cảng King Abdulaziz (Dammam, Ả Rập Xê Út)', country: 'Ả Rập Xê Út', coords: [26.44, 50.15], international: true },
   { code: 'SA-JED', name: 'Cảng Jeddah Islamic Port (Ả Rập Xê Út)', country: 'Ả Rập Xê Út', coords: [21.4858, 39.17], international: true },
@@ -130,13 +132,21 @@ export const KNOWN_SEAPORTS: KnownSeaport[] = [
   { code: 'BE-ANR', name: 'Cảng Antwerp (Bỉ)', country: 'Bỉ', coords: [51.265, 4.35], international: true },
   { code: 'NL-RTM', name: 'Cảng Rotterdam (Hà Lan)', country: 'Hà Lan', coords: [51.95, 4.135], international: true },
   { code: 'FR-LEH', name: 'Cảng Le Havre (Pháp)', country: 'Pháp', coords: [49.475, 0.115], international: true },
+  { code: 'FR-MRS', name: 'Cảng Marseille-Fos (Pháp)', country: 'Pháp', coords: [43.34, 5.33], international: true },
   { code: 'GB-FXT', name: 'Cảng Felixstowe (Vương quốc Anh)', country: 'Vương quốc Anh', coords: [51.955, 1.32], international: true },
+  { code: 'GB-SOU', name: 'Cảng Southampton (Vương quốc Anh)', country: 'Vương quốc Anh', coords: [50.897, -1.404], international: true },
+  { code: 'IE-DUB', name: 'Cảng Dublin (Ireland)', country: 'Ireland', coords: [53.347, -6.205], international: true },
   { code: 'DE-HAM', name: 'Cảng Hamburg (Đức)', country: 'Đức', coords: [53.525, 9.935], international: true },
   { code: 'ES-BCN', name: 'Cảng Barcelona (Tây Ban Nha)', country: 'Tây Ban Nha', coords: [41.345, 2.165], international: true },
   { code: 'IT-GOA', name: 'Cảng Genoa (Ý)', country: 'Ý', coords: [44.405, 8.915], international: true },
+  { code: 'IT-NAP', name: 'Cảng Naples (Ý)', country: 'Ý', coords: [40.84, 14.27], international: true },
+  { code: 'TR-IST', name: 'Cảng Ambarli / Istanbul (Thổ Nhĩ Kỳ)', country: 'Thổ Nhĩ Kỳ', coords: [40.97, 28.69], international: true },
 
   // Bắc Mỹ
   { code: 'US-LAX', name: 'Cảng Los Angeles / Long Beach (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [33.74, -118.27], international: true },
+  { code: 'US-OAK', name: 'Cảng Oakland / San Francisco (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [37.795, -122.28], international: true },
+  { code: 'US-SEA', name: 'Cảng Seattle (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [47.58, -122.35], international: true },
+  { code: 'CA-VAN', name: 'Cảng Vancouver (Canada)', country: 'Canada', coords: [49.29, -123.11], international: true },
   { code: 'US-NYC', name: 'Cảng New York / New Jersey (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [40.67, -74.14], international: true },
   { code: 'US-SAV', name: 'Cảng Savannah (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [32.13, -81.15], international: true },
   { code: 'US-MIA', name: 'Cảng PortMiami (Hoa Kỳ)', country: 'Hoa Kỳ', coords: [25.775, -80.17], international: true },

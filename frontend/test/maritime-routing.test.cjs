@@ -380,7 +380,7 @@ test('All maritime graph edges and key global smoothed routes avoid island and c
   }
 });
 
-test('Cross-border coastal city falls back to nearest international seaport within 400 km (Barcelona -> Nice/Genoa <= 7d)', () => {
+test('Mediterranean coastal city uses nearest French Mediterranean seaport (Barcelona -> Nice via Marseille-Fos)', () => {
   const medRoute = geo.buildEquineRoute(
     'Barcelona, Spain',
     'Nice, France',
@@ -393,8 +393,8 @@ test('Cross-border coastal city falls back to nearest international seaport with
   );
   assert.equal(medRoute.seaUnavailableNotice, null);
   const seaLeg = medRoute.legs.find((l) => l.type === 'sea');
-  assert.ok(seaLeg, 'Expected sea leg for Barcelona -> Nice via Genoa port');
-  assert.ok(seaLeg.toName.includes('Genoa'), `Expected Genoa seaport, got ${seaLeg.toName}`);
+  assert.ok(seaLeg, 'Expected sea leg for Barcelona -> Nice via Marseille-Fos port');
+  assert.ok(seaLeg.toName.includes('Marseille'), `Expected Marseille seaport, got ${seaLeg.toName}`);
 });
 
 test('ASEAN+China multi-hop sea routes include 12h port-call penalty and render curved legs even >168h', () => {

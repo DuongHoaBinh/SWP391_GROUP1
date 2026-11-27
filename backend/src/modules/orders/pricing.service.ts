@@ -391,6 +391,18 @@ export class PricingService {
         }
       }
 
+      const MAX_AIRPORT_TRANSFER_KM = 900;
+      if (
+        minDeptDist > MAX_AIRPORT_TRANSFER_KM ||
+        minArrDist > MAX_AIRPORT_TRANSFER_KM ||
+        isRoadSeparatedByOcean(origin, { lat: deptAirport.lat, lng: deptAirport.lng }) ||
+        isRoadSeparatedByOcean({ lat: arrAirport.lat, lng: arrAirport.lng }, destination)
+      ) {
+        throw new UnprocessableEntityException(
+          'Chưa có sân bay tiếp nhận ngựa đua trong bán kính hợp lý (≤ 900 km, nối liền đường bộ) gần điểm đón hoặc điểm giao.',
+        );
+      }
+
       if (deptAirport.id === arrAirport.id) {
         throw new UnprocessableEntityException(
           `Điểm đón và điểm giao cùng dùng chung sân bay gần nhất (${deptAirport.name}). Vui lòng chọn phương thức Đường bộ.`,
