@@ -151,13 +151,18 @@ const STATUS_ALIASES: Record<string, string> = {
 const DOC_TYPE_DATA: Record<string, { en: string; vi: string }> = {
   horse_passport: { en: 'FEI Equine International Passport', vi: 'Hộ chiếu ngựa quốc tế FEI' },
   passport: { en: 'FEI Equine International Passport', vi: 'Hộ chiếu ngựa quốc tế FEI' },
+  microchip_certificate: { en: 'Microchip Identification Certificate', vi: 'Giấy chứng nhận vi mạch (Microchip)' },
   health_certificate: { en: 'International Veterinary Health Certificate', vi: 'Giấy chứng nhận kiểm dịch thú y quốc tế' },
   health_cert: { en: 'International Veterinary Health Certificate', vi: 'Giấy chứng nhận kiểm dịch thú y' },
+  vaccination_tetanus: { en: 'Tetanus Vaccination Certificate', vi: 'Chứng nhận tiêm phòng uốn ván' },
+  vaccination_influenza: { en: 'Equine Influenza Vaccination Certificate', vi: 'Chứng nhận tiêm phòng cúm ngựa' },
   vaccination_certificate: { en: 'Equine Influenza Vaccination Certificate', vi: 'Chứng nhận tiêm phòng cúm ngựa' },
   vaccination_record: { en: 'Equine Influenza Vaccination Certificate', vi: 'Chứng nhận tiêm phòng cúm ngựa' },
+  export_quarantine_certificate: { en: 'Export Quarantine Clearance Certificate', vi: 'Giấy chứng nhận kiểm dịch xuất khẩu' },
   quarantine_certificate: { en: 'Quarantine Isolation Clearance Certificate', vi: 'Chứng nhận cách ly kiểm dịch xuất khẩu' },
   import_permit: { en: 'Live Animal Import & Transit Permit', vi: 'Giấy phép nhập cảnh & hải quan ngựa' },
   export_permit: { en: 'Live Animal Export Quarantine Permit', vi: 'Giấy phép kiểm dịch xuất khẩu' },
+  eia_coggins_test: { en: 'Equine Infectious Anemia (Coggins) Certificate', vi: 'Chứng nhận xét nghiệm máu Coggins (EIA)' },
   coggins_test: { en: 'Equine Infectious Anemia (Coggins) Certificate', vi: 'Chứng nhận xét nghiệm máu Coggins (EIA)' },
   ownership_certificate: { en: 'Equine Ownership & Registration Certificate', vi: 'Chứng nhận sở hữu & đăng ký chiến mã' },
   customs_declaration: { en: 'Live Animal Customs Transit Declaration', vi: 'Tờ khai hải quan quá cảnh ngựa' },
@@ -446,49 +451,66 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (docType?: string | null, customTitle?: string | null): string => {
       if (!docType && !customTitle) return '';
       const raw = String(docType || customTitle).trim();
+      const rawLower = raw.toLowerCase();
+      const lower = rawLower.replace(/[\s-]+/g, '_');
 
-      // Clean bilingual parentheses
-      const parenMatch = raw.match(/^(.+?)\s*\((.+?)\)$/);
-      if (parenMatch) {
-        const first = parenMatch[1].trim();
-        const second = parenMatch[2].trim();
-        if (language === 'en') {
-          if (/^[A-Za-z0-9\s_&/-]+$/.test(first)) return first;
-          if (/^[A-Za-z0-9\s_&/-]+$/.test(second)) return second;
-        } else {
-          if (!/^[A-Za-z0-9\s_&/-]+$/.test(second)) return second;
-          if (!/^[A-Za-z0-9\s_&/-]+$/.test(first)) return first;
-        }
+      // 2a. Exact dictionary key match first (prevents e.g. export_quarantine_certificate matching quarantine_certificate)
+      if (DOC_TYPE_DATA[lower]) {
+        return DOC_TYPE_DATA[lower][language];
       }
 
-      const lower = raw.toLowerCase().replace(/[\s-]+/g, '_');
+      // 2b. Dictionary key/label substring match
       for (const [k, v] of Object.entries(DOC_TYPE_DATA)) {
-        if (lower.includes(k) || raw.toLowerCase().includes(v.en.toLowerCase()) || raw.toLowerCase().includes(v.vi.toLowerCase())) {
+        if (lower.includes(k) || rawLower.includes(v.en.toLowerCase()) || rawLower.includes(v.vi.toLowerCase())) {
           return v[language];
         }
       }
 
-      // Specific known Vietnamese keywords
-      if (raw.toLowerCase().includes('hộ chiếu') || raw.toLowerCase().includes('passport')) {
+      // 2c. Specific known Vietnamese/English keywords (more specific rules before generic ones)
+      if (rawLower.includes('hộ chiếu') || rawLower.includes('passport')) {
         return DOC_TYPE_DATA.horse_passport[language];
       }
-      if (raw.toLowerCase().includes('tiêm phòng') || raw.toLowerCase().includes('cúm') || raw.toLowerCase().includes('vaccin')) {
+      if (rawLower.includes('uốn ván') || rawLower.includes('tetanus')) {
+        return DOC_TYPE_DATA.vaccination_tetanus[language];
+      }
+      if (rawLower.includes('tiêm phòng') || rawLower.includes('tiêm chủng') || rawLower.includes('cúm') || rawLower.includes('vaccin')) {
         return DOC_TYPE_DATA.vaccination_certificate[language];
       }
-      if (raw.toLowerCase().includes('coggins') || raw.toLowerCase().includes('eia')) {
+      if (rawLower.includes('coggins') || rawLower.includes('eia')) {
         return DOC_TYPE_DATA.coggins_test[language];
       }
-      if (raw.toLowerCase().includes('kiểm dịch') && raw.toLowerCase().includes('xuất')) {
-        return DOC_TYPE_DATA.export_permit[language];
+      if (rawLower.includes('vi mạch') || rawLower.includes('microchip')) {
+        return DOC_TYPE_DATA.microchip_certificate[language];
       }
-      if (raw.toLowerCase().includes('kiểm dịch') && raw.toLowerCase().includes('nhập')) {
+      if ((rawLower.includes('giấy phép') && (rawLower.includes('nhập') || rawLower.includes('import'))) || rawLower.includes('nhập cảnh')) {
         return DOC_TYPE_DATA.import_permit[language];
       }
-      if (raw.toLowerCase().includes('kiểm dịch') || raw.toLowerCase().includes('thú y')) {
+      if (rawLower.includes('kiểm dịch') && rawLower.includes('xuất')) {
+        return DOC_TYPE_DATA.export_permit[language];
+      }
+      if (rawLower.includes('kiểm dịch') && rawLower.includes('nhập')) {
+        return DOC_TYPE_DATA.import_permit[language];
+      }
+      if (rawLower.includes('kiểm dịch') || rawLower.includes('thú y') || rawLower.includes('sức khỏe')) {
         return DOC_TYPE_DATA.health_certificate[language];
       }
-      if (raw.toLowerCase().includes('hải quan') || raw.toLowerCase().includes('customs')) {
+      if (rawLower.includes('hải quan') || rawLower.includes('customs')) {
         return DOC_TYPE_DATA.customs_declaration[language];
+      }
+
+      // 2d. Clean genuine bilingual parentheses (only when one side is ASCII English and the other is non-ASCII Vietnamese)
+      const parenMatch = raw.match(/^(.+?)\s*\((.+?)\)$/);
+      if (parenMatch) {
+        const first = parenMatch[1].trim();
+        const second = parenMatch[2].trim();
+        const isFirstAscii = /^[A-Za-z0-9\s_&/-]+$/.test(first);
+        const isSecondAscii = /^[A-Za-z0-9\s_&/-]+$/.test(second);
+        if (isFirstAscii !== isSecondAscii) {
+          if (language === 'en') {
+            return isFirstAscii ? first : second;
+          }
+          return isSecondAscii ? first : second;
+        }
       }
 
       return customTitle || raw;

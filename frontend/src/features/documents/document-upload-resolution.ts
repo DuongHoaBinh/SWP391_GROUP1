@@ -24,7 +24,7 @@ export function parseOptionalPositiveId(value?: number | string | null): number 
   const trimmed = String(value).trim();
   if (!trimmed) return undefined;
   const num = Number(trimmed);
-  if (!Number.isFinite(num) || num <= 0) return undefined;
+  if (!Number.isInteger(num) || num <= 0) return undefined;
   return num;
 }
 
@@ -54,9 +54,11 @@ export function getDocTypeAliases(value?: string | null): string[] {
     token.includes('cúm') ||
     token === 'vaccination_certificate' ||
     token === 'vaccination_influenza' ||
+    token === 'vaccination_record' ||
     token === 'vaccine' ||
     token === 'vaccination' ||
-    token.includes('tiêm_phòng')
+    token.includes('tiêm_phòng') ||
+    token.includes('tiêm_chủng')
   ) {
     aliases.add('vaccination_certificate');
     aliases.add('vaccination_influenza');
@@ -80,7 +82,8 @@ export function getDocTypeAliases(value?: string | null): string[] {
   if (
     token === 'health_certificate' ||
     token.includes('health_cert') ||
-    token.includes('sức_khỏe')
+    token.includes('sức_khỏe') ||
+    (token.includes('kiểm_dịch') && token.includes('thú_y'))
   ) {
     aliases.add('health_certificate');
   }
@@ -190,9 +193,10 @@ export function resolveInitialRegulation(
 }
 
 /**
- * Determine arguments for `translateDocType(docType, customTitle)` in the modal summary row.
- * When re-uploading, always prefer the document's own title / docType so an unlinked or unmatched
- * regulation can never overwrite the displayed document type.
+ * Determine arguments for `translateDocType(docType, customTitle)` in the modal summary row & title.
+ * When re-uploading, prefer the document's canonical `defaultDocType` first (with `reuploadTitle`
+ * as `customTitle` fallback) so canonical codes translate cleanly in VI/EN while custom/unlinked
+ * document titles are preserved and can never be overwritten by an unrelated regulation.
  */
 export function resolveSummaryDocTypeArgs(
   options: SummaryDocTypeOptions,
@@ -200,14 +204,14 @@ export function resolveSummaryDocTypeArgs(
   const reuploadTitle = options.reuploadTitle?.trim() || '';
   const defaultDocType = options.defaultDocType?.trim() || '';
   const regDocType =
-    options.currentRegulation?.documentType?.trim() ||
     options.currentRegulation?.documentTypeCode?.trim() ||
+    options.currentRegulation?.documentType?.trim() ||
     '';
   const regDescription = options.currentRegulation?.description?.trim() || '';
 
   if (options.isReupload) {
     return {
-      docType: reuploadTitle || defaultDocType || regDocType || 'Hồ sơ kiểm dịch',
+      docType: defaultDocType || reuploadTitle || regDocType || 'Hồ sơ kiểm dịch',
       customTitle: reuploadTitle || regDescription || undefined,
     };
   }

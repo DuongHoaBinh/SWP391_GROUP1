@@ -265,7 +265,7 @@ function DocumentsHubContent() {
       const q = searchQuery.toLowerCase();
       return (
         doc.title.toLowerCase().includes(q) ||
-        translateDocType(doc.title).toLowerCase().includes(q) ||
+        translateDocType(doc.rawDocType || doc.title, doc.title).toLowerCase().includes(q) ||
         doc.requestCode.toLowerCase().includes(q) ||
         doc.horseName.toLowerCase().includes(q) ||
         doc.id.toLowerCase().includes(q)
@@ -786,7 +786,7 @@ function DocumentsHubContent() {
                                 </div>
                                 <div className="min-w-0">
                                   <div className="font-semibold text-[#181A17] text-sm leading-snug">
-                                    {translateDocType(doc.title)}
+                                    {translateDocType(doc.rawDocType || doc.title, doc.title)}
                                   </div>
                                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                                     <span className="text-[11px] font-mono font-semibold text-[#5F6977] bg-[#F0EEE8] px-2 py-0.5 rounded border border-[#D8CEBE] shrink-0">

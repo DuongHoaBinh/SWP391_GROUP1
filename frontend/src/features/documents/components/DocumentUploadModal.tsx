@@ -210,23 +210,25 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         );
       }
 
+      let allMappedOrders: OrderOption[] = [];
       let mappedOrders: OrderOption[] = [];
       if (ordersRes.status === 'fulfilled' && Array.isArray(ordersRes.value)) {
-        mappedOrders = ordersRes.value
-          .map((item: any) => ({
-            id: item.id || item.shipment_id,
-            requestCode: item.requestCode || `REQ-${String(item.id || item.shipment_id).padStart(3, '0')}`,
-            origin: item.originLocation || item.origin_location || 'Vietnam',
-            destination: item.destinationLocation || item.destination_location || 'Singapore',
-            destinationCountry: detectCountry(item.destinationLocation || item.destination_location || ''),
-            status: item.status || 'requested',
-            horses: (item.horses || []).map((h: any) => ({
-              id: Number(h.horseId || h.horse_id || h.id),
-              name: h.name || 'Racehorse',
-              breed: h.breed,
-            })),
-          }))
+        allMappedOrders = ordersRes.value.map((item: any) => ({
+          id: item.id || item.shipment_id,
+          requestCode: item.requestCode || `REQ-${String(item.id || item.shipment_id).padStart(3, '0')}`,
+          origin: item.originLocation || item.origin_location || 'Vietnam',
+          destination: item.destinationLocation || item.destination_location || 'Singapore',
+          destinationCountry: detectCountry(item.destinationLocation || item.destination_location || ''),
+          status: item.status || 'requested',
+          horses: (item.horses || []).map((h: any) => ({
+            id: Number(h.horseId || h.horse_id || h.id),
+            name: h.name || 'Racehorse',
+            breed: h.breed,
+          })),
+        }));
+        mappedOrders = allMappedOrders
           .filter((o) => {
+            if (defaultOrderId && String(o.id) === String(defaultOrderId)) return true;
             const s = String(o.status || '').toLowerCase();
             return s !== 'rejected' && s !== 'cancelled';
           })
@@ -264,8 +266,10 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         setRegulations(fetchedRegs);
       }
 
-      let initialOrder = mappedOrders.find((o) => defaultOrderId && String(o.id) === String(defaultOrderId));
-      if (!initialOrder && mappedOrders.length > 0) {
+      let initialOrder = defaultOrderId
+        ? allMappedOrders.find((o) => String(o.id) === String(defaultOrderId))
+        : undefined;
+      if (!initialOrder && !defaultOrderId && !isReupload && mappedOrders.length > 0) {
         initialOrder = mappedOrders[0];
       }
 
@@ -333,6 +337,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   useEffect(() => {
     if (!isOpen) {
       reset({ orderId: '', horseId: '', regulationId: '', docNumber: '', file: undefined });
+      setSelectedOrderId('');
       setIsDone(false);
       setIsDragging(false);
       setShowAllRegulations(false);
@@ -510,17 +515,18 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         return;
       }
 
+      const submittedDocTypeArgs = resolveSummaryDocTypeArgs({
+        isReupload,
+        reuploadTitle: uploadedDocFromApi?.regulationTitle || reuploadTitle,
+        defaultDocType:
+          uploadedDocFromApi?.documentTypeCode ||
+          uploadedDocFromApi?.regulationDocType ||
+          uploadedDocFromApi?.docType ||
+          defaultDocType,
+        currentRegulation: selectedReg,
+      });
       const docTitle = isReupload
-        ? translateDocType(
-            uploadedDocFromApi?.regulationTitle ||
-              uploadedDocFromApi?.regulationDocType ||
-              uploadedDocFromApi?.docType ||
-              reuploadTitle ||
-              defaultDocType ||
-              selectedReg?.description ||
-              selectedReg?.documentType ||
-              'Giấy chứng nhận',
-          )
+        ? translateDocType(submittedDocTypeArgs.docType, submittedDocTypeArgs.customTitle)
         : selectedReg?.description || selectedReg?.documentType || 'Giấy chứng nhận';
       const requestCode = currentOrder?.requestCode || `TR-HORSE-${data.horseId}`;
 
@@ -586,12 +592,18 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       clearTimeout(timeoutRef.current);
     }
     reset({ orderId: '', horseId: '', regulationId: '', docNumber: '', file: undefined });
+    setSelectedOrderId('');
     setIsDone(false);
     setIsDragging(false);
     setShowAllRegulations(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     onClose();
   };
+
+  const resolvedSummaryDocLabel = translateDocType(
+    summaryDocTypeArgs.docType,
+    summaryDocTypeArgs.customTitle,
+  );
 
   return (
     <Modal
@@ -600,7 +612,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       closeDisabled={isUploading}
       title={
         reuploadDocId
-          ? `${t('documents.reuploadTitle', 'Cập Nhật / Nộp Lại')}: ${translateDocType(reuploadTitle || defaultDocType || 'Hồ Sơ')}`
+          ? `${t('documents.reuploadTitle', 'Cập Nhật / Nộp Lại')}: ${resolvedSummaryDocLabel || t('documents.defaultTitle', 'Hồ Sơ')}`
           : t('documents.uploadTitle', 'Tải Lên Hồ Sơ Kiểm Dịch & Pháp Lý')
       }
       subtitle={
@@ -669,30 +681,32 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           </div>
         )}
 
-        {defaultOrderId ? (
+        {defaultOrderId || isReupload ? (
           <>
             <input type="hidden" {...register('horseId')} />
             <input type="hidden" {...register('regulationId')} />
             <div className="bg-[#F0EEE8] border border-[#D8CEBE] rounded-xl p-3.5 flex flex-col gap-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-bold text-[#181A17] bg-[#FFFFFF] border border-[#D8CEBE] px-2.5 py-1 rounded-md font-mono">
-                  {currentOrder?.requestCode || `REQ-${String(defaultOrderId).padStart(3, '0')}`}
-                </span>
-                <span className="text-xs text-[#5B6779] font-medium">
-                  {t('common.destination', 'Điểm đến')}:{' '}
-                  <strong className="text-[#181A17]">
-                    {currentOrder?.destinationCountry ? translateCountry(currentOrder.destinationCountry) : currentOrder?.destination || (language === 'en' ? 'Destination' : 'Điểm đến')}
-                  </strong>
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-2 border-t border-[#D8CEBE]/80">
+              {(defaultOrderId || currentOrder) && (
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#D8CEBE]/80">
+                  <span className="text-xs font-bold text-[#181A17] bg-[#FFFFFF] border border-[#D8CEBE] px-2.5 py-1 rounded-md font-mono">
+                    {currentOrder?.requestCode || `REQ-${String(defaultOrderId).padStart(3, '0')}`}
+                  </span>
+                  <span className="text-xs text-[#5B6779] font-medium">
+                    {t('common.destination', 'Điểm đến')}:{' '}
+                    <strong className="text-[#181A17]">
+                      {currentOrder?.destinationCountry ? translateCountry(currentOrder.destinationCountry) : currentOrder?.destination || (language === 'en' ? 'Destination' : 'Điểm đến')}
+                    </strong>
+                  </span>
+                </div>
+              )}
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                 <span className="text-[#5B6779] font-medium">
                   {t('customer.table.horse', 'Chiến mã')}: <strong className="text-[#181A17]">{selectedHorseNameDisplay}</strong>
                 </span>
                 <span className="text-[#5B6779] font-medium">
                   {t('documents.docTypeLabel', 'Loại giấy tờ')}:{' '}
                   <strong className="text-[#966516]">
-                    {translateDocType(summaryDocTypeArgs.docType, summaryDocTypeArgs.customTitle)}
+                    {resolvedSummaryDocLabel}
                   </strong>
                 </span>
               </div>
