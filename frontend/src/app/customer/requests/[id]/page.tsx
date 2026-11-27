@@ -31,6 +31,7 @@ import { useCustomerStore } from '@/lib/customer-store';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { BatchDocumentUploadModal } from '@/features/documents/components/BatchDocumentUploadModal';
 import { HorseDocumentUploadModal } from '@/features/documents/components/HorseDocumentVault';
+import { parseOptionalPositiveId } from '@/features/documents/document-upload-resolution';
 import { apiClient, openAuthenticatedDocument } from '@/lib/api-client';
 import { Modal } from '@/components/ui/Modal';
 import { OrderComplianceChecklist } from '@/features/documents/api/documents.api';
@@ -385,6 +386,7 @@ export default function RequestDetailPage() {
   const [reuploadTarget, setReuploadTarget] = useState<{
     docId: number;
     title: string;
+    docType?: string;
     horseId?: number | string;
     regulationId?: number | string;
   } | null>(null);
@@ -693,15 +695,17 @@ export default function RequestDetailPage() {
   };
 
   const handleOpenReupload = (doc: any, horseId: number | string) => {
+    const resolvedRegulationId = parseOptionalPositiveId(doc.regulationId);
     setReuploadTarget({
       docId: doc.id,
-      title: doc.regulationTitle || doc.docType || (language === 'en' ? 'Document' : 'Hồ sơ'),
+      title: doc.regulationTitle || doc.regulationDocType || doc.docType || (language === 'en' ? 'Document' : 'Hồ sơ'),
+      docType: doc.documentTypeCode || doc.regulationDocType || doc.docType || undefined,
       horseId,
-      regulationId: doc.regulationId,
+      regulationId: resolvedRegulationId,
     });
     setUploadTarget({
       horseId,
-      regulationId: doc.regulationId,
+      regulationId: resolvedRegulationId,
     });
     setIsUploadOpen(true);
   };
@@ -2125,6 +2129,7 @@ export default function RequestDetailPage() {
         defaultOrderId={request.id}
         defaultHorseId={uploadTarget?.horseId}
         defaultRegulationId={uploadTarget?.regulationId}
+        defaultDocType={reuploadTarget?.docType}
         reuploadDocId={reuploadTarget?.docId}
         reuploadTitle={reuploadTarget?.title}
         onSwitchToBatch={() => handleOpenBatchUpload()}

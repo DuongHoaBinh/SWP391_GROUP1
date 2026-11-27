@@ -21,6 +21,11 @@ import {
 import { DocumentItem } from '@/lib/types';
 import { useOptionalDocumentStore } from '@/lib/document-store';
 import { documentsApi, RegulationItem } from '../api/documents.api';
+import {
+  parseOptionalPositiveId,
+  resolveInitialRegulation,
+  resolveSummaryDocTypeArgs,
+} from '../document-upload-resolution';
 import { apiClient } from '@/lib/api-client';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import toast from 'react-hot-toast';
@@ -29,14 +34,16 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
 const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
 
-function buildUploadSchema(language: 'en' | 'vi') {
+function buildUploadSchema(language: 'en' | 'vi', isReupload = false) {
   const isEn = language === 'en';
   return z.object({
     orderId: z.string().optional(),
     horseId: z.string().min(1, isEn ? 'Please select a horse' : 'Vui lòng chọn con ngựa'),
-    regulationId: z
-      .string()
-      .min(1, isEn ? 'Please select a document type / regulation' : 'Vui lòng chọn loại giấy tờ / quy định'),
+    regulationId: isReupload
+      ? z.string().optional()
+      : z
+          .string()
+          .min(1, isEn ? 'Please select a document type / regulation' : 'Vui lòng chọn loại giấy tờ / quy định'),
     docNumber: z.string().optional(),
     file: z
       .any()
@@ -67,6 +74,7 @@ interface DocumentUploadModalProps {
   defaultOrderId?: number | string;
   defaultHorseId?: number | string;
   defaultRegulationId?: number | string;
+  defaultDocType?: string;
   reuploadDocId?: number;
   reuploadTitle?: string;
   onSwitchToBatch?: () => void;
@@ -118,11 +126,14 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   defaultOrderId,
   defaultHorseId,
   defaultRegulationId,
+  defaultDocType,
   reuploadDocId,
   reuploadTitle,
   onSwitchToBatch,
 }) => {
   const { t, language, translateDocType, translateCountry } = useLanguage();
+  const isReupload = Boolean(reuploadDocId);
+  const validDefaultRegulationId = parseOptionalPositiveId(defaultRegulationId);
   const [isUploading, setIsUploading] = useState(false);
   const [isDone, setIsDone] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -141,7 +152,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   const langRef = useRef(language);
   langRef.current = language;
 
-  const uploadSchema = useMemo(() => buildUploadSchema(language), [language]);
+  const uploadSchema = useMemo(() => buildUploadSchema(language, isReupload), [language, isReupload]);
 
   useEffect(() => {
     return () => {
@@ -258,6 +269,23 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         initialOrder = mappedOrders[0];
       }
 
+      const resolveRegulationValue = (destinationCountry?: string) => {
+        const matchedReg = resolveInitialRegulation(fetchedRegs, {
+          defaultRegulationId,
+          defaultDocType,
+          reuploadTitle,
+          destinationCountry,
+          isReupload,
+        });
+        if (matchedReg) {
+          setValue('regulationId', String(matchedReg.id));
+        } else if (validDefaultRegulationId && fetchedRegs.length === 0) {
+          setValue('regulationId', String(validDefaultRegulationId));
+        } else {
+          setValue('regulationId', '');
+        }
+      };
+
       if (initialOrder) {
         const ordIdStr = String(initialOrder.id);
         setSelectedOrderId(ordIdStr);
@@ -272,34 +300,15 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           }
         }
 
-        if (defaultRegulationId) {
-          setValue('regulationId', String(defaultRegulationId));
-        } else {
-          const matchingReg =
-            fetchedRegs.find(
-              (r) => r.country.toLowerCase() === initialOrder?.destinationCountry.toLowerCase()
-            ) ||
-            fetchedRegs.find((r) => r.country.toLowerCase() === 'global baseline');
-          if (matchingReg) {
-            setValue('regulationId', String(matchingReg.id));
-          } else if (fetchedRegs.length > 0) {
-            setValue('regulationId', String(fetchedRegs[0].id));
-          }
-        }
+        resolveRegulationValue(initialOrder.destinationCountry);
       } else if (fetchedHorses.length > 0) {
         setSelectedOrderId('direct');
         setValue('orderId', 'direct');
         setValue('horseId', defaultHorseId ? String(defaultHorseId) : String(fetchedHorses[0].id));
-        if (defaultRegulationId) {
-          setValue('regulationId', String(defaultRegulationId));
-        } else if (fetchedRegs.length > 0) {
-          setValue('regulationId', String(fetchedRegs[0].id));
-        }
+        resolveRegulationValue(undefined);
       } else if (defaultHorseId) {
         setValue('horseId', String(defaultHorseId));
-        if (defaultRegulationId) {
-          setValue('regulationId', String(defaultRegulationId));
-        }
+        resolveRegulationValue(undefined);
       }
     } catch (err: any) {
       console.error('Failed to load upload options', err);
@@ -310,11 +319,20 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     } finally {
       setIsLoadingOptions(false);
     }
-  }, [defaultOrderId, defaultHorseId, defaultRegulationId, setValue]);
+  }, [
+    defaultOrderId,
+    defaultHorseId,
+    defaultRegulationId,
+    validDefaultRegulationId,
+    defaultDocType,
+    reuploadTitle,
+    isReupload,
+    setValue,
+  ]);
 
   useEffect(() => {
     if (!isOpen) {
-      reset({ docNumber: '', file: undefined });
+      reset({ orderId: '', horseId: '', regulationId: '', docNumber: '', file: undefined });
       setIsDone(false);
       setIsDragging(false);
       setShowAllRegulations(false);
@@ -396,9 +414,9 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       : regulations;
 
   const availableRegulations = [...rawRegulations];
-  if (defaultRegulationId) {
-    const targetReg = regulations.find((r) => String(r.id) === String(defaultRegulationId));
-    if (targetReg && !availableRegulations.some((r) => String(r.id) === String(defaultRegulationId))) {
+  if (validDefaultRegulationId) {
+    const targetReg = regulations.find((r) => Number(r.id) === validDefaultRegulationId);
+    if (targetReg && !availableRegulations.some((r) => Number(r.id) === validDefaultRegulationId)) {
       availableRegulations.unshift(targetReg);
     }
   }
@@ -409,8 +427,16 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     allHorses.find((h) => String(h.id) === String(selectedHorseId));
   const selectedHorseNameDisplay = selectedHorse?.name || (language === 'en' ? 'Selected Horse' : 'Ngựa được chọn');
 
-  const selectedRegulationId = watch('regulationId') || defaultRegulationId;
-  const currentRegulation = regulations.find((r) => String(r.id) === String(selectedRegulationId));
+  const selectedRegulationId = parseOptionalPositiveId(watch('regulationId')) ?? validDefaultRegulationId;
+  const currentRegulation = selectedRegulationId
+    ? regulations.find((r) => Number(r.id) === selectedRegulationId)
+    : undefined;
+  const summaryDocTypeArgs = resolveSummaryDocTypeArgs({
+    isReupload,
+    reuploadTitle,
+    defaultDocType,
+    currentRegulation,
+  });
 
   // Keep form steps implicit without noisy numbered prefixes
   const showHorseSelector = !defaultOrderId && !(currentOrder && currentOrder.horses.length === 1);
@@ -436,12 +462,14 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         return;
       }
 
-      let resolvedRegId = Number(data.regulationId);
-      if (!resolvedRegId || isNaN(resolvedRegId)) {
-        resolvedRegId = Number(availableRegulations[0]?.id || 1);
+      let resolvedRegId = parseOptionalPositiveId(data.regulationId);
+      if (!resolvedRegId && !isReupload) {
+        resolvedRegId = parseOptionalPositiveId(availableRegulations[0]?.id) ?? 1;
       }
 
-      const selectedReg = regulations.find((r) => Number(r.id) === resolvedRegId);
+      const selectedReg = resolvedRegId
+        ? regulations.find((r) => Number(r.id) === resolvedRegId)
+        : undefined;
       let resolvedHorseName = 'Selected Horse';
 
       if (currentOrder) {
@@ -453,12 +481,17 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         if (h) resolvedHorseName = h.name;
       }
 
+      const resolvedDocType =
+        selectedReg?.documentType || defaultDocType || reuploadTitle || 'health_certificate';
+
       const fileObj = data.file[0];
       const formData = new FormData();
       formData.append('file', fileObj);
       formData.append('horseId', String(resolvedHorseId));
-      formData.append('regulationId', String(resolvedRegId));
-      formData.append('docType', selectedReg?.documentType || 'health_certificate');
+      if (resolvedRegId) {
+        formData.append('regulationId', String(resolvedRegId));
+      }
+      formData.append('docType', resolvedDocType);
       if (data.docNumber) {
         formData.append('docNumber', data.docNumber);
       }
@@ -477,7 +510,18 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         return;
       }
 
-      const docTitle = selectedReg?.description || selectedReg?.documentType || 'Giấy chứng nhận';
+      const docTitle = isReupload
+        ? translateDocType(
+            uploadedDocFromApi?.regulationTitle ||
+              uploadedDocFromApi?.regulationDocType ||
+              uploadedDocFromApi?.docType ||
+              reuploadTitle ||
+              defaultDocType ||
+              selectedReg?.description ||
+              selectedReg?.documentType ||
+              'Giấy chứng nhận',
+          )
+        : selectedReg?.description || selectedReg?.documentType || 'Giấy chứng nhận';
       const requestCode = currentOrder?.requestCode || `TR-HORSE-${data.horseId}`;
 
       submitDocumentForReview?.({
@@ -503,7 +547,11 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         requestCode,
         horseName: resolvedHorseName,
         title: docTitle,
-        documentType: mapDocType(selectedReg?.documentType || 'health_certificate'),
+        documentType: mapDocType(
+          isReupload
+            ? uploadedDocFromApi?.docType || defaultDocType || reuploadTitle || resolvedDocType
+            : resolvedDocType,
+        ),
         status: 'SUBMITTED',
         fileUrl: uploadedDocFromApi?.fileUrl || `/uploads/documents/${fileObj.name}`,
       };
@@ -537,7 +585,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
-    reset({ docNumber: '', file: undefined });
+    reset({ orderId: '', horseId: '', regulationId: '', docNumber: '', file: undefined });
     setIsDone(false);
     setIsDragging(false);
     setShowAllRegulations(false);
@@ -552,7 +600,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       closeDisabled={isUploading}
       title={
         reuploadDocId
-          ? `${t('documents.reuploadTitle', 'Cập Nhật / Nộp Lại')}: ${translateDocType(reuploadTitle || 'Hồ Sơ')}`
+          ? `${t('documents.reuploadTitle', 'Cập Nhật / Nộp Lại')}: ${translateDocType(reuploadTitle || defaultDocType || 'Hồ Sơ')}`
           : t('documents.uploadTitle', 'Tải Lên Hồ Sơ Kiểm Dịch & Pháp Lý')
       }
       subtitle={
@@ -644,7 +692,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
                 <span className="text-[#5B6779] font-medium">
                   {t('documents.docTypeLabel', 'Loại giấy tờ')}:{' '}
                   <strong className="text-[#966516]">
-                    {translateDocType(currentRegulation?.documentType || reuploadTitle || 'Hồ sơ kiểm dịch', reuploadTitle || currentRegulation?.description)}
+                    {translateDocType(summaryDocTypeArgs.docType, summaryDocTypeArgs.customTitle)}
                   </strong>
                 </span>
               </div>

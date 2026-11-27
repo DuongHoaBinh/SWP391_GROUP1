@@ -10,6 +10,7 @@ export interface RegulationItem {
   requiresAuthorityApproval?: boolean;
   minValidityBufferHours?: number;
   documentType: string;
+  documentTypeCode?: string | null;
   description: string | null;
   effectiveDate: string | null;
   createdAt: string;
@@ -31,7 +32,7 @@ export interface ApiTransportDocument {
   requestCode?: string;
   horseId: number;
   horseName?: string;
-  regulationId: number;
+  regulationId: number | null;
   regulationCountry?: string;
   regulationDocType?: string;
   regulationTitle?: string;
@@ -39,6 +40,9 @@ export interface ApiTransportDocument {
   uploaderName?: string;
   uploaderEmail?: string;
   docType: string;
+  documentTypeCode?: string | null;
+  documentTypeNameVi?: string | null;
+  documentTypeNameEn?: string | null;
   docNumber: string | null;
   fileUrl: string;
   issueDate: string | null;

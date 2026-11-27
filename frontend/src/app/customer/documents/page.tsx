@@ -28,6 +28,7 @@ import { CustomerSectionTabs } from '@/components/layout/CustomerSectionTabs';
 import { DocumentUploadModal } from '@/features/documents/components/DocumentUploadModal';
 import { HorseDocumentVault } from '@/features/documents/components/HorseDocumentVault';
 import { documentsApi } from '@/features/documents/api/documents.api';
+import { parseOptionalPositiveId } from '@/features/documents/document-upload-resolution';
 import { apiClient, openAuthenticatedDocument } from '@/lib/api-client';
 import { useCustomerStore } from '@/lib/customer-store';
 import { DocumentItem } from '@/lib/types';
@@ -41,6 +42,7 @@ interface ExtendedDocumentItem extends DocumentItem {
   validityStatus?: 'valid' | 'expiring_soon' | 'expired' | 'no_expiry';
   daysUntilExpiry?: number | null;
   expiryDate?: string | null;
+  rawDocType?: string;
 }
 
 function DocumentsHubContent() {
@@ -170,11 +172,12 @@ function DocumentsHubContent() {
               id: `DOC-${String(d.id).padStart(3, '0')}`,
               numericId: Number(d.id),
               orderId: resolvedOrderId,
-              horseId: Number(d.horseId),
-              regulationId: Number(d.regulationId),
+              horseId: parseOptionalPositiveId(d.horseId),
+              regulationId: parseOptionalPositiveId(d.regulationId),
               requestCode,
               horseName: d.horseName || `${isEn ? 'Horse' : 'Ngựa'} #${d.horseId}`,
               title: d.regulationTitle || d.regulationDocType || d.docType,
+              rawDocType: d.documentTypeCode || d.regulationDocType || d.docType || undefined,
               documentType: mapDocType(d.docType),
               status: mappedStatus,
               validityStatus,
@@ -1008,6 +1011,7 @@ function DocumentsHubContent() {
           defaultOrderId={reuploadTargetDoc?.orderId}
           defaultHorseId={reuploadTargetDoc?.horseId}
           defaultRegulationId={reuploadTargetDoc?.regulationId}
+          defaultDocType={reuploadTargetDoc?.rawDocType}
         />
       )}
     </div>
