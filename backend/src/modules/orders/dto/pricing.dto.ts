@@ -95,6 +95,11 @@ export class PreviewPricingDto {
   @IsObject()
   params?: Record<string, any>;
 
+  @ApiPropertyOptional({ description: 'Tham số bảng giá đường bộ đối tác nước ngoài (region PARTNER) muốn thử nghiệm' })
+  @IsOptional()
+  @IsObject()
+  partnerRoadParams?: Record<string, any>;
+
   @ApiProperty({ type: SampleRouteDto })
   @ValidateNested()
   @Type(() => SampleRouteDto)

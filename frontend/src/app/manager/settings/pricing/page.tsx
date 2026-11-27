@@ -79,6 +79,7 @@ export default function PricingSettingsPage() {
   const isEn = language === 'en';
 
   const [activeTab, setActiveTab] = useState<'road' | 'air' | 'sea'>('road');
+  const [roadRegion, setRoadRegion] = useState<'VN' | 'PARTNER'>('VN');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -124,17 +125,31 @@ export default function PricingSettingsPage() {
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [selectedSample, setSelectedSample] = useState(PRESET_SAMPLES[0].id);
 
+  // Effective region for API calls (Air & Sea tariffs are stored globally under 'VN'; Road supports both 'VN' and 'PARTNER')
+  const effectiveRegion = activeTab === 'road' ? roadRegion : 'VN';
+
   // Load active tariffs & history
   const loadTariffs = async () => {
     setLoading(true);
     try {
-      const activeRes = await apiClient<any>('/pricing/tariffs/active?region=VN');
-      if (activeRes.road?.params) setRoadParams(activeRes.road.params);
-      if (activeRes.air?.params) setAirParams(activeRes.air.params);
-      if (activeRes.sea?.params) setSeaParams(activeRes.sea.params);
+      const [vnActiveRes, regionActiveRes, historyRes] = await Promise.all([
+        apiClient<any>('/pricing/tariffs/active?region=VN'),
+        effectiveRegion === 'VN'
+          ? Promise.resolve(null)
+          : apiClient<any>(`/pricing/tariffs/active?region=${effectiveRegion}`),
+        apiClient<TariffHistoryItem[]>(`/pricing/tariffs?mode=${activeTab}&region=${effectiveRegion}`),
+      ]);
 
-      const historyRes = await apiClient<TariffHistoryItem[]>(`/pricing/tariffs?mode=${activeTab}&region=VN`);
-      setHistory(historyRes);
+      const roadSource = effectiveRegion === 'VN' ? vnActiveRes?.road : regionActiveRes?.road;
+      if (roadSource?.params) {
+        setRoadParams((prev) => ({ ...prev, ...roadSource.params }));
+      } else if (vnActiveRes?.road?.params) {
+        setRoadParams((prev) => ({ ...prev, ...vnActiveRes.road.params }));
+      }
+      if (vnActiveRes?.air?.params) setAirParams(vnActiveRes.air.params);
+      if (vnActiveRes?.sea?.params) setSeaParams(vnActiveRes.sea.params);
+
+      setHistory(Array.isArray(historyRes) ? historyRes : []);
     } catch (err: any) {
       toast.error(err.message || 'Lỗi khi tải bảng giá');
     } finally {
@@ -144,7 +159,14 @@ export default function PricingSettingsPage() {
 
   useEffect(() => {
     loadTariffs();
-  }, [activeTab]);
+    if (activeTab === 'road') {
+      setSelectedSample(roadRegion === 'PARTNER' ? 'hcm_sin' : 'hcm_dalat');
+    } else if (activeTab === 'air') {
+      setSelectedSample('hcm_sin');
+    } else {
+      setSelectedSample('hcm_sin_sea');
+    }
+  }, [activeTab, roadRegion]);
 
   // Road distance tier helpers
   const handleAddTier = () => {
@@ -177,7 +199,7 @@ export default function PricingSettingsPage() {
         method: 'POST',
         body: JSON.stringify({
           mode: activeTab,
-          region: 'VN',
+          region: effectiveRegion,
           params: currentParams,
           notes: versionNotes.trim() || undefined,
         }),
@@ -198,16 +220,21 @@ export default function PricingSettingsPage() {
     setPreviewing(true);
     try {
       const sampleObj = PRESET_SAMPLES.find((s) => s.id === selectedSample) || PRESET_SAMPLES[0];
-      let testParams: any = roadParams;
-      if (sampleObj.mode === 'air') testParams = airParams;
-      if (sampleObj.mode === 'sea') testParams = seaParams;
+      const isPartnerRoadPreview = activeTab === 'road' && roadRegion === 'PARTNER';
+      let testParams: any = undefined;
+      if (!isPartnerRoadPreview) {
+        if (sampleObj.mode === 'road') testParams = roadParams;
+        if (sampleObj.mode === 'air') testParams = airParams;
+        if (sampleObj.mode === 'sea') testParams = seaParams;
+      }
 
       const res = await apiClient<any>('/pricing/preview', {
         method: 'POST',
         body: JSON.stringify({
           mode: sampleObj.mode,
           seaMode: (sampleObj as any).seaMode,
-          params: testParams,
+          ...(testParams ? { params: testParams } : {}),
+          ...(isPartnerRoadPreview ? { partnerRoadParams: roadParams } : {}),
           sample: sampleObj.sample,
         }),
       });
@@ -288,15 +315,56 @@ export default function PricingSettingsPage() {
           {/* Main Form (2 cols) */}
           <div className="lg:col-span-2 space-y-6">
             <div className="p-6 rounded-2xl bg-white border border-[#D8CEBE] shadow-sm space-y-5">
-              <div className="flex items-center justify-between border-b border-[#F0EEE8] pb-4">
-                <h2 className="text-sm font-bold uppercase tracking-wider text-[#181A17]">
-                  {activeTab === 'road' && (isEn ? 'Road Tariff Parameters' : 'Tham Số Cước Đường Bộ')}
-                  {activeTab === 'air' && (isEn ? 'Air Cargo Tariff Parameters' : 'Tham Số Cước Hàng Không')}
-                  {activeTab === 'sea' && (isEn ? 'Sea Freight Tariff Parameters' : 'Tham Số Cước Đường Thủy')}
-                </h2>
-                <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold">
-                  {isEn ? 'Region: Vietnam (VN)' : 'Khu vực: Việt Nam (VN)'}
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#F0EEE8] pb-4">
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-[#181A17] m-0">
+                    {activeTab === 'road' && (isEn ? 'Road Tariff Parameters' : 'Tham Số Cước Đường Bộ')}
+                    {activeTab === 'air' && (isEn ? 'Air Cargo Tariff Parameters' : 'Tham Số Cước Hàng Không')}
+                    {activeTab === 'sea' && (isEn ? 'Sea Freight Tariff Parameters' : 'Tham Số Cước Đường Thủy')}
+                  </h2>
+                  {activeTab === 'road' && (
+                    <p className="text-[11px] text-[#6D7785] mt-1 mb-0">
+                      {roadRegion === 'PARTNER'
+                        ? isEn
+                          ? 'Applied to overseas partner road delivery legs (airport/seaport → destination stable).'
+                          : 'Áp dụng cho chặng đường bộ đối tác nước ngoài (sân bay/cảng đích → trang trại nhận).'
+                        : isEn
+                          ? 'Applied to Vietnam domestic road trips and pickup-to-hub transfer legs.'
+                          : 'Áp dụng cho chuyến đường bộ nội địa Việt Nam và chặng trung chuyển ra sân bay/cảng.'}
+                    </p>
+                  )}
+                </div>
+
+                {activeTab === 'road' ? (
+                  <div className="inline-flex items-center rounded-xl border border-[#D8CEBE] bg-[#FAF8F4] p-1 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setRoadRegion('VN')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer border-0 ${
+                        roadRegion === 'VN'
+                          ? 'bg-[#181A17] text-[#FAF8F4] shadow-xs'
+                          : 'bg-transparent text-[#5B6779] hover:text-[#181A17]'
+                      }`}
+                    >
+                      {isEn ? 'Vietnam (VN)' : 'Việt Nam (VN)'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRoadRegion('PARTNER')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer border-0 ${
+                        roadRegion === 'PARTNER'
+                          ? 'bg-[#A67C2E] text-white shadow-xs'
+                          : 'bg-transparent text-[#5B6779] hover:text-[#181A17]'
+                      }`}
+                    >
+                      {isEn ? 'Overseas Partner (PARTNER)' : 'Đối tác nước ngoài (PARTNER)'}
+                    </button>
+                  </div>
+                ) : (
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                    {isEn ? 'Scope: Global / International' : 'Phạm vi: Toàn cầu / Quốc tế'}
+                  </span>
+                )}
               </div>
 
               {/* ROAD FORM */}
@@ -371,6 +439,24 @@ export default function PricingSettingsPage() {
                         value={roadParams.borderCrossingFee}
                         onChange={(e) =>
                           setRoadParams({ ...roadParams, borderCrossingFee: Number(e.target.value) })
+                        }
+                        className="w-full h-10 px-3 rounded-xl border border-[#D8CEBE] font-mono text-sm"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-bold text-[#181A17]">
+                          {isEn ? 'Night Surcharge / Truck-Ban Shift (VND / vehicle)' : 'Phụ phí chạy đêm tránh giờ cấm (VNĐ / xe)'}
+                        </label>
+                        <span className="text-[11px] font-bold text-[#966516] tabular-nums">
+                          {Number(roadParams.nightSurchargePerVehicle || 0).toLocaleString('vi-VN')} ₫
+                        </span>
+                      </div>
+                      <input
+                        type="number"
+                        value={roadParams.nightSurchargePerVehicle ?? 0}
+                        onChange={(e) =>
+                          setRoadParams({ ...roadParams, nightSurchargePerVehicle: Number(e.target.value) })
                         }
                         className="w-full h-10 px-3 rounded-xl border border-[#D8CEBE] font-mono text-sm"
                       />
@@ -593,9 +679,16 @@ export default function PricingSettingsPage() {
           {/* History Sidebar (1 col) */}
           <div className="space-y-4">
             <div className="p-5 rounded-2xl bg-white border border-[#D8CEBE] shadow-sm space-y-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#181A17] flex items-center gap-2 border-b border-[#F0EEE8] pb-3">
-                <History className="w-4 h-4 text-[#A67C2E]" />
-                {isEn ? 'Tariff Version History' : 'Lịch Sử Phiên Bản'}
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#181A17] flex items-center justify-between gap-2 border-b border-[#F0EEE8] pb-3">
+                <span className="flex items-center gap-2">
+                  <History className="w-4 h-4 text-[#A67C2E]" />
+                  {isEn ? 'Tariff Version History' : 'Lịch Sử Phiên Bản'}
+                </span>
+                {activeTab === 'road' && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FAF8F4] border border-[#D8CEBE] text-[#6D7785] font-bold">
+                    {roadRegion}
+                  </span>
+                )}
               </h3>
 
               <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
@@ -635,7 +728,11 @@ export default function PricingSettingsPage() {
       <Modal
         isOpen={showSaveModal}
         onClose={() => setShowSaveModal(false)}
-        title={isEn ? 'Confirm New Tariff Version' : 'Xác Nhận Tạo Phiên Bản Bảng Giá Mới'}
+        title={
+          isEn
+            ? `Confirm New Tariff Version (${activeTab.toUpperCase()}${activeTab === 'road' ? ` · ${roadRegion}` : ''})`
+            : `Xác Nhận Tạo Phiên Bản Bảng Giá Mới (${activeTab === 'road' ? (roadRegion === 'PARTNER' ? 'Đường bộ · Đối tác nước ngoài' : 'Đường bộ · VN') : activeTab === 'air' ? 'Hàng không' : 'Đường thủy'})`
+        }
         subtitle={isEn ? 'Activate new version without altering locked quotes' : 'Bật bản mới và giữ nguyên giá các báo giá/đơn cũ'}
         maxWidth="max-w-md"
       >

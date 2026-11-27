@@ -242,12 +242,22 @@ export class PricingService {
     let roadTariff = activeTariffs.road?.params as RoadTariff;
     let airTariff = activeTariffs.air?.params as AirTariff | undefined;
     let seaTariff = activeTariffs.sea?.params as SeaTariff | undefined;
+    const activePartnerRoad =
+      typeof this.pricingStore.getActiveTariff === 'function'
+        ? await this.pricingStore.getActiveTariff('road', 'PARTNER')
+        : null;
+    let partnerRoadTariff = activePartnerRoad?.params as RoadTariff | undefined;
 
     if (dto.params) {
       validateTariffParams(mode, dto.params);
       if (mode === 'road') roadTariff = dto.params as RoadTariff;
       if (mode === 'air') airTariff = dto.params as AirTariff;
       if (mode === 'sea') seaTariff = dto.params as SeaTariff;
+    }
+
+    if (dto.partnerRoadParams) {
+      validateTariffParams('road', dto.partnerRoadParams);
+      partnerRoadTariff = dto.partnerRoadParams as RoadTariff;
     }
 
     if (!roadTariff) {
@@ -272,6 +282,9 @@ export class PricingService {
       road: { ...roadTariff, version: activeTariffs.road?.version || 1 },
       air: airTariff ? { ...airTariff, version: activeTariffs.air?.version || 1 } : undefined,
       sea: seaTariff ? { ...seaTariff, version: activeTariffs.sea?.version || 1 } : undefined,
+      partnerRoad: partnerRoadTariff
+        ? { ...partnerRoadTariff, version: activePartnerRoad?.version || 1 }
+        : undefined,
     };
     const networkCtx = await this.buildRouteContextFromNetwork(dto, requiredStallSlots, tariffsBundle);
     if (networkCtx) return networkCtx;
@@ -673,6 +686,9 @@ export class PricingService {
         road: { ...roadTariff, version: activeTariffs.road?.version || 1 },
         air: airTariff ? { ...airTariff, version: activeTariffs.air?.version || 1 } : undefined,
         sea: seaTariff ? { ...seaTariff, version: activeTariffs.sea?.version || 1 } : undefined,
+        partnerRoad: partnerRoadTariff
+          ? { ...partnerRoadTariff, version: activePartnerRoad?.version || 1 }
+          : undefined,
       },
     };
   }
