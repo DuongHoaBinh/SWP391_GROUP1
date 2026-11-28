@@ -540,3 +540,45 @@ test('9. Đơn một chiều có chặng return khi lưu kế hoạch → 400', 
     (err) => err instanceof BadRequestException && err.message.includes('phải có ít nhất 1 chặng về'),
   );
 });
+
+test('getReturnCancellationPreview rejects cancelled/unpaid orders (409) and returns full preview fields for paid active orders', async () => {
+  const customerUser = { id: '10', role: 'Customer', email: 'c@example.com' };
+  const futureReturn = new Date(Date.now() + 200 * 3600 * 1000).toISOString();
+
+  let currentOrder = {
+    id: 13,
+    customerId: 10,
+    status: 'cancelled',
+    tripType: 'round_trip',
+    returnStatus: 'scheduled',
+    returnDepartureAt: futureReturn,
+    returnFreight: 50000000,
+    returnInsuranceFee: 5000000,
+  };
+
+  const ordersService = new OrdersService(
+    { findShipmentById: async () => currentOrder },
+    { createNotification: async () => {}, notifyRole: async () => {} },
+  );
+
+  await assert.rejects(
+    () => ordersService.getReturnCancellationPreview(customerUser, 13),
+    (err) => err instanceof ConflictException && err.message.includes('đã bị hủy'),
+  );
+
+  currentOrder = { ...currentOrder, status: 'awaiting_payment' };
+  await assert.rejects(
+    () => ordersService.getReturnCancellationPreview(customerUser, 13),
+    (err) => err instanceof ConflictException && err.message.includes('chưa thanh toán'),
+  );
+
+  currentOrder = { ...currentOrder, status: 'approved' };
+  const preview = await ordersService.getReturnCancellationPreview(customerUser, 13);
+  assert.equal(preview.freightRefundPercent, 80);
+  assert.equal(preview.freightRefundAmount, 40000000);
+  assert.equal(preview.insuranceRefundAmount, 5000000);
+  assert.equal(preview.totalRefundAmount, 45000000);
+  assert.equal(typeof preview.hoursUntilDeparture, 'number');
+  assert.ok(preview.hoursUntilDeparture >= 199);
+  assert.ok(preview.policyTierDescription);
+});

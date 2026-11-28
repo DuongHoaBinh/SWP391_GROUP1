@@ -147,9 +147,7 @@ export function calculateOperationalRefund(input: RefundCalculationInput): Refun
       grossRefundBeforeDisbursement,
       netRefundAmount: grossRefundBeforeDisbursement,
       receivableExcessAmount: 0,
-      requiresDualApproval:
-        appliedMode === RefundMode.CASH_REFUND &&
-        grossRefundBeforeDisbursement >= DUAL_APPROVAL_THRESHOLD_VND,
+      requiresDualApproval: false,
     };
   }
 
@@ -167,7 +165,6 @@ export function calculateOperationalRefund(input: RefundCalculationInput): Refun
     grossRefundBeforeDisbursement,
     netRefundAmount,
     receivableExcessAmount,
-    requiresDualApproval:
-      appliedMode === RefundMode.CASH_REFUND && netRefundAmount >= DUAL_APPROVAL_THRESHOLD_VND,
+    requiresDualApproval: false,
   };
 }

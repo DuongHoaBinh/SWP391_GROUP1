@@ -33,20 +33,22 @@ const SEA_TARIFF = {
   roundingUnit: 1000,
 };
 
-test('P0.7: FleetService.updateStaffShift does NOT release trips when dutyStatus is ON_DUTY', async () => {
+test('P0.7: FleetService.updateStaffShift respects explicit releaseActiveTrips=true regardless of dutyStatus and returns real activeTrips', async () => {
   let capturedReleaseFlag = null;
   const fakeFleetStore = {
     updateStaffShift: async (_id, _shift, _status, shouldRelease) => {
       capturedReleaseFlag = shouldRelease;
       return true;
     },
+    countActiveTripsForStaff: async () => 1,
   };
   const service = new FleetService(fakeFleetStore, {});
-  await service.updateStaffShift(5, { currentShift: 'Ca Sáng', dutyStatus: 'ON_DUTY', releaseActiveTrips: true });
-  assert.equal(capturedReleaseFlag, false, 'ON_DUTY must never release active trips');
+  const res1 = await service.updateStaffShift(5, { currentShift: 'Ca Sáng', dutyStatus: 'ON_DUTY', releaseActiveTrips: true });
+  assert.equal(capturedReleaseFlag, true, 'Explicit releaseActiveTrips=true must release non-in-transit assignments');
+  assert.equal(res1.activeTrips, 1, 'Must return live activeTrips count (in_transit/return_pending remain)');
 
-  await service.updateStaffShift(5, { currentShift: 'Nghỉ phép', dutyStatus: 'OFF_DUTY', releaseActiveTrips: true });
-  assert.equal(capturedReleaseFlag, true, 'OFF_DUTY with explicit releaseActiveTrips=true may release non-in-transit trips');
+  await service.updateStaffShift(5, { currentShift: 'Ca Sáng', dutyStatus: 'ON_DUTY', releaseActiveTrips: false });
+  assert.equal(capturedReleaseFlag, false, 'releaseActiveTrips=false must not release trips');
 });
 
 test('P0.3: OrdersService.cancelReturnLegByCustomer rejects unpaid awaiting_payment order', async () => {

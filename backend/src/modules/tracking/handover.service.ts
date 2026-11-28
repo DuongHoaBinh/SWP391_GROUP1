@@ -101,6 +101,22 @@ export class HandoverService {
 
       const inferredDirection: 'outbound' | 'return' =
         dto.direction ?? (target.tripType === 'round_trip' && ['in_progress', 'completed'].includes(target.returnStatus) ? 'return' : 'outbound');
+
+      if (
+        user.role === UserRole.DRIVER_ESCORT &&
+        typeof (this.handoverStore as any).isDriverOnlyForOverseasHandover === 'function'
+      ) {
+        const blocked = await (this.handoverStore as any).isDriverOnlyForOverseasHandover(
+          shipmentId,
+          Number(user.id),
+          inferredDirection,
+        );
+        if (blocked) {
+          throw new ForbiddenException(
+            'Biên bản bàn giao tại điểm đích nước ngoài do Nhân viên hộ tống (Escort) phụ trách.',
+          );
+        }
+      }
       const defaultLocation = inferredDirection === 'return' ? (target.originLocation || target.destinationLocation) : target.destinationLocation;
 
       const created = await this.handoverStore.createHandover({

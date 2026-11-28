@@ -55,13 +55,28 @@ export function RoundTripPanel({ order, userRole, onRefresh }: RoundTripPanelPro
   const isRoundTrip = order?.trip_type === 'round_trip' || order?.tripType === 'round_trip';
   if (!isRoundTrip) return null;
 
-  const returnStatus = order.return_status || order.returnStatus || 'scheduled';
+  const orderStatus = String(order?.status || '').toLowerCase();
+  const isOrderCancelledOrRejected = orderStatus === 'cancelled' || orderStatus === 'rejected';
+  const isOrderPaidActive = [
+    'paid_pending_review',
+    'approved',
+    'planning',
+    'confirmed',
+    'ready_to_depart',
+    'in_transit',
+    'return_pending',
+  ].includes(orderStatus);
+
+  const returnStatus = isOrderCancelledOrRejected
+    ? 'cancelled'
+    : order.return_status || order.returnStatus || 'scheduled';
   const returnDepartureAt = order.return_departure_at || order.returnDepartureAt;
   const returnWaitMinutes = order.return_wait_minutes || order.returnWaitMinutes || 120;
   const returnNoShow = order.return_no_show ?? order.returnNoShow ?? false;
   const returnRescheduleFee = Number(order.return_reschedule_fee || order.returnRescheduleFee || 0);
 
-  const formatVnd = (val: number) => Math.round(val).toLocaleString('vi-VN') + ' đ';
+  const formatVnd = (val: number | undefined | null) =>
+    `${Math.round(Number(val ?? 0) || 0).toLocaleString('vi-VN')} đ`;
 
   const formatDate = (isoStr?: string) => {
     if (!isoStr) return '--';
@@ -263,8 +278,8 @@ export function RoundTripPanel({ order, userRole, onRefresh }: RoundTripPanelPro
           </p>
         </details>
 
-        {/* Action Buttons */}
-        {returnStatus === 'scheduled' && (
+        {/* Action Buttons — only allowed when order is paid & active AND return leg is scheduled */}
+        {returnStatus === 'scheduled' && isOrderPaidActive && (
           <div className="pt-3 border-t border-[#D8CEBE] flex flex-wrap items-center justify-end gap-3">
             {isCustomer && (
               <>
@@ -318,37 +333,43 @@ export function RoundTripPanel({ order, userRole, onRefresh }: RoundTripPanelPro
               <span>{isEn ? 'Calculating exact refund amount...' : 'Đang tính toán số tiền hoàn chuẩn...'}</span>
             </div>
           ) : previewData ? (
+            (() => {
+              const rawPreview = previewData as any;
+              const hoursLeft = Number(
+                rawPreview.hoursUntilDeparture ??
+                  (returnDepartureAt
+                    ? Math.max(0, (new Date(returnDepartureAt).getTime() - Date.now()) / 3600000)
+                    : 0),
+              );
+              const tierLabel = rawPreview.policyTierDescription || rawPreview.tier || '--';
+              const refundPct = Number(rawPreview.freightRefundPercent ?? rawPreview.refundPercent ?? 0);
+              const freightAmt = Number(rawPreview.freightRefundAmount ?? rawPreview.freightRefund ?? 0);
+              const insAmt = Number(rawPreview.insuranceRefundAmount ?? rawPreview.insuranceRefund ?? 0);
+              const totalAmt = Number(rawPreview.totalRefundAmount ?? rawPreview.total ?? freightAmt + insAmt);
+              return (
             <>
               <div className="p-3.5 rounded-xl bg-[#FAF8F4] border border-[#E5DDD0] space-y-2">
                 <div className="flex justify-between">
                   <span className="text-[#6D7785]">{isEn ? 'Hours before return departure:' : 'Thời gian còn lại trước giờ đón:'}</span>
-                  <span className="font-bold text-[#181A17]">{previewData.hoursUntilDeparture.toFixed(1)} {isEn ? 'hours' : 'giờ'}</span>
+                  <span className="font-bold text-[#181A17]">{(Number.isFinite(hoursLeft) ? hoursLeft : 0).toFixed(1)} {isEn ? 'hours' : 'giờ'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#6D7785]">{isEn ? 'Applicable refund policy tier:' : 'Mốc chính sách áp dụng:'}</span>
-                  <span className="font-bold text-[#287653]">{previewData.policyTierDescription} ({previewData.freightRefundPercent}%)</span>
+                  <span className="font-bold text-[#287653]">{tierLabel} ({refundPct}%)</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#6D7785]">{isEn ? 'Return freight refund:' : 'Tiền cước hoàn lại:'}</span>
-                  <span className="font-mono font-bold text-[#181A17]">{formatVnd(previewData.freightRefundAmount)}</span>
+                  <span className="font-mono font-bold text-[#181A17]">{formatVnd(freightAmt)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#6D7785]">{isEn ? 'Return insurance refund:' : 'Tiền bảo hiểm hoàn lại (100%):'}</span>
-                  <span className="font-mono font-bold text-[#181A17]">{formatVnd(previewData.insuranceRefundAmount)}</span>
+                  <span className="font-mono font-bold text-[#181A17]">{formatVnd(insAmt)}</span>
                 </div>
                 <div className="pt-2 border-t border-[#D8CEBE] flex justify-between items-baseline">
                   <span className="font-bold uppercase text-[#181A17]">{isEn ? 'Total Refund Amount:' : 'Tổng Tiền Hoàn:'}</span>
-                  <span className="font-mono font-black text-base text-[#A67C2E]">{formatVnd(previewData.totalRefundAmount)}</span>
+                  <span className="font-mono font-black text-base text-[#A67C2E]">{formatVnd(totalAmt)}</span>
                 </div>
               </div>
-
-              {previewData.requiresDualApproval && (
-                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px]">
-                  {isEn
-                    ? 'Refund amount is ≥ 20,000,000 VND and requires dual approval (Manager + Admin) before disbursement.'
-                    : 'Khoản hoàn ≥ 20.000.000 đ sẽ cần 2 cấp duyệt (Manager + Admin) theo nguyên tắc kiểm soát SoD trước khi chuyển khoản.'}
-                </div>
-              )}
 
               <div>
                 <label className="font-bold text-[#181A17] block mb-1">
@@ -378,6 +399,8 @@ export function RoundTripPanel({ order, userRole, onRefresh }: RoundTripPanelPro
                 </Button>
               </div>
             </>
+              );
+            })()
           ) : null}
         </div>
       </Modal>

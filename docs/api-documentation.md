@@ -1025,13 +1025,14 @@ Apply migration 018 with `npm run migrate:booking` in `backend`, after existing 
   - `POST /orders` (`CUSTOMER`) & `PUT /orders/:id` (`CUSTOMER`): Enforce dynamic `Order Cutoff`; departures earlier than `earliestDepartureDate` return `422 Unprocessable Entity` with `code: 'ORDER_CUTOFF_VIOLATION'`. Wrong-state mutations and race conditions return `409 Conflict`.
   - `POST /orders/:id/operational-cancel` (`LOGISTICS_MANAGER`, `ADMIN`): Transitions shipment to `cancelled_operational` (forbidden once `in_transit` -> `409 Conflict`), computes refund/credit policy matrix, deducts logged disbursements, and creates `shipment_refund_record`.
   - `GET /orders/refunds` (`LOGISTICS_MANAGER`, `ADMIN`) & `GET /orders/:id/refunds` (authorized order viewers): Lists manual refund / 30-day credit records.
-  - `PATCH /orders/refunds/:refundId/approve` (`LOGISTICS_MANAGER`, `ADMIN`): Approves refund or credit; `>= 20,000,000 VND` cash refunds require Dual Approval (`second_approved_by != approved_by`, else `403 Forbidden`).
-  - `POST /orders/refunds/:refundId/transfer` (`ADMIN`): Multipart/JSON bank-transfer confirmation with `magic bytes` validation; enforces server-side SoD (`transferred_by != approved_by` / `second_approved_by`, else `403 Forbidden`).
+  - `PATCH /orders/refunds/:refundId/approve` (`LOGISTICS_MANAGER`, `ADMIN`): Single-step approval (`pending_approval` → `approved_for_transfer`, no Dual-Approval required).
+  - `GET /orders/refunds/:refundId/bank-info` & `POST /orders/refunds/:refundId/bank-info` (`CUSTOMER` owner): Unified beneficiary bank-account submission endpoint for ALL `cash_refund` records (`company_cannot_fulfil`, `insurance_claim`, `cancelled_operational`, `cancelReturnLeg`). Requires `bankName`, `accountNumber` (6–20 digits), `accountHolder`, `confirmAmount === amount`, optional `note`.
+  - `POST /orders/refunds/:refundId/transfer` (`LOGISTICS_MANAGER`, `ADMIN`): Multipart/JSON bank-transfer confirmation with `magic bytes` validation. Enforces mandatory customer bank-info submission first (`409 Conflict` if `cash_refund` has no submitted bank info); allows same `Logistics Manager` who approved to execute transfer and preserves structured `recipient_bank_account`.
   - `GET /orders/refunds/:refundId/receipt` & `GET /orders/disbursements/:disbursementId/receipt`: Authenticated receipt streams (`Cache-Control: private, no-store`, CSP sandbox).
-  - `GET /orders/:id/disbursements` & `POST /orders/:id/disbursements` (`LOGISTICS_MANAGER`, `ADMIN`, `TRANSPORT_SPECIALIST`): Records reimbursable statutory fees with multipart receipt upload.
-  - `POST /orders/:id/upgrade-charter` & `POST /orders/:id/reschedule-shared` (`LOGISTICS_MANAGER`, `ADMIN`, `CUSTOMER`): Handles `D-3` fallback (`void` + replacement invoice pre-payment or `supplemental_invoice` post-payment).
-  - `POST /orders/:id/payment-grace` (`LOGISTICS_MANAGER`, `ADMIN`): Grants single payment grace (`MIN(granted + 10h, departure - 24h)`); subsequent attempts return `409 Conflict`.
-  - `POST /orders/:id/sla-fallback` & `POST /orders/sla/run-sweep` (`LOGISTICS_MANAGER`, `ADMIN`): Executes `T-52h` fallback actions and SLA/grace expiry auto-cancellation sweep.
+  - `GET /orders/:id/disbursements` & `POST /orders/:id/disbursements` (`LOGISTICS_MANAGER`, `ADMIN`): Records reimbursable statutory fees with multipart receipt upload.
+  - `POST /orders/:id/payment-grace` (`LOGISTICS_MANAGER`, `ADMIN`): Grants single payment grace (`MIN(granted + 10h, departure - 24h)`) on `awaiting_payment` / `confirmed` / `planning`; subsequent attempts return `409 Conflict`.
+  - `POST /orders/sla/run-sweep` (`LOGISTICS_MANAGER`, `ADMIN`): Executes SLA/grace expiry auto-cancellation sweep.
+  - *Removed legacy endpoints (11/2026):* MoMo sandbox (`/orders/:id/payments/momo/*`), `GET/POST /fleet/road-trips`, `POST /orders/:id/upgrade-charter`, `POST /orders/:id/reschedule-shared`, `POST /orders/:id/sla-fallback`, `GET/PATCH /tracking/settings` (consolidated into `/system-settings/tracking`), and dead routes in `RoutesController` (`strategic-framework`, `submit`, `GET/POST shipment/:id`, `PATCH :routeId/schedule`, `POST shipment/:id/publish`).
 
 - **Compliance & Regulations (`DocumentsController`):**
   - `GET /documents/order/:orderId/checklist`: Evaluates horse ownership (`horse.owner_id`), multidimensional `regulation` matching (`borderGate`, `transportMode`, `docTier`, `leadTimeDays`, `requiresAuthorityApproval`, `minValidityBufferHours`), 2-tier authority approvals (`document_approval`), safety buffers (`24h` domestic / `48h` international), dynamic `orderCutoffDate` & `tierADeadline`, and non-blocking Tier-B `earlyIssuanceWarning`. Also exposes `BR-F2-06` `in_transit_compliance_alert` blocking `customs_cleared` (`422`) when compliance lapses mid-transit.
@@ -1261,8 +1262,8 @@ Base URL: `http://localhost:5000/api` (Tất cả endpoint yêu cầu `Authoriza
 
 ### 4. `GET /system-settings/tracking` & `PATCH /system-settings/tracking`
 - **Quyền GET:** Mọi user đã đăng nhập.
-- **Quyền PATCH:** Chỉ `ADMIN` (`403 Forbidden` đối với các role khác).
-- **Mô tả:** Xem và cập nhật cấu hình định vị, bán kính geofence mặc định / khu lớn, cờ hiển thị sinh hiệu cho khách và cờ giả lập tuyến đường.
+- **Quyền PATCH:** `LOGISTICS_MANAGER`, `ADMIN` (`403 Forbidden` đối với các role khác).
+- **Mô tả:** Xem và cập nhật cấu hình định vị, bán kính geofence mặc định / khu lớn, cờ hiển thị sinh hiệu cho khách và cờ giả lập tuyến đường (đã hợp nhất, gỡ endpoint trùng `GET/PATCH /tracking/settings`).
 - **Request Body (PATCH):**
 ```json
 {

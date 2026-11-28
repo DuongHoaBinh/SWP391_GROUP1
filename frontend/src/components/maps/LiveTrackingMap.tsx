@@ -14,6 +14,90 @@ function escapeHtml(raw: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
+const liveOsrmCache = new Map<string, Array<[number, number]>>();
+
+function buildOsrmKey(points: Array<[number, number]>): string {
+  return points.map(([lat, lng]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join(';');
+}
+
+function sampleWaypoints(points: Array<[number, number]>, maxPoints = 25): Array<[number, number]> {
+  const deduped: Array<[number, number]> = [];
+  for (const pt of points) {
+    const prev = deduped[deduped.length - 1];
+    if (!prev || Math.abs(prev[0] - pt[0]) > 0.0002 || Math.abs(prev[1] - pt[1]) > 0.0002) {
+      deduped.push(pt);
+    }
+  }
+  if (deduped.length <= maxPoints) return deduped;
+  const sampled: Array<[number, number]> = [deduped[0]];
+  const step = (deduped.length - 1) / (maxPoints - 1);
+  for (let i = 1; i < maxPoints - 1; i++) {
+    sampled.push(deduped[Math.round(i * step)]);
+  }
+  sampled.push(deduped[deduped.length - 1]);
+  return sampled;
+}
+
+async function fetchOsrmSegment(
+  points: Array<[number, number]>,
+  signal?: AbortSignal,
+): Promise<Array<[number, number]> | null> {
+  if (points.length < 2) return null;
+  const key = buildOsrmKey(points);
+  if (liveOsrmCache.has(key)) return liveOsrmCache.get(key)!;
+  try {
+    const coordParam = points.map(([lat, lng]) => `${lng.toFixed(5)},${lat.toFixed(5)}`).join(';');
+    const url = `https://router.project-osrm.org/route/v1/driving/${coordParam}?overview=full&geometries=geojson`;
+    const res = await fetch(url, { signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.code !== 'Ok' || !Array.isArray(data?.routes) || !data.routes.length) return null;
+    const coords: Array<[number, number]> = data.routes[0].geometry.coordinates.map(
+      ([lng, lat]: [number, number]) => [lat, lng] as [number, number],
+    );
+    if (coords.length < 2) return null;
+    liveOsrmCache.set(key, coords);
+    return coords;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchOsrmSnappedRoad(
+  rawPoints: Array<[number, number]>,
+  signal?: AbortSignal,
+): Promise<Array<[number, number]> | null> {
+  const waypoints = sampleWaypoints(rawPoints, 25);
+  if (waypoints.length < 2) return null;
+  const fullKey = buildOsrmKey(waypoints);
+  if (liveOsrmCache.has(fullKey)) return liveOsrmCache.get(fullKey)!;
+
+  const direct = await fetchOsrmSegment(waypoints, signal);
+  if (direct) return direct;
+
+  if (waypoints.length > 2) {
+    const merged: Array<[number, number]> = [];
+    let anySnapped = false;
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      if (signal?.aborted) return null;
+      const seg = await fetchOsrmSegment([waypoints[i], waypoints[i + 1]], signal);
+      if (seg) {
+        if (merged.length > 0) merged.push(...seg.slice(1));
+        else merged.push(...seg);
+        anySnapped = true;
+      } else {
+        if (merged.length === 0) merged.push(waypoints[i]);
+        merged.push(waypoints[i + 1]);
+      }
+    }
+    if (anySnapped && merged.length > 1) {
+      liveOsrmCache.set(fullKey, merged);
+      return merged;
+    }
+  }
+  return null;
+}
+
 export interface LiveTrackingMapProps {
   details?: LiveTrackingDetails | null;
   liveData?: LiveTrackingDetails | null;
@@ -127,6 +211,7 @@ export function LiveTrackingMap({
     pathGroup.clearLayers();
     markersGroup.clearLayers();
 
+    const abortController = new AbortController();
     const boundsPoints: Array<[number, number]> = [];
 
     const normalizePolylineCoords = (raw: unknown): Array<[number, number]> | null => {
@@ -146,7 +231,7 @@ export function LiveTrackingMap({
       return out.length > 1 ? out : null;
     };
 
-    // 1. Draw Legs / Polylines (styled by leg type: road, flight, sea)
+    // 1. Draw Legs / Polylines (styled by leg type: road, flight, sea; snap sparse road legs via OSRM)
     for (const leg of activeDetails.legs || []) {
       let polyCoords: Array<[number, number]> | null = normalizePolylineCoords(leg.polyline);
       if (!polyCoords && leg.polylineJson) {
@@ -162,25 +247,65 @@ export function LiveTrackingMap({
             : legKind === 'flight'
               ? { color: '#B49A68', weight: 3, dashArray: '8, 8', opacity: 0.85 }
               : { color: '#94A3B8', weight: 3, dashArray: '6, 6', opacity: 0.8 };
-        L.polyline(polyCoords, lineStyle).addTo(pathGroup);
-        polyCoords.forEach((pt: [number, number]) => boundsPoints.push(pt));
+
+        const cachedRoad =
+          legKind === 'road' && polyCoords.length <= 25
+            ? liveOsrmCache.get(buildOsrmKey(sampleWaypoints(polyCoords, 25)))
+            : undefined;
+        const initialCoords = cachedRoad ?? polyCoords;
+        const legLine = L.polyline(initialCoords, lineStyle).addTo(pathGroup);
+        initialCoords.forEach((pt: [number, number]) => boundsPoints.push(pt));
+
+        if (legKind === 'road' && !cachedRoad && polyCoords.length <= 25) {
+          fetchOsrmSnappedRoad(polyCoords, abortController.signal).then((snapped) => {
+            if (snapped && !abortController.signal.aborted) {
+              try {
+                legLine.setLatLngs(snapped);
+              } catch {}
+            }
+          });
+        }
       }
     }
 
-    // 2. Draw actual Ping Path
+    // 2. Draw actual Ping Path (snap road trips onto real highway geometry via OSRM)
+    const legsList = activeDetails.legs || [];
+    const isNonRoadOnly =
+      legsList.length > 0 &&
+      legsList.every((l) => {
+        const kind = l.type || l.legType || 'road';
+        return kind === 'flight' || kind === 'sea';
+      });
+
     if (Array.isArray(activeDetails.path) && activeDetails.path.length > 1) {
       const pingCoords: Array<[number, number]> = activeDetails.path
         .filter((p) => p.lat != null && p.lng != null)
         .map((p) => [Number(p.lat), Number(p.lng)]);
 
       if (pingCoords.length > 1) {
-        L.polyline(pingCoords, {
+        const shouldSnapRoad = !isNonRoadOnly;
+        const cachedPingPath = shouldSnapRoad
+          ? liveOsrmCache.get(buildOsrmKey(sampleWaypoints(pingCoords, 25)))
+          : undefined;
+        const initialPingCoords = cachedPingPath ?? pingCoords;
+
+        const pingLine = L.polyline(initialPingCoords, {
           color: '#2563EB',
           weight: 4,
           opacity: 0.9,
           lineJoin: 'round',
         }).addTo(pathGroup);
-        pingCoords.forEach((pt) => boundsPoints.push(pt));
+        initialPingCoords.forEach((pt) => boundsPoints.push(pt));
+
+        if (shouldSnapRoad && !cachedPingPath) {
+          fetchOsrmSnappedRoad(pingCoords, abortController.signal).then((snapped) => {
+            if (snapped && !abortController.signal.aborted) {
+              try {
+                pingLine.setLatLngs(snapped);
+              } catch {}
+            }
+          });
+        }
       }
     }
 
@@ -359,6 +484,10 @@ export function LiveTrackingMap({
         map.fitBounds(L.latLngBounds(boundsPoints), { padding: [40, 40], maxZoom: 14 });
       } catch {}
     }
+
+    return () => {
+      abortController.abort();
+    };
   }, [activeDetails, ready, following, isEn]);
 
   const handleCenterVehicle = useCallback(() => {

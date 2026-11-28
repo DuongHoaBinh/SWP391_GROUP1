@@ -4,34 +4,17 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Ban,
   Clock,
-  ExternalLink,
   Landmark,
   Loader2,
-  Plus,
   Receipt,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
-  TrendingUp,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { apiClient, openAuthenticatedApiFile } from '@/lib/api-client';
-import { getCurrentUser } from '@/lib/auth';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { Button } from '@/components/ui/Button';
-
-interface DisbursementItem {
-  id: number;
-  shipmentId: number;
-  authorityName: string;
-  feeType: string;
-  amount: number;
-  authorityReceiptUrl: string | null;
-  notes: string | null;
-  settledStatus: string;
-  recordedByName?: string;
-  createdAt: string;
-}
 
 interface RefundRecordItem {
   id: number;
@@ -81,30 +64,42 @@ const CANCELLATION_CATEGORIES = [
   { value: 'force_majeure', vi: 'Bất khả kháng (Force Majeure)', en: 'Force Majeure' },
 ];
 
+const REFUND_STATUS_META: Record<string, { vi: string; en: string; cls: string }> = {
+  pending_approval: { vi: 'Chờ duyệt hoàn tiền', en: 'Pending Approval', cls: 'bg-[#F8F0DF] text-[#966516] border-[#DFCA9A]' },
+  pending_second_approval: { vi: 'Chờ duyệt hoàn tiền', en: 'Pending Approval', cls: 'bg-[#F8F0DF] text-[#966516] border-[#DFCA9A]' },
+  approved_for_transfer: { vi: 'Đã duyệt — Chờ chuyển khoản', en: 'Approved for Transfer', cls: 'bg-[#E8F2EB] text-[#287653] border-[#B7DBC4]' },
+  transferred: { vi: 'Đã chuyển khoản', en: 'Transferred', cls: 'bg-[#E8F2EB] text-[#287653] border-[#B7DBC4]' },
+  converted_to_credit: { vi: 'Đã bảo lưu 30 ngày', en: 'Converted to Credit', cls: 'bg-[#FAF5EB] text-[#A67C2E] border-[#DFCA9A]' },
+  rejected: { vi: 'Đã từ chối', en: 'Rejected', cls: 'bg-[#F8EAEA] text-[#B33E3E] border-[#E5B8B8]' },
+};
+
+const REFUND_CATEGORY_LABELS: Record<string, { vi: string; en: string }> = {
+  company_fault: { vi: 'Lỗi vận hành công ty', en: 'Company Fault' },
+  company_cannot_fulfil: { vi: 'Công ty không thể đáp ứng', en: 'Company Cannot Fulfil' },
+  vet_unfit: { vi: 'Ngựa không đạt sức khỏe thú y', en: 'Vet Unfit' },
+  vet_unfit_certified: { vi: 'Thú y xác nhận không đạt sức khỏe', en: 'Vet Unfit (Certified)' },
+  vet_unfit_uncertified: { vi: 'Báo không đạt sức khỏe (chưa có giấy thú y)', en: 'Vet Unfit (Uncertified)' },
+  payment_overdue: { vi: 'Quá hạn thanh toán', en: 'Payment Overdue' },
+  payment_overdue_expired: { vi: 'Hết hạn gia hạn thanh toán', en: 'Payment Grace Expired' },
+  customer_request_post_approval: { vi: 'Khách hủy sau duyệt', en: 'Customer Post-Approval Cancel' },
+  force_majeure: { vi: 'Bất khả kháng', en: 'Force Majeure' },
+  return_leg_customer_cancel: { vi: 'Khách hủy chặng về khứ hồi', en: 'Customer Cancelled Return Leg' },
+  return_leg_company_cancel: { vi: 'Công ty hủy chặng về khứ hồi', en: 'Company Cancelled Return Leg' },
+  insurance_claim: { vi: 'Bồi thường bảo hiểm', en: 'Insurance Claim Payout' },
+};
+
 export function ManagerOrderFinanceGovernanceCard({
   shipmentId,
   requestCode,
   orderStatus,
-  bookingType,
   onUpdated,
 }: Props) {
   const { language } = useLanguage();
   const isEn = language === 'en';
-  const currentUser = getCurrentUser();
-  const isAdmin = /admin/i.test(String(currentUser?.role || ''));
 
-  const [disbursements, setDisbursements] = useState<DisbursementItem[]>([]);
   const [refunds, setRefunds] = useState<RefundRecordItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-
-  // Disbursement form
-  const [showDisbForm, setShowDisbForm] = useState(false);
-  const [authorityName, setAuthorityName] = useState('');
-  const [feeType, setFeeType] = useState('');
-  const [disbAmount, setDisbAmount] = useState('');
-  const [disbReceiptUrl, setDisbReceiptUrl] = useState('');
-  const [disbFile, setDisbFile] = useState<File | null>(null);
 
   // Operational cancel form
   const [showCancelForm, setShowCancelForm] = useState(false);
@@ -113,17 +108,12 @@ export function ManagerOrderFinanceGovernanceCard({
   const [cancelAirCost, setCancelAirCost] = useState('');
   const [cancelReason, setCancelReason] = useState('');
 
-  // Charter upgrade form
-  const [showUpgradeForm, setShowUpgradeForm] = useState(false);
-  const [charterCost, setCharterCost] = useState('');
-  const [upgradeReason, setUpgradeReason] = useState('');
-
-  // Grace reason
+  // Grace confirmation form (only for awaiting_payment)
+  const [showGraceForm, setShowGraceForm] = useState(false);
   const [graceReason, setGraceReason] = useState('');
 
-  // Transfer form per refund ID
+  // Transfer form per refund ID (Cách 1: uses customer-submitted bank info)
   const [transferTargetId, setTransferTargetId] = useState<number | null>(null);
-  const [bankAccount, setBankAccount] = useState('');
   const [bankTxRef, setBankTxRef] = useState('');
   const [transferUrl, setTransferUrl] = useState('');
   const [transferFile, setTransferFile] = useState<File | null>(null);
@@ -132,16 +122,12 @@ export function ManagerOrderFinanceGovernanceCard({
     if (!Number.isInteger(shipmentId) || shipmentId <= 0) return;
     setLoading(true);
     try {
-      const [disbRes, refRes] = await Promise.allSettled([
-        apiClient<DisbursementItem[]>(`/orders/${shipmentId}/disbursements`),
-        apiClient<RefundRecordItem[]>(`/orders/${shipmentId}/refunds`),
-      ]);
-      if (disbRes.status === 'fulfilled' && Array.isArray(disbRes.value)) {
-        setDisbursements(disbRes.value);
+      const refData = await apiClient<RefundRecordItem[]>(`/orders/${shipmentId}/refunds`);
+      if (Array.isArray(refData)) {
+        setRefunds(refData);
       }
-      if (refRes.status === 'fulfilled' && Array.isArray(refRes.value)) {
-        setRefunds(refRes.value);
-      }
+    } catch {
+      // Keep previous state on transient network failure
     } finally {
       setLoading(false);
     }
@@ -153,54 +139,10 @@ export function ManagerOrderFinanceGovernanceCard({
 
   const statusLower = String(orderStatus || '').toLowerCase();
   const canOperationalCancel = ['approved', 'planning', 'confirmed', 'ready_to_depart'].includes(statusLower);
-  const canGrantGrace = ['planning', 'confirmed', 'ready_to_depart'].includes(statusLower);
-  const canUpgradeCharter =
-    bookingType === 'shared_stall' && ['approved', 'planning', 'confirmed', 'ready_to_depart'].includes(statusLower);
+  // Prepaid flow: payment grace extension is only relevant while awaiting initial payment
+  const canGrantGrace = statusLower === 'awaiting_payment';
 
   const money = (v: number) => `${Number(v || 0).toLocaleString('vi-VN')} VND`;
-
-  const handleCreateDisbursement = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const numAmount = Number(disbAmount);
-    if (!authorityName.trim() || !feeType.trim() || !Number.isInteger(numAmount) || numAmount <= 0) {
-      toast.error(isEn ? 'Enter valid authority, fee type and positive VND amount.' : 'Nhập tên cơ quan, loại phí và số tiền VNĐ hợp lệ.');
-      return;
-    }
-    setBusyAction('disbursement');
-    try {
-      if (disbFile) {
-        const fd = new FormData();
-        fd.append('authorityName', authorityName.trim());
-        fd.append('feeType', feeType.trim());
-        fd.append('amount', String(numAmount));
-        fd.append('receipt', disbFile);
-        await apiClient(`/orders/${shipmentId}/disbursements`, { method: 'POST', body: fd });
-      } else {
-        await apiClient(`/orders/${shipmentId}/disbursements`, {
-          method: 'POST',
-          body: JSON.stringify({
-            authorityName: authorityName.trim(),
-            feeType: feeType.trim(),
-            amount: numAmount,
-            ...(disbReceiptUrl.trim() ? { authorityReceiptUrl: disbReceiptUrl.trim() } : {}),
-          }),
-        });
-      }
-      toast.success(isEn ? 'Reimbursable disbursement recorded.' : 'Đã ghi nhận khoản phí ứng trước có biên lai.');
-      setAuthorityName('');
-      setFeeType('');
-      setDisbAmount('');
-      setDisbReceiptUrl('');
-      setDisbFile(null);
-      setShowDisbForm(false);
-      await loadFinanceData();
-      await onUpdated();
-    } catch (err: any) {
-      toast.error(err?.message || (isEn ? 'Failed to record disbursement.' : 'Không thể ghi nhận phí ứng trước.'));
-    } finally {
-      setBusyAction(null);
-    }
-  };
 
   const handleOperationalCancel = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,7 +173,8 @@ export function ManagerOrderFinanceGovernanceCard({
     }
   };
 
-  const handleGrantGrace = async () => {
+  const handleGrantGrace = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setBusyAction('grace');
     try {
       await apiClient(`/orders/${shipmentId}/payment-grace`, {
@@ -240,41 +183,10 @@ export function ManagerOrderFinanceGovernanceCard({
       });
       toast.success(isEn ? '1-time payment grace granted (MIN(now+10h, T-24h)).' : 'Đã cấp gia hạn thanh toán duy nhất 1 lần.');
       setGraceReason('');
+      setShowGraceForm(false);
       await onUpdated();
     } catch (err: any) {
       toast.error(err?.message || (isEn ? 'Cannot grant payment grace.' : 'Không thể cấp gia hạn thanh toán.'));
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const handleUpgradeCharter = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cost = Number(charterCost);
-    if (!Number.isInteger(cost) || cost <= 0) {
-      toast.error(isEn ? 'Enter valid positive VND charter cost.' : 'Nhập cước bao xe VNĐ nguyên dương hợp lệ.');
-      return;
-    }
-    setBusyAction('upgrade');
-    try {
-      const res = await apiClient<{ branch?: string }>(`/orders/${shipmentId}/upgrade-charter`, {
-        method: 'POST',
-        body: JSON.stringify({
-          charterTransportCost: cost,
-          reason: upgradeReason.trim() || 'D-3 Upgrade Shared Stall -> Dedicated Charter',
-        }),
-      });
-      toast.success(
-        isEn
-          ? `Upgraded to Dedicated Charter (${res?.branch || 'updated'}).`
-          : `Đã nâng cấp lên Bao nguyên xe (${res?.branch || 'thành công'}).`,
-      );
-      setShowUpgradeForm(false);
-      setCharterCost('');
-      setUpgradeReason('');
-      await onUpdated();
-    } catch (err: any) {
-      toast.error(err?.message || (isEn ? 'Charter upgrade failed.' : 'Không thể nâng cấp lên bao nguyên xe.'));
     } finally {
       setBusyAction(null);
     }
@@ -302,15 +214,14 @@ export function ManagerOrderFinanceGovernanceCard({
 
   const handleTransferRefund = async (e: React.FormEvent, refundId: number) => {
     e.preventDefault();
-    if (!bankAccount.trim() || !bankTxRef.trim()) {
-      toast.error(isEn ? 'Bank account and transaction reference required.' : 'Nhập số tài khoản nhận và mã giao dịch chuyển khoản.');
+    if (!bankTxRef.trim()) {
+      toast.error(isEn ? 'Bank transaction reference is required.' : 'Vui lòng nhập mã giao dịch chuyển khoản.');
       return;
     }
     setBusyAction(`transfer-${refundId}`);
     try {
       if (transferFile) {
         const fd = new FormData();
-        fd.append('recipientBankAccount', bankAccount.trim());
         fd.append('bankTransactionRef', bankTxRef.trim());
         fd.append('receipt', transferFile);
         await apiClient(`/orders/refunds/${refundId}/transfer`, { method: 'POST', body: fd });
@@ -318,7 +229,6 @@ export function ManagerOrderFinanceGovernanceCard({
         await apiClient(`/orders/refunds/${refundId}/transfer`, {
           method: 'POST',
           body: JSON.stringify({
-            recipientBankAccount: bankAccount.trim(),
             bankTransactionRef: bankTxRef.trim(),
             ...(transferUrl.trim() ? { transferReceiptUrl: transferUrl.trim() } : {}),
           }),
@@ -326,13 +236,13 @@ export function ManagerOrderFinanceGovernanceCard({
       }
       toast.success(isEn ? `Refund #${refundId} marked transferred.` : `Đã xác nhận giải ngân chuyển khoản #${refundId}.`);
       setTransferTargetId(null);
-      setBankAccount('');
       setBankTxRef('');
       setTransferUrl('');
       setTransferFile(null);
       await loadFinanceData();
+      await onUpdated();
     } catch (err: any) {
-      toast.error(err?.message || (isEn ? 'Transfer failed (check SoD separation).' : 'Không thể xác nhận chuyển khoản (kiểm tra tách nhiệm vụ SoD).'));
+      toast.error(err?.message || (isEn ? 'Transfer failed.' : 'Không thể xác nhận chuyển khoản hoàn tiền.'));
     } finally {
       setBusyAction(null);
     }
@@ -343,7 +253,7 @@ export function ManagerOrderFinanceGovernanceCard({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-extrabold text-[#181A17] flex items-center gap-2 m-0">
           <Landmark size={18} className="text-[#A67C2E]" aria-hidden="true" />
-          <span>{isEn ? 'Finance, Disbursements & SLA Governance' : 'Tài Chính, Phí Ứng Trước & Điều Hành SLA'}</span>
+          <span>{isEn ? 'Refunds & Operational Exceptions' : 'Quản Lý Hoàn Tiền & Ngoại Lệ'}</span>
         </h2>
         <button
           type="button"
@@ -355,10 +265,10 @@ export function ManagerOrderFinanceGovernanceCard({
       </div>
 
       {/* Operational Controls */}
-      {(canGrantGrace || canUpgradeCharter || canOperationalCancel) && (
+      {(canGrantGrace || canOperationalCancel) && (
         <div className="flex flex-col gap-2.5 p-3.5 rounded-xl bg-[#FAF8F4] border border-[#E8E2D8]">
           <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6658]">
-            {isEn ? 'Operational Governance Controls' : 'Tác vụ xử lý ngoại lệ & SLA'}
+            {isEn ? 'Exception Controls' : 'Tác vụ xử lý ngoại lệ'}
           </span>
           <div className="flex flex-wrap gap-2">
             {canGrantGrace && (
@@ -367,24 +277,11 @@ export function ManagerOrderFinanceGovernanceCard({
                 variant="outline"
                 size="sm"
                 disabled={busyAction !== null}
-                onClick={() => void handleGrantGrace()}
+                onClick={() => setShowGraceForm((v) => !v)}
                 className="text-xs rounded-xl"
               >
                 <Clock size={13} className="mr-1" aria-hidden="true" />
                 {isEn ? 'Grant 1x Payment Grace' : 'Gia hạn thanh toán (1 lần)'}
-              </Button>
-            )}
-            {canUpgradeCharter && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busyAction !== null}
-                onClick={() => setShowUpgradeForm((v) => !v)}
-                className="text-xs rounded-xl"
-              >
-                <TrendingUp size={13} className="mr-1" aria-hidden="true" />
-                {isEn ? 'Upgrade Shared → Charter' : 'Nâng cấp Bao nguyên xe'}
               </Button>
             )}
             {canOperationalCancel && (
@@ -402,32 +299,23 @@ export function ManagerOrderFinanceGovernanceCard({
             )}
           </div>
 
-          {showUpgradeForm && (
-            <form onSubmit={handleUpgradeCharter} className="mt-2 p-3 rounded-xl bg-white border border-[#D8CEBE] flex flex-col gap-2.5 text-xs">
-              <strong className="text-[#181A17]">{isEn ? 'D-3 Charter Upgrade Quote' : 'Báo giá nâng cấp Dedicated Charter (D-3)'}</strong>
-              <input
-                type="number"
-                min={1}
-                placeholder={isEn ? 'Charter Freight (VND)' : 'Giá cước bao nguyên xe (VND)'}
-                value={charterCost}
-                onChange={(e) => setCharterCost(e.target.value)}
-                className="h-9 px-3 rounded-lg border border-[#D8CEBE]"
-                required
-              />
+          {showGraceForm && (
+            <form onSubmit={handleGrantGrace} className="mt-2 p-3 rounded-xl bg-white border border-[#D8CEBE] flex flex-col gap-2.5 text-xs">
+              <strong className="text-[#181A17]">{isEn ? 'Confirm 1-Time Payment Grace Extension' : 'Xác nhận gia hạn thanh toán (duy nhất 1 lần)'}</strong>
               <input
                 type="text"
-                placeholder={isEn ? 'Upgrade reason / notes' : 'Lý do nâng cấp'}
-                value={upgradeReason}
-                onChange={(e) => setUpgradeReason(e.target.value)}
+                placeholder={isEn ? 'Reason for grace extension (optional)' : 'Lý do gia hạn thanh toán (tùy chọn)'}
+                value={graceReason}
+                onChange={(e) => setGraceReason(e.target.value)}
                 className="h-9 px-3 rounded-lg border border-[#D8CEBE]"
               />
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => setShowUpgradeForm(false)}>
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowGraceForm(false)}>
                   {isEn ? 'Cancel' : 'Đóng'}
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={busyAction === 'upgrade'}>
-                  {busyAction === 'upgrade' && <Loader2 size={12} className="animate-spin mr-1" />}
-                  {isEn ? 'Confirm Upgrade' : 'Xác nhận nâng cấp'}
+                <Button type="submit" variant="primary" size="sm" disabled={busyAction === 'grace'}>
+                  {busyAction === 'grace' && <Loader2 size={12} className="animate-spin mr-1" />}
+                  {isEn ? 'Confirm Grace' : 'Xác nhận gia hạn'}
                 </Button>
               </div>
             </form>
@@ -485,135 +373,57 @@ export function ManagerOrderFinanceGovernanceCard({
         </div>
       )}
 
-      {/* Reimbursable Disbursements */}
+      {/* Refund Approval & Payout Ledger */}
       <div className="space-y-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-extrabold text-[#181A17]">
-            {isEn ? 'Agency Reimbursable Disbursements' : 'Phí cơ quan chức năng ứng trước'} ({disbursements.length})
-          </span>
-          <Button type="button" variant="outline" size="sm" onClick={() => setShowDisbForm((v) => !v)} className="text-xs rounded-xl">
-            <Plus size={12} className="mr-1" aria-hidden="true" />
-            {isEn ? 'Add Disbursement' : 'Ghi nhận phí'}
-          </Button>
-        </div>
-
-        {showDisbForm && (
-          <form onSubmit={handleCreateDisbursement} className="p-3 rounded-xl border border-[#D8CEBE] bg-[#FAF9F5] flex flex-col gap-2 text-xs">
-            <input
-              type="text"
-              required
-              placeholder={isEn ? 'Authority name (e.g., Cục Thú Y)' : 'Cơ quan thu (VD: Cục Thú Y / Hải Quan)'}
-              value={authorityName}
-              onChange={(e) => setAuthorityName(e.target.value)}
-              className="h-9 px-3 rounded-lg border border-[#D8CEBE] bg-white"
-            />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input
-                type="text"
-                required
-                placeholder={isEn ? 'Fee type (e.g., Kiểm dịch)' : 'Loại lệ phí'}
-                value={feeType}
-                onChange={(e) => setFeeType(e.target.value)}
-                className="h-9 px-3 rounded-lg border border-[#D8CEBE] bg-white"
-              />
-              <input
-                type="number"
-                required
-                min={1}
-                placeholder={isEn ? 'Amount (VND)' : 'Số tiền (VND)'}
-                value={disbAmount}
-                onChange={(e) => setDisbAmount(e.target.value)}
-                className="h-9 px-3 rounded-lg border border-[#D8CEBE] bg-white"
-              />
-            </div>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={(e) => setDisbFile(e.target.files?.[0] ?? null)}
-              className="text-xs"
-            />
-            {!disbFile && (
-              <input
-                type="url"
-                placeholder={isEn ? 'Or receipt URL (https://...)' : 'Hoặc URL biên lai (https://...)'}
-                value={disbReceiptUrl}
-                onChange={(e) => setDisbReceiptUrl(e.target.value)}
-                className="h-9 px-3 rounded-lg border border-[#D8CEBE] bg-white"
-              />
-            )}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setShowDisbForm(false)}>
-                {isEn ? 'Cancel' : 'Hủy'}
-              </Button>
-              <Button type="submit" variant="primary" size="sm" disabled={busyAction === 'disbursement'}>
-                {isEn ? 'Save Disbursement' : 'Lưu khoản phí'}
-              </Button>
-            </div>
-          </form>
-        )}
-
-        {loading ? (
-          <p className="text-xs text-[#7E867B] m-0">{isEn ? 'Loading finance records...' : 'Đang tải dữ liệu tài chính...'}</p>
-        ) : disbursements.length === 0 ? (
-          <p className="text-xs text-[#7E867B] m-0">{isEn ? 'No agency disbursements recorded.' : 'Chưa có khoản phí ứng trước nào.'}</p>
-        ) : (
-          <div className="space-y-2">
-            {disbursements.map((d) => (
-              <div key={d.id} className="p-3 rounded-xl border border-[#EAE5DA] bg-[#FAF9F5] flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div>
-                  <strong className="text-[#181A17] block">{d.authorityName} — {d.feeType}</strong>
-                  <span className="text-[#5C6658]">
-                    {money(d.amount)} • <span className="uppercase font-semibold">{d.settledStatus}</span>
-                  </span>
-                </div>
-                {d.authorityReceiptUrl && (
-                  <button
-                    type="button"
-                    onClick={() => void openAuthenticatedApiFile(`/api/orders/disbursements/${d.id}/receipt`)}
-                    className="inline-flex items-center gap-1 font-bold text-[#A67C2E] hover:underline bg-transparent border-0 cursor-pointer"
-                  >
-                    <ExternalLink size={12} aria-hidden="true" /> {isEn ? 'Receipt' : 'Biên lai'}
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Refund SoD Records */}
-      <div className="space-y-2.5 pt-2 border-t border-[#EAE5DA]">
         <span className="text-xs font-extrabold text-[#181A17] flex items-center gap-1.5">
           <Receipt size={14} className="text-[#A67C2E]" aria-hidden="true" />
-          {isEn ? 'Refund Approval & SoD Payout Ledger' : 'Sổ Phê Duyệt & Hoàn Tiền Thủ Công (SoD)'} ({refunds.length})
+          {isEn ? 'Refund Approval & Transfer Ledger' : 'Sổ Phê Duyệt & Chuyển Khoản Hoàn Tiền'} ({refunds.length})
         </span>
 
-        {refunds.length === 0 ? (
+        {loading ? (
+          <p className="text-xs text-[#7E867B] m-0">{isEn ? 'Loading refund records...' : 'Đang tải hồ sơ hoàn tiền...'}</p>
+        ) : refunds.length === 0 ? (
           <p className="text-xs text-[#7E867B] m-0">{isEn ? 'No refund records.' : 'Chưa phát sinh hồ sơ hoàn tiền.'}</p>
         ) : (
           <div className="space-y-3">
             {refunds.map((r) => {
               const needsApproval = r.status === 'pending_approval' || r.status === 'pending_second_approval';
+              const hasCustomerBankInfo = Boolean(r.formSubmittedAt && String(r.recipientBankAccount || '').trim());
               const waitingInsuranceBankForm =
                 r.cancellationCategory === 'insurance_claim' &&
                 r.status === 'pending_approval' &&
-                (!r.formSubmittedAt || !r.recipientBankAccount);
-              const canTransfer = r.status === 'approved_for_transfer' && isAdmin;
+                !hasCustomerBankInfo;
+              const waitingBankFormForTransfer =
+                r.refundMode === 'cash_refund' && !hasCustomerBankInfo;
+              const canTransfer = r.status === 'approved_for_transfer';
+              const statusMeta = REFUND_STATUS_META[r.status] || {
+                vi: r.status,
+                en: r.status,
+                cls: 'bg-white text-[#181A17] border-[#D8CEBE]',
+              };
+              const catMeta = REFUND_CATEGORY_LABELS[r.cancellationCategory];
               return (
                 <div key={r.id} className="p-3.5 rounded-xl border border-[#D8CEBE] bg-[#FAF9F5] space-y-2 text-xs">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <strong className="text-[#181A17]">
-                      #{r.id} • {money(r.amount)} ({r.refundMode === 'credit_30d' ? 'Credit 30d' : 'Cash'})
+                      #{r.id} • {money(r.amount)} (
+                      {r.refundMode === 'credit_30d'
+                        ? isEn ? '30-Day Credit' : 'Bảo lưu 30 ngày'
+                        : isEn ? 'Bank Transfer' : 'Hoàn chuyển khoản'}
+                      )
                     </strong>
-                    <span className="px-2 py-0.5 rounded-md bg-white border border-[#D8CEBE] font-bold text-[11px] uppercase">
-                      {r.status}
+                    <span className={`px-2 py-0.5 rounded-md border font-bold text-[11px] ${statusMeta.cls}`}>
+                      {isEn ? statusMeta.en : statusMeta.vi}
                     </span>
                   </div>
                   <div className="text-[#5C6658]">
-                    {r.cancellationCategory} • {isEn ? 'Disbursement deducted:' : 'Khấu trừ nộp hộ:'}{' '}
-                    <strong>{money(r.disbursementDeduction)}</strong>
-                    {r.requiresDualApproval && (
-                      <span className="ml-2 text-[#B33E3E] font-bold">• Dual Approval (&ge;20M)</span>
+                    {catMeta ? (isEn ? catMeta.en : catMeta.vi) : r.cancellationCategory}
+                    {Number(r.disbursementDeduction || 0) > 0 && (
+                      <>
+                        {' • '}
+                        {isEn ? 'Disbursement deducted:' : 'Khấu trừ nộp hộ:'}{' '}
+                        <strong>{money(r.disbursementDeduction)}</strong>
+                      </>
                     )}
                   </div>
 
@@ -626,11 +436,11 @@ export function ManagerOrderFinanceGovernanceCard({
                         {[r.recipientBankName, r.recipientBankAccount, r.recipientAccountHolder].filter(Boolean).join(' · ')}
                       </span>
                     </div>
-                  ) : waitingInsuranceBankForm ? (
+                  ) : r.refundMode === 'cash_refund' && ['pending_approval', 'approved_for_transfer'].includes(r.status) ? (
                     <div className="p-2.5 rounded-lg bg-[#FFF9EB] border border-[#DFCA9A] text-[#7A5616] font-medium">
                       {isEn
-                        ? 'Awaiting customer to submit beneficiary bank account details via the insurance payout form.'
-                        : 'Đang chờ khách hàng điền thông tin tài khoản ngân hàng qua biểu mẫu nhận bồi thường bảo hiểm.'}
+                        ? 'Awaiting customer to submit beneficiary bank account details via the refund form before transfer.'
+                        : 'Đang chờ chủ ngựa điền thông tin tài khoản ngân hàng qua biểu mẫu hoàn tiền trước khi chuyển khoản.'}
                     </div>
                   ) : null}
 
@@ -668,9 +478,7 @@ export function ManagerOrderFinanceGovernanceCard({
                         onClick={() => void handleApproveRefund(r.id, 'approve')}
                         className="text-xs rounded-xl"
                       >
-                        {r.status === 'pending_second_approval'
-                          ? isEn ? '2nd Approve (Dual)' : 'Duyệt lần 2 (Dual)'
-                          : isEn ? 'Approve Refund' : 'Duyệt hoàn tiền'}
+                        {isEn ? 'Approve Refund' : 'Duyệt hoàn tiền'}
                       </Button>
                       <Button
                         type="button"
@@ -689,18 +497,14 @@ export function ManagerOrderFinanceGovernanceCard({
                     <div className="pt-1">
                       {transferTargetId === r.id ? (
                         <form onSubmit={(e) => void handleTransferRefund(e, r.id)} className="p-2.5 rounded-lg bg-white border border-[#D8CEBE] flex flex-col gap-2">
+                          <div className="text-[11px] bg-[#FAF8F4] border border-[#E5DDD0] rounded px-2.5 py-1.5 text-[#273244]">
+                            <span className="font-bold text-[#181A17]">{isEn ? 'Transfer to:' : 'Chuyển khoản tới:'}</span>{' '}
+                            {[r.recipientBankName, r.recipientBankAccount, r.recipientAccountHolder].filter(Boolean).join(' · ')}
+                          </div>
                           <input
                             type="text"
                             required
-                            placeholder={isEn ? 'Recipient bank account' : 'Số tài khoản ngân hàng nhận'}
-                            value={bankAccount}
-                            onChange={(e) => setBankAccount(e.target.value)}
-                            className="h-8 px-2.5 rounded border border-[#D8CEBE]"
-                          />
-                          <input
-                            type="text"
-                            required
-                            placeholder={isEn ? 'Bank transaction reference' : 'Mã giao dịch ủy nhiệm chi'}
+                            placeholder={isEn ? 'Bank transaction reference' : 'Mã giao dịch ủy nhiệm chi *'}
                             value={bankTxRef}
                             onChange={(e) => setBankTxRef(e.target.value)}
                             className="h-8 px-2.5 rounded border border-[#D8CEBE]"
@@ -733,17 +537,20 @@ export function ManagerOrderFinanceGovernanceCard({
                           type="button"
                           variant="primary"
                           size="sm"
-                          onClick={() => {
-                            setTransferTargetId(r.id);
-                            setBankAccount(
-                              [r.recipientBankName, r.recipientBankAccount, r.recipientAccountHolder]
-                                .filter(Boolean)
-                                .join(' - '),
-                            );
-                          }}
+                          disabled={waitingBankFormForTransfer}
+                          title={
+                            waitingBankFormForTransfer
+                              ? isEn
+                                ? 'Locked until customer submits bank account form'
+                                : 'Đang chờ chủ ngựa cung cấp STK qua biểu mẫu hoàn tiền'
+                              : undefined
+                          }
+                          onClick={() => setTransferTargetId(r.id)}
                           className="text-xs rounded-xl"
                         >
-                          {isEn ? 'Record Manual Transfer (Admin SoD)' : 'Xác nhận đã chuyển khoản (Admin SoD)'}
+                          {waitingBankFormForTransfer
+                            ? isEn ? 'Waiting Customer Bank Info' : 'Chờ khách cung cấp STK'
+                            : isEn ? 'Confirm Bank Transfer' : 'Xác nhận đã chuyển khoản'}
                         </Button>
                       )}
                     </div>

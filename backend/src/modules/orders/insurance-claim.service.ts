@@ -420,13 +420,6 @@ export class InsuranceClaimService {
       'status_update',
       result.shipmentId,
     );
-    await this.notificationsService.notifyRole(
-      'Admin',
-      `Khách đã điền STK nhận bồi thường #${claimId} (${code})`,
-      msg,
-      'status_update',
-      result.shipmentId,
-    );
     return result;
   }
 }

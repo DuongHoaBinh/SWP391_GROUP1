@@ -533,13 +533,12 @@ export default function ManagerSettingsPage() {
             </label>
           </div>
 
-          {isAdmin ? (
           <div className="pt-2 border-t border-[#EFEAE0] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="text-xs font-bold text-[#181A17] flex items-center gap-1.5">
                 <span>{language === 'en' ? 'GPS Simulation Mode' : 'Chế độ Giả lập Tọa độ GPS'}</span>
                 <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-300">
-                  Admin
+                  {language === 'en' ? 'Operations' : 'Vận hành'}
                 </span>
               </div>
               <div className="text-[11px] text-[#5F6977]">
@@ -563,20 +562,13 @@ export default function ManagerSettingsPage() {
               <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#A67C2E]"></div>
             </label>
           </div>
-          ) : (
-            <div className="pt-2 border-t border-[#EFEAE0] text-xs text-[#5F6977] bg-[#FAF8F4] px-3.5 py-2.5 rounded-xl border border-[#EAE5DA]">
-              {language === 'en'
-                ? 'System-wide GPS simulation mode is managed exclusively by System Administrators.'
-                : 'Chế độ giả lập GPS toàn hệ thống chỉ được cấu hình bởi Quản trị viên (Admin).'}
-            </div>
-          )}
 
           <div className="flex justify-end mt-2">
             <Button
               type="submit"
               variant="primary"
               size="sm"
-              disabled={isSavingTracking || !isAdmin}
+              disabled={isSavingTracking}
               className="h-11 px-5 rounded-xl"
             >
               {isSavingTracking ? (

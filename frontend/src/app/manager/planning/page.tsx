@@ -517,8 +517,7 @@ export default function ManagerPlanningPage() {
   const isAssignReadOnly = Boolean(
     selectedOrderForAssign &&
       (['in_transit', 'return_pending', 'completed'].includes(selectedOrderForAssign.status) ||
-        ['in_transit', 'completed'].includes(selectedOrderForAssign.routePlan?.planStatus || '') ||
-        (['confirmed', 'ready_to_depart'].includes(selectedOrderForAssign.status) && !hasPendingOrDeclinedStaff))
+        ['in_transit', 'completed'].includes(selectedOrderForAssign.routePlan?.planStatus || ''))
   );
 
   const assignEffectiveLegs =
@@ -526,7 +525,14 @@ export default function ManagerPlanningPage() {
 
   const isConsigneePickupPlate = (plate?: string | null) => {
     const p = String(plate || '').toLowerCase();
-    return p.includes('đến đón') || p.includes('đến rước') || p.includes('bên nhận') || p.includes('consignee');
+    return (
+      p.includes('đến đón') ||
+      p.includes('đến rước') ||
+      p.includes('bên nhận') ||
+      p.includes('consignee') ||
+      p.includes('trạm đối tác') ||
+      p.includes('partner depot')
+    );
   };
 
   const isAssignSeaShipment = Boolean(
@@ -539,8 +545,7 @@ export default function ManagerPlanningPage() {
       (assignEffectiveLegs.some((l: any) => l.legType === 'flight' || l.mode === 'air') ||
         selectedOrderForAssign?.routePlan?.managerAirlineId ||
         selectedOrderForAssign?.routePlan?.managerDepartureAirportId ||
-        (selectedOrderForAssign as any)?.transportMode === 'air' ||
-        (selectedOrderForAssign && isInternational(selectedOrderForAssign)))
+        (selectedOrderForAssign as any)?.transportMode === 'air')
   );
 
   const hasCompanyRoadLegForAssign =
@@ -854,10 +859,6 @@ export default function ManagerPlanningPage() {
                     order.transportMode === 'sea' || plan?.legs?.some((l) => l.legType === 'sea')
                       ? 'sea'
                       : order.transportMode === 'air' || plan?.legs?.some((l) => l.legType === 'flight')
-                      ? 'air'
-                      : order.transportMode === 'road'
-                      ? 'road'
-                      : isIntl
                       ? 'air'
                       : 'road';
 
@@ -1749,6 +1750,7 @@ export default function ManagerPlanningPage() {
                           s.confirmationNotes?.includes('TỪ CHỐI')
                       );
                       const isCurrentDriver = String(d.id) === selectedDriverId;
+                      const activeCount = Number(d.activeTrips || 0);
 
                       return (
                         <option key={d.id} value={d.id} disabled={hasDeclined}>
@@ -1757,6 +1759,8 @@ export default function ManagerPlanningPage() {
                             ? `— ${t('manager.planning.statusDeclined', 'ĐÃ TỪ CHỐI CHUYẾN NÀY (Không khả dụng)')}`
                             : isCurrentDriver
                             ? `— (${t('manager.planning.statusCurrentlySelected', 'Đang chọn')})`
+                            : activeCount > 0
+                            ? `— ${isEn ? `Busy (${activeCount} active trip${activeCount > 1 ? 's' : ''})` : `Đang bận (${activeCount} chuyến)`}`
                             : `— ${t('manager.planning.statusAvailableFree', 'Đang rảnh (0 chuyến)')}`}
                         </option>
                       );
@@ -1771,6 +1775,10 @@ export default function ManagerPlanningPage() {
                     ? isEn
                       ? 'Equine Vet / In-Flight Medical Escort (Flight & Arrival Clearance) *'
                       : 'Bác sĩ thú y / Hộ tống hàng không (Đi cùng chuyến bay & thông quan đích) *'
+                    : isAssignSeaShipment
+                    ? isEn
+                      ? 'Equine Vet / Sea Voyage Medical Escort (Vessel & Port Clearance) *'
+                      : 'Bác sĩ thú y / Hộ tống tàu biển (Đi cùng tàu & thông quan cảng) *'
                     : t('manager.planning.fieldEscort', 'Chuyên viên y tế / Bác sĩ thú y hộ tống (Tùy chọn)')}
                 </label>
                 <select
@@ -1786,6 +1794,10 @@ export default function ManagerPlanningPage() {
                       ? isEn
                         ? '-- Select mandatory Veterinary / Flight Escort (Available) --'
                         : '-- Chọn Bác sĩ thú y / Hộ tống bay bắt buộc (Đang rảnh) --'
+                      : isAssignSeaShipment
+                      ? isEn
+                        ? '-- Select mandatory Veterinary / Sea Escort (Available) --'
+                        : '-- Chọn Bác sĩ thú y / Hộ tống tàu biển bắt buộc (Đang rảnh) --'
                       : t(
                           'manager.planning.selectEscortPlaceholder',
                           '-- Chọn chuyên viên y tế / hộ tống đi kèm (Đang rảnh) --'
@@ -2101,7 +2113,7 @@ export default function ManagerPlanningPage() {
                         ? 'Transport route plan is not fully confirmed.'
                         : cond.includes('Hồ sơ pháp lý') || cond.includes('Flow 2')
                         ? 'Legal, testing, and quarantine documentation is not 100% completed and approved.'
-                        : cond.includes('thanh toán') || cond.includes('MoMo') || cond.includes('SePay')
+                        : cond.includes('thanh toán') || cond.includes('SePay')
                         ? 'Awaiting customer freight payment completion via SePay VietQR.'
                         : cond
                       : cond}

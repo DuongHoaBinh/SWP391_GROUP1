@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -125,6 +126,12 @@ export class IncidentsService {
         if (!assigned) {
           throw new ForbiddenException('Bạn chỉ được báo cáo sự cố cho chuyến đi được phân công cho mình.');
         }
+        const activeIncidentStatuses = ['ready_to_depart', 'in_transit', 'return_pending'];
+        if (shipment.status && !activeIncidentStatuses.includes(String(shipment.status))) {
+          throw new ConflictException(
+            `Chuyến đi đang ở trạng thái "${shipment.status}", chỉ được báo sự cố khi chuyến đang sẵn sàng xuất phát hoặc đang vận chuyển.`,
+          );
+        }
       }
 
       const fileUrls = files.map((f) => `/api/incidents/attachments/${f.filename}`);
@@ -204,8 +211,8 @@ export class IncidentsService {
 
     await this.notificationsService.notifyRole(
       'Logistics Manager',
-      `Đề xuất thay đổi #${created.id} (${created.requestCode})`,
-      `Coordinator đề xuất [${dto.changeType}]: ${dto.reason.trim()} (Chi phí dự kiến: ${created.estimatedExtraCost.toLocaleString('vi-VN')} VND, phân bổ: ${allocation}).`,
+      `Phương án điều chỉnh sự cố #${created.id} (${created.requestCode})`,
+      `Đề xuất điều chỉnh [${dto.changeType}]: ${dto.reason.trim()} (Chi phí dự kiến: ${created.estimatedExtraCost.toLocaleString('vi-VN')} VND, phân bổ: ${allocation}).`,
       'incident',
       inc.shipmentId,
     );

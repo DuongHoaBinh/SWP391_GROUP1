@@ -192,7 +192,18 @@ export function ManagerHandoverDisputesPanel() {
 
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-[#5C6658]">
                 <span>{isEn ? 'Receiver:' : 'Người nhận:'} <strong className="text-[#181A17]">{h.receivedByName}</strong></span>
-                <span>{isEn ? 'Condition:' : 'Tình trạng:'} <strong className="text-[#181A17]">{h.horseConditionAtHandover}</strong></span>
+                <span>
+                  {isEn ? 'Condition:' : 'Tình trạng:'}{' '}
+                  <strong className="text-[#181A17]">
+                    {h.horseConditionAtHandover === 'healthy'
+                      ? isEn ? 'Healthy' : 'Khỏe mạnh'
+                      : h.horseConditionAtHandover === 'minor_issue'
+                      ? isEn ? 'Minor Issue' : 'Lưu ý nhỏ'
+                      : h.horseConditionAtHandover === 'needs_attention'
+                      ? isEn ? 'Needs Attention' : 'Cần theo dõi thú y'
+                      : h.horseConditionAtHandover}
+                  </strong>
+                </span>
                 <span>
                   {isEn ? 'Max Cover:' : 'Trần bảo hiểm:'}{' '}
                   <strong className="text-[#181A17]">{h.maxCompensation.toLocaleString('vi-VN')} VND</strong>

@@ -131,8 +131,8 @@ function makeMockDocumentsStore(initialData = {}) {
   };
 }
 
-// 1. evaluateRequirement: 6 statuses, maxIssueAgeDays boundary, minValidityBufferHours boundary
-test('1. evaluateRequirement: handles all 6 statuses, maxIssueAgeDays, and buffer hours', () => {
+// 1. evaluateRequirement: Cách A — Manager approval is authoritative, no Tier A/B issued_too_early rejection
+test('1. evaluateRequirement: handles reusable, pending_review, missing, explicit expired, and trusts Manager approval', () => {
   const requirement = {
     regulationId: 1,
     documentTypeCode: 'health_certificate',
@@ -146,13 +146,13 @@ test('1. evaluateRequirement: handles all 6 statuses, maxIssueAgeDays, and buffe
   const tripEndAt = new Date('2026-12-16T10:00:00.000+07:00');
   const now = new Date('2026-12-01T08:00:00.000+07:00');
 
-  // 1.1 reusable: approved doc, valid expiry, valid issue date
+  // 1.1 reusable: approved doc, valid expiry
   const res1 = evaluateRequirement({
     requirement,
     document: {
       id: 10,
       status: 'approved',
-      issueDate: '2026-12-10', // 5 days old <= 10 days max
+      issueDate: '2026-12-10',
       expiryDate: '2027-06-01',
     },
     departureAt,
@@ -160,6 +160,7 @@ test('1. evaluateRequirement: handles all 6 statuses, maxIssueAgeDays, and buffe
     now,
   });
   assert.equal(res1.status, 'reusable');
+  assert.equal(res1.canSubmitLater, true);
 
   // 1.2 pending_review: submitted doc
   const res2 = evaluateRequirement({
@@ -175,8 +176,9 @@ test('1. evaluateRequirement: handles all 6 statuses, maxIssueAgeDays, and buffe
     now,
   });
   assert.equal(res2.status, 'pending_review');
+  assert.equal(res2.canSubmitLater, true);
 
-  // 1.3 missing: no document provided
+  // 1.3 missing: no document provided + Cách A submitDeadline = max(today, departure - 1d), never before today
   const res3 = evaluateRequirement({
     requirement,
     document: null,
@@ -185,9 +187,30 @@ test('1. evaluateRequirement: handles all 6 statuses, maxIssueAgeDays, and buffe
     now,
   });
   assert.equal(res3.status, 'missing');
+  assert.equal(res3.canSubmitLater, true);
+  assert.equal(res3.submitDeadline, '2026-12-14'); // departure 15/12 - 1d
 
-  // 1.4 issued_too_early: issueDate is older than maxIssueAgeDays (10 days)
-  // Departure: 2026-12-15. Issued: 2026-12-04 (11 days before) -> too early
+  // Order created on 2026-11-28 departing 2026-12-01 with leadTimeDays=7 must NOT produce 2026-11-24!
+  const resNear = evaluateRequirement({
+    requirement: { ...requirement, leadTimeDays: 7 },
+    document: null,
+    departureAt: new Date('2026-12-01T08:00:00.000+07:00'),
+    tripEndAt: new Date('2026-12-02T10:00:00.000+07:00'),
+    now: new Date('2026-11-28T08:55:00.000+07:00'),
+  });
+  assert.equal(resNear.submitDeadline, '2026-11-30');
+
+  // Same-day departure must clamp to today (never yesterday)
+  const resSameDay = evaluateRequirement({
+    requirement: { ...requirement, leadTimeDays: 14 },
+    document: null,
+    departureAt: new Date('2026-11-28T18:00:00.000+07:00'),
+    tripEndAt: new Date('2026-11-29T10:00:00.000+07:00'),
+    now: new Date('2026-11-28T08:55:00.000+07:00'),
+  });
+  assert.equal(resSameDay.submitDeadline, '2026-11-28');
+
+  // 1.4 Cách A: earlier issueDate is NOT auto-rejected as issued_too_early when Manager already approved
   const res4 = evaluateRequirement({
     requirement,
     document: {
@@ -200,26 +223,9 @@ test('1. evaluateRequirement: handles all 6 statuses, maxIssueAgeDays, and buffe
     tripEndAt,
     now,
   });
-  assert.equal(res4.status, 'issued_too_early');
+  assert.equal(res4.status, 'reusable');
 
-  // Boundary check: Issued exactly 10 days before (2026-12-05) -> valid/reusable
-  const resBoundary = evaluateRequirement({
-    requirement,
-    document: {
-      id: 13,
-      status: 'approved',
-      issueDate: '2026-12-05',
-      expiryDate: '2027-06-01',
-    },
-    departureAt,
-    tripEndAt,
-    now,
-  });
-  assert.equal(resBoundary.status, 'reusable');
-
-  // 1.5 expired: expiry date does not cover tripEndAt + 48h buffer
-  // tripEndAt: 2026-12-16 10:00. Buffer 48h -> 2026-12-18 10:00.
-  // Doc expires 2026-12-17 (ends 2026-12-17 23:59:59.999) -> expired (before 2026-12-18 10:00)
+  // 1.5 Cách A: Manager-approved doc inside old +48h buffer stays usable (reusable/expiring), never auto-downgraded to expired
   const res5 = evaluateRequirement({
     requirement,
     document: {
@@ -232,11 +238,26 @@ test('1. evaluateRequirement: handles all 6 statuses, maxIssueAgeDays, and buffe
     tripEndAt,
     now,
   });
-  assert.equal(res5.status, 'expired');
+  assert.ok(res5.status === 'reusable' || res5.status === 'expiring');
+
+  // 1.6 Explicit DB status='expired' still evaluates to expired
+  const res6 = evaluateRequirement({
+    requirement,
+    document: {
+      id: 15,
+      status: 'expired',
+      issueDate: '2026-12-01',
+      expiryDate: '2026-12-05',
+    },
+    departureAt,
+    tripEndAt,
+    now,
+  });
+  assert.equal(res6.status, 'expired');
 });
 
-// 2. Round-trip: document expiring after arrival leg but before return leg end
-test('2. Round-trip: document expiring before return leg end evaluates to expired', () => {
+// 2. Round-trip: Cách A trusts Manager-approved document, flags explicit DB expired status
+test('2. Round-trip: Manager-approved document remains valid while DB-expired document evaluates to expired', () => {
   const requirement = {
     regulationId: 2,
     documentTypeCode: 'health_certificate',
@@ -246,12 +267,11 @@ test('2. Round-trip: document expiring before return leg end evaluates to expire
   };
 
   const departureAt = new Date('2026-12-01T00:00:00.000+07:00');
-  // Return date: 2026-12-25. tripEndAt is return date + 48h buffer -> 2026-12-27 23:59:59.999
   const tripEndAt = new Date('2026-12-27T23:59:59.999+07:00');
   const now = new Date('2026-11-20T08:00:00.000+07:00');
 
-  // Doc expires on 2026-12-10 (covers outbound arrival ~2026-12-04, but fails return leg ~2026-12-27)
-  const res = evaluateRequirement({
+  // Manager already approved -> trusted (informational expiring/reusable, not auto-rejected)
+  const resApproved = evaluateRequirement({
     requirement,
     document: {
       id: 20,
@@ -263,57 +283,56 @@ test('2. Round-trip: document expiring before return leg end evaluates to expire
     tripEndAt,
     now,
   });
-  assert.equal(res.status, 'expired');
+  assert.ok(resApproved.status === 'reusable' || resApproved.status === 'expiring');
+
+  // Explicit DB status='expired' -> expired
+  const resExpired = evaluateRequirement({
+    requirement,
+    document: {
+      id: 21,
+      status: 'expired',
+      issueDate: '2026-11-01',
+      expiryDate: '2026-11-15',
+    },
+    departureAt,
+    tripEndAt,
+    now,
+  });
+  assert.equal(resExpired.status, 'expired');
 });
 
-// 3. earliestFeasibleDeparture: only missing/expired/issued_too_early push lead time
-test('3. earliestFeasibleDeparture: reusable documents do not push departure date forward', () => {
+// 3. earliestFeasibleDeparture: Cách A never pushes departure date forward based on document leadTimeDays
+test('3. earliestFeasibleDeparture: does not push departure date forward regardless of missing docs', () => {
   const now = new Date('2026-12-01T08:00:00.000+07:00');
 
-  // Scenario A: Missing doc with leadTimeDays = 14
   const missingReqs = [
     { status: 'missing', leadTimeDays: 14 },
-    { status: 'reusable', leadTimeDays: 30 }, // Reusable with 30 days should NOT push date!
+    { status: 'reusable', leadTimeDays: 30 },
   ];
-  const earliestA = earliestFeasibleDeparture(missingReqs, now);
-  const earliestDateStrA = formatDateIct(earliestA);
-  assert.equal(earliestDateStrA, '2026-12-15'); // 14 days from Dec 1
+  assert.equal(formatDateIct(earliestFeasibleDeparture(missingReqs, now)), '2026-12-01');
 
-  // Scenario B: Only reusable docs
   const reusableReqs = [
     { status: 'reusable', leadTimeDays: 14 },
     { status: 'pending_review', leadTimeDays: 7 },
   ];
-  const earliestB = earliestFeasibleDeparture(reusableReqs, now);
-  const earliestDateStrB = formatDateIct(earliestB);
-  assert.equal(earliestDateStrB, '2026-12-01'); // Today! Not pushed!
+  assert.equal(formatDateIct(earliestFeasibleDeparture(reusableReqs, now)), '2026-12-01');
 });
 
-// 4. assertDocumentLeadTime: throws 422 DOCUMENT_LEAD_TIME_VIOLATION when too early
-test('4. assertDocumentLeadTime: throws 422 DOCUMENT_LEAD_TIME_VIOLATION on lead time violation', async () => {
+// 4. assertDocumentLeadTime: Cách A no longer blocks order creation with 422 DOCUMENT_LEAD_TIME_VIOLATION
+test('4. assertDocumentLeadTime: allows booking without blocking on document lead time (Cách A)', async () => {
   const store = makeMockDocumentsStore();
   const service = new DocumentsService(store, { createNotification: async () => {} }, {});
 
-  // Australia preset requires Tier A docs with leadTimeDays = 14
   const today = new Date().toISOString().slice(0, 10);
 
-  await assert.rejects(
-    async () => {
-      await service.assertDocumentLeadTime({
-        destinationCountry: 'Australia',
-        transportMode: 'air',
-        horseIds: [101],
-        departDate: today, // today is earlier than feasible date (needs 14 days)
-      });
-    },
-    (err) => {
-      assert(err instanceof UnprocessableEntityException);
-      const resp = err.getResponse();
-      assert.equal(resp.code, 'DOCUMENT_LEAD_TIME_VIOLATION');
-      assert(resp.earliestFeasibleDeparture > today);
-      return true;
-    }
-  );
+  await assert.doesNotReject(async () => {
+    await service.assertDocumentLeadTime({
+      destinationCountry: 'Australia',
+      transportMode: 'air',
+      horseIds: [101],
+      departDate: today,
+    });
+  });
 });
 
 // 5. GET /compliance/requirements: security & ownership verification

@@ -67,24 +67,30 @@ test('AC-F2-01 & AC-F2-02: multi-dim gate filtering, lead_time_days=14, 2-tier a
     {},
   );
 
-  // Specialist approved internally, authority still pending -> non-compliant & leadTime=14
+  // Manager approved internally, authority still pending -> non-compliant; Cách A clears Tier A deadline fields
   const chkPending = await docService.getOrderComplianceChecklist({ id: '6', role: UserRole.CUSTOMER }, 77);
-  assert.equal(chkPending.effectiveTierALeadDays, 14);
-  assert.equal(chkPending.tierADeadline, '2099-05-06');
+  assert.equal(chkPending.effectiveTierALeadDays, 0);
+  assert.equal(chkPending.tierADeadline, null);
   assert.deepEqual(chkPending.matchedBorderGates, ['SIN']);
   assert.equal(chkPending.totalRequiredDocuments, 1); // road_only_doc filtered out
   assert.equal(chkPending.isFullyCompliant, false);
 
-  // Authority approves -> now compliant (May 22 23:59 >= May 20 12:00 + 48h = May 22 12:00)
+  // Authority approves -> now compliant
   docRecord.approvals = [{ id: 1, status: 'approved' }];
   const chkCompliant = await docService.getOrderComplianceChecklist({ id: '6', role: UserRole.CUSTOMER }, 77);
   assert.equal(chkCompliant.isFullyCompliant, true);
 
-  // Schedule shifts expected arrival to May 21 12:00 -> May 21 12:00 + 48h = May 23 12:00 > May 22 -> EXPIRED (AC-F2-02)
+  // Cách A: schedule shift does not auto-invalidate a Manager-approved document
   orderRow.expected_arrival_date = '2099-05-21T12:00:00.000Z';
   const chkShifted = await docService.getOrderComplianceChecklist({ id: '6', role: UserRole.CUSTOMER }, 77);
-  assert.equal(chkShifted.hasExpiredDocuments, true);
-  assert.equal(chkShifted.isFullyCompliant, false);
+  assert.equal(chkShifted.hasExpiredDocuments, false);
+  assert.equal(chkShifted.isFullyCompliant, true);
+
+  // Explicit DB status='expired' still flags hasExpiredDocuments & blocks compliance
+  docRecord.status = 'expired';
+  const chkExpired = await docService.getOrderComplianceChecklist({ id: '6', role: UserRole.CUSTOMER }, 77);
+  assert.equal(chkExpired.hasExpiredDocuments, true);
+  assert.equal(chkExpired.isFullyCompliant, false);
 });
 
 test('AC-F2-03: expired compliance while in_transit keeps status in_transit, sets alert, and blocks customs_cleared (422)', async () => {
@@ -181,6 +187,7 @@ test('DocumentsStore.formatMysqlDateOnly avoids UTC-offset backward shift & stop
     arrival_airport_codes: 'SIN',
   };
 
+  let docStatus = 'approved';
   const docService = new DocumentsService(
     {
       findOrderDetails: async () => orderRow,
@@ -194,8 +201,8 @@ test('DocumentsStore.formatMysqlDateOnly avoids UTC-offset backward shift & stop
           horseId: 1,
           regulationId: 30,
           docType: 'import_permit',
-          expiryDate: '2099-05-21', // OK for 19T10+48h=21T10, FAILS for 20T10+48h=22T10!
-          status: 'approved',
+          expiryDate: '2099-05-21',
+          status: docStatus,
           isArchived: false,
           approvals: [{ id: 1, documentId: 901, status: 'approved' }],
         },
@@ -206,10 +213,16 @@ test('DocumentsStore.formatMysqlDateOnly avoids UTC-offset backward shift & stop
     { changed: async () => {} },
   );
 
-  const chk = await docService.getOrderComplianceChecklist({ id: '6', role: UserRole.CUSTOMER }, 88);
-  assert.equal(chk.tripTargetDate, '2099-05-20');
-  assert.equal(chk.hasExpiredDocuments, true);
-  assert.equal(chk.isFullyCompliant, false);
+  const chkApproved = await docService.getOrderComplianceChecklist({ id: '6', role: UserRole.CUSTOMER }, 88);
+  assert.equal(chkApproved.tripTargetDate, '2099-05-20');
+  assert.equal(chkApproved.hasExpiredDocuments, false);
+  assert.equal(chkApproved.isFullyCompliant, true);
+
+  docStatus = 'expired';
+  const chkExpired = await docService.getOrderComplianceChecklist({ id: '6', role: UserRole.CUSTOMER }, 88);
+  assert.equal(chkExpired.tripTargetDate, '2099-05-20');
+  assert.equal(chkExpired.hasExpiredDocuments, true);
+  assert.equal(chkExpired.isFullyCompliant, false);
 });
 
 // --- Flow 3: tài xế/áp tải từ chối sau khi kế hoạch đã confirmed ---

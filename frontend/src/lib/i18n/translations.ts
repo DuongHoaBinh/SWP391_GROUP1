@@ -5335,7 +5335,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       "booking.step5Label": "5. Khởi hành",
       "booking.step5Timing": "Ngày D",
       "booking.stepRunning": "● Đang chạy",
-      "booking.guidanceStep1": "Đơn hàng đã ghi nhận. Vui lòng hoàn tất nộp giấy tờ tiêm phòng và xét nghiệm máu của ngựa đúng hạn Tầng A (≥ 2 ngày nội địa / 3 ngày quốc tế).",
+      "booking.guidanceStep1": "Đơn hàng đã ghi nhận. Vui lòng tải lên hồ sơ kiểm dịch & tiêm phòng của ngựa để Quản lý vận hành thẩm định trước khi xuất phát.",
       "booking.guidanceStep2": "📋 Đơn hàng đã được duyệt sơ bộ. Chuyên viên đang hoàn thiện hồ sơ xin kiểm dịch thú y liên tỉnh.",
       "booking.guidanceStep3": "🚚 Điều phối viên đang gom đơn ghép tuyến & sắp xếp ô chuồng. Lộ trình đón/trả và hóa đơn sẽ được xác nhận chậm nhất trước giờ chạy 72 giờ.",
       "booking.guidanceStep4": "💳 Lộ trình đã được chốt thành công! Quý khách vui lòng quét mã QR SePay bên dưới để thanh toán và khóa slot chuồng trước giờ xuất phát.",

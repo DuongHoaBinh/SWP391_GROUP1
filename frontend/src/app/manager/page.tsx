@@ -202,36 +202,37 @@ export default function ManagerDashboardPage() {
   );
 
   const liveIncidentItems = useMemo(() => {
-    const storeAlerts = (fleetStore?.alerts || [])
-      .filter((a) => !a.isAcknowledged)
-      .map((a) => ({
-        key: `store-${a.id}`,
-        title: a.message || a.type || (isEn ? 'Route / Dispatch Alert' : 'Cảnh báo tuyến vận tải'),
-        location: a.location || a.tripCode || '—',
-        severity: a.severity === 'CRITICAL' ? 'CRITICAL' : 'WARNING',
-        createdAt: a.timeAgo,
-      }));
-
+    const seen = new Set<string>();
     const notifAlerts = notifications
       .filter(
         (n) =>
           !n.isRead &&
-          /sos|incident|sự cố|khẩn|emergency|delay|trễ|alert|cảnh báo|warning/i.test(
+          /sos|incident|sự cố|khẩn|emergency|delay|trễ|alert|cảnh báo|warning|bồi thường|claim/i.test(
             `${n.title || ''} ${n.message || ''} ${n.type || ''}`
           )
       )
-      .map((n) => ({
-        key: `notif-${n.id}`,
-        title: n.title || n.message || (isEn ? 'Operational Alert' : 'Cảnh báo vận hành'),
-        location: n.shipmentId ? `#${n.shipmentId}` : '—',
-        severity: /sos|critical|khẩn|emergency/i.test(`${n.title || ''} ${n.message || ''}`)
-          ? 'CRITICAL'
-          : 'WARNING',
-        createdAt: n.createdAt,
-      }));
+      .filter((n) => {
+        const dedupKey = `${n.shipmentId ?? 'none'}|${String(n.title || '').trim().toLowerCase()}`;
+        if (seen.has(dedupKey)) return false;
+        seen.add(dedupKey);
+        return true;
+      })
+      .map((n) => {
+        const isClaim = /bồi thường|claim|bảo hiểm/i.test(`${n.title || ''} ${n.message || ''}`);
+        return {
+          key: `notif-${n.id}`,
+          title: n.title || n.message || (isEn ? 'Operational Alert' : 'Cảnh báo vận hành'),
+          location: n.shipmentId ? `#${n.shipmentId}` : '—',
+          severity: /sos|critical|khẩn|emergency/i.test(`${n.title || ''} ${n.message || ''}`)
+            ? 'CRITICAL'
+            : 'WARNING',
+          href: isClaim ? '/manager/insurance/claims' : '/manager/incidents',
+          createdAt: n.createdAt,
+        };
+      });
 
-    return [...storeAlerts, ...notifAlerts];
-  }, [fleetStore?.alerts, notifications, isEn]);
+    return notifAlerts;
+  }, [notifications, isEn]);
 
   const totalApprovedRevenueVnd = useMemo(
     () =>
@@ -496,7 +497,7 @@ export default function ManagerDashboardPage() {
 
         {/* KPI 2: Active & Upcoming Trips */}
         <Link
-          href="/manager/planning"
+          href="/manager/monitoring"
           className="no-underline bg-white rounded-2xl p-5 border border-[#E5DDD0] hover:border-[#C4B38E] shadow-sm flex flex-col justify-between group transition-all hover:shadow-md"
         >
           <div className="flex items-center justify-between mb-3">
@@ -657,7 +658,7 @@ export default function ManagerDashboardPage() {
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <Link
-                            href="/manager/incidents"
+                            href={item.href || '/manager/incidents'}
                             className="text-xs font-bold text-[#A67C2E] hover:underline no-underline"
                           >
                             {t('manager.dashboard.handle', 'Xử lý')}

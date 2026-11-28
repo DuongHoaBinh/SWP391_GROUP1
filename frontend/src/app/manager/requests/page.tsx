@@ -85,8 +85,10 @@ const STATUS_LABELS: Record<ShipmentStatus, string> = {
   confirmed: 'Confirmed',
   ready_to_depart: 'Ready to Depart',
   in_transit: 'In Transit',
+  return_pending: 'Return Pending',
   completed: 'Completed',
   cancelled: 'Cancelled',
+  cancelled_operational: 'Cancelled (Operational)',
 };
 
 const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border: string }> = {
@@ -103,8 +105,10 @@ const STATUS_COLORS: Record<ShipmentStatus, { bg: string; color: string; border:
   confirmed: { bg: '#FAF8F4', color: '#181A17', border: '#D4C5A3' },
   ready_to_depart: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
   in_transit: { bg: '#FAF8F4', color: '#A67C2E', border: '#D4C5A3' },
+  return_pending: { bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
   completed: { bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
   cancelled: { bg: '#F0EEE8', color: '#5B6779', border: '#D8CEBE' },
+  cancelled_operational: { bg: '#F8EAEA', color: '#B33E3E', border: '#E5B8B8' },
 };
 
 interface OrderHorse extends Partial<InsuredHorse> {

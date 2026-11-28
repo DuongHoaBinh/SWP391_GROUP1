@@ -217,10 +217,10 @@ test('BR-F2-02: getOrderComplianceChecklist computes orderCutoffDate and Tier-B 
     { id: 6, role: UserRole.CUSTOMER },
     200,
   );
-  // maxTierALead = 14 -> orderCutoffDays = max(7, 14+2) = 16 -> 2026-12-30 - 16d = 2026-12-14
-  assert.equal(checklist.orderCutoffDate, '2026-12-14');
-  assert.equal(checklist.tierADeadline, '2026-12-16');
-  assert.ok(checklist.horses[0].documents[0].earlyIssuanceWarning);
+  // Cách A: no Tier A/B windows or Tier-B early issuance warnings; orderCutoffDate = departure - 2d
+  assert.equal(checklist.orderCutoffDate, '2026-12-28');
+  assert.equal(checklist.tierADeadline, null);
+  assert.equal(checklist.horses[0].documents[0].earlyIssuanceWarning, null);
 });
 
 test('Wave 5 Order Cutoff: createOrder & updateOrder reject violations with 422 ORDER_CUTOFF_VIOLATION and allow >= earliestDepartureDate', async () => {

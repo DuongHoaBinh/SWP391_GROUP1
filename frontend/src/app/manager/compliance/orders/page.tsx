@@ -502,19 +502,12 @@ export default function ComplianceOrdersPage() {
                         </span>
                       )}
                     </div>
-                    {checklist && (checklist.effectiveTierALeadDays || checklist.tierADeadline) && (
+                    {checklist?.tripTargetDate && (
                       <div className="mt-2 pt-2 border-t border-[#EAE5DA] flex flex-wrap gap-3 text-[11px] font-semibold text-[#242722]">
                         <span>
-                          ⏱️ {isEn ? 'Prep Cutoff:' : 'Hạn chuẩn bị:'}{' '}
-                          <strong className="text-[#7A591C]">D - {checklist.effectiveTierALeadDays ?? 5}</strong>
-                          {checklist.tierADeadline ? ` (${checklist.tierADeadline})` : ''}
+                          🛡️ {isEn ? 'Target Departure:' : 'Ngày xuất phát dự kiến:'}{' '}
+                          <strong>{checklist.tripTargetDate}</strong>
                         </span>
-                        {checklist.tripTargetDate && (
-                          <span>
-                            🛡️ {isEn ? 'Target Departure:' : 'Ngày xuất phát dự kiến:'}{' '}
-                            <strong>{checklist.tripTargetDate}</strong>
-                          </span>
-                        )}
                       </div>
                     )}
                   </div>

@@ -1082,6 +1082,15 @@ export default function RequestDetailPage() {
         </div>
       ) : null}
 
+      {/* TIER 2.5: SURFACE REFUND BANK-INFO CTA DIRECTLY ON OVERVIEW FOR CANCELLED / RETURN-CANCELLED ORDERS */}
+      {activeTab !== 'payment' &&
+        (['cancelled_operational', 'refund_requested', 'refunded'].includes(statusLower) ||
+          request.returnStatus === 'cancelled') &&
+        Number.isInteger(Number(request.id)) &&
+        Number(request.id) > 0 && (
+          <CustomerRefundSummaryCard shipmentId={Number(request.id)} />
+        )}
+
       {/* TIER 3: COMPACT SUMMARY STRIP */}
       <div className="bg-white rounded-2xl border border-[#E5DDD0] px-4 py-3.5 shadow-xs grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
         <div className="min-w-0">
@@ -1506,44 +1515,25 @@ export default function RequestDetailPage() {
                 )}
               </div>
 
-              {/* CASE 1: Pending Manager review */}
-              {checklist && (checklist.inTransitComplianceAlert || checklist.effectiveTierALeadDays || checklist.tierADeadline) && (
+              {/* CASE 1: Runtime In-Transit Compliance Alert */}
+              {checklist && checklist.inTransitComplianceAlert && (
                 <div style={{ padding: '12px 20px', borderBottom: '1px solid #EAE5DA', backgroundColor: '#FAF8F4', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {checklist.inTransitComplianceAlert && (
-                    <div
-                      role="alert"
-                      style={{
-                        padding: '10px 14px',
-                        borderRadius: '10px',
-                        backgroundColor: '#fef2f2',
-                        border: '1px solid #fecaca',
-                        color: '#991b1b',
-                        fontSize: '12.5px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {language === 'en'
-                        ? 'Alert: A required compliance document expired during transport. Please upload an updated certificate immediately so border/quarantine clearance can proceed.'
-                        : 'Cảnh báo: Hồ sơ kiểm dịch đã hết hạn trong quá trình vận chuyển. Vui lòng nộp bản gia hạn ngay để không bị chặn thông quan cửa khẩu.'}
-                    </div>
-                  )}
-                  {(checklist.effectiveTierALeadDays || checklist.tierADeadline) && (
-                    <div className="flex flex-wrap gap-4 text-xs text-[#5F6977]">
-                      <span>
-                        {language === 'en' ? 'Tier-A Prep Window:' : 'Hạn chuẩn bị Tầng A:'}{' '}
-                        <strong className="text-[#181A17]">D - {checklist.effectiveTierALeadDays ?? 5}</strong>
-                        {checklist.tierADeadline ? ` (${checklist.tierADeadline})` : ''}
-                      </span>
-                      {checklist.tierBWindowStart && checklist.tierBWindowEnd && (
-                        <span>
-                          {language === 'en' ? 'Tier-B Vet Window:' : 'Cấp Tầng B (Thú y):'}{' '}
-                          <strong className="text-[#181A17]">
-                            {new Date(checklist.tierBWindowStart).toLocaleDateString(language === 'en' ? 'en-US' : 'vi-VN')} → {new Date(checklist.tierBWindowEnd).toLocaleDateString(language === 'en' ? 'en-US' : 'vi-VN')}
-                          </strong>
-                        </span>
-                      )}
-                    </div>
-                  )}
+                  <div
+                    role="alert"
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: '10px',
+                      backgroundColor: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      color: '#991b1b',
+                      fontSize: '12.5px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {language === 'en'
+                      ? 'Alert: A required compliance document expired during transport. Please upload an updated certificate immediately so border/quarantine clearance can proceed.'
+                      : 'Cảnh báo: Hồ sơ kiểm dịch đã hết hạn trong quá trình vận chuyển. Vui lòng nộp bản gia hạn ngay để không bị chặn thông quan cửa khẩu.'}
+                  </div>
                 </div>
               )}
 
@@ -1735,9 +1725,15 @@ export default function RequestDetailPage() {
                                       String(reg.documentType || '').toLowerCase(),
                                 )
                               : null;
+                            const todayIct = new Intl.DateTimeFormat('en-CA', {
+                              timeZone: 'Asia/Ho_Chi_Minh',
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                            }).format(new Date());
                             const isDeferredOverdue = Boolean(
                               deferredMatch?.submitDeadline &&
-                                deferredMatch.submitDeadline < new Date().toISOString().slice(0, 10),
+                                String(deferredMatch.submitDeadline).slice(0, 10) < todayIct,
                             );
                             return (
                             <div
@@ -1931,10 +1927,16 @@ export default function RequestDetailPage() {
                             (d.status === 'approved' || d.status === 'submitted') &&
                             !d.isExpiredForTrip,
                         );
+                        const todayIct = new Intl.DateTimeFormat('en-CA', {
+                          timeZone: 'Asia/Ho_Chi_Minh',
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                        }).format(new Date());
                         const isOverdue = Boolean(
                           !uploadedDoc &&
                             def.submitDeadline &&
-                            String(def.submitDeadline).slice(0, 10) < new Date().toISOString().slice(0, 10),
+                            String(def.submitDeadline).slice(0, 10) < todayIct,
                         );
 
                         return (

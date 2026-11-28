@@ -19,6 +19,7 @@ function render(state, props = {}, loadError) {
       return { data: state, error: loadError, mutate() {}, isLoading: false, isValidating: false };
     };
     if (name === './InvoiceSummary') return { InvoiceSummary: () => null };
+    if (name === './PaymentCountdownBadge') return { PaymentCountdownBadge: () => null };
     if (name === 'next/link') return ({ href, children, ...rest }) => React.createElement('a', { href, ...rest }, children);
     if (name === 'lucide-react') return Object.fromEntries(['CheckCircle2', 'Copy', 'QrCode', 'RefreshCw', 'ShieldCheck'].map(icon => [icon, () => null]));
     if (name === '@/lib/auth') return { getCurrentUser: () => ({ id: 99 }) };
@@ -57,7 +58,7 @@ test('unpaid order opens its own checkout; checkout presents QR creation without
   assert.doesNotMatch(detail, /<img|Đã nhận/);
   const checkout = render(state(null), { checkout: true }).html;
   assert.match(checkout, /Tạo mã QR thanh toán/);
-  assert.match(checkout, /href="\/customer\/requests\/123#sepay-payment"/);
+  assert.match(checkout, /href="\/customer\/requests\/123\?tab=payment#sepay-payment"/);
   assert.match(checkout, /Đóng thanh toán và về đơn/);
 });
 
@@ -66,7 +67,7 @@ test('pending checkout displays exact transfer details and polls; closing is a n
   for (const value of ['DH12345678', '15.000 VND', '0123456789', 'TEST ACCOUNT']) assert.ok(html.includes(value));
   assert.match(html, /<img/);
   assert.match(html, /Đóng thanh toán và về đơn/);
-  assert.match(html, /chỉ đóng màn hình thanh toán/);
+  assert.match(html, /Giữ đúng số tiền/);
   assert.equal(options.refreshInterval(state(payment)), 3000);
   const detail = render(state(payment)).html;
   assert.doesNotMatch(detail, /<img/);

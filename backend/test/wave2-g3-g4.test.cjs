@@ -71,7 +71,7 @@ test('AC-F1-05: calculateOperationalRefund matches DEC-04 matrix (vet_unfit_cert
   assert.equal(fault.disbursementDeduction, 0);
   assert.equal(fault.disbursementAbsorbedByCompany, 800_000);
   assert.equal(fault.netRefundAmount, 25_000_000);
-  assert.equal(fault.requiresDualApproval, true);
+  assert.equal(fault.requiresDualApproval, false);
 
   const excess = calculateOperationalRefund({
     category: CancellationCategory.CUSTOMER_REQUEST_POST_APPROVAL,
@@ -85,7 +85,7 @@ test('AC-F1-05: calculateOperationalRefund matches DEC-04 matrix (vet_unfit_cert
   assert.equal(excess.receivableExcessAmount, 500_000);
 });
 
-test('AC-F1-06: SoD forbids approver from transferring or double-approving >=20M refunds (403), succeeds for independent Admin', async () => {
+test('AC-F1-06: Single Logistics Manager approves >=20M refunds directly and transfers after customer submits bank info', async () => {
   const { OrdersOpsStore } = require('../dist/modules/orders/orders-ops.store');
   const store = new OrdersOpsStore();
 
@@ -102,11 +102,15 @@ test('AC-F1-06: SoD forbids approver from transferring or double-approving >=20M
     amount: 22_000_000,
     receivable_excess_amount: 0,
     status: 'pending_approval',
-    requires_dual_approval: 1,
+    requires_dual_approval: 0,
     requested_by: 2,
     approved_by: null,
     second_approved_by: null,
     transferred_by: null,
+    recipient_bank_name: null,
+    recipient_bank_account: null,
+    recipient_account_holder: null,
+    form_submitted_at: null,
     created_at: new Date(),
     updated_at: new Date(),
   };
@@ -120,12 +124,18 @@ test('AC-F1-06: SoD forbids approver from transferring or double-approving >=20M
       execute: async (sql, args) => {
         if (sql.includes('FROM shipment_refund_record WHERE refund_id = ? FOR UPDATE')) return [[rowState]];
         if (sql.includes('FROM shipment_refund_record rr')) return [[rowState]];
-        if (sql.includes("SET status = 'pending_second_approval'")) {
-          rowState = { ...rowState, status: 'pending_second_approval', approved_by: args[0] };
+        if (sql.includes("SET status = 'approved_for_transfer'")) {
+          rowState = { ...rowState, status: 'approved_for_transfer', approved_by: args[0] };
           return [{ affectedRows: 1 }];
         }
-        if (sql.includes('SET status = \'approved_for_transfer\',') && sql.includes('second_approved_by')) {
-          rowState = { ...rowState, status: 'approved_for_transfer', second_approved_by: args[0] };
+        if (sql.includes('SET recipient_bank_name = ?')) {
+          rowState = {
+            ...rowState,
+            recipient_bank_name: args[0],
+            recipient_bank_account: args[1],
+            recipient_account_holder: args[2],
+            form_submitted_at: new Date(),
+          };
           return [{ affectedRows: 1 }];
         }
         if (sql.includes("SET status = 'transferred'")) {
@@ -139,6 +149,7 @@ test('AC-F1-06: SoD forbids approver from transferring or double-approving >=20M
           };
           return [{ affectedRows: 1 }];
         }
+        if (sql.includes('SELECT claim_id FROM insurance_claim')) return [[]];
         return [{ affectedRows: 1 }];
       },
     }),
@@ -150,40 +161,33 @@ test('AC-F1-06: SoD forbids approver from transferring or double-approving >=20M
     notifyRole: async (...a) => notifs.push(a),
   });
 
-  // Step 1: Manager #2 approves -> pending_second_approval
+  // Step 1: Single Manager #2 approves -> approved_for_transfer directly
   const s1 = await svc.approveRefund({ id: '2', role: UserRole.LOGISTICS_MANAGER }, 77, {});
-  assert.equal(s1.status, 'pending_second_approval');
+  assert.equal(s1.status, 'approved_for_transfer');
 
-  // Step 2: Same Manager #2 cannot be second approver -> 403
+  // Step 2: Transfer blocked before customer provides bank info
   await assert.rejects(
-    svc.approveRefund({ id: '2', role: UserRole.LOGISTICS_MANAGER }, 77, {}),
-    (err) => err.getStatus?.() === 403,
+    svc.transferRefund({ id: '2', role: UserRole.LOGISTICS_MANAGER }, 77, {
+      bankTransactionRef: 'FT99',
+      transferReceiptUrl: 'https://example.com/unc.pdf',
+    }),
+    (err) => err.getStatus?.() === 409,
   );
 
-  // Manager #9 performs 2nd approval -> approved_for_transfer
-  const s2 = await svc.approveRefund({ id: '9', role: UserRole.LOGISTICS_MANAGER }, 77, {});
-  assert.equal(s2.status, 'approved_for_transfer');
+  // Step 3: Customer #6 submits bank info
+  await svc.submitRefundBankInfo({ id: '6', role: UserRole.CUSTOMER }, 77, {
+    bankName: 'VCB',
+    accountNumber: '123456',
+    accountHolder: 'NGUYEN VAN A',
+  });
 
-  // Step 3: Neither approver (#2 or #9) can transfer -> 403
-  for (const sameId of ['2', '9']) {
-    await assert.rejects(
-      svc.transferRefund({ id: sameId, role: UserRole.ADMIN }, 77, {
-        recipientBankAccount: '123456',
-        bankTransactionRef: 'FT99',
-        transferReceiptUrl: 'https://example.com/unc.pdf',
-      }),
-      (err) => err.getStatus?.() === 403,
-    );
-  }
-
-  // Independent Admin #1 succeeds
-  const s3 = await svc.transferRefund({ id: '1', role: UserRole.ADMIN }, 77, {
-    recipientBankAccount: '123456',
+  // Step 4: Manager #2 executes transfer cleanly
+  const s3 = await svc.transferRefund({ id: '2', role: UserRole.LOGISTICS_MANAGER }, 77, {
     bankTransactionRef: 'FT99',
     transferReceiptUrl: 'https://example.com/unc.pdf',
   });
   assert.equal(s3.status, 'transferred');
-  assert.equal(s3.transferredBy, 1);
+  assert.equal(s3.transferredBy, 2);
 });
 
 test('AC-F3-04 & AC-F3-05: Dynamic SLA timeline, T-30h payment cap, and T-24h grace hard cap', () => {

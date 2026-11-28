@@ -61,6 +61,9 @@ export interface RouteLegItem {
   plannedArrival?: string | null;
   vehicleId?: number | null;
   vehiclePlate?: string | null;
+  isOverseasPartnerRoad?: boolean;
+  partnerDepotName?: string | null;
+  partnerDepotId?: number | null;
   airlineId?: number | null;
   airlineName?: string | null;
   flightNumber?: string | null;

@@ -165,15 +165,18 @@ export const Modal: React.FC<ModalProps> = ({
         aria-label={hideHeader || customHeader || !title ? ariaLabel || title || closeLabel : undefined}
         tabIndex={-1}
         className={cn(
-          'bg-surface rounded-2xl w-full max-h-[92vh] flex flex-col shadow-xl border border-border overflow-hidden animate-modal-enter focus:outline-none',
+          'bg-white rounded-2xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-[#D8CEBE] overflow-hidden animate-modal-enter focus:outline-none',
           maxWidth.startsWith('max-w') ? maxWidth : undefined
         )}
-        style={maxWidth.startsWith('max-w') ? undefined : { maxWidth }}
+        style={{
+          backgroundColor: '#FFFFFF',
+          ...(maxWidth.startsWith('max-w') ? {} : { maxWidth }),
+        }}
       >
         {customHeader ? (
           customHeader
         ) : !hideHeader ? (
-          <div className="shrink-0 px-6 py-4 sm:py-5 border-b border-border flex items-start justify-between gap-4 bg-surface relative">
+          <div className="shrink-0 px-6 py-4 sm:py-5 border-b border-[#EAE5DA] flex items-start justify-between gap-4 bg-white relative">
             <div className="min-w-0 flex-1">
               {title && (
                 <h2 id={titleId} className="text-lg font-bold text-text-primary m-0 tracking-tight break-words">

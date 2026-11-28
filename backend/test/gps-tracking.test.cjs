@@ -514,7 +514,7 @@ test('8. Customer live tracking: Phân quyền Customer, che sinh hiệu số kh
   );
 });
 
-test('9. System settings tracking: Manager gọi PATCH -> 403, Admin gọi PATCH -> 200', async () => {
+test('9. System settings tracking: Driver/Customer gọi PATCH -> 403, Manager & Admin gọi PATCH -> 200', async () => {
   const store = makeMockTrackingStore({
     settings: {
       'tracking.simulation_enabled': false,
@@ -525,21 +525,29 @@ test('9. System settings tracking: Manager gọi PATCH -> 403, Admin gọi PATCH
   const service = new TrackingService(store, notif, {});
   const controller = new SystemSettingsController(service);
 
-  // Manager cố cập nhật -> 403 Forbidden
+  // Driver cố cập nhật -> 403 Forbidden
   await assert.rejects(
     async () => {
-      await controller.updateTrackingSettings(MANAGER_USER, { simulationEnabled: true });
+      await controller.updateTrackingSettings(DRIVER_USER, { simulationEnabled: true });
     },
     (err) => err instanceof ForbiddenException,
   );
 
-  // Admin cập nhật -> 200 OK
-  const updated = await controller.updateTrackingSettings(ADMIN_USER, {
+  // Manager cập nhật trực tiếp -> 200 OK
+  const byManager = await controller.updateTrackingSettings(MANAGER_USER, {
     simulationEnabled: true,
     customerVitalsDetail: false,
   });
-  assert.equal(updated.simulationEnabled, true);
-  assert.equal(updated.customerVitalsDetail, false);
+  assert.equal(byManager.simulationEnabled, true);
+  assert.equal(byManager.customerVitalsDetail, false);
+
+  // Admin cập nhật -> 200 OK
+  const updated = await controller.updateTrackingSettings(ADMIN_USER, {
+    simulationEnabled: false,
+    customerVitalsDetail: true,
+  });
+  assert.equal(updated.simulationEnabled, false);
+  assert.equal(updated.customerVitalsDetail, true);
 });
 
 test('10. getLiveTracking preserves route_polyline column (tuple and {lat,lng} formats) and sea leg_type', async () => {

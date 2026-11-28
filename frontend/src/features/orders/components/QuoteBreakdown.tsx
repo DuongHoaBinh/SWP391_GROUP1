@@ -25,6 +25,9 @@ interface QuoteBreakdownProps {
   onSelectOptionCode?: (code: string) => void;
   /** Step 9: khách bấm chọn nhanh một ngày gợi ý khi thiếu xe */
   onPickShortageDate?: (date: string) => void;
+  /** Demo payment override (VND string; empty = use calculated quote total) */
+  demoPaymentAmount?: string;
+  onDemoPaymentAmountChange?: (value: string) => void;
 }
 
 function getSourceBadge(source: QuoteLeg['source'], isEn: boolean) {
@@ -65,6 +68,8 @@ export function QuoteBreakdown({
   selectedOptionCode,
   onSelectOptionCode,
   onPickShortageDate,
+  demoPaymentAmount,
+  onDemoPaymentAmountChange,
 }: QuoteBreakdownProps) {
   const { language } = useLanguage();
   const isEn = language === 'en';
@@ -403,12 +408,100 @@ export function QuoteBreakdown({
               </div>
             )}
 
-          <div className="flex justify-between items-baseline pt-2.5 border-t-2 border-[#181A17] text-[#181A17]">
-            <span className="text-sm font-bold uppercase tracking-wider">
-              {isEn ? 'Total Payment (VND):' : 'Tổng thanh toán (VNĐ):'}
-            </span>
-            <span className="text-xl font-black font-mono text-[#A67C2E]">{formatVnd(grandTotal)}</span>
-          </div>
+          {(() => {
+            const rawDigits = (demoPaymentAmount || '').replace(/[^\d]/g, '');
+            const parsedDemo = rawDigits ? Number(rawDigits) : null;
+            const hasValidDemo = parsedDemo !== null && Number.isFinite(parsedDemo) && parsedDemo >= 1000;
+            const effectiveTotal = hasValidDemo ? parsedDemo : grandTotal;
+            return (
+              <>
+                <div className="flex flex-wrap justify-between items-baseline gap-2 pt-2.5 border-t-2 border-[#181A17] text-[#181A17]">
+                  <span className="text-sm font-bold uppercase tracking-wider">
+                    {isEn ? 'Total Payment (VND):' : 'Tổng thanh toán (VNĐ):'}
+                  </span>
+                  <div className="flex items-baseline gap-2.5">
+                    {hasValidDemo && parsedDemo !== grandTotal && (
+                      <span className="text-xs font-mono line-through text-[#747D88]">
+                        {formatVnd(grandTotal)}
+                      </span>
+                    )}
+                    <span className="text-xl font-black font-mono text-[#A67C2E]">
+                      {formatVnd(effectiveTotal)}
+                    </span>
+                  </div>
+                </div>
+
+                {onDemoPaymentAmountChange && (
+                  <div className="mt-3 p-3 rounded-xl border border-dashed border-[#CBB682] bg-white/90 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label
+                        htmlFor="demo-payment-amount-input"
+                        className="text-[11.5px] font-bold text-[#181A17]"
+                      >
+                        {isEn
+                          ? 'Adjust Payment Amount (Transfer Demo)'
+                          : 'Điều chỉnh số tiền thanh toán (Demo chuyển khoản)'}
+                      </label>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {[2000, 5000, 10000].map((preset) => {
+                          const isSelected = rawDigits === String(preset);
+                          return (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => onDemoPaymentAmountChange(String(preset))}
+                              className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border cursor-pointer transition-colors ${
+                                isSelected
+                                  ? 'bg-[#181A17] text-[#FAF8F4] border-[#181A17]'
+                                  : 'bg-[#FAF8F4] text-[#5F6977] border-[#D8CEBE] hover:border-[#A67C2E]'
+                              }`}
+                            >
+                              {preset.toLocaleString('vi-VN')} đ
+                            </button>
+                          );
+                        })}
+                        {rawDigits && (
+                          <button
+                            type="button"
+                            onClick={() => onDemoPaymentAmountChange('')}
+                            className="px-2 py-0.5 rounded-md text-[11px] font-bold border border-[#D8CEBE] bg-white text-[#8C6621] hover:bg-[#FAF8F4] cursor-pointer"
+                          >
+                            {isEn ? 'Reset' : 'Giá gốc'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="demo-payment-amount-input"
+                        type="text"
+                        inputMode="numeric"
+                        value={rawDigits ? Number(rawDigits).toLocaleString('vi-VN') : ''}
+                        onChange={(e) => {
+                          const digitsOnly = e.target.value.replace(/[^\d]/g, '').slice(0, 12);
+                          onDemoPaymentAmountChange(digitsOnly);
+                        }}
+                        placeholder={
+                          isEn
+                            ? `Leave blank for original (${grandTotal.toLocaleString('vi-VN')} VND)`
+                            : `Để trống giữ giá gốc (${grandTotal.toLocaleString('vi-VN')} đ) hoặc nhập VD: 2.000`
+                        }
+                        className="flex-1 px-3 py-1.5 rounded-lg border border-[#D8CEBE] bg-[#FDFCFB] text-xs font-mono font-bold text-[#181A17] focus:outline-none focus:ring-2 focus:ring-[#A67C2E]"
+                      />
+                      <span className="text-xs font-bold text-[#5F6977] shrink-0">VNĐ</span>
+                    </div>
+                    {rawDigits && !hasValidDemo && (
+                      <p className="text-[11px] text-[#B33E3E] font-medium m-0">
+                        {isEn
+                          ? 'Minimum demo transfer amount is 1,000 VND.'
+                          : 'Số tiền demo chuyển khoản tối thiểu là 1.000 VNĐ.'}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
     </div>

@@ -121,10 +121,19 @@ export default function ManagerIncidentsPage() {
               })
           : [];
 
+      const dedupedNotifs: LiveOperationalAlert[] = [];
+      const seenNotifKeys = new Set<string>();
+      for (const n of notifMapped) {
+        const key = `${n.shipmentId ?? 'none'}|${n.type.trim().toLowerCase()}|${n.message.trim().toLowerCase()}`;
+        if (seenNotifKeys.has(key)) continue;
+        seenNotifKeys.add(key);
+        dedupedNotifs.push(n);
+      }
+
       if (incRes.status === 'rejected' && notifRes.status === 'rejected') {
         throw incRes.reason || notifRes.reason;
       }
-      setNotifAlerts([...incidentAlerts, ...notifMapped]);
+      setNotifAlerts([...incidentAlerts, ...dedupedNotifs]);
     } catch (err: any) {
       console.error('Failed to fetch live operational alerts:', err);
       setLoadError(
@@ -145,20 +154,7 @@ export default function ManagerIncidentsPage() {
     return () => window.removeEventListener('notifications-updated', onNotifUpdate);
   }, [fetchLiveAlerts]);
 
-  const combinedAlerts = useMemo<LiveOperationalAlert[]>(() => {
-    const fromStore: LiveOperationalAlert[] = storeAlerts.map((alt) => ({
-      id: `store-${alt.id}`,
-      source: 'store',
-      tripCode: alt.tripCode,
-      type: alt.type,
-      severity: alt.severity,
-      location: alt.location,
-      message: alt.message,
-      timeAgo: alt.timeAgo,
-      isAcknowledged: alt.isAcknowledged,
-    }));
-    return [...notifAlerts, ...fromStore];
-  }, [notifAlerts, storeAlerts]);
+  const combinedAlerts = useMemo<LiveOperationalAlert[]>(() => notifAlerts, [notifAlerts]);
 
   const filteredAlerts = useMemo(() => {
     if (filterMode === 'CRITICAL') return combinedAlerts.filter((a) => a.severity === 'CRITICAL');
@@ -175,6 +171,11 @@ export default function ManagerIncidentsPage() {
         setNotifAlerts((prev) =>
           prev.map((a) => (a.id === alertItem.id ? { ...a, isAcknowledged: true } : a)),
         );
+        toast.success(
+          language === 'en'
+            ? 'Field incident marked as resolved.'
+            : 'Đã xác nhận giải quyết và đóng sự cố hiện trường.',
+        );
       } else if (alertItem.source === 'notification' && alertItem.numericNotifId) {
         await apiClient(`/notifications/${alertItem.numericNotifId}/read`, { method: 'PATCH' });
         setNotifAlerts((prev) =>
@@ -183,11 +184,13 @@ export default function ManagerIncidentsPage() {
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('notifications-updated'));
         }
+        toast.success(
+          language === 'en' ? 'Alert notification marked as read.' : 'Đã đánh dấu đã đọc thông báo cảnh báo.',
+        );
       } else {
         const rawId = alertItem.id.replace(/^store-/, '');
         acknowledgeAlert(rawId);
       }
-      toast.success(t('manager.incidents.toastAckSuccess', 'Đã xác nhận và lưu vết cảnh báo vận hành.'));
       setConfirmAlert(null);
     } catch (err: any) {
       toast.error(
@@ -385,16 +388,20 @@ export default function ManagerIncidentsPage() {
                   {alt.isAcknowledged ? (
                     <span className="inline-flex items-center gap-1 text-xs font-bold text-[#287653] bg-[#E8F2EB] border border-[#B7DBC4] px-3 py-1.5 rounded-xl">
                       <CheckCircle size={14} aria-hidden="true" />{' '}
-                      {t('manager.incidents.acknowledged', 'Đã tiếp nhận')}
+                      {alt.source === 'incident'
+                        ? language === 'en' ? 'Incident Resolved' : 'Đã đóng sự cố'
+                        : t('manager.incidents.acknowledged', 'Đã đọc thông báo')}
                     </span>
                   ) : (
                     <Button
                       size="sm"
-                      variant={alt.severity === 'CRITICAL' ? 'danger' : 'primary'}
+                      variant={alt.source === 'incident' || alt.severity === 'CRITICAL' ? 'danger' : 'primary'}
                       onClick={() => setConfirmAlert(alt)}
                       className="rounded-xl"
                     >
-                      {t('manager.incidents.ackBtn', 'Xác Nhận Đã Đọc')}
+                      {alt.source === 'incident'
+                        ? language === 'en' ? 'Resolve Incident' : 'Đóng Sự Cố'
+                        : t('manager.incidents.ackBtn', 'Đánh Dấu Đã Đọc')}
                     </Button>
                   )}
                 </div>
@@ -411,7 +418,13 @@ export default function ManagerIncidentsPage() {
           isOpen={!!confirmAlert}
           onClose={() => !actionLoading && setConfirmAlert(null)}
           closeDisabled={actionLoading}
-          title={t('manager.incidents.modalTitle', 'Xác Nhận Tiếp Nhận Cảnh Báo Vận Hành')}
+          title={
+            confirmAlert.source === 'incident'
+              ? language === 'en'
+                ? 'Confirm Field Incident Resolution'
+                : 'Xác Nhận Đóng Sự Cố Hiện Trường'
+              : t('manager.incidents.modalTitle', 'Xác Nhận Đánh Dấu Đã Đọc Thông Báo')
+          }
           subtitle={`${t('manager.incidents.trip', 'Chuyến đi')} ${confirmAlert.tripCode} • ${translateIncident(confirmAlert.type)}`}
           maxWidth="max-w-md"
         >
@@ -420,6 +433,13 @@ export default function ManagerIncidentsPage() {
               <span className="font-bold text-[#181A17] block">{confirmAlert.type}</span>
               <p className="text-[#5F6977] m-0 leading-relaxed">{confirmAlert.message}</p>
             </div>
+            {confirmAlert.source === 'incident' && (
+              <p className="text-xs text-[#B33E3E] font-medium m-0">
+                {language === 'en'
+                  ? 'This action marks the active field incident as RESOLVED in the database.'
+                  : 'Thao tác này sẽ chuyển trạng thái sự cố hiện trường sang ĐÃ GIẢI QUYẾT trong hệ thống.'}
+              </p>
+            )}
             <div className="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-[#E8E2D8]">
               <Button
                 variant="outline"
@@ -431,7 +451,7 @@ export default function ManagerIncidentsPage() {
                 {t('common.cancel', 'Hủy bỏ')}
               </Button>
               <Button
-                variant="primary"
+                variant={confirmAlert.source === 'incident' ? 'danger' : 'primary'}
                 size="sm"
                 disabled={actionLoading}
                 onClick={() => void handleConfirmAcknowledge(confirmAlert)}
@@ -439,7 +459,9 @@ export default function ManagerIncidentsPage() {
               >
                 {actionLoading
                   ? t('manager.incidents.authorizing', 'Đang xử lý...')
-                  : t('manager.incidents.confirmBtn', 'Xác Nhận Tiếp Nhận')}
+                  : confirmAlert.source === 'incident'
+                    ? language === 'en' ? 'Confirm Resolve Incident' : 'Xác Nhận Đóng Sự Cố'
+                    : t('manager.incidents.confirmBtn', 'Xác Nhận Đã Đọc')}
               </Button>
             </div>
           </div>

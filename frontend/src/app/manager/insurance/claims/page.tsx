@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
+import toast from 'react-hot-toast';
 import { apiClient } from '@/lib/api-client';
 import { getAuthToken } from '@/lib/auth';
 import {
@@ -188,20 +189,31 @@ export default function ManagerInsuranceClaimsPage() {
     fetch(`${baseUrl}/insurance/claims/${claimId}/evidence/${idx}`, {
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     })
-      .then((res) => {
-        if (!res.ok) throw new Error('Không thể tải tệp.');
-        return res.blob();
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Không thể tải tệp chứng từ.');
+        const contentType = res.headers.get('content-type') || '';
+        const blob = await res.blob();
+        let ext = '';
+        if (contentType.includes('image/jpeg')) ext = '.jpg';
+        else if (contentType.includes('image/png')) ext = '.png';
+        else if (contentType.includes('image/webp')) ext = '.webp';
+        else if (contentType.includes('application/pdf')) ext = '.pdf';
+        const finalName = ext && fileName.endsWith('.pdf') && ext !== '.pdf'
+          ? fileName.replace(/\.pdf$/i, ext)
+          : fileName;
+        return { blob, finalName };
       })
-      .then((blob) => {
+      .then(({ blob, finalName }) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = fileName;
+        a.download = finalName;
         document.body.appendChild(a);
         a.click();
         a.remove();
+        setTimeout(() => window.URL.revokeObjectURL(url), 1000);
       })
-      .catch((err) => alert(err.message));
+      .catch((err) => toast.error(err?.message || 'Không thể tải tệp chứng từ.'));
   };
 
   return (
@@ -464,18 +476,16 @@ export default function ManagerInsuranceClaimsPage() {
                 </p>
               </div>
 
-              {/* Dual-approval & SoD notice */}
-              {Number(approvedAmount || activeClaim.suggestedAmount) >= 20000000 && (
-                <div className="flex items-start gap-2.5 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs">
-                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
-                  <div>
-                    <strong>Cảnh báo Dual-Approval & SoD (≥ 20.000.000 VNĐ):</strong>
-                    <p className="mt-0.5 text-amber-800">
-                      Khoản duyệt này sẽ tự động tạo hồ sơ hoàn tiền yêu cầu <strong>phê duyệt 2 cấp</strong> độc lập và lệnh chuyển khoản do <strong>Admin</strong> thực hiện (người chuyển không trùng người duyệt).
-                    </p>
-                  </div>
+              {/* Payout flow notice */}
+              <div className="flex items-start gap-2.5 p-3 rounded-lg bg-[#FAF8F4] border border-[#DFCA9A] text-[#6B5016] text-xs">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-[#A67C2E]" />
+                <div>
+                  <strong>Quy trình chi trả bồi thường:</strong>
+                  <p className="mt-0.5 text-[#5C6658]">
+                    Sau khi bạn phê duyệt mức bồi thường, chủ ngựa sẽ điền thông tin tài khoản ngân hàng qua biểu mẫu nhận tiền. Khi có đủ STK, Quản lý vận hành duyệt chi và xác nhận chuyển khoản kèm ủy nhiệm chi ngay tại trang chi tiết đơn hàng.
+                  </p>
                 </div>
-              )}
+              </div>
 
               {/* Review Actions Form */}
               {['submitted', 'under_review'].includes(activeClaim.status) ? (

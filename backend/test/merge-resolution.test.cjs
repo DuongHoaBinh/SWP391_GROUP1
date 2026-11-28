@@ -5,13 +5,18 @@ const { RoutesService } = require('../dist/modules/routes/routes.service');
 const { SepayPaymentStore } = require('../dist/modules/orders/sepay-payment.store');
 const { UserRole } = require('../dist/modules/auth/auth.types');
 
-for (const [expiryDate, compliant] of [['2099-01-09', false], ['2099-01-10', true]]) {
-  test(`merged compliance keeps trip expiry validation for ${expiryDate}`, async () => {
+for (const [docStatus, expiryDate, compliant] of [
+  ['approved', '2099-01-09', true],
+  ['approved', '2099-01-10', true],
+  ['expired', '2099-01-09', false],
+  ['submitted', '2099-01-10', false],
+]) {
+  test(`merged compliance trusts Manager-approved status (${docStatus}, expiry ${expiryDate})`, async () => {
     const service = new DocumentsService({
       findOrderDetails: async () => ({ customer_id: 7, destination_location: 'Vietnam', requested_date: '2099-01-01', expected_arrival_date: '2099-01-10' }),
       findRegulations: async () => [{ id: 1, documentType: 'health_certificate' }],
       findHorsesInOrder: async () => [{ horse_id: 4, name: 'Test horse' }],
-      findDocumentsByHorseId: async () => [{ regulationId: 1, status: 'approved', expiryDate }],
+      findDocumentsByHorseId: async () => [{ regulationId: 1, status: docStatus, expiryDate }],
       hasRequirementsSent: async () => true,
     }, {}, {});
     const checklist = await service.getOrderComplianceChecklist({ id: '7', role: UserRole.CUSTOMER }, 42);

@@ -217,22 +217,21 @@ Toàn bộ KPI của Logistics Manager phải tính trực tiếp từ dữ li�
 - **Quy trình thanh toán trả trước (Prepaid Booking Flow):** Khách hàng mở ngay popup thanh toán VietQR SePay sau khi gửi đơn từ báo giá (đơn khởi tạo ở trạng thái `awaiting_payment`). Nếu khách đóng popup hoặc chưa thanh toán thành công ngay, đơn được giữ trong thời hạn **12 giờ** (`payment_due_at = created_at + 12h`, cấu hình qua `ORDER_PAYMENT_WINDOW_MINUTES=720`); quá 12 giờ chưa ghi nhận SePay thành công, tác vụ SLA tự động hủy đơn (`cancelled` / `payment_expired`), void hóa đơn và giải phóng xe + ngựa về trạng thái khả dụng. Sau khi thanh toán thành công, đơn chuyển sang trạng thái `paid_pending_review` để Logistics Manager thẩm định tính khả thi vận hành (`feasibility_status`).
 - **Thẩm định khả thi (`PATCH /orders/:id/feasibility`):**
   - Nếu khả thi (`feasible`): Đơn được phê duyệt chính thức (`approved`), chuyển sang lập kế hoạch lộ trình chi tiết (Flow 3).
-  - Nếu không khả thi (`unfeasible`): Manager từ chối với lý do cụ thể, hệ thống tự động sinh hồ sơ hoàn tiền 100% (`shipment_refund_record`) và form tiếp nhận tài khoản ngân hàng của khách hàng.
+  - Nếu không khả thi (`unfeasible`): Manager từ chối với lý do cụ thể, hệ thống tự động sinh hồ sơ hoàn tiền 100% (`shipment_refund_record`) và thông báo khách điền thông tin tài khoản ngân hàng.
 - **Hóa đơn điện tử PDF & Hóa đơn bổ sung:** Phát hành hóa đơn VAT PDF chính thức ngay sau khi thanh toán. Nếu phát sinh chi phí hoặc thay đổi lộ trình khẩn cấp, phát hành hóa đơn điều chỉnh bổ sung (`supplemental_invoice`).
-- **Tách nhiệm vụ tài chính (Segregation of Duties - SoD):**
-  - Mọi khoản hoàn tiền hoặc bồi thường: Logistics Manager phê duyệt số tiền (`approved_by`), Quản trị viên (Admin) độc lập thực thi lệnh chuyển khoản (`transferred_by`). Hệ thống kiểm tra ràng buộc cứng `transferred_by != approved_by` ở tầng server (`403 Forbidden` nếu trùng người).
-  - Khoản tiền hoàn hoặc bồi thường ≥ 20.000.000 VNĐ bắt buộc áp dụng cơ chế phê duyệt kép (Dual-Approval: `second_approved_by != approved_by`).
+- **Hoàn tiền 1-Manager & Bắt buộc Form STK Khách hàng (Cập nhật 11/2026):**
+  - **1 Manager duyệt & chuyển khoản:** Một `Logistics Manager` có toàn quyền phê duyệt (`pending_approval` → `approved_for_transfer`, không yêu cầu duyệt kép Dual-Approval) **và** thực thi chuyển khoản hoàn tiền / bồi thường (`POST /orders/refunds/:refundId/transfer`) mà không bị chặn SoD bởi Admin.
+  - **Bắt buộc Khách hàng điền STK thụ hưởng (Cách 1):** Mọi khoản hoàn tiền mặt (`refund_mode = 'cash_refund'`, `amount > 0`) phát sinh từ cả 4 luồng (`company_cannot_fulfil`, `insurance_claim`, `cancelled_operational`, `cancelReturnLeg`) đều yêu cầu **chủ ngựa (Customer)** gửi thông tin ngân hàng thụ hưởng (`POST /orders/refunds/:refundId/bank-info` hoặc `POST /orders/:id/refund-form`) trước khi Manager có thể giải ngân; backend trả `409 Conflict` nếu Manager cố chuyển khoản khi khách chưa nộp STK.
+- **Giám sát GPS & Phân tách Driver / Escort (Cập nhật 11/2026):**
+  - `Logistics Manager` có quyền cấu hình trực tiếp bán kính Geofence, mức chi tiết sinh hiệu và chế độ giả lập GPS (`PATCH /system-settings/tracking`).
+  - `driver` (Tài xế xe chuyên dụng VN) chỉ check-in & gửi GPS trên chặng đường bộ nội địa/VN; bị chặn (`403`) thao tác trên chặng bay (`flight`), đường biển (`sea`), chặng đường bộ do đối tác nước ngoài vận hành (`vehicle_id IS NULL`) và bàn giao điểm đích quốc tế. `escort` (Bác sĩ thú y áp tải) phụ trách xuyên suốt chặng bay/biển, kiểm dịch, thông quan và đối tác nước ngoài; hai vai trò vẫn được check-in chéo dự phòng trên chặng nội địa kèm cờ kiểm toán `updated_by_role` và khóa cập nhật nguyên tử (atomic status guard).
 
 ## 13. Yêu cầu giấy tờ pháp lý theo quốc gia đến và tái sử dụng hồ sơ (Step 8 — Review 11/2026)
 
-- **Danh mục giấy tờ theo quốc gia (`country_document_requirement`):** Cấu hình linh hoạt theo quốc gia đến (Việt Nam, Campuchia, Thái Lan, Singapore, Malaysia, Úc, UAE), loại hình vận chuyển (nội địa, xuất cảnh, nhập cảnh, quá cảnh) và phương thức (`road`, `air`, `sea`).
+- **Danh mục giấy tờ theo quốc gia (`country_document_requirement`):** Cấu hình linh hoạt theo quốc gia đến (Việt Nam, Campuchia, Thái Lan, Singapore, Malaysia, Úc, UAE) và phương thức (`road`, `air`, `sea`). Đã bỏ phân tách Tầng A / Tầng B và bỏ chặn đặt ngày khởi hành theo `lead_time_days` (Cách A — Cập nhật 11/2026).
 - **Kho hồ sơ ngựa đua tập trung:** Giấy tờ pháp lý gắn trực tiếp vào từng cá thể ngựa (`horse_document`), loại bỏ nhập thủ công theo từng đơn hàng.
-- **Tự động đối chiếu và tái sử dụng:** Khi tạo đơn, hệ thống tự động quét hồ sơ của từng ngựa được chọn và phân loại trạng thái:
-  - *Dùng lại được (`reusable`):* Hộ chiếu FEI, kết quả xét nghiệm Coggins còn hạn.
-  - *Sắp hết hạn (`expiring`):* Còn hạn dưới 14 ngày trước ngày đến nơi.
-  - *Hết hạn (`expired`) hoặc Thiếu (`missing`):* Cảnh báo bắt buộc nộp bổ sung.
-  - *Cấp quá sớm (`issued_too_early`):* Giấy kiểm dịch cấp trước ngày xuất phát quy định.
-- **Quy trình thẩm định 4 tiêu chí:** Logistics Manager duyệt hồ sơ theo checklist 4 điểm: trùng khớp vi chip, trùng số hộ chiếu, ngày cấp hợp lệ, ngày hết hạn bao phủ toàn bộ hành trình.
+- **Tự động đối chiếu và tái sử dụng:** Khi tạo đơn, hệ thống đối chiếu kho hồ sơ của từng ngựa (đã duyệt / chờ duyệt / thiếu / đã hết hạn), cho phép khách tải lên ngay hoặc chọn **"Nộp sau"** để bổ sung trước khi xuất phát.
+- **Quy trình thẩm định 4 tiêu chí do Logistics Manager quyết định:** Manager trực tiếp xem tệp và tự kiểm tra thời hạn trên 4 tiêu chí (vi chip, hộ chiếu, ngày cấp, hạn dùng); khi Manager đã **Phê duyệt (`approved`)**, hồ sơ được công nhận hợp lệ cho chuyến đi. Từ chối bắt buộc lý do.
 
 ## 14. Giám sát GPS trực tuyến, phát hiện ngoài luồng geofence và cảnh báo sinh hiệu (Step 10 — Review 11/2026)
 

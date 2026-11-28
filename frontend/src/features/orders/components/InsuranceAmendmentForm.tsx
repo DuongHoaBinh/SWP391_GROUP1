@@ -6,8 +6,6 @@ import { apiClient } from '@/lib/api-client';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { InsuranceSelection } from './InsuranceSelection';
 import { CostSummary } from './InsuranceSummary';
-import { BookingChoice } from './BookingChoice';
-import { type BookingType } from '../booking-policy';
 import {
   previewInsurance,
   unchangedInsurance,
@@ -20,14 +18,13 @@ export function InsuranceAmendmentForm({
   orderId,
   horses,
   specialRequirements,
-  bookingType = 'dedicated_charter',
   onSaved,
   onCancel,
 }: {
   orderId: number;
   horses: InsuredHorse[];
   specialRequirements?: string | null;
-  bookingType?: BookingType;
+  bookingType?: string;
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -47,7 +44,6 @@ export function InsuranceAmendmentForm({
     ),
   );
   const [notes, setNotes] = useState('');
-  const [booking, setBooking] = useState<BookingType>(bookingType);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { data: policy, error: policyError, mutate } = useSWR<InsurancePolicy>(
@@ -92,7 +88,7 @@ export function InsuranceAmendmentForm({
       await apiClient(`/orders/${orderId}`, {
         method: 'PUT',
         body: JSON.stringify({
-          bookingType: booking,
+          bookingType: 'dedicated_charter',
           specialRequirements: [specialRequirements, `[Updated] ${notes.trim()}`]
             .filter(Boolean)
             .join(' | '),

@@ -257,7 +257,7 @@ export const FleetRouteStoreProvider: React.FC<{ children: React.ReactNode }> = 
             capacity: cap,
             status: v.status || 'available',
             lastInspection: v.createdAt ? v.createdAt.split('T')[0] : '2026-10-01',
-            location: v.status === 'in_use' ? `Active: ${v.assignedTripCode || 'On Road'} (${baseLoc})` : baseLoc,
+            location: baseLoc,
             assignedTripCode: v.assignedTripCode || undefined,
             assignedShipmentStatus: v.assignedShipmentStatus ?? null,
             isReservedOnly: Boolean(v.isReservedOnly),

@@ -341,14 +341,18 @@ export default function VehicleManagementPage() {
   });
 
   const availableCount = vehicles.filter((v) => normalizeFleetStatus(v.status) === 'available').length;
-  const inUseCount = vehicles.filter((v) => {
+  const isVehicleInTransit = (v: Vehicle) => {
     const s = normalizeFleetStatus(v.status);
     if (s !== 'in_use') return false;
-    const isReservedOnly = Boolean((v as any).isReservedOnly) || /active:\s*req-/i.test(String(v.location || ''));
+    const isReservedOnly = Boolean((v as any).isReservedOnly);
     const shipStatus = String((v as any).assignedShipmentStatus || '').toLowerCase();
     if (shipStatus) return shipStatus === 'in_transit' || shipStatus === 'return_pending';
     return !isReservedOnly;
-  }).length;
+  };
+  const inUseCount = vehicles.filter(isVehicleInTransit).length;
+  const reservedCount = vehicles.filter(
+    (v) => normalizeFleetStatus(v.status) === 'in_use' && !isVehicleInTransit(v),
+  ).length;
   const maintenanceCount = vehicles.filter((v) => normalizeFleetStatus(v.status) === 'maintenance').length;
   const hasActiveFilter = Boolean(searchTerm.trim()) || filterType !== 'ALL' || filterDepot !== 'ALL';
 
@@ -414,7 +418,7 @@ export default function VehicleManagementPage() {
       )}
 
       {/* Metrics Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-[#D8CEBE]/70 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider m-0">
@@ -440,6 +444,20 @@ export default function VehicleManagementPage() {
           </div>
           <div className="w-12 h-12 rounded-xl bg-[#FAF8F4] text-[#A67C2E] flex items-center justify-center">
             <Truck size={24} />
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-[#D8CEBE]/70 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider m-0">
+              {language === 'en' ? 'Reserved for Orders' : 'Đang Giữ Chỗ'}
+            </p>
+            <h2 className="text-2xl font-extrabold text-sky-700 mt-1 m-0">
+              {t('fleet.vehiclesUnit', '{count} Phương tiện', { count: reservedCount })}
+            </h2>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+            <ShieldCheck size={24} />
           </div>
         </div>
 

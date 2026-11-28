@@ -570,30 +570,32 @@ function CustomerTrackingContent() {
               </div>
             </div>
 
-            {/* 3: On-board Crew (Driver & Vet names preserved, no fake phones) */}
+            {/* 3: Operational Assignment (Internal crew identities redacted for customer privacy) */}
             <div className="bg-white rounded-xl border border-[#E5DDD0] p-3 flex flex-col justify-between">
               <div className="text-xs font-semibold text-[#5F6977]">
-                {isEn ? 'On-board Crew' : 'Đội ngũ phụ trách'}
+                {isEn ? 'Operations Team' : 'Đội ngũ vận hành'}
               </div>
               <div className="mt-1.5 space-y-0.5 text-xs">
                 <div className="truncate">
-                  <span className="text-[#747D88]">{isEn ? 'Driver:' : 'Tài xế:'} </span>
+                  <span className="text-[#747D88]">{isEn ? 'Transport:' : 'Tài xế:'} </span>
                   <strong className="text-[#181A17]">
-                    {trackingDetails?.assignedDriver ||
-                      (statusLower === 'completed' || statusLower === 'delivered'
+                    {statusLower === 'completed' || statusLower === 'delivered'
+                      ? isEn
+                        ? 'Completed handover'
+                        : 'Đã hoàn tất bàn giao'
+                      : ['in_transit', 'return_pending', 'ready_to_depart', 'confirmed'].includes(statusLower)
                         ? isEn
-                          ? 'Completed handover'
-                          : 'Đã hoàn tất bàn giao'
+                          ? 'Assigned (Protected)'
+                          : 'Chuyên trách (Bảo mật)'
                         : isEn
                           ? 'Assigning'
-                          : 'Đang phân công')}
+                          : 'Đang phân công'}
                   </strong>
                 </div>
                 <div className="truncate">
-                  <span className="text-[#747D88]">{isEn ? 'Vet / Escort:' : 'Thú y / Áp tải:'} </span>
+                  <span className="text-[#747D88]">{isEn ? 'Vet Care:' : 'Thú y:'} </span>
                   <strong className="text-[#181A17]">
-                    {trackingDetails?.assignedEscort ||
-                      (isEn ? 'Equine Vet' : 'Thú y chuyên trách')}
+                    {isEn ? 'Equine Vet Escort' : 'Thú y chuyên trách'}
                   </strong>
                 </div>
               </div>

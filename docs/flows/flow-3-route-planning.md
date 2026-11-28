@@ -239,14 +239,16 @@ Hệ thống hỗ trợ 2 dạng vận chuyển đường thủy (`sea`) với c
 
 **Đoàn xe (nhiều xe cho một đơn)**: kế hoạch chi tiết vẫn gắn một **xe dẫn đầu** cho mỗi chặng bộ; xe nằm trong nhóm đã giữ chỗ cùng hướng được tính sức chứa bằng **tổng sức chứa cả đoàn** (`applyConvoyCapacity`). Xe ngoài nhóm giữ nguyên quy tắc Step 3 (mỗi xe phải đủ chỗ cho cả đơn).
 
-**Trạm đối tác nước ngoài**: chặng giao sau sân bay/cảng ở nước ngoài dùng trạm `partner` gần điểm giao nhất (≤ 300 km) và bảng giá `pricing_tariff` mode `road`, `region = 'PARTNER'`; chạy rỗng tính từ trạm đối tác đến sân bay/cảng đến. Không có trạm đối tác trong 300 km → dùng bảng giá VN, cảnh báo `NO_PARTNER_DEPOT`.
+**Trạm đối tác nước ngoài (Partner Depot Handoff):** Chặng đường bộ sau sân bay/cảng đích (chiều đi) và trước sân bay/cảng đi ở nước ngoài (chiều về khứ hồi) do đối tác địa phương đảm nhiệm (`vehicle_id = NULL`), gắn thông tin trạm `partner` gần nhất (≤ 300 km) từ báo giá và bảng giá `pricing_tariff` mode `road`, `region = 'PARTNER'`. Escort (bác sĩ thú y áp tải theo ngựa) chịu trách nhiệm check-in mốc và cập nhật GPS trên các chặng này; Tài xế VN (`driver`) không được check-in chặng nước ngoài.
 
-**Manager đổi xe/trạm**:
+**Manager đổi xe/trạm:**
 
 - `POST /fleet/shipments/:id/reservations/swap` (bắt buộc lý do ≥ 5 ký tự): khóa xe, giữ xe mới cùng khung giờ, nhả xe cũ (`released_reason = manager_swap`), cập nhật chặng `pending` đang dùng xe cũ kèm `route_leg.allocation_override_reason`, ghi `trip_status_log` (`milestone_type = allocation_override`) và nối lịch sử vào `shipment.allocation_snapshot.overrides`. Tổng sức chứa sau khi đổi vẫn phải đủ.
-- Trong màn dựng kế hoạch, chặng bộ dùng xe **khác** nhóm đã giữ phải nhập `allocationOverrideReason`, nếu không backend trả `400`.
+- Trong màn dựng kế hoạch, dropdown chặng đường bộ chỉ liệt kê xe tải chuyên dụng (`truck_*`, loại trừ `aircraft_stall`/`vessel_pen`/`container`); chặng bộ dùng xe **khác** nhóm đã giữ phải nhập `allocationOverrideReason`, nếu không backend trả `400`.
 
-**Chặng bay**: `route_leg.jet_stall_count` = ⌈tổng số ngựa / 3⌉; `stalls_booked` giữ nghĩa cũ (số chỗ ngựa).
+**Chặng bay (Jet Stall Capacity — Cập nhật 11/2026):** Mỗi Jet Stall hàng không chở tối đa 3 ngựa; cả `route_leg.jet_stall_count` và `route_leg.stalls_booked` trên chặng `flight` đều thống nhất tính theo **số Jet Stall** (`>= Math.ceil(horseCount / 3)`). Chặng đường biển (`sea`) giữ nguyên `stalls_booked >= horseCount` (1 ô chuồng tàu / ngựa).
+
+**Gỡ bỏ legacy (Cập nhật 11/2026):** Đã gỡ hoàn toàn controller `GET/POST /fleet/road-trips`, `shared_stall` UI/endpoints (`RoadTripPicker`, `upgrade-charter`, `reschedule-shared`, `sla-fallback`), cổng MoMo sandbox, và các route chết trong `RoutesController`. `RoadTripsStore.prepareLegs` được giữ lại nội bộ để khóa chống trùng lịch cho xe `dedicated_charter`.
 
 ## 11. Tinh gọn & Đồng bộ Điều phối từ Báo giá (Flow 3 Consolidation — 11/2026)
 

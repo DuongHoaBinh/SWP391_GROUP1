@@ -14,6 +14,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
 import { TrackingSystemSettings } from './tracking.types';
+import { UpdateTrackingSettingsDto } from './dto/update-tracking-settings.dto';
 
 @ApiTags('System Settings')
 @ApiBearerAuth()
@@ -30,11 +31,11 @@ export class SystemSettingsController {
   }
 
   @Patch('tracking')
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Cập nhật cấu hình tracking (ADMIN only: simulation, geofence, customer_vitals_detail)' })
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Cập nhật cấu hình tracking (simulation, geofence, customer_vitals_detail)' })
   async updateTrackingSettings(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() patch: Partial<TrackingSystemSettings>,
+    @Body() patch: UpdateTrackingSettingsDto,
   ): Promise<TrackingSystemSettings> {
     return this.trackingService.updateTrackingSettings(user, patch);
   }

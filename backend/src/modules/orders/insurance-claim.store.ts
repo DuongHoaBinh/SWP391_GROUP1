@@ -460,7 +460,7 @@ export class InsuranceClaimStore implements OnModuleInit, OnModuleDestroy {
           throw new BadRequestException('Số tiền phê duyệt bồi thường phải lớn hơn 0.');
         }
 
-        const requiresDualApproval = approvedAmount >= 20000000;
+        const requiresDualApproval = false;
 
         // Insert into shipment_refund_record
         const [refRes] = await db.execute<ResultSetHeader>(

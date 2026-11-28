@@ -426,7 +426,7 @@ export class OrdersService {
       throw new ForbiddenException('Bạn chỉ có thể hủy đơn vận chuyển của chính mình');
     }
 
-    if (![UserRole.CUSTOMER, UserRole.ADMIN].includes(user.role)) throw new ForbiddenException('Chỉ khách hàng sở hữu đơn hoặc Admin được hủy yêu cầu.');
+    if (![UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN].includes(user.role)) throw new ForbiddenException('Chỉ khách hàng sở hữu đơn hoặc Logistics Manager được hủy yêu cầu.');
     const wasAwaitingPayment = order.status === ShipmentStatus.AWAITING_PAYMENT;
     const changed = await this.ordersStore.cancelShipment(orderId, { id: Number(user.id), role: user.role });
     if (!changed) return order;
@@ -469,6 +469,24 @@ export class OrdersService {
     if (!order.returnDepartureAt) {
       throw new BadRequestException('Đơn khứ hồi chưa có thời điểm khởi hành chặng về');
     }
+    const activePaidStatuses = [
+      'paid_pending_review',
+      'approved',
+      'planning',
+      'confirmed',
+      'ready_to_depart',
+      'in_transit',
+      'return_pending',
+    ];
+    if (!activePaidStatuses.includes(order.status)) {
+      throw new ConflictException(
+        order.status === 'cancelled' || order.status === 'rejected'
+          ? 'Đơn hàng đã bị hủy — không thể hoàn tiền chặng về'
+          : order.status === 'awaiting_payment'
+            ? 'Đơn hàng chưa thanh toán — không có khoản hoàn tiền chặng về'
+            : `Không thể xem tiền hoàn chặng về khi đơn đang ở trạng thái "${order.status}"`,
+      );
+    }
     if (order.returnStatus === 'in_progress') {
       throw new ConflictException('Chặng về đã xuất phát (in_progress), không thể hủy');
     }
@@ -476,15 +494,46 @@ export class OrdersService {
       throw new ConflictException(`Không thể xem phí hủy chặng về ở trạng thái "${order.returnStatus}"`);
     }
 
+    const now = new Date();
+    const returnDepartureDate = new Date(order.returnDepartureAt);
+    const hoursUntilDeparture = Math.max(
+      0,
+      (returnDepartureDate.getTime() - now.getTime()) / (1000 * 3600),
+    );
     const policy = order.returnPolicySnapshot || currentReturnPolicy();
-    return calculateReturnCancellationRefund({
+    const calc = calculateReturnCancellationRefund({
       returnFreight: order.returnFreight || 0,
       returnInsuranceFee: order.returnInsuranceFee || 0,
-      returnDepartureAt: new Date(order.returnDepartureAt),
-      cancelledAt: new Date(),
+      returnDepartureAt: returnDepartureDate,
+      cancelledAt: now,
       cause: 'customer',
       policy,
     });
+
+    const policyTierDescription =
+      calc.tier === '>= 168h'
+        ? 'Hủy trước ≥ 168 giờ (7 ngày)'
+        : calc.tier === '72h-168h'
+          ? 'Hủy từ 72 đến dưới 168 giờ'
+          : 'Hủy dưới 72 giờ trước giờ đón';
+
+    return {
+      ...calc,
+      shipmentId: order.id,
+      tripType: order.tripType,
+      returnStatus: order.returnStatus,
+      returnDepartureAt: returnDepartureDate.toISOString(),
+      currentTime: now.toISOString(),
+      hoursUntilDeparture: Number(hoursUntilDeparture.toFixed(2)),
+      returnFreightTotal: Number(order.returnFreight || 0),
+      returnInsuranceTotal: Number(order.returnInsuranceFee || 0),
+      freightRefundPercent: calc.refundPercent,
+      freightRefundAmount: calc.freightRefund,
+      insuranceRefundAmount: calc.insuranceRefund,
+      totalRefundAmount: calc.total,
+      requiresDualApproval: calc.total >= 20_000_000,
+      policyTierDescription,
+    };
   }
 
   async cancelReturnLegByCustomer(user: AuthenticatedUser, shipmentId: number, reason?: string) {
@@ -537,6 +586,15 @@ export class OrdersService {
       'status_update',
       shipmentId,
     );
+    if (refund.total > 0) {
+      await this.notificationsService.createNotification(
+        order.customerId,
+        `Đã hủy chặng về - Vui lòng cung cấp STK nhận hoàn tiền (${code})`,
+        `Chặng về của đơn ${code} đã được hủy. Số tiền hoàn dự kiến ${refund.total.toLocaleString('vi-VN')} VND. Vui lòng vào trang chi tiết đơn hàng để điền thông tin tài khoản ngân hàng nhận hoàn tiền.`,
+        'status_update',
+        shipmentId,
+      );
+    }
 
     return {
       success: true,
@@ -591,7 +649,7 @@ export class OrdersService {
     await this.notificationsService.createNotification(
       order.customerId,
       `Công ty hủy chặng về - Đơn ${code}`,
-      `Công ty rất tiếc phải hủy chặng về của đơn vận chuyển ${code}. Bạn được hoàn 100% chi phí chặng về (${refund.total.toLocaleString('vi-VN')} VND). Lý do: ${finalReason}`,
+      `Công ty rất tiếc phải hủy chặng về của đơn vận chuyển ${code}. Bạn được hoàn 100% chi phí chặng về (${refund.total.toLocaleString('vi-VN')} VND). Vui lòng vào chi tiết đơn hàng điền thông tin tài khoản ngân hàng để nhận hoàn tiền. Lý do: ${finalReason}`,
       'status_update',
       shipmentId,
     );

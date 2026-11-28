@@ -13,11 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RoutesService } from './routes.service';
-import { CreateRouteDto } from './dto/create-route.dto';
-import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { RecordStopProgressDto } from './dto/record-stop-progress.dto';
-import { PublishTripDto } from './dto/publish-trip.dto';
-import { SetStrategicFrameworkDto } from './dto/set-strategic-framework.dto';
 import { BuildDetailedPlanDto } from './dto/build-detailed-plan.dto';
 import { ReviewPlanDto } from './dto/review-plan.dto';
 import { ConfirmAssignmentDto } from './dto/confirm-assignment.dto';
@@ -77,12 +73,6 @@ export class RoutesController {
     });
   }
 
-  @Get('shipment/:shipmentId')
-  @ApiOperation({ summary: 'Lấy thông tin lộ trình và danh sách điểm dừng của đơn vận chuyển' })
-  getRouteByShipmentId(@CurrentUser() user: AuthenticatedUser, @Param('shipmentId', ParseIntPipe) shipmentId: number) {
-    return this.routesService.getRouteByShipmentId(shipmentId, user);
-  }
-
   @Get('shipment/:shipmentId/optional')
   @ApiOperation({ summary: 'Lấy lộ trình của đơn hàng nếu đã lập (trả { route: null } với HTTP 200 nếu chưa có lộ trình)' })
   findOptionalRouteByShipmentId(
@@ -114,25 +104,11 @@ export class RoutesController {
     return this.routesService.getDraftSuggestion(user, shipmentId);
   }
 
-  // --- Step 1a: Manager Sets Strategic Framework ---
-  @Post('plan/:shipmentId/strategic-framework')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({
-    summary: 'Bước 1a: Logistics Manager lập khung kế hoạch chiến lược (loại xe, hãng bay, tuyến chính, giao Coordinator)',
-  })
-  setStrategicFramework(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('shipmentId', ParseIntPipe) shipmentId: number,
-    @Body() dto: SetStrategicFrameworkDto,
-  ) {
-    return this.routesService.setStrategicFramework(user, shipmentId, dto);
-  }
-
-  // --- Step 1b: Coordinator Builds Detailed Plan ---
+  // --- Step 1: Logistics Manager Builds Detailed Plan ---
   @Post('plan/:shipmentId/build-detail')
   @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
-    summary: 'Bước 1b: Coordinator dựng kế hoạch chi tiết các chặng (Legs), gán xe cụ thể, chuyến bay và điểm dừng',
+    summary: 'Bước 1: Logistics Manager dựng kế hoạch chi tiết các chặng (Legs), gán xe cụ thể, chuyến bay và điểm dừng',
   })
   buildDetailedPlan(
     @CurrentUser() user: AuthenticatedUser,
@@ -140,18 +116,6 @@ export class RoutesController {
     @Body() dto: BuildDetailedPlanDto,
   ) {
     return this.routesService.buildDetailedPlan(user, shipmentId, dto);
-  }
-
-  @Post('plan/:shipmentId/submit')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({
-    summary: 'Coordinator gửi duyệt kế hoạch chi tiết cho Manager (chuyển sang pending_approval)',
-  })
-  submitPlanForApproval(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('shipmentId', ParseIntPipe) shipmentId: number,
-  ) {
-    return this.routesService.submitPlanForApproval(user, shipmentId);
   }
 
   // --- Step 2: Manager Reviews Plan ---
@@ -170,7 +134,7 @@ export class RoutesController {
 
   // --- Step 3: Driver Confirms Assignment ---
   @Post('plan/:shipmentId/driver-confirm')
-  @Roles(UserRole.DRIVER_ESCORT, UserRole.ADMIN)
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Bước 3: Tài xế / Hộ tống viên xác nhận nhận nhiệm vụ chuyến đi (khi đủ tất cả xác nhận chuyển sang confirmed)',
   })
@@ -183,7 +147,7 @@ export class RoutesController {
   }
 
   @Post('plan/:shipmentId/driver-decline')
-  @Roles(UserRole.DRIVER_ESCORT, UserRole.ADMIN)
+  @Roles(UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Bước 3 (Từ chối): Tài xế / Hộ tống viên từ chối nhận chuyến kèm lý do',
   })
@@ -205,49 +169,6 @@ export class RoutesController {
     @Param('shipmentId', ParseIntPipe) shipmentId: number,
   ) {
     return this.routesService.getTripPlanReadiness(user, shipmentId);
-  }
-
-  // --- Legacy Compatibility ---
-  @Post('shipment/:shipmentId')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({
-    summary:
-      'Fleet Coordinator lập/cập nhật lộ trình di chuyển gồm các chặng/điểm dừng',
-  })
-  createOrUpdateRoute(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('shipmentId', ParseIntPipe) shipmentId: number,
-    @Body() dto: CreateRouteDto,
-  ) {
-    return this.routesService.createOrUpdateRoute(user, shipmentId, dto);
-  }
-
-  @Patch(':routeId/schedule')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({
-    summary:
-      'Điều chỉnh lịch trình các chặng (Bắt buộc phải có lý do điều chỉnh reason để bảo toàn audit trail)',
-  })
-  updateSchedule(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('routeId', ParseIntPipe) routeId: number,
-    @Body() dto: UpdateScheduleDto,
-  ) {
-    return this.routesService.updateSchedule(user, routeId, dto);
-  }
-
-  @Post('shipment/:shipmentId/publish')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({
-    summary:
-      'Logistics Manager / Coordinator xuất bản chuyến đi và chuyển sang in_transit',
-  })
-  publishTripPlan(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('shipmentId', ParseIntPipe) shipmentId: number,
-    @Body() dto: PublishTripDto,
-  ) {
-    return this.routesService.publishTripPlan(user, shipmentId, dto);
   }
 
   @Post('stops/:stopId/progress')

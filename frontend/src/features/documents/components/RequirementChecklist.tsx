@@ -148,7 +148,7 @@ export function RequirementChecklist({
 
   if (!requirements) return null;
 
-  const { isDepartureFeasible, earliestFeasibleDeparture, country, usingGlobalBaseline, horses, summary } =
+  const { country, usingGlobalBaseline, horses, summary } =
     requirements;
 
   const handleBulkSubmitLater = (horseGroup: HorseRequirementGroup) => {
@@ -277,23 +277,6 @@ export function RequirementChecklist({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[#747D88] pl-5">
-                        <span className="inline-flex items-center gap-1">
-                          <Calendar size={11} /> {isEn ? 'Due:' : 'Hạn nộp:'}{' '}
-                          <strong className={!isReady && req.canSubmitLater === false ? 'text-rose-700' : 'text-[#181A17]'}>
-                            {req.submitDeadline}
-                          </strong>
-                        </span>
-                        {!isReady && req.canSubmitLater === false && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">
-                            <AlertTriangle size={10} />
-                            {isEn ? 'Past recommended due date' : 'Quá hạn nộp khuyến nghị'}
-                          </span>
-                        )}
-                        {req.earliestIssueDate && (
-                          <span>
-                            {isEn ? 'Issued from:' : 'Cấp từ:'} <strong className="text-[#181A17]">{req.earliestIssueDate}</strong>
-                          </span>
-                        )}
                         {req.requiresAuthorityApproval && (
                           <span className="text-amber-800 font-semibold">
                             • {isEn ? 'Requires Veterinary Authority approval' : 'Cần cơ quan thú y phê duyệt'}
@@ -330,18 +313,7 @@ export function RequirementChecklist({
 
                           {!isReady && onToggleSubmitLater && (
                             <label
-                              className={`inline-flex items-center gap-1.5 text-xs cursor-pointer select-none px-2.5 py-1.5 rounded-lg border transition-colors ${
-                                req.canSubmitLater === false
-                                  ? 'border-rose-200 bg-rose-50/70 text-rose-800 hover:border-rose-400'
-                                  : 'border-[#E5DDD0] bg-white text-[#5F6977] hover:border-[#A67C2E]'
-                              }`}
-                              title={
-                                req.canSubmitLater === false
-                                  ? isEn
-                                    ? 'Past recommended deadline — upload as soon as possible after booking'
-                                    : 'Đã sát/quá hạn khuyến nghị — nên tải lên ngay sau khi tạo đơn'
-                                  : undefined
-                              }
+                              className="inline-flex items-center gap-1.5 text-xs cursor-pointer select-none px-2.5 py-1.5 rounded-lg border transition-colors border-[#E5DDD0] bg-white text-[#5F6977] hover:border-[#A67C2E]"
                             >
                               <input
                                 type="checkbox"
@@ -387,36 +359,7 @@ export function RequirementChecklist({
 
   return (
     <div className={`space-y-4 ${isLoading ? 'opacity-75 transition-opacity' : ''}`}>
-      {/* 1. Feasibility Warning Banner */}
-      {!isDepartureFeasible && (
-        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-rose-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">
-          <div className="flex items-start gap-3">
-            <ShieldAlert size={20} className="text-rose-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-bold m-0">
-                {isEn ? `Tight document preparation timeline for ${country}` : `Không kịp chuẩn bị giấy tờ cho ${country}`}
-              </p>
-              <p className="text-xs text-rose-800 mt-0.5 mb-0">
-                {isEn
-                  ? 'Mandatory certificates normally require quarantine lead time and authority approval. Recommended earliest departure date: '
-                  : 'Các chứng từ bắt buộc cần tối thiểu thời gian chuẩn bị và phê duyệt kiểm dịch. Ngày khởi hành sớm nhất khả thi là '}
-                <span className="font-bold underline">{earliestFeasibleDeparture}</span>.
-              </p>
-            </div>
-          </div>
-          {onSelectDepartureDate && (
-            <button
-              type="button"
-              onClick={() => onSelectDepartureDate(earliestFeasibleDeparture)}
-              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shrink-0 cursor-pointer shadow-sm"
-            >
-              {isEn ? `Select from ${earliestFeasibleDeparture}` : `Chọn ngày từ ${earliestFeasibleDeparture}`}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* 2. Global baseline info if applicable */}
+      {/* 1. Global baseline info if applicable */}
       {usingGlobalBaseline && (
         <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
           <AlertTriangle size={15} className="text-amber-600 shrink-0" />

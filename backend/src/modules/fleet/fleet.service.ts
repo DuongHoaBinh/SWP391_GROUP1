@@ -255,10 +255,17 @@ export class FleetService {
       throw new ForbiddenException('Không thể khởi tạo tài khoản Admin hoặc Customer qua cổng nhân sự vận hành.');
     }
     if (
-      normalizedTarget.includes('logistics manager') &&
-      actor?.role !== UserRole.ADMIN
+      normalizedTarget.includes('specialist') ||
+      normalizedTarget.includes('coordinator')
     ) {
-      throw new ForbiddenException('Chỉ quản trị viên hệ thống (Admin) mới có quyền khởi tạo tài khoản Logistics Manager.');
+      throw new BadRequestException('Vai trò cũ (Transport Specialist / Fleet Coordinator) đã được gộp vào Logistics Manager.');
+    }
+    if (
+      normalizedTarget.includes('logistics manager') &&
+      actor?.role !== UserRole.ADMIN &&
+      actor?.role !== UserRole.LOGISTICS_MANAGER
+    ) {
+      throw new ForbiddenException('Chỉ Logistics Manager hoặc Admin mới có quyền khởi tạo tài khoản Logistics Manager.');
     }
 
     const providedPassword = dto.password?.trim();
@@ -285,17 +292,21 @@ export class FleetService {
     userId: number,
     dto: UpdateStaffShiftDto,
   ): Promise<{ success: boolean; userId: number; currentShift: string; dutyStatus: string; activeTrips: number }> {
-    const shouldRelease = dto.releaseActiveTrips === true && dto.dutyStatus !== 'ON_DUTY';
+    const shouldRelease = dto.releaseActiveTrips === true;
     const ok = await this.fleetStore.updateStaffShift(userId, dto.currentShift, dto.dutyStatus, shouldRelease);
     if (!ok) {
       throw new NotFoundException(`Không tìm thấy nhân sự #${userId}`);
     }
+    const activeTrips =
+      typeof this.fleetStore.countActiveTripsForStaff === 'function'
+        ? await this.fleetStore.countActiveTripsForStaff(userId)
+        : 0;
     return {
       success: true,
       userId,
       currentShift: dto.currentShift.trim(),
       dutyStatus: dto.dutyStatus,
-      activeTrips: shouldRelease ? 0 : undefined as any,
+      activeTrips,
     };
   }
 

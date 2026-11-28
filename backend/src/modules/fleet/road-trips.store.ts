@@ -1,6 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { createPool, Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { CreateRoadTripDto } from './dto/create-road-trip.dto';
 import { RouteLegDto } from '../routes/dto/build-detailed-plan.dto';
 import { applyConvoyCapacity, assertRoadCapacity, loadRequiredStallSlots } from './capacity-policy';
 import { consumeShipmentReservations, findShipmentReservations, INACTIVE_SHIPMENT_SQL } from './vehicle-reservation';
@@ -24,68 +23,6 @@ export class RoadTripsStore implements OnModuleInit, OnModuleDestroy {
     }
   }
   async onModuleDestroy() { if (this.pool && !this.injectedPool) await this.pool.end(); }
-
-  async list() {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(`SELECT t.*, v.plate_or_code, v.capacity,
-      COALESCE(SUM(CASE WHEN s.status NOT IN ${INACTIVE_SHIPMENT_SQL} THEN l.stalls_booked ELSE 0 END), 0) AS booked_stalls
-      FROM road_trip t JOIN vehicle v ON v.vehicle_id = t.vehicle_id
-      LEFT JOIN route_leg l ON l.road_trip_id = t.road_trip_id
-      LEFT JOIN route r ON r.route_id = l.route_id LEFT JOIN shipment s ON s.shipment_id = r.shipment_id
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM route_leg l_run
-        JOIN route r_run ON r_run.route_id = l_run.route_id
-        JOIN shipment s_run ON s_run.shipment_id = r_run.shipment_id
-        WHERE l_run.road_trip_id = t.road_trip_id
-          AND s_run.status = 'in_transit'
-      )
-      AND (
-        EXISTS (
-          SELECT 1
-          FROM route_leg l_act
-          JOIN route r_act ON r_act.route_id = l_act.route_id
-          JOIN shipment s_act ON s_act.shipment_id = r_act.shipment_id
-          WHERE l_act.road_trip_id = t.road_trip_id
-            AND s_act.status NOT IN ${INACTIVE_SHIPMENT_SQL}
-        )
-        OR (
-          NOT EXISTS (SELECT 1 FROM route_leg l_any WHERE l_any.road_trip_id = t.road_trip_id)
-          AND NOT EXISTS (
-            SELECT 1
-            FROM route_leg l_conf
-            JOIN route r_conf ON r_conf.route_id = l_conf.route_id
-            JOIN shipment s_conf ON s_conf.shipment_id = r_conf.shipment_id
-            WHERE l_conf.vehicle_id = t.vehicle_id
-              AND s_conf.status NOT IN ${INACTIVE_SHIPMENT_SQL}
-              AND l_conf.planned_departure IS NOT NULL
-              AND l_conf.planned_arrival IS NOT NULL
-              AND l_conf.planned_departure < t.planned_arrival
-              AND l_conf.planned_arrival > t.planned_departure
-          )
-        )
-      )
-      GROUP BY t.road_trip_id, v.vehicle_id ORDER BY t.planned_departure, t.road_trip_id`);
-    return rows.map(t => ({ id: Number(t.road_trip_id), vehicleId: Number(t.vehicle_id), vehiclePlate: t.plate_or_code,
-      capacity: Number(t.capacity), bookedStalls: Number(t.booked_stalls), bookingType: t.booking_type,
-      originLocation: t.origin_location, destinationLocation: t.destination_location,
-      plannedDeparture: new Date(t.planned_departure).toISOString(), plannedArrival: new Date(t.planned_arrival).toISOString() }));
-  }
-
-  async create(dto: CreateRoadTripDto, actorId: number) {
-    if (!dto.originLocation.trim() || !dto.destinationLocation.trim() || !Number.isFinite(new Date(dto.plannedDeparture).getTime()) ||
-      !Number.isFinite(new Date(dto.plannedArrival).getTime()) || new Date(dto.plannedArrival) <= new Date(dto.plannedDeparture)) {
-      throw new BadRequestException('Cần tuyến và khoảng thời gian chuyến đường bộ hợp lệ');
-    }
-    const [vehicles] = await this.pool.execute<RowDataPacket[]>('SELECT * FROM vehicle WHERE vehicle_id = ?', [dto.vehicleId]);
-    if (!vehicles[0] || ['aircraft_stall', 'container'].includes(String(vehicles[0].vehicle_type)) || vehicles[0].status === 'maintenance') {
-      throw new BadRequestException('Cần phương tiện đường bộ hoạt động');
-    }
-    const [result] = await this.pool.execute<any>(`INSERT INTO road_trip
-      (vehicle_id, booking_type, origin_location, destination_location, planned_departure, planned_arrival, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`, [dto.vehicleId, dto.bookingType, dto.originLocation.trim(), dto.destinationLocation.trim(),
-      new Date(dto.plannedDeparture), new Date(dto.plannedArrival), actorId]);
-    return { id: Number(result.insertId) };
-  }
 
   // Call inside the plan transaction, after locking shipment/route and before replacing legs.
   // Every reservation locks vehicle rows in ID order; the vehicle lock serializes capacity decisions.

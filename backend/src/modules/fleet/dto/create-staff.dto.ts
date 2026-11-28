@@ -17,11 +17,11 @@ export class CreateStaffDto {
   phone?: string;
 
   @ApiProperty({
-    description: 'ID vai trò (2: Logistics Manager, 3: Transport Specialist, 4: Fleet & Route Coordinator, 5: Vehicle Driver / Escort)',
+    description: 'ID vai trò (2: Logistics Manager, 5: Vehicle Driver / Escort)',
     example: 5,
   })
   @IsInt()
-  @IsIn([2, 3, 4, 5], { message: 'Vai trò không hợp lệ (chỉ chấp nhận 2, 3, 4 hoặc 5)' })
+  @IsIn([2, 5], { message: 'Vai trò không hợp lệ (chỉ chấp nhận 2: Logistics Manager hoặc 5: Vehicle Driver / Escort)' })
   roleId!: number;
 
   @ApiPropertyOptional({

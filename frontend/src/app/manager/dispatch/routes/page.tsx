@@ -33,7 +33,7 @@ import {
 import { AddressAutocompleteInput } from '@/components/ui/AddressAutocompleteInput';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { bookingName, type BookingType } from '@/features/orders/booking-policy';
-import { LegScheduleFields } from '@/features/routes/components/RoadTripPicker';
+import { LegScheduleFields } from '@/features/routes/components/LegScheduleFields';
 import { ReservedVehiclesPanel } from '@/features/fleet/components/ReservedVehiclesPanel';
 
 const DISPATCH_ELIGIBLE_STATUSES = new Set([
@@ -586,7 +586,7 @@ function RoutePlanningContent() {
       arrivalAirportCode: arrAirportMeta.iataCode,
       flightNumber: `${depAirportMeta.iataCode}-${arrAirportMeta.iataCode}-CARGO`,
       bookingReference: `AWB-${order?.requestCode || 'AIR'}-${arrAirportMeta.iataCode}`,
-      stallsBooked: horseCount || 1,
+      stallsBooked: Math.max(1, Math.ceil((horseCount || 1) / 3)),
       distanceKm: flightDistanceKm,
       durationHours: flightHoursOverride ?? flightEst?.durationHours ?? flightPreview?.durationHours ?? 2.5,
     });
@@ -604,11 +604,12 @@ function RoutePlanningContent() {
         durationHours: deliveryEst?.durationHours ?? deliveryPreview?.durationHours ?? 1,
         vehicleId: isDomesticArrival ? defaultVehicle.vehicleId : null,
         roadTripId: null,
+        isOverseasPartnerRoad: !isDomesticArrival,
         vehiclePlate: isDomesticArrival
           ? defaultVehicle.vehiclePlate
           : language === 'en'
-            ? `Vehicle from ${destClean} - Consignee pickup`
-            : `Xe từ ${destClean} đến đón (Bên nhận tự rước)`,
+            ? `Partner Depot Dispatch (${destClean})`
+            : `Điều phối qua Trạm Đối tác (${destClean})`,
       });
     }
 
@@ -812,14 +813,23 @@ function RoutePlanningContent() {
       const suggestion = await routesApi.getDraftSuggestion(order.id);
       const defaultVehicle = pickDefaultRoadVehicle(order);
       const defaultAirline = resolveAirlineMeta(undefined, order);
-      const hasCrossBorder = suggestion.legs.some((l) => l.legType === 'flight' || l.legType === 'sea');
-      const firstCrossIdx = suggestion.legs.findIndex((l) => l.legType === 'flight' || l.legType === 'sea');
+      const outboundCrossIdx = suggestion.legs.findIndex(
+        (l) => (l.direction || 'outbound') === 'outbound' && (l.legType === 'flight' || l.legType === 'sea'),
+      );
+      const returnCrossIdx = suggestion.legs.findIndex(
+        (l) => l.direction === 'return' && (l.legType === 'flight' || l.legType === 'sea'),
+      );
       const destClean = (order.destination || 'Địa điểm đích').split(',')[0].trim();
+      const suggestedPartnerName =
+        (suggestion as any).partnerDepot?.name ||
+        (suggestion as any).partnerDepot?.depotName ||
+        null;
 
       const mappedLegs: RouteLegItem[] = suggestion.legs.map((sl, idx) => {
         if (sl.legType === 'flight') {
           const depCode = sl.departureAirportCode || extractIataCode(sl.originLocation) || 'SGN';
           const arrCode = sl.arrivalAirportCode || extractIataCode(sl.destinationLocation) || 'SIN';
+          const minJetStalls = Math.max(1, Math.ceil((order.horseCount || 1) / 3));
           return {
             sequenceNo: sl.sequenceNo,
             direction: sl.direction,
@@ -838,7 +848,7 @@ function RoutePlanningContent() {
             arrivalAirportCode: arrCode,
             flightNumber: `${depCode}-${arrCode}-CARGO`,
             bookingReference: `AWB-${order.requestCode}-${arrCode}`,
-            stallsBooked: Math.max(1, sl.stallsBooked || order.horseCount || 1),
+            stallsBooked: Math.max(minJetStalls, sl.stallsBooked || minJetStalls),
           };
         }
         if (sl.legType === 'sea') {
@@ -856,17 +866,24 @@ function RoutePlanningContent() {
             stallsBooked: Math.max(1, sl.stallsBooked || order.horseCount || 1),
           };
         }
-        // Road leg
-        const isOverseasPostCrossBorder =
-          hasCrossBorder && sl.direction === 'outbound' && firstCrossIdx !== -1 && idx > firstCrossIdx && !sl.vehicleId;
+        // Road leg — detect overseas partner road symmetrically for both outbound & return
+        const isOverseasPartnerRoad =
+          Boolean((sl as any).isOverseasPartnerRoad) ||
+          ((sl.direction || 'outbound') === 'outbound' && outboundCrossIdx !== -1 && idx > outboundCrossIdx && !sl.vehicleId) ||
+          (sl.direction === 'return' && returnCrossIdx !== -1 && idx < returnCrossIdx && !sl.vehicleId);
+        const partnerLabelName = (sl as any).partnerDepotName || suggestedPartnerName;
         const resolvedPlate = sl.vehicleId
           ? findVehiclePlateById(sl.vehicleId) || defaultVehicle.vehiclePlate
-          : isOverseasPostCrossBorder
-            ? language === 'en'
-              ? `Vehicle from ${destClean} - Consignee pickup`
-              : `Xe từ ${destClean} đến đón (Bên nhận tự rước)`
+          : isOverseasPartnerRoad
+            ? partnerLabelName
+              ? language === 'en'
+                ? `Partner Depot: ${partnerLabelName}`
+                : `Trạm Đối tác: ${partnerLabelName}`
+              : language === 'en'
+                ? `Partner / Consignee Pickup (${destClean})`
+                : `Điều phối Trạm Đối tác / Bên nhận đón (${destClean})`
             : defaultVehicle.vehiclePlate;
-        const resolvedVehicleId = sl.vehicleId ?? (isOverseasPostCrossBorder ? null : defaultVehicle.vehicleId);
+        const resolvedVehicleId = sl.vehicleId ?? (isOverseasPartnerRoad ? null : defaultVehicle.vehicleId);
         return {
           sequenceNo: sl.sequenceNo,
           direction: sl.direction,
@@ -879,6 +896,8 @@ function RoutePlanningContent() {
           plannedArrival: sl.plannedArrival,
           vehicleId: resolvedVehicleId,
           vehiclePlate: resolvedPlate,
+          isOverseasPartnerRoad,
+          partnerDepotName: partnerLabelName || null,
         };
       });
 
@@ -973,7 +992,7 @@ function RoutePlanningContent() {
             arrivalAirportCode: leg.arrivalAirportCode || arrMeta.iataCode,
             flightNumber: leg.flightNumber || `${depMeta.iataCode}-${arrMeta.iataCode}-CARGO`,
             bookingReference: leg.bookingReference || `AWB-${order.requestCode}-${arrMeta.iataCode}`,
-            stallsBooked: Math.max(Number(leg.stallsBooked || 0), Number(order.horseCount || 1)),
+            stallsBooked: Math.max(Number(leg.stallsBooked || 0), Math.max(1, Math.ceil(Number(order.horseCount || 1) / 3))),
             distanceKm: leg.distanceKm || flightPreview?.distanceKm || 1150,
           };
         }
@@ -1128,7 +1147,7 @@ function RoutePlanningContent() {
         arrivalAirportCode: arrMeta.iataCode,
         flightNumber: `${depMeta.iataCode}-${arrMeta.iataCode}-CARGO`,
         bookingReference: `AWB-${selectedPlanningOrder?.requestCode || 'AIR'}-${arrMeta.iataCode}`,
-        stallsBooked: selectedPlanningOrder?.horseCount || 1,
+        stallsBooked: Math.max(1, Math.ceil((selectedPlanningOrder?.horseCount || 1) / 3)),
         distanceKm: 1150,
         durationHours: 3,
       };
@@ -1578,12 +1597,18 @@ function RoutePlanningContent() {
         return;
       }
 
-      const isPostCrossBorderRoad =
+      const outboundCrossIdx = sortedLegs.findIndex(
+        (legItem) => (legItem.direction || 'outbound') === 'outbound' && (legItem.legType === 'flight' || legItem.legType === 'sea'),
+      );
+      const returnCrossIdx = sortedLegs.findIndex(
+        (legItem) => legItem.direction === 'return' && (legItem.legType === 'flight' || legItem.legType === 'sea'),
+      );
+      const isOverseasPartnerRoad =
         l.legType === 'road' &&
-        (l.direction || 'outbound') !== 'return' &&
-        firstCrossBorderIdx !== -1 &&
-        i > firstCrossBorderIdx;
-      if (l.legType === 'road' && !isPostCrossBorderRoad) {
+        (Boolean(l.isOverseasPartnerRoad) ||
+          ((l.direction || 'outbound') === 'outbound' && outboundCrossIdx !== -1 && i > outboundCrossIdx) ||
+          (l.direction === 'return' && returnCrossIdx !== -1 && i < returnCrossIdx));
+      if (l.legType === 'road' && !isOverseasPartnerRoad) {
         if (!l.vehiclePlate && !l.vehicleId) {
           toast.error(
             language === 'en'
@@ -1598,10 +1623,14 @@ function RoutePlanningContent() {
           const matchedVehicle = vehicles.find((v) => v.code === l.vehiclePlate || (l.vehicleId && String(v.id) === String(l.vehicleId)));
           if (matchedVehicle) {
             const isCurrentTrip = Boolean(matchedVehicle.assignedTripCode) && matchedVehicle.assignedTripCode === selectedPlanningOrder?.requestCode;
-            const isInTransport =
-              (matchedVehicle.status === 'in_use' || Boolean(matchedVehicle.assignedTripCode)) &&
-              !isCurrentTrip;
-            if (isInTransport) {
+            const isReservedOnly = Boolean((matchedVehicle as any).isReservedOnly);
+            const shipStatus = String((matchedVehicle as any).assignedShipmentStatus || '').toLowerCase();
+            const isActuallyInTransit =
+              matchedVehicle.status === 'in_use' &&
+              !isCurrentTrip &&
+              !isReservedOnly &&
+              (!shipStatus || shipStatus === 'in_transit' || shipStatus === 'return_pending');
+            if (isActuallyInTransit) {
               toast.error(
                 language === 'en'
                   ? `Leg #${seqLabel}: Vehicle "${matchedVehicle.code}" is currently in transport (${matchedVehicle.assignedTripCode || 'running another trip'}). Please select an available vehicle.`
@@ -1611,11 +1640,18 @@ function RoutePlanningContent() {
               return;
             }
             const requiredStalls = Math.max(1, Number(selectedPlanningOrder?.horseCount || 1));
-            if (Number(matchedVehicle.capacity || 0) < requiredStalls) {
+            const convoyTotalCapacity = vehicles
+              .filter((v) => Boolean(v.assignedTripCode) && v.assignedTripCode === selectedPlanningOrder?.requestCode)
+              .reduce((sum, v) => sum + Number(v.capacity || 0), 0);
+            const effectiveCapacity =
+              isCurrentTrip && convoyTotalCapacity > Number(matchedVehicle.capacity || 0)
+                ? convoyTotalCapacity
+                : Number(matchedVehicle.capacity || 0);
+            if (effectiveCapacity < requiredStalls) {
               toast.error(
                 language === 'en'
-                  ? `Leg #${seqLabel}: Vehicle "${matchedVehicle.code}" has insufficient stalls (${matchedVehicle.capacity}/${requiredStalls} horses).`
-                  : `Chặng #${seqLabel}: Xe "${matchedVehicle.code}" không đủ sức chứa (${matchedVehicle.capacity}/${requiredStalls} ngựa)!`,
+                  ? `Leg #${seqLabel}: Vehicle "${matchedVehicle.code}" has insufficient stalls (${effectiveCapacity}/${requiredStalls} horses).`
+                  : `Chặng #${seqLabel}: Xe "${matchedVehicle.code}" không đủ sức chứa (${effectiveCapacity}/${requiredStalls} ngựa)!`,
                 { duration: 6000 }
               );
               return;
@@ -2184,7 +2220,7 @@ function RoutePlanningContent() {
                           ))}
                         </div>
                       ) : (
-                        <p className="text-slate-400 italic m-0 mt-1">{t('coordinator.routes.noLegsBuilt', 'Chưa có chặng nào được dựng. Vui lòng bấm "Dựng kế hoạch chi tiết".')}</p>
+                        <p className="text-slate-400 italic m-0 mt-1">{t('coordinator.routes.noLegsBuilt', 'Chưa có chặng nào được dựng. Vui lòng bấm "Xác nhận lộ trình".')}</p>
                       )}
                     </div>
                   </div>
@@ -2587,11 +2623,34 @@ function RoutePlanningContent() {
                           <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.vehicleDedicated', 'Phương Tiện / Xe Chuyên Dụng *')}</label>
                           {(() => {
                             const destClean = (leg.destinationLocation || selectedPlanningOrder?.destination || 'Địa điểm đích').split(',')[0].trim();
-                            const receiverOption = leg.vehiclePlate && (leg.vehiclePlate.includes('đến đón') || leg.vehiclePlate.includes('đến rước'))
-                              ? leg.vehiclePlate
-                              : (language === 'en' ? `Vehicle from ${destClean} - Consignee pickup` : `Xe từ ${destClean} đến đón (Bên nhận tự rước)`);
+                            const partnerOption =
+                              leg.vehiclePlate &&
+                              (leg.vehiclePlate.includes('Trạm Đối tác') ||
+                                leg.vehiclePlate.includes('Partner Depot') ||
+                                leg.vehiclePlate.includes('đến đón') ||
+                                leg.vehiclePlate.includes('đến rước'))
+                                ? leg.vehiclePlate
+                                : leg.partnerDepotName
+                                  ? language === 'en'
+                                    ? `Partner Depot: ${leg.partnerDepotName}`
+                                    : `Trạm Đối tác: ${leg.partnerDepotName}`
+                                  : language === 'en'
+                                    ? `Partner / Consignee Pickup (${destClean})`
+                                    : `Điều phối Trạm Đối tác / Bên nhận đón (${destClean})`;
+                            const legDir = leg.direction || 'outbound';
+                            const dirLegs = legs.filter((l) => (l.direction || 'outbound') === legDir);
+                            const firstCrossSeqInDir = dirLegs
+                              .filter((l) => l.legType === 'flight' || l.legType === 'sea')
+                              .reduce<number | null>(
+                                (min, l) => (min === null || l.sequenceNo < min ? l.sequenceNo : min),
+                                null,
+                              );
                             const isOverseasOrLastMile =
-                              leg.sequenceNo > 1 || legs.some((l) => l.legType === 'flight' || l.legType === 'sea');
+                              Boolean(leg.isOverseasPartnerRoad) ||
+                              (firstCrossSeqInDir !== null &&
+                                (legDir === 'outbound'
+                                  ? leg.sequenceNo > firstCrossSeqInDir
+                                  : leg.sequenceNo < firstCrossSeqInDir));
 
                             return (
                               <>
@@ -2619,27 +2678,36 @@ function RoutePlanningContent() {
                                 >
                                   <option value="">{t('coordinator.routes.selectVehiclePlaceholder', '-- Chọn xe / phương tiện --')}</option>
                                   {isOverseasOrLastMile && (
-                                    <optgroup label={t('coordinator.routes.overseasVehicleGroup', 'Phương tiện địa điểm đích (Nước ngoài)')}>
-                                      <option value={receiverOption}>
-                                        🚗 {receiverOption}
+                                    <optgroup label={t('coordinator.routes.overseasVehicleGroup', 'Bàn giao Trạm Đối tác / Đầu nước ngoài')}>
+                                      <option value={partnerOption}>
+                                        🚗 {partnerOption}
                                       </option>
                                     </optgroup>
                                   )}
-                                  <optgroup label={t('coordinator.routes.domesticFleetGroup', 'Đội xe chuyên dụng nội bộ (Việt Nam)')}>
+                                  <optgroup label={t('coordinator.routes.domesticFleetGroup', 'Đội xe tải chuyên dụng nội bộ (Việt Nam)')}>
                                     {(() => {
                                       const availableRoadFleet = vehicles
-                                        .filter((v) => !v.type?.toLowerCase().includes('air'))
+                                        .filter((v) => {
+                                          const typeText = String(v.type || '').toLowerCase();
+                                          const classCode = String((v as any).vehicleClassCode || '').toLowerCase();
+                                          if (typeText.includes('air') || typeText.includes('máy bay') || typeText.includes('chuồng bay')) return false;
+                                          if (typeText.includes('container') || typeText.includes('tàu biển') || classCode === 'vessel_pen' || classCode === 'jet_stall') return false;
+                                          return true;
+                                        })
                                         .filter((v) => {
                                           const isCurrentLegVehicle = v.code === leg.vehiclePlate;
                                           const isCurrentTripVehicle =
                                             Boolean(v.assignedTripCode) &&
                                             v.assignedTripCode === selectedPlanningOrder?.requestCode;
-                                          const isInTransport =
-                                            (v.status === 'in_use' || Boolean(v.assignedTripCode)) &&
+                                          const isReservedOnly = Boolean((v as any).isReservedOnly);
+                                          const shipStatus = String((v as any).assignedShipmentStatus || '').toLowerCase();
+                                          const isActuallyInTransit =
+                                            v.status === 'in_use' &&
                                             !isCurrentLegVehicle &&
-                                            !isCurrentTripVehicle;
-                                          // Ẩn các xe đang trong quá trình vận chuyển chuyến khác
-                                          return !isInTransport;
+                                            !isCurrentTripVehicle &&
+                                            !isReservedOnly &&
+                                            (!shipStatus || shipStatus === 'in_transit' || shipStatus === 'return_pending');
+                                          return !isActuallyInTransit;
                                         });
 
                                       if (availableRoadFleet.length === 0) {
@@ -2653,19 +2721,26 @@ function RoutePlanningContent() {
                                       }
 
                                       const requiredStalls = Math.max(1, Number(selectedPlanningOrder?.horseCount || 1));
+                                      const convoyTotalCapacity = vehicles
+                                        .filter((v) => Boolean(v.assignedTripCode) && v.assignedTripCode === selectedPlanningOrder?.requestCode)
+                                        .reduce((sum, v) => sum + Number(v.capacity || 0), 0);
 
                                       return availableRoadFleet.map((v) => {
-                                        const isUnderCapacity = Number(v.capacity || 0) < requiredStalls;
                                         const isCurrentTrip =
                                           v.code === leg.vehiclePlate ||
                                           (Boolean(v.assignedTripCode) && v.assignedTripCode === selectedPlanningOrder?.requestCode);
+                                        const effectiveCap =
+                                          isCurrentTrip && convoyTotalCapacity > Number(v.capacity || 0)
+                                            ? convoyTotalCapacity
+                                            : Number(v.capacity || 0);
+                                        const isUnderCapacity = effectiveCap < requiredStalls;
                                         return (
                                           <option key={v.id} value={v.code} disabled={Boolean(isUnderCapacity) && !isCurrentTrip}>
                                             {v.code} — {translateVehicleType(v.type)} ({v.capacity} stall, {v.location}){' '}
                                             {isUnderCapacity
                                               ? `— ⚠️ ${language === 'en' ? `Insufficient stalls (${v.capacity}/${requiredStalls})` : `Không đủ chuồng (${v.capacity}/${requiredStalls} ngựa)`}`
                                               : isCurrentTrip && v.status === 'in_use'
-                                              ? `— (${language === 'en' ? 'In use for this trip' : 'Đang dùng cho chuyến này'})`
+                                              ? `— (${language === 'en' ? 'Reserved / In use for this trip' : 'Đã giữ chỗ / Đang dùng cho đơn này'})`
                                               : `— ${language === 'en' ? 'Available' : 'Sẵn sàng'}`}
                                           </option>
                                         );
@@ -3041,17 +3116,24 @@ function RoutePlanningContent() {
                         <div>
                           <div className="grid grid-cols-3 gap-2">
                             <div>
-                              <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.stallsBookedLabel', 'Stall Đã Book')}</label>
+                              <label className="font-bold text-slate-700 block mb-1">
+                                {language === 'en' ? 'Jet Stalls (3 horses/stall)' : 'Số thùng bay (Jet Stall — 3 ngựa/thùng)'}
+                              </label>
                               <input
                                 type="number"
-                                min={1}
-                                value={leg.stallsBooked || selectedPlanningOrder.horseCount}
+                                min={Math.max(1, Math.ceil((selectedPlanningOrder.horseCount || 1) / 3))}
+                                value={leg.stallsBooked || Math.max(1, Math.ceil((selectedPlanningOrder.horseCount || 1) / 3))}
                                 onChange={(e) => {
                                   const num = Number(e.target.value);
                                   setLegs((prev) => prev.map((item, i) => (i === idx ? { ...item, stallsBooked: num } : item)));
                                 }}
                                 className="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold disabled:bg-slate-50"
                               />
+                              <span className="text-[10px] text-slate-500 block mt-0.5">
+                                {language === 'en'
+                                  ? `Min ${Math.max(1, Math.ceil((selectedPlanningOrder.horseCount || 1) / 3))} stall(s) for ${selectedPlanningOrder.horseCount || 1} horse(s)`
+                                  : `Tối thiểu ${Math.max(1, Math.ceil((selectedPlanningOrder.horseCount || 1) / 3))} thùng cho ${selectedPlanningOrder.horseCount || 1} ngựa`}
+                              </span>
                             </div>
                             <div>
                               <label className="font-bold text-slate-700 block mb-1">{t('coordinator.routes.legDistKm', 'Cự ly bay (km)')}</label>

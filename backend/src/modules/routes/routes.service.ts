@@ -86,6 +86,14 @@ export class RoutesService implements OnModuleInit {
     returnDepartureAt: string | null;
     reservedOutboundVehicleIds: number[];
     reservedReturnVehicleIds: number[];
+    partnerDepot?: {
+      depotId?: number;
+      id?: number;
+      name?: string;
+      depotName?: string;
+      country?: string;
+      deadheadKm?: number;
+    } | null;
     legs: Array<{
       sequenceNo: number;
       direction: 'outbound' | 'return';
@@ -97,6 +105,9 @@ export class RoutesService implements OnModuleInit {
       plannedDeparture: string;
       plannedArrival: string;
       vehicleId: number | null;
+      isOverseasPartnerRoad?: boolean;
+      partnerDepotName?: string | null;
+      partnerDepotId?: number | null;
       departureAirportId: number | null;
       departureAirportCode: string | null;
       arrivalAirportId: number | null;
@@ -477,6 +488,9 @@ export class RoutesService implements OnModuleInit {
       plannedDeparture: string;
       plannedArrival: string;
       vehicleId: number | null;
+      isOverseasPartnerRoad?: boolean;
+      partnerDepotName?: string | null;
+      partnerDepotId?: number | null;
       departureAirportId: number | null;
       departureAirportCode: string | null;
       arrivalAirportId: number | null;
@@ -561,6 +575,16 @@ export class RoutesService implements OnModuleInit {
       const isInternationalRoadOnly = firstCrossBorderIdx < 0 && isCrossBorderShipment;
       const directionStartStopCount = stops.length;
 
+      const quotePartnerDepot = quote?.resultJson?.partnerDepot ?? null;
+      const partnerDepotInfo = quotePartnerDepot
+        ? {
+            depotId: Number(quotePartnerDepot.depotId ?? quotePartnerDepot.id ?? 0) || null,
+            name: String(quotePartnerDepot.name || quotePartnerDepot.depotName || ''),
+            country: quotePartnerDepot.country ? String(quotePartnerDepot.country) : null,
+            deadheadKm: quotePartnerDepot.deadheadKm != null ? Number(quotePartnerDepot.deadheadKm) : null,
+          }
+        : null;
+
       rawList.forEach((raw, idx) => {
         const seq = legs.length + 1;
         const depMs = cursorMs;
@@ -597,6 +621,9 @@ export class RoutesService implements OnModuleInit {
           plannedDeparture: new Date(depMs).toISOString(),
           plannedArrival: new Date(arrMs).toISOString(),
           vehicleId: raw.legType === 'road' && !isOverseasPartnerRoad ? companyVehicleId : null,
+          isOverseasPartnerRoad,
+          partnerDepotName: isOverseasPartnerRoad && partnerDepotInfo?.name ? partnerDepotInfo.name : null,
+          partnerDepotId: isOverseasPartnerRoad ? partnerDepotInfo?.depotId ?? null : null,
           departureAirportId,
           departureAirportCode,
           arrivalAirportId,
@@ -774,6 +801,7 @@ export class RoutesService implements OnModuleInit {
       returnDepartureAt: returnDepartureAtIso,
       reservedOutboundVehicleIds,
       reservedReturnVehicleIds,
+      partnerDepot: quote?.resultJson?.partnerDepot ?? null,
       legs,
       stops,
     };
@@ -1058,7 +1086,8 @@ export class RoutesService implements OnModuleInit {
             airports.find((ap) => !ap.country.toLowerCase().includes('viet')) ||
             airports[0];
 
-          const requiredStalls = Math.max(Number(leg.stallsBooked || 0), Number(order.requestedHorseCount || 1));
+          const minAirStalls = jetStalls ?? Math.max(1, Math.ceil(Number(order.requestedHorseCount || 1) / 3));
+          const requiredStalls = Math.max(Number(leg.stallsBooked || 0), minAirStalls);
 
           return {
             ...leg,
@@ -1408,7 +1437,7 @@ export class RoutesService implements OnModuleInit {
     }
 
     let targetUserId = Number(user.id);
-    if (isNaN(targetUserId) || user.role === UserRole.ADMIN) {
+    if (isNaN(targetUserId) || user.role === UserRole.ADMIN || user.role === UserRole.LOGISTICS_MANAGER) {
       if (dto.driverUserId) {
         targetUserId = Number(dto.driverUserId);
       } else {
@@ -1441,7 +1470,7 @@ export class RoutesService implements OnModuleInit {
     }
 
     let targetUserId = Number(user.id);
-    if (isNaN(targetUserId) || user.role === UserRole.ADMIN) {
+    if (isNaN(targetUserId) || user.role === UserRole.ADMIN || user.role === UserRole.LOGISTICS_MANAGER) {
       if (dto.driverUserId) {
         targetUserId = Number(dto.driverUserId);
       } else {
@@ -1477,17 +1506,13 @@ export class RoutesService implements OnModuleInit {
       );
     }
 
-    const managers = await this.fleetStore.findAvailableStaff();
-    const logisticsManagers = managers.filter((m) => m.roleName.toLowerCase().includes('manager'));
-    for (const lm of logisticsManagers) {
-      await this.notificationsService.createNotification(
-        lm.id,
-        `⚠️ Nhân sự TỪ CHỐI chuyến ${code}`,
-        `Tài xế/Hộ tống phụ trách chuyến đi ${code} đã TỪ CHỐI nhận nhiệm vụ. Lý do: "${dto.reason}". Vui lòng chỉ định nhân sự thay thế.${result.reverted ? ' Kế hoạch đã chuyển về "đã duyệt – chờ xác nhận nhân sự" và đơn về trạng thái lập kế hoạch cho đến khi người thay thế xác nhận.' : ''}`,
-        'incident',
-        shipmentId,
-      );
-    }
+    await this.notificationsService.notifyRole(
+      'Logistics Manager',
+      `⚠️ Nhân sự TỪ CHỐI chuyến ${code}`,
+      `Tài xế/Hộ tống phụ trách chuyến đi ${code} đã TỪ CHỐI nhận nhiệm vụ. Lý do: "${dto.reason}". Vui lòng chỉ định nhân sự thay thế.${result.reverted ? ' Kế hoạch đã chuyển về "đã duyệt – chờ xác nhận nhân sự" và đơn về trạng thái lập kế hoạch cho đến khi người thay thế xác nhận.' : ''}`,
+      'incident',
+      shipmentId,
+    );
 
     return {
       success: true,
@@ -1731,21 +1756,13 @@ export class RoutesService implements OnModuleInit {
 
     const code = order.requestCode || `REQ-${String(shipmentId).padStart(3, '0')}`;
 
-    const staffList = await this.fleetStore.findAvailableStaff();
-    const ops = staffList.filter(
-      (s) =>
-        s.roleName.toLowerCase().includes('coordinator') ||
-        s.roleName.toLowerCase().includes('manager'),
+    await this.notificationsService.notifyRole(
+      'Logistics Manager',
+      `🚨 SỰ CỐ TRÊN ĐƯỜNG: Đơn ${code}`,
+      `Báo cáo sự cố [${dto.incidentType}]: "${dto.description}". Lộ trình của chuyến đi ${code} đã được mở quyền hiệu chỉnh chặng khẩn cấp.`,
+      'incident',
+      shipmentId,
     );
-    for (const op of ops) {
-      await this.notificationsService.createNotification(
-        op.id,
-        `🚨 SỰ CỐ TRÊN ĐƯỜNG: Đơn ${code}`,
-        `Báo cáo sự cố [${dto.incidentType}]: "${dto.description}". Lộ trình của chuyến đi ${code} đã được mở quyền hiệu chỉnh chặng khẩn cấp.`,
-        'incident',
-        shipmentId,
-      );
-    }
 
     return { success: true, incidentId };
   }

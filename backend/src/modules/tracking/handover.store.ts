@@ -145,18 +145,51 @@ export class HandoverStore implements OnModuleInit, OnModuleDestroy {
 
   private baseSelectSql(whereClause: string): string {
     return `
-      SELECT dh.*, sh.horse_id, sh.insurance_package, sh.max_compensation, sh.emergency_vet_covered,
+      SELECT dh.*,
+             COALESCE(sh.horse_id, sh_fb.horse_id) AS horse_id,
+             COALESCE(sh.insurance_package, sh_fb.insurance_package) AS insurance_package,
+             COALESCE(sh.max_compensation, sh_fb.max_compensation) AS max_compensation,
+             COALESCE(sh.emergency_vet_covered, sh_fb.emergency_vet_covered) AS emergency_vet_covered,
              h.name AS horse_name, h.microchip_no, h.passport_no,
              s.customer_id, s.destination_location,
              u.full_name AS driver_name
       FROM delivery_handover dh
       JOIN shipment s ON s.shipment_id = dh.shipment_id
       LEFT JOIN shipment_horse sh ON sh.shipment_horse_id = dh.shipment_horse_id
-      LEFT JOIN horse h ON h.horse_id = sh.horse_id
+      LEFT JOIN shipment_horse sh_fb
+        ON (dh.shipment_horse_id IS NULL OR dh.shipment_horse_id = 0)
+       AND sh_fb.shipment_id = dh.shipment_id
+       AND sh_fb.shipment_horse_id = (
+         SELECT MIN(sh3.shipment_horse_id) FROM shipment_horse sh3 WHERE sh3.shipment_id = dh.shipment_id
+       )
+      LEFT JOIN horse h ON h.horse_id = COALESCE(sh.horse_id, sh_fb.horse_id)
       LEFT JOIN \`user\` u ON u.user_id = dh.handed_over_by
       ${whereClause}
       ORDER BY dh.handover_id DESC
     `;
+  }
+
+  async isDriverOnlyForOverseasHandover(
+    shipmentId: number,
+    userId: number,
+    direction: 'outbound' | 'return',
+  ): Promise<boolean> {
+    if (direction !== 'outbound') return false;
+    const [crossLegs] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT 1 FROM route_leg rl
+       JOIN route r ON r.route_id = rl.route_id
+       WHERE r.shipment_id = ? AND rl.leg_type IN ('flight', 'sea')
+       LIMIT 1`,
+      [shipmentId],
+    );
+    if (!crossLegs.length) return false;
+    const [roles] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT role_in_shipment FROM shipment_assignment WHERE shipment_id = ? AND user_id = ?',
+      [shipmentId, userId],
+    );
+    const hasDriver = roles.some((r) => String(r.role_in_shipment) === 'driver');
+    const hasEscort = roles.some((r) => String(r.role_in_shipment) === 'escort');
+    return hasDriver && !hasEscort;
   }
 
   async findShipmentOwner(shipmentId: number): Promise<{ customerId: number; status: string } | null> {

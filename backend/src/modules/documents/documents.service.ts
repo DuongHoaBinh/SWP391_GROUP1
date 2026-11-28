@@ -204,6 +204,27 @@ export class DocumentsService {
   }
 
   async createRegulation(user: AuthenticatedUser, dto: CreateRegulationDto): Promise<Regulation> {
+    const existingList = await this.documentsStore.findRegulations(dto.country.trim());
+    const targetDocKey = String((dto as any).documentTypeCode || dto.documentType || '')
+      .trim()
+      .toLowerCase();
+    const targetGate = String(dto.borderGate || '').trim().toLowerCase();
+    const targetMode = (dto.transportMode ?? 'both').toLowerCase();
+    const duplicate = existingList.find((r) => {
+      if (r.isActive === false) return false;
+      const existingDocKey = String(r.documentTypeCode || r.documentType || '').trim().toLowerCase();
+      const existingGate = String(r.borderGate || '').trim().toLowerCase();
+      const existingMode = String(r.transportMode || 'both').toLowerCase();
+      const modeOverlaps =
+        existingMode === targetMode || existingMode === 'both' || targetMode === 'both';
+      return existingDocKey === targetDocKey && existingGate === targetGate && modeOverlaps;
+    });
+    if (duplicate) {
+      throw new ConflictException(
+        `Quy định "${dto.documentType}" cho quốc gia ${dto.country} đã tồn tại (#${duplicate.id}). Vui lòng chỉnh sửa quy định hiện có thay vì tạo trùng.`,
+      );
+    }
+
     const id = await this.documentsStore.createRegulation(dto);
     const created = await this.documentsStore.findRegulationById(id);
     if (!created) {
@@ -421,7 +442,7 @@ export class DocumentsService {
 
     const lowerGateTokens = gateTokens.map((g) => g.toLowerCase().trim()).filter(Boolean);
     const matchedBorderGates = new Set<string>();
-    const applicableRegulations = rawRegulations.filter((reg) => {
+    const filteredRegulations = rawRegulations.filter((reg) => {
       if (reg.isActive === false) {
         return false;
       }
@@ -447,6 +468,23 @@ export class DocumentsService {
       }
       return true;
     });
+
+    // Chống hiển thị trùng loại giấy tờ (ưu tiên quy định khớp cửa khẩu > khớp phương thức > 'both')
+    const dedupedByDocKey = new Map<string, Regulation>();
+    const regSpecificity = (r: Regulation) =>
+      (r.borderGate && r.borderGate.trim().length > 0 ? 4 : 0) +
+      (orderMode && r.transportMode === orderMode ? 2 : 0) +
+      (r.documentTypeCode ? 1 : 0);
+    for (const reg of filteredRegulations) {
+      const docKey = String(reg.documentTypeCode || reg.documentType || reg.id)
+        .trim()
+        .toLowerCase();
+      const existing = dedupedByDocKey.get(docKey);
+      if (!existing || regSpecificity(reg) > regSpecificity(existing)) {
+        dedupedByDocKey.set(docKey, reg);
+      }
+    }
+    const applicableRegulations = Array.from(dedupedByDocKey.values());
 
     return {
       applicableRegulations,
@@ -559,7 +597,8 @@ export class DocumentsService {
   }
 
   private isDocumentApprovedForCompliance(doc: TransportDocument, reg?: Regulation): boolean {
-    if (doc.status !== DocumentStatus.APPROVED || doc.isExpiredForTrip || doc.isArchived) {
+    // Cách A: Manager tự kiểm tra thời hạn khi duyệt; nếu Manager đã duyệt (APPROVED) và bản chưa bị lưu trữ thì đạt.
+    if (doc.status !== DocumentStatus.APPROVED || doc.isArchived) {
       return false;
     }
     if (reg?.requiresAuthorityApproval) {
@@ -695,26 +734,15 @@ export class DocumentsService {
       ? `Quốc gia đến "${destinationCountry}" hiện chưa có danh mục quy chế riêng. Hệ thống tự động áp dụng Tiêu chuẩn Quốc tế Cơ bản WOAH/FEI.`
       : undefined;
 
-    const baseDays = order.booking_type === 'dedicated_charter' ? 1 : 2;
-    const tierARegs = applicableRegulations.filter((r) => (r.docTier || 'A') === 'A');
-    const maxTierALead = tierARegs.length > 0 ? Math.max(...tierARegs.map((r) => Number(r.leadTimeDays ?? 2))) : 0;
-    const effectiveTierALeadDays = Math.max(baseDays, maxTierALead);
-    const orderCutoffDays = Math.max(order.booking_type === 'dedicated_charter' ? 2 : 3, maxTierALead + 2);
-
+    const effectiveTierALeadDays = 0;
     const depRaw = order.departure_date || order.requested_date;
     const depMs = depRaw ? new Date(depRaw).getTime() : NaN;
     const orderCutoffDate = Number.isFinite(depMs)
-      ? new Date(depMs - orderCutoffDays * 86400 * 1000).toISOString().split('T')[0]
+      ? new Date(depMs - 2 * 86400 * 1000).toISOString().split('T')[0]
       : null;
-    const tierADeadline = Number.isFinite(depMs)
-      ? new Date(depMs - effectiveTierALeadDays * 86400 * 1000).toISOString().split('T')[0]
-      : null;
-    const tierBWindowStart = Number.isFinite(depMs)
-      ? new Date(depMs - (isInternational ? 48 : 24) * 3600 * 1000).toISOString()
-      : null;
-    const tierBWindowEnd = Number.isFinite(depMs)
-      ? new Date(depMs - 6 * 3600 * 1000).toISOString()
-      : null;
+    const tierADeadline: string | null = null;
+    const tierBWindowStart: string | null = null;
+    const tierBWindowEnd: string | null = null;
 
     // Lấy danh sách ngựa trong đơn
     const horsesInOrder = await this.documentsStore.findHorsesInOrder(orderId);
@@ -767,23 +795,16 @@ export class DocumentsService {
             : isInternational
               ? 48
               : 0;
-        const expiryEval = this.evaluateDocumentExpiry(d.expiryDate, tripArrivalDateTime, bufferHours);
-        let earlyIssuanceWarning: string | null = null;
-        if (reg && (reg.docTier || 'A') === 'B' && d.issueDate && Number.isFinite(depMs)) {
-          const issueMs = new Date(d.issueDate).getTime();
-          const earliestRecommendedMs = depMs - (isInternational ? 10 : 2) * 86400 * 1000;
-          if (Number.isFinite(issueMs) && issueMs < earliestRecommendedMs) {
-            earlyIssuanceWarning = isInternational
-              ? 'Cảnh báo: Hồ sơ kiểm dịch ngắn hạn (Tầng B) được cấp sớm hơn D-10 có thể hết hạn trước khi thông quan; cần kiểm tra lại biên an toàn +48h.'
-              : 'Cảnh báo: Giấy kiểm dịch nội địa (Tầng B) thường chỉ cấp từ D-1 (24h–6h trước khởi hành); cấp quá sớm có nguy cơ hết hạn trước khi đến nơi.';
-          }
-        }
+        const expiryEval =
+          d.status === DocumentStatus.APPROVED
+            ? { isExpiredForTrip: false, isExpiringSoonForTrip: false }
+            : this.evaluateDocumentExpiry(d.expiryDate, tripArrivalDateTime, bufferHours);
         return {
           ...d,
           regulationId: reg.id,
           matchedBy,
           ...expiryEval,
-          earlyIssuanceWarning,
+          earlyIssuanceWarning: null,
           _associatedRegId: reg.id,
         };
       });
@@ -804,7 +825,7 @@ export class DocumentsService {
         }
       }
       const docs = Array.from(dedupedByReg.values());
-      if (docs.some((d) => d.isExpiredForTrip)) {
+      if (docs.some((d) => d.status === DocumentStatus.EXPIRED)) {
         hasExpiredDocuments = true;
       }
 
@@ -975,7 +996,7 @@ export class DocumentsService {
       throw new BadRequestException('Khi từ chối tài liệu, bắt buộc phải có lý do cụ thể');
     }
 
-    // 4-point verification checklist when approving
+    // 4-point verification checklist when approving (Cách A: Manager tự kiểm tra thời hạn & quyết định duyệt/từ chối)
     if (dto.status === DocumentStatus.APPROVED) {
       const f = dto.checkedFields;
       const allPassed = Boolean(
@@ -987,31 +1008,6 @@ export class DocumentsService {
       );
       if (!allPassed) {
         throw new BadRequestException('Phê duyệt tài liệu yêu cầu tất cả 4 tiêu chí kiểm tra phải đạt (microchip, hộ chiếu, ngày cấp, hạn dùng)');
-      }
-    }
-
-    if (dto.status === DocumentStatus.APPROVED && dto.expiryDate) {
-      const reg = doc.regulationId !== null && typeof this.documentsStore.findRegulationById === 'function'
-        ? await this.documentsStore.findRegulationById(doc.regulationId)
-        : undefined;
-      const activeShipmentIds = await this.documentsStore.findActiveShipmentIdsByHorseId(doc.horseId);
-      for (const sid of activeShipmentIds) {
-        const orderDetails = await this.documentsStore.findOrderDetails(sid);
-        const arrivalDt = this.computeTripArrivalDateTime(orderDetails);
-        const destCountry = this.detectDestinationCountry(orderDetails?.destination_location || '');
-        const bufferHours =
-          reg && reg.minValidityBufferHours !== undefined && reg.minValidityBufferHours !== null
-            ? Number(reg.minValidityBufferHours)
-            : destCountry !== 'Vietnam'
-              ? 48
-              : 24;
-        const evalResult = this.evaluateDocumentExpiry(dto.expiryDate, arrivalDt, bufferHours);
-        if (evalResult.isExpiredForTrip) {
-          throw new BadRequestException(
-            evalResult.expiryNotice ||
-              `Tài liệu hết hạn vào ngày ${dto.expiryDate}, không đủ biên an toàn +${bufferHours}h sau khi đến. Không thể phê duyệt.`,
-          );
-        }
       }
     }
 
@@ -1054,7 +1050,7 @@ export class DocumentsService {
     await this.notificationsService.createNotification(
       doc.ownerId ?? doc.uploadedBy,
       'Cập nhật trạng thái thẩm định tài liệu kiểm dịch',
-      `Tài liệu "${friendlyDocTitle}" của ngựa "${doc.horseName ?? 'ngựa'}"${orderText} ${statusText} bởi Chuyên viên Transport Specialist.`,
+      `Tài liệu "${friendlyDocTitle}" của ngựa "${doc.horseName ?? 'ngựa'}"${orderText} ${statusText} bởi Quản lý vận hành (Logistics Manager).`,
       'status_update',
     );
 
@@ -1556,7 +1552,7 @@ export class DocumentsService {
 
     const earliestFeasible = earliestFeasibleDeparture(allEvaluations, now);
     const earliestFeasibleDateStr = formatDateIct(earliestFeasible);
-    const isDepartureFeasible = departureAt.getTime() >= earliestFeasible.getTime();
+    const isDepartureFeasible = true;
 
     let reusableCount = 0;
     let pendingCount = 0;
@@ -1566,26 +1562,15 @@ export class DocumentsService {
 
     for (const h of horsesResult) {
       for (const r of h.requirements) {
-        if (r.status === 'reusable') reusableCount++;
+        if (r.status === 'reusable' || r.status === 'expiring') reusableCount++;
         else if (r.status === 'pending_review') pendingCount++;
         else if (r.status === 'missing') {
           missingCount++;
-          if (r.tier === 'A') {
-            blocking.push(`Ngựa "${h.horseName}": thiếu "${r.documentTypeName}" (Tầng A bắt buộc)`);
-          }
         } else if (r.status === 'expired') {
           expiredCount++;
           blocking.push(`Ngựa "${h.horseName}": "${r.documentTypeName}" đã hết hạn`);
-        } else if (r.status === 'issued_too_early') {
-          missingCount++;
-          blocking.push(`Ngựa "${h.horseName}": "${r.documentTypeName}" cấp quá sớm, cần cấp lại`);
         }
       }
-    }
-
-    if (!isDepartureFeasible) {
-      const earliestFormatted = `${earliestFeasibleDateStr.slice(8, 10)}/${earliestFeasibleDateStr.slice(5, 7)}`;
-      blocking.unshift(`Không kịp chuẩn bị giấy tờ cho ${destinationCountry}, chọn ngày từ ${earliestFormatted}`);
     }
 
     return {
@@ -1607,7 +1592,7 @@ export class DocumentsService {
     };
   }
 
-  async assertDocumentLeadTime(input: {
+  async assertDocumentLeadTime(_input: {
     departDate: string;
     destinationLocation?: string;
     originLocation?: string;
@@ -1616,93 +1601,8 @@ export class DocumentsService {
     bookingType?: string;
     horseIds?: number[];
   }): Promise<void> {
-    const destinationCountry = input.destinationLocation
-      ? this.detectDestinationCountry(input.destinationLocation)
-      : 'Vietnam';
-    const originCountry = this.detectDestinationCountry(input.originLocation || 'Vietnam');
-    const explicitDom = String(input.transportationType || '').toLowerCase().includes('domestic');
-    const isInternational =
-      !explicitDom &&
-      (destinationCountry !== originCountry ||
-        destinationCountry !== 'Vietnam' ||
-        String(input.transportationType || '').toLowerCase().includes('international'));
-
-    const orderMode =
-      input.transportMode === 'road' || input.transportMode === 'air' || input.transportMode === 'sea'
-        ? input.transportMode
-        : null;
-
-    const gateTokens = input.destinationLocation ? [input.destinationLocation] : [];
-    const { applicableRegulations } = await this.resolveApplicableRegulations(
-      destinationCountry,
-      orderMode,
-      gateTokens,
-      isInternational,
-    );
-
-    const now = new Date();
-    const departDate = new Date(`${input.departDate.slice(0, 10)}T00:00:00.000+07:00`);
-    const allEvaluated: Array<{ status: RequirementStatus; leadTimeDays?: number }> = [];
-
-    const horseIds = input.horseIds && input.horseIds.length > 0 ? input.horseIds : [];
-    if (horseIds.length > 0) {
-      for (const hid of horseIds) {
-        const rawDocs = await this.documentsStore.findDocumentsByHorseId(hid);
-        for (const reg of applicableRegulations) {
-          const matched = rawDocs.find(
-            (d) =>
-              !d.isArchived &&
-              (d.regulationId === reg.id ||
-                (d.documentTypeCode && (d.documentTypeCode === reg.documentTypeCode || d.documentTypeCode === reg.documentType)) ||
-                d.docType === reg.documentType),
-          );
-          const evalRes = evaluateRequirement({
-            requirement: {
-              regulationId: reg.id,
-              documentTypeCode: reg.documentTypeCode || reg.documentType,
-              tier: reg.docTier,
-              leadTimeDays: reg.leadTimeDays,
-              maxIssueAgeDays: reg.maxIssueAgeDays ?? null,
-              minValidityBufferHours: reg.minValidityBufferHours,
-            },
-            document: matched
-              ? {
-                  id: matched.id,
-                  status: matched.status as any,
-                  issueDate: matched.issueDate ?? null,
-                  expiryDate: matched.expiryDate ?? null,
-                }
-              : null,
-            departureAt: departDate,
-            tripEndAt: departDate,
-            now,
-          });
-          allEvaluated.push({
-            status: evalRes.status,
-            leadTimeDays: reg.leadTimeDays,
-          });
-        }
-      }
-    } else {
-      for (const reg of applicableRegulations) {
-        allEvaluated.push({
-          status: 'missing',
-          leadTimeDays: reg.leadTimeDays,
-        });
-      }
-    }
-
-    const earliestFeasible = earliestFeasibleDeparture(allEvaluated, now);
-    const earliestFeasibleDateStr = formatDateIct(earliestFeasible);
-
-    if (departDate.getTime() < earliestFeasible.getTime()) {
-      const formattedEarliest = `${earliestFeasibleDateStr.slice(8, 10)}/${earliestFeasibleDateStr.slice(5, 7)}`;
-      throw new UnprocessableEntityException({
-        message: `Không kịp chuẩn bị giấy tờ cho ${destinationCountry}, chọn ngày từ ${formattedEarliest}`,
-        code: 'DOCUMENT_LEAD_TIME_VIOLATION',
-        earliestFeasibleDeparture: earliestFeasibleDateStr,
-        destinationCountry,
-      });
-    }
+    // Cách A: Không chặn ngày khởi hành theo leadTimeDays / Tầng A-B.
+    // Khách nộp hồ sơ ngay hoặc nộp sau; Logistics Manager tự kiểm tra thời hạn và duyệt trước giờ xuất phát.
+    return;
   }
 }

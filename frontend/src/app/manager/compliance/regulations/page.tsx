@@ -848,9 +848,6 @@ export default function RegulationsPage() {
                           <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 border border-slate-200">
                             {reg.documentTypeCode || reg.docType}
                           </span>
-                          <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${reg.docTier === 'A' ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
-                            Tier {reg.docTier}
-                          </span>
                         </div>
                       </td>
                       <td className="px-4 py-3.5 text-xs text-slate-600">
@@ -1278,20 +1275,6 @@ export default function RegulationsPage() {
                   <option value="sea">{language === 'en' ? 'Sea Only' : 'Đường thủy'}</option>
                 </select>
               </div>
-              <div>
-                <label htmlFor="add-reg-tier" className="text-xs font-semibold text-slate-800 block mb-1">
-                  {language === 'en' ? 'Document Tier' : 'Tầng hồ sơ'}
-                </label>
-                <select
-                  id="add-reg-tier"
-                  value={newDocTier}
-                  onChange={(e) => setNewDocTier(e.target.value as 'A' | 'B')}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:border-[#C4B38E] bg-white"
-                >
-                  <option value="A">{language === 'en' ? 'Tier A (Long-term / Permits)' : 'Tầng A (Giấy phép dài hạn)'}</option>
-                  <option value="B">{language === 'en' ? 'Tier B (Short-term Quarantine D-1)' : 'Tầng B (Kiểm dịch ngắn hạn D-1)'}</option>
-                </select>
-              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label htmlFor="add-reg-lead" className="text-xs font-semibold text-slate-800 block mb-1">
@@ -1451,20 +1434,6 @@ export default function RegulationsPage() {
                   <option value="road">{language === 'en' ? 'Road' : 'Đường bộ'}</option>
                   <option value="air">{language === 'en' ? 'Air' : 'Hàng không'}</option>
                   <option value="sea">{language === 'en' ? 'Sea' : 'Đường thủy'}</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="edit-reg-tier" className="text-xs font-semibold text-slate-800 block mb-1">
-                  {language === 'en' ? 'Document Tier' : 'Tầng hồ sơ'}
-                </label>
-                <select
-                  id="edit-reg-tier"
-                  value={editDocTier}
-                  onChange={(e) => setEditDocTier(e.target.value as 'A' | 'B')}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm outline-none focus:border-[#181A17] bg-white"
-                >
-                  <option value="A">Tier A</option>
-                  <option value="B">Tier B</option>
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-2">

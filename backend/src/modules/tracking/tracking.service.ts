@@ -545,6 +545,26 @@ export class TrackingService {
     const escortStaff = assignedStaff.find((s) => s.role_in_shipment === 'escort');
     const assignedVehicle = effectiveLegs.find((l) => l.vehicle_plate)?.vehicle_plate || 'Xe thùng chuyên dụng';
 
+    let visibleHealthLogs = healthLogs;
+    if (isCustomer) {
+      const vitalsDetailSetting =
+        typeof this.trackingStore?.getSetting === 'function'
+          ? await this.trackingStore.getSetting('tracking.customer_vitals_detail')
+          : true;
+      const showDetail = vitalsDetailSetting !== false && vitalsDetailSetting !== 'false';
+      visibleHealthLogs = (healthLogs || []).map((log: any) => ({
+        ...log,
+        recordedByName: undefined,
+        ...(showDetail
+          ? {}
+          : {
+              temperatureC: null,
+              heartRateBpm: null,
+              respiratoryRateBpm: null,
+            }),
+      }));
+    }
+
     const finalRequestCode = `REQ-${String(shipmentId).padStart(3, '0')}`;
 
     return {
@@ -562,11 +582,15 @@ export class TrackingService {
       eta: effectiveLegs[effectiveLegs.length - 1]?.planned_arrival ? new Date(effectiveLegs[effectiveLegs.length - 1].planned_arrival).toISOString() : null,
       totalDistanceKm: route?.total_distance_km ? Number(route.total_distance_km) : null,
       assignedVehicle,
-      assignedDriver: driverStaff
-        ? (!isCustomer && driverStaff.phone ? `${driverStaff.full_name} (${driverStaff.phone})` : driverStaff.full_name)
+      assignedDriver: isCustomer
+        ? null
+        : driverStaff
+        ? (driverStaff.phone ? `${driverStaff.full_name} (${driverStaff.phone})` : driverStaff.full_name)
         : null,
-      assignedEscort: escortStaff
-        ? (!isCustomer && escortStaff.phone ? `${escortStaff.full_name} (${escortStaff.phone})` : escortStaff.full_name)
+      assignedEscort: isCustomer
+        ? null
+        : escortStaff
+        ? (escortStaff.phone ? `${escortStaff.full_name} (${escortStaff.phone})` : escortStaff.full_name)
         : null,
       assignedHorses: assignedHorses.map((h) => ({
         id: h.horse_id,
@@ -577,7 +601,7 @@ export class TrackingService {
         passportNo: h.passport_no,
       })),
       milestones,
-      healthLogs,
+      healthLogs: visibleHealthLogs,
       statusLogs,
       tripType: shipment.trip_type || 'one_way',
       returnStatus: shipment.return_status || null,
@@ -894,9 +918,13 @@ export class TrackingService {
     });
 
     // --- MỐC 5: Ngựa đã vượt qua hải quan & kiểm dịch sân bay đến ---
+    const isImportQuarantine = stopImport?.stop_type === 'quarantine';
     const isM5Done =
-      (stopImport && (stopImport.status === 'customs_cleared' || stopImport.status === 'departed')) ||
-      (legRoadLast.actual_departure !== null && legRoadLast.status !== 'pending');
+      (stopImport &&
+        (isImportQuarantine
+          ? stopImport.status === 'departed'
+          : stopImport.status === 'customs_cleared' || stopImport.status === 'departed')) ||
+      (!stopImport && legRoadLast.actual_departure !== null && legRoadLast.status !== 'pending');
 
     let m5Status: 'PENDING' | 'CURRENT' | 'COMPLETED' = 'PENDING';
     if (isM5Done) {
@@ -1036,6 +1064,18 @@ export class TrackingService {
         foundFirstIncomplete = true;
       }
 
+      const legDir = (leg as any).direction || 'outbound';
+      const dirLegs = legs.filter((l) => ((l as any).direction || 'outbound') === legDir);
+      const firstCrossSeq = dirLegs
+        .filter((l) => l.leg_type === 'flight' || l.leg_type === 'sea')
+        .reduce<number | null>((min, l) => (min === null || l.sequence_no < min ? l.sequence_no : min), null);
+      const isOverseasPartnerRoad =
+        leg.leg_type === 'road' &&
+        firstCrossSeq !== null &&
+        (legDir === 'outbound' ? leg.sequence_no > firstCrossSeq : leg.sequence_no < firstCrossSeq);
+      const legResponsibleRole: 'driver' | 'escort' =
+        leg.leg_type === 'flight' || leg.leg_type === 'sea' || isOverseasPartnerRoad ? 'escort' : 'driver';
+
       items.push({
         id: `leg-${leg.leg_id}-start`,
         itemType: 'leg_start',
@@ -1050,7 +1090,7 @@ export class TrackingService {
         actualTime: leg.actual_departure ? new Date(leg.actual_departure).toISOString() : null,
         isCustomsBorder: false,
         legType: leg.leg_type || 'road',
-        responsibleRole: leg.leg_type === 'flight' || leg.leg_type === 'sea' ? 'escort' : 'driver',
+        responsibleRole: legResponsibleRole,
         notes: null,
         updatedBy: null,
         allowedActions: legStartStatus === 'CURRENT' ? ['start_leg'] : [],
@@ -1102,7 +1142,7 @@ export class TrackingService {
           actualTime: stop.actual_departure ? new Date(stop.actual_departure).toISOString() : (stop.actual_arrival ? new Date(stop.actual_arrival).toISOString() : null),
           isCustomsBorder: isCustoms,
           legType: leg.leg_type || 'road',
-          responsibleRole: leg.leg_type === 'flight' || leg.leg_type === 'sea' ? 'escort' : 'driver',
+          responsibleRole: legResponsibleRole,
           notes: stop.notes || null,
           updatedBy: stop.updated_by_name || null,
           allowedActions: stopActions,
@@ -1148,7 +1188,7 @@ export class TrackingService {
         actualTime: leg.actual_arrival ? new Date(leg.actual_arrival).toISOString() : null,
         isCustomsBorder: false,
         legType: leg.leg_type || 'road',
-        responsibleRole: leg.leg_type === 'flight' || leg.leg_type === 'sea' ? 'escort' : 'driver',
+        responsibleRole: legResponsibleRole,
         notes: null,
         updatedBy: null,
         allowedActions: legEndStatus === 'CURRENT' ? ['arrive_leg'] : [],
@@ -1218,8 +1258,8 @@ export class TrackingService {
     const targetLeg = legs.find((l) => l.leg_id === Number(legId));
     if (!targetLeg) throw new NotFoundException(`Không tìm thấy chặng #${legId}`);
 
-    // Role check: driver for road, escort for flight, coordinator/manager can override
-    this.assertStaffCanUpdateLeg(user, targetLeg);
+    // Role check: driver for road, escort for flight/sea/overseas partner road, manager/admin can override
+    await this.assertDriverScopeForLeg(user, shipmentId, targetLeg, legs);
 
     // Mốc chỉ đi tiến: chặng đã xuất phát / hoàn thành không được "xuất phát" lại
     // (trước đây sẽ reset chặng về active và ghi đè actual_departure cũ, làm mất lịch sử).
@@ -1272,21 +1312,22 @@ export class TrackingService {
         ? { lat: legCoords.originLat, lng: legCoords.originLng }
         : null;
 
+    const originRefType = this.inferLegLocationRefType(targetLeg.leg_type, targetLeg.origin_location);
     const locEvidence = await this.validateLocationAndGeofence(
       user,
       dto.location,
       originPoint,
       {
         stopType: 'origin',
-        geofenceRadiusM: 300,
-        locationRefType: 'address',
+        geofenceRadiusM: null,
+        locationRefType: originRefType,
         name: targetLeg.origin_location,
       },
       dto.manualReason,
       dto.evidenceUrl,
     );
 
-    // Step 5: Nếu xuất phát chặng về (direction: return)
+    // Step 5: Kiểm tra trạng thái chặng về trước khi cập nhật DB
     const legDirection = (targetLeg as any).direction || 'outbound';
     if (legDirection === 'return') {
       if ((shipment as any).return_status === 'cancelled') {
@@ -1295,26 +1336,19 @@ export class TrackingService {
       if ((shipment as any).return_status === 'no_show') {
         throw new ConflictException('Chặng về đã bị đánh dấu no-show, không thể xuất phát');
       }
+    }
+
+    // Atomic conditional transition: tránh race condition khi Driver và Escort bấm cùng lúc
+    const legStarted = await this.trackingStore.updateLegStatus(legId, 'active', now, null, ['pending']);
+    if (legStarted === false) {
+      throw new ConflictException('Chặng này vừa được nhân sự khác xác nhận xuất phát. Vui lòng tải lại trạng thái mới nhất.');
+    }
+
+    if (legDirection === 'return') {
       await this.trackingStore.updateShipmentStatus(shipmentId, 'in_transit');
       await this.trackingStore.updateShipmentReturnStatus(shipmentId, 'in_progress');
       await this.trackingStore.updateRoutePlanStatus(route.route_id, 'in_transit');
-      await this.trackingStore.recordTripStatusLog({
-        shipmentId,
-        routeId: route.route_id,
-        legId: targetLeg.leg_id,
-        previousStatus: 'return_pending',
-        newStatus: 'in_transit',
-        milestoneType: 'leg_departure',
-        milestoneName: `Bắt đầu khởi hành chặng về #${targetLeg.sequence_no}`,
-        notes: `Bắt đầu khởi hành chặng về #${targetLeg.sequence_no} (${targetLeg.origin_location} → ${targetLeg.destination_location})`,
-        updatedBy: Number(user.id),
-        updatedByRole: actorRole || String(user.role),
-        isBackdated,
-      });
     }
-
-    // Update leg status to 'active'
-    await this.trackingStore.updateLegStatus(legId, 'active', now, null);
 
     // Transition shipment from 'ready_to_depart' to 'in_transit' if starting 1st leg
     if (targetLeg.sequence_no === 1 && shipment.status === 'ready_to_depart') {
@@ -1445,7 +1479,10 @@ export class TrackingService {
             ? legs[0]
             : legs.find((l) => l.leg_type !== 'flight') || legs[0]);
 
-    // DEC-07: Driver & Escort đều được phép check-in chéo dự phòng nếu đã được phân công chuyến; ghi rõ updated_by_role.
+    // DEC-07: Driver & Escort được check-in chéo trên chặng nội địa; Tài xế VN không check-in chặng bay/biển/nước ngoài.
+    if (parentLeg) {
+      await this.assertDriverScopeForLeg(user, shipmentId, parentLeg, legs);
+    }
     const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
 
     // Rule: Chặng phải bắt đầu rồi mới được check-in trạm dừng (riêng trạm nhập cảnh sau chặng bay chỉ cần chặng bay đã hạ cánh)
@@ -1586,7 +1623,13 @@ export class TrackingService {
       dto.evidenceUrl,
     );
 
-    await this.trackingStore.updateStopStatus(
+    const expectedStopStatuses =
+      dto.action === 'arrived'
+        ? ['pending']
+        : dto.action === 'customs_cleared'
+          ? ['arrived']
+          : ['arrived', 'customs_cleared', 'cleared'];
+    const stopUpdated = await this.trackingStore.updateStopStatus(
       stopId,
       dto.action,
       Number(user.id),
@@ -1596,18 +1639,26 @@ export class TrackingService {
       actorRole,
       isBackdated,
       locEvidence,
+      expectedStopStatuses,
     );
+    if (stopUpdated === false) {
+      throw new ConflictException('Trạm dừng này vừa được nhân sự khác cập nhật trạng thái. Vui lòng tải lại.');
+    }
 
     // Tuyến đa phương thức:
     // - Trạm xuất cảnh hoàn tất -> hoàn tất chặng đường bộ 1 & giải phóng xe tải về available.
-    // - Trạm nhập cảnh hoàn tất -> kích hoạt chặng đường bộ cuối để hoàn tất Mốc #6.
+    // - Trạm nhập cảnh hoàn tất -> kích hoạt chặng đường bộ cuối để hoàn tất Mốc #6 (riêng trạm quarantine phải departed sau khi đo sinh hiệu).
+    const importDoneForNextLeg =
+      targetStop.stop_type === 'quarantine'
+        ? dto.action === 'departed'
+        : dto.action === 'customs_cleared' || dto.action === 'departed';
     if (isMultiModalFlight && (dto.action === 'customs_cleared' || dto.action === 'departed')) {
       if (!isImportStop && parentLeg && parentLeg.sequence_no === 1 && parentLeg.leg_type === 'road') {
         await this.trackingStore.updateLegStatus(parentLeg.leg_id, 'completed', undefined, now);
         if (parentLeg.vehicle_id) {
           await this.trackingStore.updateVehicleStatus(parentLeg.vehicle_id, 'available');
         }
-      } else if (isImportStop && classifiedStops?.legRoadLast && !classifiedStops.legRoadLast.actual_departure) {
+      } else if (isImportStop && importDoneForNextLeg && classifiedStops?.legRoadLast && !classifiedStops.legRoadLast.actual_departure) {
         await this.trackingStore.updateLegStatus(classifiedStops.legRoadLast.leg_id, 'active', now, null);
       }
     }
@@ -1698,6 +1749,7 @@ export class TrackingService {
       throw new ConflictException('Chặng vận chuyển này đã hoàn thành trước đó!');
     }
     this.assertJourneyActive(shipment.status, 'xác nhận đến chặng');
+    await this.assertDriverScopeForLeg(user, shipmentId, targetLeg, legs);
 
     // Rule: Chặng phải bắt đầu rồi mới được bấm đến
     if (!targetLeg.actual_departure && targetLeg.status === 'pending') {
@@ -1741,22 +1793,26 @@ export class TrackingService {
         ? { lat: legCoords.destinationLat, lng: legCoords.destinationLng }
         : null;
 
+    const destRefType = this.inferLegLocationRefType(targetLeg.leg_type, targetLeg.destination_location);
     const locEvidence = await this.validateLocationAndGeofence(
       user,
       dto.location,
       destPoint,
       {
         stopType: 'destination',
-        geofenceRadiusM: 300,
-        locationRefType: 'address',
+        geofenceRadiusM: null,
+        locationRefType: destRefType,
         name: targetLeg.destination_location,
       },
       dto.manualReason,
       dto.evidenceUrl,
     );
 
-    // Complete this leg
-    await this.trackingStore.updateLegStatus(legId, 'completed', undefined, now);
+    // Atomic conditional completion: tránh 2 nhân sự bấm hoàn tất chặng cùng lúc
+    const legCompleted = await this.trackingStore.updateLegStatus(legId, 'completed', undefined, now, ['active', 'in_transit', 'pending']);
+    if (legCompleted === false) {
+      throw new ConflictException('Chặng này vừa được nhân sự khác xác nhận hoàn thành. Vui lòng tải lại.');
+    }
 
     // Tuyến đa phương thức: Khi chặng đường bộ 1 tới sân bay hoặc cảng biển hoàn thành, giải phóng xe tải về available
     if (targetLeg.leg_type === 'road' && targetLeg.sequence_no < legs.length) {
@@ -1766,46 +1822,17 @@ export class TrackingService {
       }
     }
 
-    // Tuyến đa phương thức: Chặng đường bộ cuối sẽ do nhân sự xác nhận tại Mốc #5 (thông quan / khởi hành chặng cuối)
-    if (targetLeg.leg_type === 'flight' && targetLeg.sequence_no < legs.length) {
-      const nextLeg = legs.find((l) => l.sequence_no === targetLeg.sequence_no + 1);
-      if (nextLeg && !nextLeg.actual_departure) {
-        // Giữ nguyên trạng thái chờ tại Mốc #5 để không tự động nhảy cóc từ Mốc #4 sang Mốc #6
-      }
-    }
-
-    // Step 5: Round-trip status handling
+    // Step 5: Round-trip status handling (nếu chặng về đã hủy/no_show thì kết thúc chuyến ngay khi xong chiều đi)
     const isRoundTrip = (shipment as any).trip_type === 'round_trip';
+    const isReturnClosed = ['cancelled', 'no_show'].includes(String((shipment as any).return_status || ''));
     const outboundLegs = legs.filter((l) => ((l as any).direction || 'outbound') === 'outbound');
     const isLastOutboundLeg = outboundLegs.length > 0 && targetLeg.sequence_no === Math.max(...outboundLegs.map((l) => l.sequence_no));
-    const isFinalLeg = targetLeg.sequence_no === legs.length;
+    const isFinalLeg = targetLeg.sequence_no === legs.length || (isRoundTrip && isLastOutboundLeg && isReturnClosed);
     const customerDest = shipment.destination_location || targetLeg.destination_location;
 
-    if (isRoundTrip && isLastOutboundLeg && !isFinalLeg) {
+    if (isRoundTrip && isLastOutboundLeg && !isFinalLeg && !isReturnClosed) {
       // Chặng đi hoàn thành đối với đơn khứ hồi: chuyển sang return_pending, giữ ngựa in_transit
       await this.trackingStore.updateShipmentStatus(shipmentId, 'return_pending');
-      await this.trackingStore.recordTripStatusLog({
-        shipmentId,
-        routeId: route.route_id,
-        legId: targetLeg.leg_id,
-        previousStatus: 'in_transit',
-        newStatus: 'return_pending',
-        milestoneType: 'leg_arrival',
-        milestoneName: `Hoàn tất chặng đi #${targetLeg.sequence_no}: Đến ${customerDest}`,
-        notes: 'Chặng đi hoàn tất an toàn. Đang chờ xuất phát chặng về (return_pending).',
-        updatedBy: Number(user.id),
-        updatedByRole: actorRole || String(user.role),
-        isBackdated,
-        lat: locEvidence.lat,
-        lng: locEvidence.lng,
-        accuracyM: locEvidence.accuracyM,
-        locationSource: locEvidence.locationSource,
-        distanceToStopM: locEvidence.distanceToStopM,
-        geofencePassed: locEvidence.geofencePassed,
-        manualReason: locEvidence.manualReason,
-        evidenceUrl: locEvidence.evidenceUrl,
-        flagged: locEvidence.flagged,
-      });
 
       await this.notificationsService.createNotification(
         shipment.customer_id,
@@ -1815,9 +1842,9 @@ export class TrackingService {
         shipmentId,
       );
     } else if (isFinalLeg && shipment.status !== 'completed') {
-      // Hoàn tất toàn bộ chuyến (đơn một chiều hoặc chặng cuối đơn khứ hồi)
+      // Hoàn tất toàn bộ chuyến (đơn một chiều, chặng cuối đơn khứ hồi, hoặc khứ hồi đã hủy chặng về)
       await this.trackingStore.updateShipmentStatus(shipmentId, 'completed');
-      if (isRoundTrip) {
+      if (isRoundTrip && !isReturnClosed) {
         await this.trackingStore.updateShipmentReturnStatus(shipmentId, 'completed');
       }
       await this.trackingStore.updateRoutePlanStatus(route.route_id, 'completed');
@@ -2203,6 +2230,7 @@ export class TrackingService {
       await this.trackingStore.updateRoutePlanStatus(route.route_id, 'completed');
     }
 
+    const actorRole = await this.resolveOperationalActorRole(shipmentId, user);
     await this.trackingStore.recordTripStatusLog({
       shipmentId,
       routeId: route?.route_id || 0,
@@ -2210,9 +2238,9 @@ export class TrackingService {
       newStatus: 'completed',
       milestoneType: 'trip_status_change',
       milestoneName: 'Chuyến đi hoàn tất',
-      notes: `Đánh dấu hoàn thành bởi ${user.fullName || user.email} (${user.role})`,
+      notes: `Đánh dấu hoàn thành bởi ${user.fullName || user.email} (${actorRole || user.role})`,
       updatedBy: Number(user.id),
-      updatedByRole: user.role,
+      updatedByRole: actorRole || user.role,
     });
   }
 
@@ -2297,6 +2325,55 @@ export class TrackingService {
       throw new BadRequestException('Ngựa được chọn không thuộc chuyến đi này. Vui lòng chọn đúng ngựa trong chuyến.');
     }
     return { horseId: match.id, horseName: match.name || horseName };
+  }
+
+  private inferLegLocationRefType(legType?: string | null, locationText?: string | null): string {
+    const text = String(locationText || '').toLowerCase();
+    if (legType === 'flight' || text.includes('sân bay') || text.includes('airport')) {
+      return 'airport';
+    }
+    if (legType === 'sea' || text.includes('cảng') || text.includes('port')) {
+      return 'seaport';
+    }
+    return 'address';
+  }
+
+  private isLegOverseasOrCrossBorder(leg: any, allLegs: any[]): boolean {
+    if (!leg) return false;
+    if (leg.leg_type === 'flight' || leg.leg_type === 'sea') return true;
+    const legDir = (leg as any).direction || 'outbound';
+    const dirLegs = allLegs.filter((l) => ((l as any).direction || 'outbound') === legDir);
+    const firstCrossSeq = dirLegs
+      .filter((l) => l.leg_type === 'flight' || l.leg_type === 'sea')
+      .reduce<number | null>((min, l) => (min === null || Number(l.sequence_no) < min ? Number(l.sequence_no) : min), null);
+    if (firstCrossSeq === null) return false;
+    return legDir === 'outbound'
+      ? Number(leg.sequence_no) > firstCrossSeq
+      : Number(leg.sequence_no) < firstCrossSeq;
+  }
+
+  private async assertDriverScopeForLeg(
+    user: AuthenticatedUser,
+    shipmentId: number,
+    leg: any,
+    allLegs: any[],
+  ): Promise<void> {
+    this.assertStaffCanUpdateLeg(user, leg);
+    const roleStr = String(user.role || '').toUpperCase();
+    if (roleStr.includes('MANAGER') || roleStr.includes('ADMIN') || roleStr.includes('COORDINATOR')) {
+      return;
+    }
+    if (!this.isLegOverseasOrCrossBorder(leg, allLegs)) return;
+    if (typeof this.trackingStore?.findAssignedStaff !== 'function') return;
+    const assigned = await this.trackingStore.findAssignedStaff(shipmentId);
+    const myRoles = assigned
+      .filter((s) => Number(s.user_id) === Number(user.id))
+      .map((s) => String(s.role_in_shipment || '').toLowerCase());
+    if (myRoles.includes('driver') && !myRoles.includes('escort')) {
+      throw new ForbiddenException(
+        'Chặng bay/biển hoặc đường bộ nước ngoài do Nhân viên hộ tống (Escort) phụ trách. Tài xế Việt Nam chỉ phụ trách chặng đường bộ nội địa Việt Nam.',
+      );
+    }
   }
 
   private assertStaffCanUpdateLeg(user: AuthenticatedUser, leg: any): void {
@@ -2778,6 +2855,7 @@ export class TrackingService {
       const legs = await this.trackingStore.findLegsByRouteId(route.route_id);
       const activeLeg = legs.find((l) => l.status === 'active' || l.status === 'in_transit') || legs[0];
       if (activeLeg) {
+        await this.assertDriverScopeForLeg(user, shipmentId, activeLeg, legs);
         activeLegId = activeLeg.leg_id;
         vehicleId = activeLeg.vehicle_id || null;
       }
@@ -3238,15 +3316,23 @@ export class TrackingService {
 
   async updateTrackingSettings(
     user: AuthenticatedUser,
-    patch: Partial<TrackingSystemSettings>,
+    patch: Omit<Partial<TrackingSystemSettings>, 'geofence'> & {
+      geofence?: Partial<NonNullable<TrackingSystemSettings['geofence']>>;
+    },
   ): Promise<TrackingSystemSettings> {
     const roleStr = String(user.role || '').toUpperCase();
-    if (!roleStr.includes('ADMIN')) {
-      throw new ForbiddenException('Chỉ Quản trị viên (ADMIN) mới có quyền chỉnh sửa cài đặt hệ thống định vị & giám sát.');
+    if (!roleStr.includes('ADMIN') && !roleStr.includes('MANAGER')) {
+      throw new ForbiddenException('Chỉ Logistics Manager hoặc Quản trị viên mới có quyền chỉnh sửa cài đặt hệ thống định vị & giám sát.');
     }
 
     if (patch.geofence !== undefined && typeof this.trackingStore?.setSetting === 'function') {
-      await this.trackingStore.setSetting('tracking.geofence', patch.geofence);
+      const current = await this.getTrackingSettings();
+      await this.trackingStore.setSetting('tracking.geofence', {
+        defaultRadiusM: patch.geofence.defaultRadiusM ?? current.geofence?.defaultRadiusM ?? 300,
+        largeSiteRadiusM: patch.geofence.largeSiteRadiusM ?? current.geofence?.largeSiteRadiusM ?? 1000,
+        bufferAccuracyM: patch.geofence.bufferAccuracyM ?? current.geofence?.bufferAccuracyM ?? 100,
+        maxAccuracyM: patch.geofence.maxAccuracyM ?? current.geofence?.maxAccuracyM ?? 200,
+      });
     } else if (
       (patch.geofenceRadiusDefaultM !== undefined || patch.geofenceRadiusLargeSiteM !== undefined) &&
       typeof this.trackingStore?.setSetting === 'function'
@@ -3384,7 +3470,7 @@ export class TrackingService {
       group: 'pre_trip',
       kind: 'documents',
       title: 'Hồ sơ kiểm dịch & giấy tờ thú y',
-      subtitle: isDocsCompliant ? 'Đủ điều kiện xuất phát (Tier A/B)' : 'Đang rà soát và kiểm duyệt giấy tờ',
+      subtitle: isDocsCompliant ? 'Đủ hồ sơ kiểm dịch & pháp lý' : 'Đang rà soát và kiểm duyệt giấy tờ',
       status: isDocsCompliant ? 'done' : ['approved', 'planning', 'confirmed'].includes(status) ? 'current' : 'upcoming',
     });
 

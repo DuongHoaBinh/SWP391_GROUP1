@@ -5,8 +5,9 @@ const path = require('node:path');
 const Module = require('node:module');
 const ts = require('typescript');
 
-function compile(source, filename) {
+function compile(source, filename, overrides = {}) {
   const loaded = new Module(filename, module); loaded.filename = filename; loaded.paths = module.paths;
+  loaded.require = name => (name in overrides ? overrides[name] : require(name));
   loaded._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, filename);
   return loaded.exports;
 }
@@ -19,9 +20,12 @@ const factory = compile(`exports.make = function(deps) {
   return ${handler.getText(source)};
 };`, pageFile).make;
 const redirectFile = path.resolve(__dirname, '../src/lib/auth-redirect.ts');
-const { getPostLoginRedirect } = compile(fs.readFileSync(redirectFile, 'utf8'), redirectFile);
+const authRedirectExports = compile(fs.readFileSync(redirectFile, 'utf8'), redirectFile);
+const { getPostLoginRedirect } = authRedirectExports;
 const loginFile = path.resolve(__dirname, '../src/lib/auth-login.ts');
-const { loginWithPassword, loginWithGoogle } = fs.existsSync(loginFile) ? compile(fs.readFileSync(loginFile, 'utf8'), loginFile) : {};
+const { loginWithPassword, loginWithGoogle } = fs.existsSync(loginFile)
+  ? compile(fs.readFileSync(loginFile, 'utf8'), loginFile, { './auth-redirect': authRedirectExports })
+  : {};
 
 async function runLogin({ status = 200, body, offline = false, redirect = null } = {}) {
   const state = { sessions: [], errors: [], successes: [], fullNavigations: [], routerNavigations: [] };

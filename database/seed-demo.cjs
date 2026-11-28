@@ -148,6 +148,9 @@ async function main() {
       { filename: 'demo_vaccine_tuyetma.pdf', title: 'Vaccine Certificate - Horse: Tuyet Ma' },
       { filename: 'demo_coggins_tuyetma.pdf', title: 'EIA Coggins Negative Test - Horse: Tuyet Ma' },
       { filename: 'demo_passport_general.pdf', title: 'Official FEI Equine Passport - EquiTransit Demo Record' },
+      { filename: 'demo_quarantine_export_general.pdf', title: 'Export Quarantine Certificate - EquiTransit Demo Record' },
+      { filename: 'demo_import_permit_general.pdf', title: 'Official Animal Import Permit - EquiTransit Demo Record' },
+      { filename: 'demo_health_cert_general.pdf', title: 'Domestic Veterinary Health Certificate (15b-TY) - EquiTransit Demo Record' },
     ];
 
     for (const f of pdfFiles) {
@@ -390,9 +393,33 @@ async function main() {
         documentTypeCode: 'eia_coggins_test',
         docNumber: 'COG-2026-012',
         fileUrl: '/uploads/documents/demo_coggins_xichtho.pdf',
-        issueDate: minusDays(90),
+        issueDate: minusDays(15),
         expiryDate: plusDays(275),
         status: 'approved',
+      },
+      {
+        horseId: horseXichThoId,
+        uploadedBy: customerAId,
+        docType: 'quarantine_export',
+        documentTypeCode: 'export_quarantine_certificate',
+        docNumber: 'EQC-2026-001',
+        fileUrl: '/uploads/documents/demo_quarantine_export_general.pdf',
+        issueDate: minusDays(5),
+        expiryDate: plusDays(30),
+        status: 'approved',
+        authorityName: 'Cục Thú y Việt Nam (Chi cục Kiểm dịch Vùng VI)',
+      },
+      {
+        horseId: horseXichThoId,
+        uploadedBy: customerAId,
+        docType: 'import_permit',
+        documentTypeCode: 'import_permit',
+        docNumber: 'IMP-KH-2026-001',
+        fileUrl: '/uploads/documents/demo_import_permit_general.pdf',
+        issueDate: minusDays(10),
+        expiryDate: plusDays(90),
+        status: 'approved',
+        authorityName: 'Tổng cục Thú y & Chăn nuôi Campuchia (GDAHP)',
       },
       // Bạch Long: passport valid, vaccine expired 1 month ago
       {
@@ -532,7 +559,7 @@ async function main() {
         expiryDate: plusYears(4),
         status: 'approved',
       },
-      // Hỏa Vân
+      // Hỏa Vân (return_pending: TP.HCM - Phnom Penh, đủ 5/5 giấy tờ bắt buộc)
       {
         horseId: horseMap.get(`${customerAId}:Hỏa Vân`),
         uploadedBy: customerAId,
@@ -543,6 +570,52 @@ async function main() {
         issueDate: minusYears(1),
         expiryDate: plusYears(4),
         status: 'approved',
+      },
+      {
+        horseId: horseMap.get(`${customerAId}:Hỏa Vân`),
+        uploadedBy: customerAId,
+        docType: 'vaccination',
+        documentTypeCode: 'vaccination_influenza',
+        docNumber: 'VAC-2026-007',
+        fileUrl: '/uploads/documents/demo_vaccine_xichtho.pdf',
+        issueDate: minusDays(40),
+        expiryDate: plusDays(320),
+        status: 'approved',
+      },
+      {
+        horseId: horseMap.get(`${customerAId}:Hỏa Vân`),
+        uploadedBy: customerAId,
+        docType: 'coggins',
+        documentTypeCode: 'eia_coggins_test',
+        docNumber: 'COG-2026-007',
+        fileUrl: '/uploads/documents/demo_coggins_xichtho.pdf',
+        issueDate: minusDays(15),
+        expiryDate: plusDays(75),
+        status: 'approved',
+      },
+      {
+        horseId: horseMap.get(`${customerAId}:Hỏa Vân`),
+        uploadedBy: customerAId,
+        docType: 'quarantine_export',
+        documentTypeCode: 'export_quarantine_certificate',
+        docNumber: 'EQC-2026-007',
+        fileUrl: '/uploads/documents/demo_quarantine_export_general.pdf',
+        issueDate: minusDays(5),
+        expiryDate: plusDays(30),
+        status: 'approved',
+        authorityName: 'Cục Thú y Việt Nam (Chi cục Kiểm dịch Vùng VI)',
+      },
+      {
+        horseId: horseMap.get(`${customerAId}:Hỏa Vân`),
+        uploadedBy: customerAId,
+        docType: 'import_permit',
+        documentTypeCode: 'import_permit',
+        docNumber: 'IMP-KH-2026-007',
+        fileUrl: '/uploads/documents/demo_import_permit_general.pdf',
+        issueDate: minusDays(10),
+        expiryDate: plusDays(90),
+        status: 'approved',
+        authorityName: 'Tổng cục Thú y & Chăn nuôi Campuchia (GDAHP)',
       },
       // Thanh Phong
       {
@@ -556,7 +629,7 @@ async function main() {
         expiryDate: plusYears(4),
         status: 'approved',
       },
-      // Phi Yến
+      // Phi Yến (ready_to_depart: TP.HCM - Đà Nẵng, đủ 2/2 giấy tờ nội địa)
       {
         horseId: horseMap.get(`${customerAId}:Phi Yến`),
         uploadedBy: customerAId,
@@ -566,6 +639,17 @@ async function main() {
         fileUrl: '/uploads/documents/demo_passport_general.pdf',
         issueDate: minusYears(1),
         expiryDate: plusYears(4),
+        status: 'approved',
+      },
+      {
+        horseId: horseMap.get(`${customerAId}:Phi Yến`),
+        uploadedBy: customerAId,
+        docType: 'health_certificate',
+        documentTypeCode: 'health_certificate',
+        docNumber: 'HC-VN-2026-009',
+        fileUrl: '/uploads/documents/demo_health_cert_general.pdf',
+        issueDate: minusDays(1),
+        expiryDate: plusDays(14),
         status: 'approved',
       },
       // Lôi Điện
@@ -629,25 +713,53 @@ async function main() {
       },
     ];
 
+    const [[managerUser]] = await db.query('SELECT user_id FROM `user` WHERE email = ?', ['manager_a@example.com']);
+    const defaultReviewerId = managerUser?.user_id ?? null;
+
     for (const d of demoDocs) {
       if (!d.horseId) continue;
+      let documentId;
       const [existing] = await db.execute(
         'SELECT document_id FROM transport_document WHERE horse_id = ? AND doc_number = ?',
         [d.horseId, d.docNumber]
       );
       if (existing.length > 0) {
+        documentId = existing[0].document_id;
         await db.execute(
           `UPDATE transport_document
            SET file_url = ?, issue_date = ?, expiry_date = ?, status = ?, document_type_code = ?
            WHERE document_id = ?`,
-          [d.fileUrl, d.issueDate, d.expiryDate, d.status, d.documentTypeCode, existing[0].document_id],
+          [d.fileUrl, d.issueDate, d.expiryDate, d.status, d.documentTypeCode, documentId],
         );
       } else {
-        await db.execute(
+        const [ins] = await db.execute(
           `INSERT INTO transport_document (horse_id, uploaded_by, doc_type, document_type_code, doc_number, file_url, issue_date, expiry_date, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [d.horseId, d.uploadedBy, d.docType, d.documentTypeCode, d.docNumber, d.fileUrl, d.issueDate, d.expiryDate, d.status],
         );
+        documentId = ins.insertId;
+      }
+
+      // Layer-2 authority approval for regulations with requires_authority_approval = TRUE
+      if (d.authorityName && documentId) {
+        const [existingApproval] = await db.execute(
+          'SELECT approval_id FROM document_approval WHERE document_id = ? LIMIT 1',
+          [documentId],
+        );
+        if (existingApproval.length > 0) {
+          await db.execute(
+            `UPDATE document_approval
+             SET approved_by = ?, authority_name = ?, status = 'approved', approval_date = NOW(), notes = ?
+             WHERE approval_id = ?`,
+            [defaultReviewerId, d.authorityName, 'Đã xác nhận duyệt Tầng 2 từ cơ quan chức năng (Demo)', existingApproval[0].approval_id],
+          );
+        } else {
+          await db.execute(
+            `INSERT INTO document_approval (document_id, approved_by, authority_name, status, approval_date, notes)
+             VALUES (?, ?, ?, 'approved', NOW(), ?)`,
+            [documentId, defaultReviewerId, d.authorityName, 'Đã xác nhận duyệt Tầng 2 từ cơ quan chức năng (Demo)'],
+          );
+        }
       }
     }
 
@@ -868,17 +980,22 @@ async function seedCustomerAShipments(db, ctx) {
   }
 
   async function upsertHandover(shipmentId, handedOverBy, receivedByName, location, horseCondition = 'healthy', confirmedBy = null) {
+    const [shRows] = await db.query(
+      'SELECT shipment_horse_id FROM shipment_horse WHERE shipment_id = ? ORDER BY shipment_horse_id ASC LIMIT 1',
+      [shipmentId],
+    );
+    const shipmentHorseId = shRows[0]?.shipment_horse_id ?? null;
     const [existing] = await db.query('SELECT handover_id FROM delivery_handover WHERE shipment_id = ?', [shipmentId]);
     if (existing.length > 0) {
       await db.query(
-        `UPDATE delivery_handover SET handed_over_by = ?, received_by_name = ?, handover_location = ?, horse_condition_at_handover = ?, status = 'confirmed', confirmed_by = ?, confirmed_at = NOW() WHERE handover_id = ?`,
-        [handedOverBy, receivedByName, location, horseCondition, confirmedBy, existing[0].handover_id]
+        `UPDATE delivery_handover SET shipment_horse_id = COALESCE(shipment_horse_id, ?), handed_over_by = ?, received_by_name = ?, handover_location = ?, horse_condition_at_handover = ?, status = 'confirmed', confirmed_by = ?, confirmed_at = NOW() WHERE handover_id = ?`,
+        [shipmentHorseId, handedOverBy, receivedByName, location, horseCondition, confirmedBy, existing[0].handover_id]
       );
     } else {
       await db.query(
-        `INSERT INTO delivery_handover (shipment_id, handed_over_by, received_by_name, handover_location, handover_datetime, delivered_quantity, horse_condition_at_handover, identity_verified, documents_handed_over, customer_signature_url, status, confirmed_by, confirmed_at, notes)
-         VALUES (?, ?, ?, ?, NOW(), 1, ?, TRUE, TRUE, '/uploads/signatures/demo_customer_sig.png', 'confirmed', ?, NOW(), 'Giao nhận ngựa an toàn, đầy đủ giấy tờ hợp lệ')`,
-        [shipmentId, handedOverBy, receivedByName, location, horseCondition, confirmedBy]
+        `INSERT INTO delivery_handover (shipment_id, shipment_horse_id, handed_over_by, received_by_name, handover_location, handover_datetime, delivered_quantity, horse_condition_at_handover, identity_verified, documents_handed_over, customer_signature_url, status, confirmed_by, confirmed_at, notes)
+         VALUES (?, ?, ?, ?, ?, NOW(), 1, ?, TRUE, TRUE, '/uploads/signatures/demo_customer_sig.png', 'confirmed', ?, NOW(), 'Giao nhận ngựa an toàn, đầy đủ giấy tờ hợp lệ')`,
+        [shipmentId, shipmentHorseId, handedOverBy, receivedByName, location, horseCondition, confirmedBy]
       );
     }
   }
@@ -1056,6 +1173,10 @@ async function seedCustomerAShipments(db, ctx) {
       transitRouteId, transitTruck, toSqlDateTime(subMinutes(now, 45)),
     ]
   );
+  await db.query(
+    'DELETE FROM route_stop_update WHERE route_stop_id IN (SELECT route_stop_id FROM route_stop WHERE route_id = ?)',
+    [transitRouteId],
+  );
   await db.query('DELETE FROM route_stop WHERE route_id = ?', [transitRouteId]);
   await db.query(
     `INSERT INTO route_stop (route_id, sequence_no, stop_type, location_name, country, status, direction, lat, lng, actual_arrival, actual_departure)
@@ -1129,8 +1250,56 @@ async function seedCustomerAShipments(db, ctx) {
     insurance_fee: 6000000,
     special_requirements: 'SEED-DEMO-RETURN-PENDING',
   });
-  await linkShipmentHorse(idReturn, getHorseId('Hỏa Vân'), { declared_value: 1800000000, insurance_fee: 6000000 });
-  await upsertRoute(idReturn, 'TP.HCM - Phnom Penh (Khứ hồi thi đấu)', 491.0, 'confirmed', 'planned', managerAId);
+  const hoaVanId = getHorseId('Hỏa Vân');
+  await linkShipmentHorse(idReturn, hoaVanId, { declared_value: 1800000000, insurance_fee: 6000000 });
+  const retRouteId = await upsertRoute(idReturn, 'TP.HCM - Phnom Penh (Khứ hồi thi đấu)', 491.0, 'in_transit', 'active', managerAId, managerAId);
+  const retTruck = vehicleMap.get('DEMO-51C-005') || vehicleMap.get('DEMO-51C-002') || vehicleMap.get('DEMO-51C-001');
+  await db.query('DELETE FROM route_leg WHERE route_id = ?', [retRouteId]);
+  await db.query(
+    `INSERT INTO route_leg (route_id, sequence_no, leg_type, origin_location, destination_location, distance_km, vehicle_id, status, direction, actual_departure, actual_arrival)
+     VALUES
+       (?, 1, 'road', 'Trạm Điều phối Thủ Đức (TP.HCM)', 'Trạm Đối tác Phnom Penh (Campuchia)', 245.5, ?, 'completed', 'outbound', ?, ?),
+       (?, 2, 'road', 'Trạm Đối tác Phnom Penh (Campuchia)', 'Trạm Điều phối Thủ Đức (TP.HCM)', 245.5, ?, 'pending', 'return', NULL, NULL)`,
+    [
+      retRouteId, retTruck, toSqlDateTime(subHours(now, 24)), toSqlDateTime(subHours(now, 16)),
+      retRouteId, retTruck,
+    ]
+  );
+  await db.query(
+    'DELETE FROM route_stop_update WHERE route_stop_id IN (SELECT route_stop_id FROM route_stop WHERE route_id = ?)',
+    [retRouteId],
+  );
+  await db.query('DELETE FROM route_stop WHERE route_id = ?', [retRouteId]);
+  await db.query(
+    `INSERT INTO route_stop (route_id, sequence_no, stop_type, location_name, country, status, direction, lat, lng, actual_arrival, actual_departure)
+     VALUES
+       (?, 1, 'border_check', 'Cửa khẩu Quốc tế Mộc Bài (Chiều đi)', 'Vietnam', 'departed', 'outbound', 11.071200, 106.182300, ?, ?),
+       (?, 2, 'border_check', 'Cửa khẩu Quốc tế Mộc Bài (Chiều về)', 'Vietnam', 'pending', 'return', 11.071200, 106.182300, NULL, NULL)`,
+    [
+      retRouteId, toSqlDateTime(subHours(now, 21)), toSqlDateTime(subHours(now, 20)),
+      retRouteId,
+    ]
+  );
+  await db.query('DELETE FROM shipment_vehicle WHERE shipment_id = ?', [idReturn]);
+  if (retTruck) {
+    await db.query('INSERT INTO shipment_vehicle (shipment_id, vehicle_id) VALUES (?, ?)', [idReturn, retTruck]);
+  }
+  await assignStaff(idReturn, ctx.seedDriverId || driver1Id, 'driver', true);
+  if (ctx.seedDriverId && driver1Id && ctx.seedDriverId !== driver1Id) {
+    await assignStaff(idReturn, driver1Id, 'driver', true);
+  }
+  await assignStaff(idReturn, escortId, 'escort', true);
+  // Seed confirmed outbound handover so return leg handover can be demonstrated cleanly
+  await db.query('DELETE FROM delivery_handover WHERE shipment_id = ?', [idReturn]);
+  await upsertHandover(idReturn, escortId, 'Sokha Meas (CLB Đua Phnom Penh)', 'Trạm Đối tác Phnom Penh (Campuchia)', 'healthy', customerAId);
+  await db.query("UPDATE delivery_handover SET direction = 'outbound' WHERE shipment_id = ?", [idReturn]);
+  await db.query('DELETE FROM incident_report WHERE shipment_id = ?', [idReturn]);
+  await db.query('DELETE FROM horse_health_log WHERE shipment_id = ?', [idReturn]);
+  await db.query(
+    `INSERT INTO horse_health_log (shipment_id, horse_id, horse_name, leg_name, recorded_by, recorded_by_role, condition_status, temperature_c, heart_rate_bpm, respiratory_rate_bpm, alert_tier, notes, recorded_at)
+     VALUES (?, ?, 'Hỏa Vân', 'Chặng đi: TP.HCM - Phnom Penh', ?, 'escort', 'stable', 37.9, 36, 12, 'green', 'Bàn giao chặng đi tại Phnom Penh an toàn, ngựa ăn uống bình thường chờ đón chặng về.', ?)`,
+    [idReturn, hoaVanId, escortId, toSqlDateTime(subHours(now, 15))]
+  );
 
   // 8. completed (Delivered, signed delivery handover record)
   const idCompleted = await upsertShipment({

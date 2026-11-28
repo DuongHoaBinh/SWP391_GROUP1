@@ -147,17 +147,21 @@ function TripMonitoringContent() {
 
   const fetchTrackingDetails = useCallback(async (shipmentId: number, isSilent = false) => {
     try {
-      if (!isSilent) setRefreshing(true);
+      if (!isSilent) {
+        setRefreshing(true);
+        setLiveTracking(null);
+        setTimelineItems([]);
+      }
       const [details, live, timelineRes] = await Promise.all([
         trackingApi.getTrackingDetails(shipmentId),
         trackingApi.getLiveTracking(shipmentId).catch(() => null),
         trackingApi.getShipmentTimeline(shipmentId).catch(() => null),
       ]);
       setTrackingDetails(details);
-      if (live) setLiveTracking(live);
-      if (timelineRes) {
-        setTimelineItems(buildTimeline({ timelineData: timelineRes, viewer: 'manager', language }));
-      }
+      setLiveTracking(live);
+      setTimelineItems(
+        timelineRes ? buildTimeline({ timelineData: timelineRes, viewer: 'manager', language }) : [],
+      );
     } catch {
       if (!isSilent) {
         toast.error(tRef.current('monitoring.errLoadDetails', 'Không thể tải dữ liệu chi tiết chuyến đi'));
@@ -180,9 +184,12 @@ function TripMonitoringContent() {
   }, []);
 
   useEffect(() => {
-    if (viewMode === 'fleet_overview') {
+    if (viewMode !== 'fleet_overview') return;
+    void fetchFleetOverview();
+    const interval = setInterval(() => {
       void fetchFleetOverview();
-    }
+    }, 15000);
+    return () => clearInterval(interval);
   }, [viewMode, fetchFleetOverview]);
 
   useEffect(() => {

@@ -53,7 +53,13 @@ Document checklist, authority approval status, missing-document notifications, a
 
 Document completion is a departure requirement, not the payment trigger. A confirmed Flow 3 plan opens payment independently of Flow 2 completion. Reviewing or replacing documents refreshes departure readiness; approved documents must remain valid. Missing/invalid compliance prevents departure even after payment.
 
-## Chuẩn hóa Tuân thủ Đa chiều, 2 Tầng Hồ sơ & Runtime Expiry (`DEC-03` Approved — `Target Spec v3.1 (Planned)`)
+## Đơn giản hóa Kiểm duyệt theo Cách A (Cập nhật 11/2026)
+
+- **Bỏ phân tách Tầng A / Tầng B trên nghiệp vụ & giao diện:** Hệ thống gộp toàn bộ danh mục giấy tờ của quốc gia đích thành **1 danh sách thống nhất** (cột `regulation.doc_tier` vẫn giữ nguyên trong CSDL để bảo toàn `schema-parity`, mặc định `'A'`).
+- **Không chặn ngày khởi hành theo `lead_time_days` hay báo lỗi "cấp quá sớm" (`issued_too_early`):** Khách hàng có thể đặt đơn và tải hồ sơ lên ngay hoặc chọn **"Nộp sau"** rồi bổ sung trước giờ xuất phát.
+- **Quyết định duyệt thuộc về Logistics Manager:** Khi khách tải tệp lên, Logistics Manager trực tiếp mở hồ sơ, tự đối chiếu 4 tiêu chí (microchip, hộ chiếu, ngày cấp, thời hạn sử dụng) và bấm **Phê duyệt** hoặc **Từ chối**. Một khi Manager đã **Phê duyệt (`approved`)**, hệ thống ghi nhận hồ sơ đạt chuẩn tuân thủ (không tự động từ chối ngược vì biên an toàn `+24h/+48h` hay cảnh báo Tầng B).
+
+## Chuẩn hóa Tuân thủ Đa chiều & Runtime Expiry (Lịch sử Spec v3.1)
 
 > [!IMPORTANT]
 > Phân quyền thao tác tuân thủ Ma trận RACI tại [actors-and-roles.md](file:///f:/SWP/Project/SWP391_GROUP1/docs/actors-and-roles.md).

@@ -7,7 +7,7 @@ import { MYSQL_POOL } from '../../common/database/database.module';
 import { DocumentStatus } from './documents.types';
 import { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { UserRole } from '../auth/auth.types';
-import { formatDateIct, parseEndOfDayIct, parseStartOfDayIct } from './requirement-policy';
+import { computeDeferredSubmitDeadline, formatDateIct, parseEndOfDayIct, parseStartOfDayIct } from './requirement-policy';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -133,7 +133,7 @@ export class DocumentExpiryMonitorService implements OnModuleInit, OnModuleDestr
         }
       }
 
-      // 2. Demote orders in ready_to_depart if any Tier A document required for the trip has expired
+      // 2. Demote orders in ready_to_depart if any required document has expired
       const systemUser: AuthenticatedUser = {
         id: '0',
         email: 'system@equitransit.local',
@@ -148,12 +148,11 @@ export class DocumentExpiryMonitorService implements OnModuleInit, OnModuleDestr
         const shipmentId = Number(orderRow.shipment_id);
         const checklist = await this.documentsService.getOrderComplianceChecklist(systemUser, shipmentId);
 
-        // Check if compliance is broken or Tier A docs are expired/missing
-        const hasTierAExpired = checklist.horses.some((h) =>
-          h.documents.some((d) => d.isExpiredForTrip && (!d.regulationDocType || d.status !== 'approved')),
+        const hasExpiredRequiredDoc = checklist.horses.some((h) =>
+          h.documents.some((d) => d.status === DocumentStatus.EXPIRED),
         );
 
-        if (!checklist.isFullyCompliant || checklist.hasExpiredDocuments || hasTierAExpired) {
+        if (!checklist.isFullyCompliant || checklist.hasExpiredDocuments || hasExpiredRequiredDoc) {
           // Demote order back to confirmed/planning and sync route plan_status
           await this.pool.execute(
             "UPDATE shipment SET status = 'confirmed' WHERE shipment_id = ? AND status = 'ready_to_depart'",
@@ -168,8 +167,8 @@ export class DocumentExpiryMonitorService implements OnModuleInit, OnModuleDestr
 
           await this.notificationsService.notifyRole(
             'Logistics Manager',
-            `⚠️ Đơn ${code} chuyển về planning do giấy tờ Tầng A hết hạn`,
-            `Đơn vận chuyển ${code} đang ở trạng thái ready_to_depart nhưng phát hiện hồ sơ Tầng A của ngựa đã hết hạn hoặc không còn đủ điều kiện xuất phát. Đơn đã được chuyển về trạng thái planning.`,
+            `⚠️ Đơn ${code} cần rà soát lại do có hồ sơ kiểm dịch hết hạn`,
+            `Đơn vận chuyển ${code} đang ở trạng thái ready_to_depart nhưng phát hiện hồ sơ kiểm dịch của ngựa đã hết hạn hoặc không còn đủ điều kiện xuất phát. Đơn đã tạm chuyển về trạng thái đã xác nhận (confirmed).`,
             'status_update',
             shipmentId,
           );
@@ -205,7 +204,7 @@ export class DocumentExpiryMonitorService implements OnModuleInit, OnModuleDestr
       // 4. Remind Customer (and alert Manager on overdue) for deferred ("Submit later") documents approaching submitDeadline
       try {
         const [deferredRows] = await this.pool.execute<RowDataPacket[]>(
-          `SELECT shipment_id, customer_id, requested_date, deferred_documents_json
+          `SELECT shipment_id, customer_id, requested_date, departure_date, created_at, deferred_documents_json
            FROM shipment
            WHERE status IN ('awaiting_payment', 'paid_pending_review', 'approved', 'planning', 'confirmed')
              AND deferred_documents_json IS NOT NULL`,
@@ -233,8 +232,10 @@ export class DocumentExpiryMonitorService implements OnModuleInit, OnModuleDestr
 
           const checklist = await this.documentsService.getOrderComplianceChecklist(systemUser, shipmentId);
           const code = `REQ-${String(shipmentId).padStart(3, '0')}`;
-          const fallbackDeadline = row.requested_date
-            ? formatDateIct(new Date(parseStartOfDayIct(new Date(row.requested_date)) - 2 * DAY_MS))
+          const departureRef = row.departure_date || row.requested_date;
+          const createdRef = row.created_at || now;
+          const canonicalDeadline = departureRef
+            ? computeDeferredSubmitDeadline(new Date(departureRef), new Date(createdRef))
             : todayIct;
 
           for (const item of deferredList) {
@@ -254,7 +255,7 @@ export class DocumentExpiryMonitorService implements OnModuleInit, OnModuleDestr
             );
             if (alreadyUploaded) continue;
 
-            const deadlineStr = (item.submitDeadline || fallbackDeadline).trim().slice(0, 10);
+            const deadlineStr = canonicalDeadline;
             const hoursRemaining = (parseEndOfDayIct(deadlineStr) - now.getTime()) / HOUR_MS;
 
             // Pick the tightest crossed threshold (0 = overdue, 24 = <=24h left, 48 = <=48h left)

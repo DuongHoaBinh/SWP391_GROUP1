@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Receipt, RefreshCw, ShieldCheck, ExternalLink, Clock } from 'lucide-react';
+import Link from 'next/link';
+import { Receipt, RefreshCw, ShieldCheck, ExternalLink, Clock, Building2 } from 'lucide-react';
 import { apiClient, openAuthenticatedApiFile } from '@/lib/api-client';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 
@@ -20,6 +21,9 @@ export interface CustomerRefundRecord {
   status: string;
   requiresDualApproval: boolean;
   recipientBankAccount: string | null;
+  recipientBankName?: string | null;
+  recipientAccountHolder?: string | null;
+  formSubmittedAt?: string | null;
   bankTransactionRef: string | null;
   transferReceiptUrl: string | null;
   creditExpiresAt: string | null;
@@ -28,8 +32,8 @@ export interface CustomerRefundRecord {
 }
 
 const REFUND_STATUS_LABELS: Record<string, { vi: string; en: string; cls: string }> = {
-  pending_approval: { vi: 'Chờ Manager duyệt', en: 'Pending Approval', cls: 'bg-[#F8F0DF] text-[#966516] border-[#DFCA9A]' },
-  pending_second_approval: { vi: 'Chờ duyệt kép (>=20M)', en: 'Pending Dual Approval', cls: 'bg-[#F8F0DF] text-[#966516] border-[#DFCA9A]' },
+  pending_approval: { vi: 'Chờ Quản lý duyệt', en: 'Pending Approval', cls: 'bg-[#F8F0DF] text-[#966516] border-[#DFCA9A]' },
+  pending_second_approval: { vi: 'Chờ Quản lý duyệt', en: 'Pending Approval', cls: 'bg-[#F8F0DF] text-[#966516] border-[#DFCA9A]' },
   approved_for_transfer: { vi: 'Đã duyệt — Chờ chuyển khoản', en: 'Approved for Transfer', cls: 'bg-[#E8F2EB] text-[#287653] border-[#B7DBC4]' },
   transferred: { vi: 'Đã chuyển khoản hoàn tiền', en: 'Transferred', cls: 'bg-[#E8F2EB] text-[#287653] border-[#B7DBC4]' },
   converted_to_credit: { vi: 'Đã cấp Bảo lưu cước 30 ngày', en: 'Converted to 30-Day Credit', cls: 'bg-[#FAF5EB] text-[#A67C2E] border-[#DFCA9A]' },
@@ -141,6 +145,35 @@ export function CustomerRefundSummaryCard({ shipmentId }: { shipmentId: number }
                   </span>
                 </div>
               )}
+
+              {rec.recipientBankAccount ? (
+                <div className="p-2.5 rounded-lg bg-white border border-[#E5DDD0] text-[#273244] flex flex-wrap items-center gap-1.5">
+                  <Building2 size={13} className="text-[#A67C2E]" aria-hidden="true" />
+                  <span className="font-bold text-[#181A17]">
+                    {isEn ? 'Beneficiary account:' : 'STK nhận hoàn tiền:'}
+                  </span>
+                  <span>
+                    {[rec.recipientBankName, rec.recipientBankAccount, rec.recipientAccountHolder].filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+              ) : rec.refundMode === 'cash_refund' &&
+                rec.amount > 0 &&
+                ['pending_approval', 'approved_for_transfer'].includes(rec.status) ? (
+                <div className="p-3 rounded-lg bg-[#FFF9EB] border border-[#DFCA9A] flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[#7A5616] font-medium">
+                    {isEn
+                      ? 'Please submit your beneficiary bank account to receive this refund.'
+                      : 'Vui lòng điền thông tin tài khoản ngân hàng để nhận khoản hoàn tiền này.'}
+                  </span>
+                  <Link
+                    href={`/customer/requests/${shipmentId}/refund?refundId=${rec.id}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#A67C2E] text-white font-bold text-xs hover:bg-[#8E6822] no-underline"
+                  >
+                    <Building2 size={13} aria-hidden="true" />
+                    <span>{isEn ? 'Submit Bank Info' : 'Điền STK nhận hoàn tiền'}</span>
+                  </Link>
+                </div>
+              ) : null}
 
               {rec.bankTransactionRef && (
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#EAE5DA]">

@@ -190,7 +190,7 @@ test('Authorization Matrix: RolesGuard denies Customer and Driver from Manager/A
   }
 });
 
-test('Authorization Matrix: RolesGuard denies non-Admin users from Admin-only endpoints', () => {
+test('Authorization Matrix: RolesGuard allows Logistics Manager & Admin on operational settings and refund transfer, denies Customer & Driver', () => {
   const reflector = new Reflector();
   const guard = new RolesGuard(reflector);
 
@@ -204,24 +204,26 @@ test('Authorization Matrix: RolesGuard denies non-Admin users from Admin-only en
     }),
   });
 
-  const adminOnlyEndpoints = [
+  const managerAndAdminEndpoints = [
     TrackingSystemSettingsController.prototype.updateTrackingSettings,
     OrdersOpsController.prototype.transferRefund,
   ];
 
-  for (const handler of adminOnlyEndpoints) {
-    for (const role of [UserRole.CUSTOMER, UserRole.DRIVER_ESCORT, UserRole.LOGISTICS_MANAGER]) {
+  for (const handler of managerAndAdminEndpoints) {
+    for (const role of [UserRole.CUSTOMER, UserRole.DRIVER_ESCORT]) {
       assert.throws(
         () => guard.canActivate(createExecutionContext(handler, role)),
         /Access denied/,
-        `RolesGuard should deny ${role} on Admin-only endpoint ${handler.name}`
+        `RolesGuard should deny ${role} on endpoint ${handler.name}`
       );
     }
-    assert.equal(
-      guard.canActivate(createExecutionContext(handler, UserRole.ADMIN)),
-      true,
-      `RolesGuard should allow ADMIN on Admin-only endpoint ${handler.name}`
-    );
+    for (const role of [UserRole.LOGISTICS_MANAGER, UserRole.ADMIN]) {
+      assert.equal(
+        guard.canActivate(createExecutionContext(handler, role)),
+        true,
+        `RolesGuard should allow ${role} on endpoint ${handler.name}`
+      );
+    }
   }
 });
 

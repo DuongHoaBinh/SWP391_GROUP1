@@ -140,8 +140,30 @@ export default function DriverDashboardPage() {
     }
   };
 
+  const activeSosTrips = useMemo(
+    () =>
+      trips.filter((tr) =>
+        ['ready_to_depart', 'in_transit', 'return_pending'].includes(
+          String(tr.shipment_status || '').toLowerCase(),
+        ),
+      ),
+    [trips],
+  );
+  const canTriggerSos = activeSosTrips.length > 0;
+  const [emergencyShipmentId, setEmergencyShipmentId] = useState<number>(0);
+
   const openEmergencyModal = () => {
-    if (!activeTrip) return;
+    if (!canTriggerSos) {
+      toast.error(
+        isEn
+          ? 'SOS can only be reported for ready or in-transit trips.'
+          : 'Chỉ có thể gửi tín hiệu SOS cho chuyến đã sẵn sàng xuất phát hoặc đang vận chuyển.',
+      );
+      return;
+    }
+    const preferred =
+      activeSosTrips.find((tr) => tr.shipment_id === activeTrip?.shipment_id) || activeSosTrips[0];
+    setEmergencyShipmentId(preferred?.shipment_id || 0);
     setEmergencyType(isEscort ? 'horse_medical' : 'vehicle_breakdown');
     setEmergencyReason('');
     setEmergencyModalOpen(true);
@@ -156,24 +178,34 @@ export default function DriverDashboardPage() {
   const handleSendEmergency = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSendingEmergency) return;
-    if (!activeTrip) {
+    const targetTrip =
+      activeSosTrips.find((tr) => tr.shipment_id === emergencyShipmentId) || activeSosTrips[0];
+    if (!targetTrip) {
       toast.error(isEn ? 'No active trip to report SOS.' : 'Không có chuyến đi đang kích hoạt để báo sự cố.');
       setEmergencyModalOpen(false);
+      return;
+    }
+    const trimmedReason = emergencyReason.trim();
+    if (trimmedReason.length < 5) {
+      toast.error(
+        isEn
+          ? 'Please enter a brief emergency description (at least 5 characters).'
+          : 'Vui lòng mô tả ngắn tình trạng sự cố (tối thiểu 5 ký tự).',
+      );
       return;
     }
 
     setIsSendingEmergency(true);
     try {
-      const activeMs = trackingDetails?.milestones?.find((m) => m.status === 'CURRENT');
-      await incidentsApi.createIncident(activeTrip.shipment_id, {
+      const activeMs =
+        targetTrip.shipment_id === activeTrip?.shipment_id
+          ? trackingDetails?.milestones?.find((m) => m.status === 'CURRENT')
+          : undefined;
+      await incidentsApi.createIncident(targetTrip.shipment_id, {
         incidentType: emergencyType,
         severity: 'critical',
-        locationText: activeMs?.location || activeTrip.origin_location,
-        description:
-          emergencyReason.trim() ||
-          (isEn
-            ? 'Urgent field SOS alert dispatched from route'
-            : 'Phát tín hiệu cứu hộ khẩn cấp từ tuyến vận chuyển'),
+        locationText: activeMs?.location || targetTrip.origin_location,
+        description: trimmedReason,
       });
       toast.success(
         isEn
@@ -268,7 +300,7 @@ export default function DriverDashboardPage() {
             type="button"
             variant="primary"
             size="sm"
-            disabled={!activeTrip}
+            disabled={!canTriggerSos}
             onClick={openEmergencyModal}
             className="min-h-[42px] px-3.5 bg-[#B33E3E] hover:bg-[#932E2E] text-white font-extrabold text-xs shadow-sm border border-[#9E3B3B] cursor-pointer disabled:opacity-45"
           >
@@ -370,7 +402,12 @@ export default function DriverDashboardPage() {
       )}
 
       {/* 4. ACTION-FIRST: CURRENT MILESTONE CHECK-IN HERO (ABOVE THE FOLD ON MOBILE) */}
-      {!isLoading && activeTrip && currentMilestone && (
+      {!isLoading &&
+        activeTrip &&
+        currentMilestone &&
+        ['ready_to_depart', 'in_transit', 'return_pending'].includes(
+          String(activeTrip.shipment_status || '').toLowerCase(),
+        ) && (
         <div className="rounded-2xl border-2 border-[#181A17] bg-gradient-to-br from-[#181A17] via-[#232620] to-[#181A17] text-[#FAF8F4] p-4 sm:p-5 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -715,6 +752,25 @@ export default function DriverDashboardPage() {
           </div>
 
           <div>
+            <label htmlFor="driver-sos-trip" className="font-bold text-[#181A17] block mb-1.5">
+              {isEn ? 'Affected Trip *' : 'Chuyến đang gặp sự cố *'}
+            </label>
+            <select
+              id="driver-sos-trip"
+              value={emergencyShipmentId}
+              onChange={(e) => setEmergencyShipmentId(Number(e.target.value))}
+              className="w-full min-h-[44px] px-3 rounded-xl border border-[#D8CEBE] bg-white font-semibold text-xs"
+            >
+              {activeSosTrips.map((tr) => (
+                <option key={tr.shipment_id} value={tr.shipment_id}>
+                  {formatCode(tr.customer_request_code || tr.request_code, tr.shipment_id)} —{' '}
+                  {tr.origin_location?.split(',')[0]} → {tr.destination_location?.split(',')[0]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
             <label htmlFor="driver-sos-type" className="font-bold text-[#181A17] block mb-1.5">
               {isEn ? 'Emergency Type *' : 'Loại sự cố khẩn cấp *'}
             </label>
@@ -735,11 +791,13 @@ export default function DriverDashboardPage() {
 
           <div>
             <label htmlFor="driver-sos-reason" className="font-bold text-[#181A17] block mb-1.5">
-              {isEn ? 'Short description of emergency:' : 'Mô tả ngắn tình trạng sự cố:'}
+              {isEn ? 'Short description of emergency *:' : 'Mô tả ngắn tình trạng sự cố *:'}
             </label>
             <textarea
               id="driver-sos-reason"
               rows={3}
+              required
+              minLength={5}
               value={emergencyReason}
               onChange={(e) => setEmergencyReason(e.target.value)}
               placeholder={
@@ -766,7 +824,7 @@ export default function DriverDashboardPage() {
               type="submit"
               variant="primary"
               size="sm"
-              disabled={isSendingEmergency || !activeTrip}
+              disabled={isSendingEmergency || !canTriggerSos}
               className="min-h-[44px] px-5 bg-[#9E3B3B] hover:bg-[#7F2E2E] text-white font-bold cursor-pointer"
             >
               {isSendingEmergency

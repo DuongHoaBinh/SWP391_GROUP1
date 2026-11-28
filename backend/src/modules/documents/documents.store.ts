@@ -365,14 +365,16 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
   ): Promise<number> {
     const cleanBorderGate = meta?.borderGate?.trim() || null;
     const docTypeCode = meta?.documentTypeCode?.trim() || documentType;
+    const transportMode = meta?.transportMode ?? 'both';
     const [existing] = await this.pool.execute<RegulationRow[]>(
-      `SELECT regulation_id FROM regulation
+      `SELECT regulation_id, document_type_code, transport_mode FROM regulation
        WHERE LOWER(country) = LOWER(?)
          AND (LOWER(document_type) = LOWER(?) OR LOWER(document_type_code) = LOWER(?))
          AND COALESCE(LOWER(border_gate), '') = COALESCE(LOWER(?), '')
-         AND transport_mode = ?
+         AND (transport_mode = ? OR transport_mode = 'both' OR ? = 'both')
+       ORDER BY (transport_mode = ?) DESC, (transport_mode = 'both') DESC, regulation_id ASC
        LIMIT 1`,
-      [country, documentType, docTypeCode, cleanBorderGate, meta?.transportMode ?? 'both'],
+      [country, documentType, docTypeCode, cleanBorderGate, transportMode, transportMode, transportMode],
     );
     const effDate = this.toMysqlDateParam(effectiveDate) ?? this.formatMysqlDateOnly(new Date());
     const isDomesticVn = country.trim().toLowerCase() === 'vietnam';
@@ -390,7 +392,6 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
             : 1);
     const requiresAuth = meta?.requiresAuthorityApproval ?? (!isDomesticVn && ['import_permit', 'export_permit', 'quarantine_certificate'].includes(documentType));
     const bufferHours = meta?.minValidityBufferHours ?? (isDomesticVn ? 24 : 48);
-    const transportMode = meta?.transportMode ?? 'both';
     const maxIssueAgeDays = meta?.maxIssueAgeDays !== undefined && meta?.maxIssueAgeDays !== null ? Number(meta.maxIssueAgeDays) : null;
     const legalRef = meta?.legalReference?.trim() || 'Dữ liệu demo — cần đối chiếu cơ quan thú y';
     const isDemo = meta?.isDemoData !== undefined ? (meta.isDemoData ? 1 : 0) : 1;
@@ -398,7 +399,15 @@ export class DocumentsStore implements OnModuleInit, OnModuleDestroy {
 
     if (existing.length > 0) {
       const regId = existing[0].regulation_id;
-      if (meta?.preserveExisting) return regId;
+      if (meta?.preserveExisting) {
+        if (!existing[0].document_type_code && docTypeCode) {
+          await this.pool.execute(
+            'UPDATE regulation SET document_type_code = (SELECT code FROM document_type WHERE code = ?) WHERE regulation_id = ? AND document_type_code IS NULL',
+            [docTypeCode, regId],
+          );
+        }
+        return regId;
+      }
       await this.pool.execute(
         `UPDATE regulation
          SET description = ?, effective_date = ?, border_gate = ?, transport_mode = ?,

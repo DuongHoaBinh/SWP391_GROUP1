@@ -968,12 +968,23 @@ export function DriverTripConsole({
                   </div>
 
                   {!isEscort && (currentMilestone.responsibleRole === 'escort' || currentMilestone.legType === 'flight' || currentMilestone.legType === 'sea') && (
+                    <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 flex items-center gap-2">
+                      <Info size={13} className="text-amber-700 shrink-0" aria-hidden="true" />
+                      <span>
+                        {isEn
+                          ? 'Escort-owned international milestone — flight, sea, and overseas partner road legs are checked in by the assigned Veterinary Escort.'
+                          : 'Mốc chặng bay/biển hoặc đường bộ nước ngoài do Bác sĩ thú y / Nhân viên hộ tống (Escort) phụ trách check-in.'}
+                      </span>
+                    </div>
+                  )}
+
+                  {isEscort && currentMilestone.responsibleRole === 'driver' && currentMilestone.legType === 'road' && (
                     <div className="px-3 py-2 rounded-lg bg-sky-50 border border-sky-200 text-[11px] text-sky-900 flex items-center gap-2">
                       <Info size={13} className="text-sky-700 shrink-0" aria-hidden="true" />
                       <span>
                         {isEn
-                          ? 'Escort-owned milestone — driver backup check-in is allowed.'
-                          : 'Mốc do Thú y phụ trách — tài xế vẫn có thể check-in hỗ trợ.'}
+                          ? 'Driver-owned domestic road milestone — Escort backup check-in is allowed and logged with your Escort role.'
+                          : 'Mốc đường bộ do Tài xế phụ trách chính — Hộ tống (Escort) vẫn có thể check-in hỗ trợ dự phòng và hệ thống sẽ ghi nhận vai trò.'}
                       </span>
                     </div>
                   )}
@@ -1392,10 +1403,11 @@ export function DriverTripConsole({
                 canSubmitHandover={canSubmitHandover}
               />
 
-              {/* Return Leg No-Show Card (Round-trip only) */}
+              {/* Return Leg No-Show Card (Round-trip only, hidden when cancelled/completed/no_show) */}
               {trackingDetails.tripType === 'round_trip' &&
                 trackingDetails.returnStatus !== 'completed' &&
-                trackingDetails.returnStatus !== 'no_show' && (
+                trackingDetails.returnStatus !== 'no_show' &&
+                trackingDetails.returnStatus !== 'cancelled' && (
                   <div className="rounded-2xl border-2 border-rose-300 bg-rose-50/50 p-5 shadow-sm flex flex-col gap-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">

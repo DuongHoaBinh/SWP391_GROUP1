@@ -238,6 +238,7 @@ function CreateTransportRequestForm() {
   const bookingType: BookingType = 'dedicated_charter';
   const [insuranceValues, setInsuranceValues] = useState<Record<string, InsuranceInput>>({});
   const [insuranceError, setInsuranceError] = useState('');
+  const [demoPaymentAmount, setDemoPaymentAmount] = useState<string>('');
   const { data: policy, error: policyError, mutate: reloadPolicy } = useSWR<InsurancePolicy>('/orders/insurance-policy', url => apiClient<InsurancePolicy>(url), { shouldRetryOnError: false });
 
   const cutoffQuery = useMemo(() => {
@@ -437,17 +438,6 @@ function CreateTransportRequestForm() {
         returnDate: tripType === 'round_trip' && returnDepartureAt ? returnDepartureAt.slice(0, 10) : undefined,
       });
       setComplianceReqs(res);
-      // Auto-advance initial departure date to earliestFeasibleDeparture when horse docs require lead time
-      if (
-        res &&
-        !res.isDepartureFeasible &&
-        res.earliestFeasibleDeparture &&
-        formValues.departureDate < res.earliestFeasibleDeparture &&
-        autoSyncedFeasibleRef.current !== res.earliestFeasibleDeparture
-      ) {
-        autoSyncedFeasibleRef.current = res.earliestFeasibleDeparture;
-        setValue('departureDate', res.earliestFeasibleDeparture, { shouldValidate: true });
-      }
     } catch (err) {
       console.warn('Failed to load compliance requirements:', err);
     } finally {
@@ -734,30 +724,6 @@ function CreateTransportRequestForm() {
       return true;
     }
     if (stepNum === 3) {
-      if (complianceReqs && !complianceReqs.isDepartureFeasible) {
-        const blockingUnresolved: string[] = [];
-        for (const hGroup of complianceReqs.horses) {
-          for (const req of hGroup.requirements) {
-            const key = `${hGroup.horseId}_${req.documentTypeCode}`;
-            const isSatisfied =
-              req.status === 'reusable' ||
-              req.status === 'pending_review' ||
-              req.status === 'expiring' ||
-              submittedLaterKeys.has(key);
-            if (!isSatisfied) {
-              blockingUnresolved.push(`${hGroup.horseName}: ${req.documentTypeName}`);
-            }
-          }
-        }
-        if (blockingUnresolved.length > 0) {
-          toast.error(
-            language === 'en'
-              ? `Cannot proceed for ${formValues.departureDate}. Upload documents, choose "Submit later", or select from ${complianceReqs.earliestFeasibleDeparture}.`
-              : `Chưa thể tiếp tục với ngày ${formValues.departureDate}. Vui lòng nộp giấy tờ, đánh dấu "Nộp bổ sung sau", hoặc chọn ngày từ ${complianceReqs.earliestFeasibleDeparture}.`
-          );
-          return false;
-        }
-      }
       return true;
     }
     return true;
@@ -799,31 +765,6 @@ function CreateTransportRequestForm() {
     if (isDepartureBeforeCutoff(data.departureDate)) {
       toast.error(cutoffViolationMessage());
       return;
-    }
-    // Dynamic compliance lead-time check (Step 8)
-    if (complianceReqs && !complianceReqs.isDepartureFeasible) {
-      const blockingUnresolved: string[] = [];
-      for (const hGroup of complianceReqs.horses) {
-        for (const req of hGroup.requirements) {
-          const key = `${hGroup.horseId}_${req.documentTypeCode}`;
-          const isSatisfied =
-            req.status === 'reusable' ||
-            req.status === 'pending_review' ||
-            req.status === 'expiring' ||
-            submittedLaterKeys.has(key);
-          if (!isSatisfied) {
-            blockingUnresolved.push(`${hGroup.horseName}: ${req.documentTypeName}`);
-          }
-        }
-      }
-      if (blockingUnresolved.length > 0) {
-        toast.error(
-          language === 'en'
-            ? `Cannot depart on ${data.departureDate}. Earliest feasible departure is ${complianceReqs.earliestFeasibleDeparture}. Outstanding documents: ${blockingUnresolved.slice(0, 2).join(', ')}`
-            : `Theo quy định của ${complianceReqs.country}, bạn không kịp chuẩn bị hồ sơ cho ngày đi đã chọn. Ngày sớm nhất khả thi: ${complianceReqs.earliestFeasibleDeparture}. Giấy tờ chưa hoàn tất: ${blockingUnresolved.slice(0, 2).join(', ')}`
-        );
-        return;
-      }
     }
     if (tripType === 'round_trip') {
       if (!returnDepartureAt) {
@@ -887,6 +828,18 @@ function CreateTransportRequestForm() {
         }
       }
 
+      const rawDemoDigits = demoPaymentAmount.replace(/[^\d]/g, '');
+      const parsedDemoPaymentAmount = rawDemoDigits ? Number(rawDemoDigits) : undefined;
+      if (rawDemoDigits && (!Number.isFinite(parsedDemoPaymentAmount) || (parsedDemoPaymentAmount ?? 0) < 1000)) {
+        toast.error(
+          language === 'en'
+            ? 'Minimum demo transfer amount is 1,000 VND.'
+            : 'Số tiền demo chuyển khoản tối thiểu là 1.000 VNĐ.',
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
       const payload = {
         bookingType,
         contactName: currentUser.fullName || currentUser.name || 'Current Customer',
@@ -905,6 +858,7 @@ function CreateTransportRequestForm() {
         acceptReturnPolicy: tripType === 'round_trip' ? acceptReturnPolicy : undefined,
         quoteId: quote?.quoteId ? Number(quote.quoteId) : undefined,
         optionCode: selectedOptionCode,
+        demoPaymentAmount: parsedDemoPaymentAmount,
         specialRequirements: combinedReqs || undefined,
         horses: selectedHorsesData.length > 0 ? selectedHorsesData : undefined,
         deferredDocuments: deferredDocumentsPayload.length > 0 ? deferredDocumentsPayload : undefined,
@@ -1015,11 +969,18 @@ function CreateTransportRequestForm() {
   }, [complianceReqs, submittedLaterKeys]);
 
   const activeQuoteOption = quote?.options?.find((o) => o.optionCode === (selectedOptionCode || quote.recommendedOptionCode)) || quote?.options?.[0];
-  const liveQuoteTotal = quote
+  const baseLiveQuoteTotal = quote
     ? (Array.isArray(activeQuoteOption?.vehicleIds)
         ? (activeQuoteOption?.freight?.total ?? 0) + (quote.insurance?.total || 0)
         : quote.total)
     : null;
+  const parsedLiveDemoAmount = (() => {
+    const digits = demoPaymentAmount.replace(/[^\d]/g, '');
+    if (!digits) return null;
+    const n = Number(digits);
+    return Number.isFinite(n) && n >= 1000 ? n : null;
+  })();
+  const liveQuoteTotal = parsedLiveDemoAmount ?? baseLiveQuoteTotal;
 
   return (
     <div className="flex flex-col gap-5 pb-8">
@@ -2010,6 +1971,8 @@ function CreateTransportRequestForm() {
                 selectedOptionCode={selectedOptionCode}
                 onSelectOptionCode={(code) => setSelectedOptionCode(code)}
                 onPickShortageDate={(date) => setValue('departureDate', date, { shouldValidate: true })}
+                demoPaymentAmount={demoPaymentAmount}
+                onDemoPaymentAmountChange={setDemoPaymentAmount}
               />
               {quoteError && (
                 <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
@@ -2079,18 +2042,10 @@ function CreateTransportRequestForm() {
                       ? `${complianceSummary.deferred} document(s) marked "Submit later"`
                       : `Nộp sau ${complianceSummary.deferred} giấy tờ kiểm dịch`}
                   </strong>
-                  {complianceSummary.earliestDue ? (
-                    <span className="font-mono"> ({language === 'en' ? 'due' : 'hạn'} {complianceSummary.earliestDue})</span>
-                  ) : null}
                   {' — '}
                   {language === 'en'
-                    ? 'upload from Order Detail before departure.'
-                    : 'bổ sung tại Chi tiết đơn trước khi xuất phát.'}
-                  {complianceSummary.hasPastRecommendedDue && (
-                    <span className="ml-1 font-semibold text-rose-800">
-                      {language === 'en' ? '(Past recommended due date)' : '(Sát/quá hạn khuyến nghị)'}
-                    </span>
-                  )}
+                    ? 'upload from Order Detail before departure so Logistics Manager can verify validity and approve.'
+                    : 'tải lên tại Chi tiết đơn trước khi xuất phát để Quản lý vận hành kiểm tra thời hạn và phê duyệt.'}
                 </p>
               </section>
             )}

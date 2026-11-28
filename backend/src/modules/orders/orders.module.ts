@@ -4,9 +4,6 @@ import { OrdersService } from './orders.service';
 import { OrdersStore } from './orders.store';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { DocumentsModule } from '../documents/documents.module';
-import { MomoPaymentController } from './momo-payment.controller';
-import { MomoPaymentService } from './momo-payment.service';
-import { MomoPaymentStore } from './momo-payment.store';
 import { SepayPaymentController, SepayWebhookController } from './sepay-payment.controller';
 import { SepayPaymentService } from './sepay-payment.service';
 import { SepayPaymentStore } from './sepay-payment.store';
@@ -37,7 +34,6 @@ import { RouteNetworkModule } from '../routes/route-network.module';
     PricingController,
     QuotesController,
     InsuranceClaimController,
-    MomoPaymentController,
     SepayPaymentController,
     SepayWebhookController,
   ],
@@ -51,8 +47,6 @@ import { RouteNetworkModule } from '../routes/route-network.module';
     QuoteAllocationService,
     InsuranceClaimService,
     InsuranceClaimStore,
-    MomoPaymentService,
-    MomoPaymentStore,
     SepayPaymentService,
     SepayPaymentStore,
     OrdersOpsStore,
@@ -68,8 +62,6 @@ import { RouteNetworkModule } from '../routes/route-network.module';
     QuotesStore,
     InsuranceClaimService,
     InsuranceClaimStore,
-    MomoPaymentService,
-    MomoPaymentStore,
     SepayPaymentService,
     SepayPaymentStore,
     OrdersOpsStore,

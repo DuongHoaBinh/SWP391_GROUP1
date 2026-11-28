@@ -636,6 +636,37 @@ export class FleetStore implements OnModuleInit, OnModuleDestroy {
     }));
   }
 
+  async countActiveTripsForStaff(userId: number): Promise<number> {
+    const [rows] = await this.pool.execute<any[]>(
+      `SELECT COUNT(DISTINCT sa.shipment_id) AS cnt
+       FROM shipment_assignment sa
+       JOIN shipment s ON sa.shipment_id = s.shipment_id
+       WHERE sa.user_id = ?
+         AND s.status NOT IN ('completed', 'cancelled', 'cancelled_operational', 'rejected', 'refund_requested', 'refunded')
+         AND (
+           sa.role_in_shipment <> 'driver'
+           OR NOT EXISTS (
+             SELECT 1
+             FROM route r_cross
+             JOIN route_leg rl_cross ON rl_cross.route_id = r_cross.route_id
+             WHERE r_cross.shipment_id = s.shipment_id
+               AND rl_cross.leg_type IN ('flight', 'sea')
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM route r_open
+             JOIN route_leg rl_open ON rl_open.route_id = r_open.route_id
+             WHERE r_open.shipment_id = s.shipment_id
+               AND rl_open.leg_type = 'road'
+               AND (rl_open.sequence_no = 1 OR rl_open.vehicle_id IS NOT NULL)
+               AND rl_open.status <> 'completed'
+           )
+         )`,
+      [userId],
+    );
+    return Number(rows[0]?.cnt || 0);
+  }
+
   async updateStaffShift(
     userId: number,
     currentShift: string,

@@ -18,13 +18,11 @@ import {
   CreateDisbursementDto,
   GrantPaymentGraceDto,
   OperationalCancelDto,
-  RescheduleSharedDto,
-  SlaFallbackDto,
+  SubmitRefundBankInfoDto,
   TransferRefundDto,
-  UpgradeCharterDto,
 } from './dto/orders-ops.dto';
 import { DisbursementItem, OrdersOpsStore, RefundRecordItem } from './orders-ops.store';
-import { CancellationCategory } from './refund-policy';
+import { RefundMode } from './refund-policy';
 
 @Injectable()
 export class OrdersOpsService {
@@ -49,7 +47,9 @@ export class OrdersOpsService {
     const result = await this.opsStore.operationalCancel(Number(user.id), shipmentId, dto);
     const code = `REQ-${String(shipmentId).padStart(3, '0')}`;
     const refundSummary = result.refundRecord
-      ? ` Hồ sơ hoàn tiền/bảo lưu #${result.refundRecord.id} (${result.refundRecord.amount.toLocaleString('vi-VN')} VND - ${result.refundRecord.refundMode}) đã được khởi tạo chờ phê duyệt.`
+      ? result.refundRecord.refundMode === RefundMode.CASH_REFUND
+        ? ` Hồ sơ hoàn tiền #${result.refundRecord.id} (${result.refundRecord.amount.toLocaleString('vi-VN')} VND) đã được tạo. Vui lòng vào trang chi tiết đơn hàng điền thông tin tài khoản ngân hàng để nhận hoàn tiền.`
+        : ` Hồ sơ bảo lưu cước #${result.refundRecord.id} (${result.refundRecord.amount.toLocaleString('vi-VN')} VND - bảo lưu 30 ngày) đã được tạo chờ phê duyệt.`
       : '';
     await this.notificationsService.createNotification(
       result.customerId,
@@ -160,23 +160,82 @@ export class OrdersOpsService {
         'status_update',
         updated.shipmentId,
       );
-    } else if (updated.status === 'pending_second_approval') {
-      await this.notificationsService.notifyRole(
-        'Admin',
-        `Yêu cầu Xác nhận kép hoàn tiền >= 20M (${code})`,
-        `Hồ sơ hoàn tiền #${updated.id} (${updated.amount.toLocaleString('vi-VN')} VND) cần phê duyệt lần 2 trước khi giải ngân.`,
-        'status_update',
-        updated.shipmentId,
-      );
     } else if (updated.status === 'approved_for_transfer') {
-      await this.notificationsService.notifyRole(
-        'Admin',
-        `Sẵn sàng chuyển khoản hoàn tiền (${code})`,
-        `Hồ sơ hoàn tiền #${updated.id} (${updated.amount.toLocaleString('vi-VN')} VND) đã duyệt. Kế toán/Admin vui lòng thực hiện chuyển khoản thủ công và tải ủy nhiệm chi.`,
-        'status_update',
-        updated.shipmentId,
-      );
+      if (!updated.formSubmittedAt || !updated.recipientBankAccount) {
+        await this.notificationsService.createNotification(
+          updated.customerId,
+          `Vui lòng cung cấp STK nhận hoàn tiền (${code})`,
+          `Hồ sơ hoàn tiền #${updated.id} (${updated.amount.toLocaleString('vi-VN')} VND) đã được Logistics Manager phê duyệt. Quý khách vui lòng điền thông tin tài khoản ngân hàng trên trang đơn hàng để hoàn tất chuyển khoản.`,
+          'status_update',
+          updated.shipmentId,
+        );
+      } else {
+        await this.notificationsService.notifyRole(
+          'Logistics Manager',
+          `Sẵn sàng chuyển khoản hoàn tiền (${code})`,
+          `Hồ sơ hoàn tiền #${updated.id} (${updated.amount.toLocaleString('vi-VN')} VND) đã duyệt và có đủ STK khách hàng. Vui lòng thực hiện chuyển khoản và tải ủy nhiệm chi.`,
+          'status_update',
+          updated.shipmentId,
+        );
+      }
     }
+    return updated;
+  }
+
+  async getRefundBankInfo(user: AuthenticatedUser, refundId: number) {
+    if (user.role === UserRole.DRIVER_ESCORT) {
+      throw new ForbiddenException('Tài xế không có quyền xem thông tin hoàn tiền.');
+    }
+    const record = await this.opsStore.findRefundById(refundId);
+    if (!record) throw new NotFoundException(`Không tìm thấy hồ sơ hoàn tiền #${refundId}`);
+    if (user.role === UserRole.CUSTOMER && record.customerId !== Number(user.id)) {
+      throw new ForbiddenException('Bạn chỉ được xem biểu mẫu hoàn tiền của đơn hàng thuộc tài khoản mình.');
+    }
+    return {
+      refundId: record.id,
+      shipmentId: record.shipmentId,
+      requestCode: record.requestCode,
+      cancellationCategory: record.cancellationCategory,
+      refundMode: record.refundMode,
+      status: record.status,
+      amount: record.amount,
+      freightRefundAmount: record.freightRefundAmount,
+      insuranceRefundAmount: record.insuranceRefundAmount,
+      disbursementDeduction: record.disbursementDeduction,
+      nonRefundableAirDeduction: record.nonRefundableAirDeduction,
+      bankName: record.recipientBankName,
+      accountNumber: record.recipientBankAccount,
+      accountHolder: record.recipientAccountHolder,
+      customerNote: record.customerNote,
+      formSubmittedAt: record.formSubmittedAt,
+      slaDueAt: record.slaDueAt,
+      transferReceiptUrl: record.transferReceiptUrl,
+      bankTransactionRef: record.bankTransactionRef,
+      canSubmit:
+        user.role === UserRole.CUSTOMER &&
+        record.refundMode === RefundMode.CASH_REFUND &&
+        record.amount > 0 &&
+        !record.formSubmittedAt &&
+        ['pending_approval', 'approved_for_transfer'].includes(record.status),
+    };
+  }
+
+  async submitRefundBankInfo(
+    user: AuthenticatedUser,
+    refundId: number,
+    dto: SubmitRefundBankInfoDto,
+  ): Promise<RefundRecordItem> {
+    if (user.role !== UserRole.CUSTOMER) {
+      throw new ForbiddenException('Chỉ chủ ngựa sở hữu đơn mới được điền thông tin tài khoản nhận hoàn tiền.');
+    }
+    const updated = await this.opsStore.submitRefundBankInfo(refundId, Number(user.id), dto);
+    await this.notificationsService.notifyRole(
+      'Logistics Manager',
+      `Chủ ngựa đã cung cấp STK hoàn tiền (${updated.requestCode})`,
+      `Khách hàng đã gửi STK nhận hoàn tiền (${updated.recipientBankName} · ${updated.recipientBankAccount} · ${updated.recipientAccountHolder}) cho hồ sơ #${updated.id} (${updated.amount.toLocaleString('vi-VN')} VND).`,
+      'status_update',
+      updated.shipmentId,
+    );
     return updated;
   }
 
@@ -206,6 +265,7 @@ export class OrdersOpsService {
         bankTransactionRef: dto.bankTransactionRef,
         transferReceiptUrl: receiptUrl,
         notes: dto.notes,
+        actorRole: user.role,
       });
 
       await this.notificationsService.createNotification(
@@ -246,63 +306,6 @@ export class OrdersOpsService {
     return { absolutePath, fileName: safeName };
   }
 
-  async upgradeCharter(user: AuthenticatedUser, shipmentId: number, dto: UpgradeCharterDto) {
-    if (![UserRole.LOGISTICS_MANAGER, UserRole.ADMIN].includes(user.role)) {
-      throw new ForbiddenException('Chỉ Logistics Manager hoặc Admin mới có quyền thực hiện nâng cấp bao nguyên xe.');
-    }
-    const order = await this.opsStore.findOrderOwner(shipmentId);
-    if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
-
-    const res = await this.opsStore.upgradeCharter(Number(user.id), shipmentId, dto.charterTransportCost, dto.reason);
-    const code = `REQ-${String(shipmentId).padStart(3, '0')}`;
-    if (res.branch === 'A_void_reissue') {
-      await this.notificationsService.createNotification(
-        res.customerId,
-        `Cập nhật hóa đơn nâng cấp bao nguyên xe (${code})`,
-        `Đơn ${code} đã nâng cấp sang dedicated_charter. Hóa đơn cũ đã void; vui lòng thanh toán hóa đơn mới ${res.newTotalCost.toLocaleString('vi-VN')} VND.`,
-        'status_update',
-        shipmentId,
-      );
-    } else if (res.branch === 'B_supplemental_invoice') {
-      await this.notificationsService.createNotification(
-        res.customerId,
-        `Phát hành hóa đơn phụ thu chênh lệch (${code})`,
-        `Đơn ${code} đã nâng cấp sang dedicated_charter. Hóa đơn gốc được giữ nguyên; vui lòng thanh toán thêm hóa đơn phụ thu ${Number(res.invoice?.amount || 0).toLocaleString('vi-VN')} VND.`,
-        'status_update',
-        shipmentId,
-      );
-    }
-    return res;
-  }
-
-  async rescheduleShared(
-    user: AuthenticatedUser,
-    shipmentId: number,
-    dto: RescheduleSharedDto,
-    options?: { requireSharedStall?: boolean },
-  ) {
-    if (![UserRole.LOGISTICS_MANAGER, UserRole.ADMIN].includes(user.role)) {
-      throw new ForbiddenException('Chỉ Logistics Manager hoặc Admin mới có quyền dời lịch chuyến ghép.');
-    }
-    const order = await this.opsStore.findOrderOwner(shipmentId);
-    if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
-    const res = await this.opsStore.rescheduleSharedOrder(
-      shipmentId,
-      dto.newDepartureDate,
-      dto.reason,
-      options,
-    );
-    const code = `REQ-${String(shipmentId).padStart(3, '0')}`;
-    await this.notificationsService.createNotification(
-      res.customerId,
-      `Đã dời lịch chuyến ghép miễn phí (${code})`,
-      `Đơn ${code} đã được dời sang ngày khởi hành ${res.newDepartureDate} theo yêu cầu D-3 fallback.`,
-      'status_update',
-      shipmentId,
-    );
-    return res;
-  }
-
   async grantPaymentGrace(user: AuthenticatedUser, shipmentId: number, dto: GrantPaymentGraceDto) {
     const res = await this.opsStore.grantPaymentGrace(Number(user.id), shipmentId, dto.reason);
     const code = `REQ-${String(shipmentId).padStart(3, '0')}`;
@@ -314,29 +317,5 @@ export class OrdersOpsService {
       shipmentId,
     );
     return res;
-  }
-
-  async handleSlaFallback(user: AuthenticatedUser, shipmentId: number, dto: SlaFallbackDto) {
-    if (dto.option === 'reschedule_free') {
-      if (!dto.newDepartureDate) {
-        throw new BadRequestException('Phương án dời lịch chuyến (reschedule_free) bắt buộc có newDepartureDate.');
-      }
-      await this.rescheduleShared(
-        user,
-        shipmentId,
-        {
-          newDepartureDate: dto.newDepartureDate,
-          reason: dto.notes || 'Dời lịch do quá trần nhân sự BR-F3-06',
-        },
-        { requireSharedStall: false },
-      );
-    } else if (dto.option === 'cancel_refund') {
-      await this.operationalCancel(user, shipmentId, {
-        category: CancellationCategory.COMPANY_FAULT,
-        reason: dto.notes || 'Hủy vận hành hoàn 100% do quá trần điều phối BR-F3-06',
-      });
-    }
-    await this.opsStore.recordSlaFallback(shipmentId, dto.option, dto.notes);
-    return { success: true, shipmentId, option: dto.option };
   }
 }

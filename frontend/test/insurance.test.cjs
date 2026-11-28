@@ -11,6 +11,7 @@ function load(file) {
   const filename = path.resolve(__dirname, '../src/features/orders', file);
   const compiled = new Module(filename, module); compiled.filename = filename; compiled.paths = module.paths;
   compiled.require = name => {
+    if (name === 'lucide-react') return new Proxy({}, { get: () => () => null });
     if (name === '@/lib/i18n/LanguageContext') return {
       useLanguage: () => ({
         language: 'vi',
@@ -30,7 +31,7 @@ const { previewInsurance, defaultInsurance } = load('insurance-policy.ts');
 const { InsuranceSelection } = load('components/InsuranceSelection.tsx');
 const { CostSummary, InsuranceSummary } = load('components/InsuranceSummary.tsx');
 const policy = { version: 'equine-v1', usdToVnd: 25000, packages: [
-  { code: 'basic', feeBasisPoints: 0 }, { code: 'standard', feeBasisPoints: 150 }, { code: 'premium', feeBasisPoints: 300 },
+  { code: 'basic', feeBasisPoints: 0, minimumFeeVnd: 0 }, { code: 'standard', feeBasisPoints: 150, minimumFeeVnd: 0 }, { code: 'premium', feeBasisPoints: 300, minimumFeeVnd: 0 },
 ] };
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
 
@@ -49,7 +50,7 @@ test('each selected horse has independent radios, valuation labels and visible f
   assert.equal((html.match(/type="radio"/g) || []).length, 6);
   assert.equal((html.match(/checked=""/g) || []).length, 2);
   assert.match(html, /name="insurance-a"/); assert.match(html, /name="insurance-b"/);
-  assert.match(html, /3\.000\.000 VNĐ/); assert.match(html, /80%/); assert.match(html, /cấp cứu thú y/);
+  assert.match(html, /3\.000\.000 VNĐ/); assert.match(html, /80%/); assert.match(html, /Thú y ≤ 20tr|Toàn bộ thú y/);
   assert.match(html, /Giá trị ước tính/);
 });
 
@@ -64,7 +65,7 @@ test('saved policy summary renders compensation, veterinary coverage and stored 
   const html = render(InsuranceSummary, { horses: [{ horseId: 1, name: '<script>unsafe</script>', quantity: 2, declaredValue: 10000,
     declaredCurrency: 'USD', exchangeRate: 25000, declaredValueVnd: 250000000, insurancePackage: 'premium', insuranceFee: 7500000,
     maxCompensation: 250000000, emergencyVetCovered: true }], transportCost: 10000000, insuranceFee: 15000000, totalCost: 25000000 });
-  assert.match(html, /tỷ giá đã lưu/); assert.match(html, /250\.000\.000 VNĐ/); assert.match(html, /cấp cứu thú y/);
+  assert.match(html, /10\.000 USD/); assert.match(html, /250\.000\.000 VNĐ/); assert.match(html, /Cấp cứu thú y/);
   assert.match(html, /25\.000\.000 VNĐ/); assert.doesNotMatch(html, /<script>/);
 });
 

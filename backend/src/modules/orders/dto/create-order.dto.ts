@@ -133,6 +133,14 @@ export class CreateOrderDto {
   @Max(999999999999)
   customerProposedPrice?: number;
 
+  @ApiPropertyOptional({ example: 2000, minimum: 1000, description: 'Số tiền thanh toán điều chỉnh cho môi trường demo chuyển khoản VietQR (VNĐ, chỉ hiệu lực khi NODE_ENV !== production)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Số tiền thanh toán demo phải là số nguyên VNĐ' })
+  @Min(1000, { message: 'Số tiền thanh toán demo tối thiểu là 1.000 VNĐ' })
+  @Max(999999999999)
+  demoPaymentAmount?: number;
+
   @ApiPropertyOptional({ enum: ['road', 'air', 'sea'], description: 'Phương thức vận tải' })
   @IsOptional()
   @IsIn(['road', 'air', 'sea'])

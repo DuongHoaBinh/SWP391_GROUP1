@@ -66,23 +66,6 @@ export class TrackingController {
     return this.trackingService.getLiveOverview(user, alertFilter);
   }
 
-  @Get('settings')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Lấy cấu hình hệ thống tracking (geofence, simulation, vitals)' })
-  async getTrackingSettings(): Promise<TrackingSystemSettings> {
-    return this.trackingService.getTrackingSettings();
-  }
-
-  @Patch('settings')
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Cập nhật cấu hình tracking (ADMIN only: simulation, geofence, customer_vitals_detail)' })
-  async updateTrackingSettings(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() patch: Partial<TrackingSystemSettings>,
-  ): Promise<TrackingSystemSettings> {
-    return this.trackingService.updateTrackingSettings(user, patch);
-  }
-
   @Get('shipments/:shipmentId')
   async getTrackingDetails(
     @CurrentUser() user: AuthenticatedUser,

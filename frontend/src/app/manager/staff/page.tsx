@@ -23,8 +23,7 @@ import toast from 'react-hot-toast';
 type StaffCategory =
   | 'Driver / Escort'
   | 'Equine Medical Escort'
-  | 'Transport Specialist'
-  | 'Fleet Coordinator';
+  | 'Logistics Manager';
 
 interface StaffMember {
   id: string;
@@ -49,17 +48,17 @@ interface StaffMember {
 function normalizeStaffCategory(rawRole: string, specialization?: string | null): StaffCategory {
   const r = String(rawRole || '').toLowerCase();
   const sp = String(specialization || '').toLowerCase();
-  if (r.includes('specialist') || r.includes('kiểm dịch')) return 'Transport Specialist';
-  if (r.includes('coordinator') || r.includes('điều phối') || r.includes('fleet')) return 'Fleet Coordinator';
+  if (r.includes('manager') || r.includes('quản lý') || r.includes('specialist') || r.includes('coordinator')) {
+    return 'Logistics Manager';
+  }
   if (sp.includes('escort') || sp.includes('vet') || r.includes('medical') || r.includes('thú y') || r.includes('hộ tống')) {
     return 'Equine Medical Escort';
   }
   return 'Driver / Escort';
 }
 
-function roleIdFromCategory(cat: StaffCategory): 2 | 3 | 4 | 5 {
-  if (cat === 'Transport Specialist') return 3;
-  if (cat === 'Fleet Coordinator') return 4;
+function roleIdFromCategory(cat: StaffCategory): 2 | 5 {
+  if (cat === 'Logistics Manager') return 2;
   return 5;
 }
 
@@ -173,7 +172,7 @@ export default function ManagerStaffPage() {
 
     setIsSavingShift(true);
     try {
-      await apiClient(`/fleet/staff/${numericId}/shift`, {
+      const shiftRes = await apiClient<{ activeTrips?: number }>(`/fleet/staff/${numericId}/shift`, {
         method: 'PATCH',
         body: JSON.stringify({
           currentShift: newShift,
@@ -181,16 +180,18 @@ export default function ManagerStaffPage() {
           releaseActiveTrips: newStatus === 'ON_DUTY',
         }),
       });
+      const nextActiveTrips = typeof shiftRes?.activeTrips === 'number' ? shiftRes.activeTrips : selectedStaff.activeTripsCount;
 
       setStaffList((prev) =>
         prev.map((s) =>
           s.id === selectedStaff.id
-              ? {
-                  ...s,
-                  currentShift: newShift,
-                  dutyStatus: newStatus,
-                  ...(newStatus === 'ON_DUTY' ? { activeTripsCount: 0, activeTrip: null } : {}),
-                }
+            ? {
+                ...s,
+                currentShift: newShift,
+                dutyStatus: newStatus,
+                activeTripsCount: nextActiveTrips,
+                ...(nextActiveTrips === 0 ? { activeTrip: null } : {}),
+              }
             : s,
         ),
       );
@@ -301,12 +302,13 @@ export default function ManagerStaffPage() {
       case 'Equine Medical Escort':
         return t(
           'manager.staff.roleEscort',
-          language === 'en' ? 'Veterinary & Flight Escort (Road & Air)' : 'Bác sĩ thú y / Hộ tống (Đường bộ & Hàng không)'
+          language === 'en' ? 'Veterinary & Flight Escort (Road, Air & Sea)' : 'Bác sĩ thú y / Hộ tống (Đường bộ, Bay & Biển)'
         );
-      case 'Transport Specialist':
-        return t('manager.staff.roleSpecialist', 'Chuyên viên kiểm dịch');
-      case 'Fleet Coordinator':
-        return t('manager.staff.roleCoordinator', 'Điều phối viên đội xe');
+      case 'Logistics Manager':
+        return t(
+          'manager.staff.roleManager',
+          language === 'en' ? 'Logistics Manager (Operations)' : 'Quản lý vận hành (Logistics Manager)'
+        );
       default:
         return translateRole(r);
     }
@@ -316,20 +318,16 @@ export default function ManagerStaffPage() {
     switch (r) {
       case 'Driver / Escort':
         return language === 'en'
-          ? 'Road corridors & Airport transfer (Leg 1)'
-          : 'Tuyến đường bộ & Xe trung chuyển ra sân bay';
+          ? 'Domestic road corridors & Vietnam airport/seaport transfer'
+          : 'Tuyến đường bộ nội địa & trung chuyển sân bay/cảng tại VN';
       case 'Equine Medical Escort':
         return language === 'en'
-          ? 'In-flight air cargo escort & Border clearance'
-          : 'Áp tải khoang bay hàng không & Thông quan đích';
-      case 'Transport Specialist':
+          ? 'In-flight air/sea escort, customs clearance & overseas partner handover'
+          : 'Áp tải bay/biển, thông quan cửa khẩu & điều phối đối tác nước ngoài';
+      case 'Logistics Manager':
         return language === 'en'
-          ? 'Quarantine dossiers & CITES / customs permits'
-          : 'Thẩm định hồ sơ kiểm dịch & cấp phép thông quan';
-      case 'Fleet Coordinator':
-        return language === 'en'
-          ? 'Route building, fleet dispatch & live radar'
-          : 'Thiết kế chặng, điều độ đội xe & giám sát hành trình';
+          ? 'Full operations: approvals, compliance, route dispatch, fleet, refunds & settings'
+          : 'Toàn quyền vận hành: duyệt đơn, kiểm dịch, lập lộ trình, đội xe, hoàn tiền & cài đặt';
       default:
         return '';
     }
@@ -585,10 +583,11 @@ export default function ManagerStaffPage() {
                 {language === 'en' ? 'Specialized Truck Driver (Road)' : 'Tài xế xe chuyên dụng (Đường bộ)'}
               </option>
               <option value="Equine Medical Escort">
-                {language === 'en' ? 'Veterinary & Flight Escort (Road & Air)' : 'Bác sĩ thú y / Hộ tống (Đường bộ & Hàng không)'}
+                {language === 'en' ? 'Veterinary & Flight Escort (Road, Air & Sea)' : 'Bác sĩ thú y / Hộ tống (Đường bộ, Bay & Biển)'}
               </option>
-              <option value="Transport Specialist">{t('manager.staff.roleSpecialist', 'Chuyên viên kiểm dịch')}</option>
-              <option value="Fleet Coordinator">{t('manager.staff.roleCoordinator', 'Điều phối viên đội xe')}</option>
+              <option value="Logistics Manager">
+                {language === 'en' ? 'Logistics Manager (Operations)' : 'Quản lý vận hành (Logistics Manager)'}
+              </option>
             </select>
           </div>
         </div>
@@ -729,7 +728,7 @@ export default function ManagerStaffPage() {
                               const numericId = Number(staff.id);
                               if (!Number.isInteger(numericId) || numericId <= 0) return;
                               try {
-                                await apiClient(`/fleet/staff/${numericId}/shift`, {
+                                const shiftRes = await apiClient<{ activeTrips?: number }>(`/fleet/staff/${numericId}/shift`, {
                                   method: 'PATCH',
                                   body: JSON.stringify({
                                     currentShift: staff.currentShift,
@@ -737,18 +736,32 @@ export default function ManagerStaffPage() {
                                     releaseActiveTrips: true,
                                   }),
                                 });
+                                const remainingTrips = typeof shiftRes?.activeTrips === 'number' ? shiftRes.activeTrips : 0;
                                 setStaffList((prev) =>
                                   prev.map((s) =>
                                     s.id === staff.id
-                                      ? { ...s, dutyStatus: 'ON_DUTY', activeTripsCount: 0, activeTrip: null }
+                                      ? {
+                                          ...s,
+                                          dutyStatus: 'ON_DUTY',
+                                          activeTripsCount: remainingTrips,
+                                          ...(remainingTrips === 0 ? { activeTrip: null } : {}),
+                                        }
                                       : s
                                   )
                                 );
-                                toast.success(
-                                  language === 'en'
-                                    ? `${staff.name} is now available (0 active trips)!`
-                                    : `Đã chuyển ${staff.name} về trạng thái Rảnh (0 chuyến)!`
-                                );
+                                if (remainingTrips === 0) {
+                                  toast.success(
+                                    language === 'en'
+                                      ? `${staff.name} is now available (0 active trips)!`
+                                      : `Đã chuyển ${staff.name} về trạng thái Rảnh (0 chuyến)!`
+                                  );
+                                } else {
+                                  toast(
+                                    language === 'en'
+                                      ? `Released unstarted assignments. ${staff.name} still has ${remainingTrips} in-transit trip(s).`
+                                      : `Đã giải phóng các chuyến chưa xuất phát. ${staff.name} vẫn còn ${remainingTrips} chuyến đang chạy không thể hủy ngang.`
+                                  );
+                                }
                               } catch (err: any) {
                                 toast.error(
                                   err?.message ||
@@ -854,7 +867,7 @@ export default function ManagerStaffPage() {
           onClose={handleCloseAddModal}
           closeDisabled={isAddingStaff}
           title={t('manager.staff.modalAddTitle', 'Thêm Nhân sự & Cấp Chứng chỉ Vận hành')}
-          subtitle={t('manager.staff.modalAddSubtitle', 'Đăng ký tài xế chuyên dụng, hộ tống thú y hoặc điều phối viên mới')}
+          subtitle={t('manager.staff.modalAddSubtitle', 'Đăng ký tài xế chuyên dụng, hộ tống thú y hoặc quản lý vận hành mới')}
           maxWidth="max-w-lg"
         >
           <form onSubmit={handleAddStaff} className="flex flex-col gap-4 text-sm">
@@ -888,10 +901,11 @@ export default function ManagerStaffPage() {
                     {language === 'en' ? 'Specialized Truck Driver (Road)' : 'Tài xế xe chuyên dụng (Đường bộ)'}
                   </option>
                   <option value="Equine Medical Escort">
-                    {language === 'en' ? 'Veterinary & Flight Escort (Road & Air)' : 'Bác sĩ thú y / Hộ tống (Đường bộ & Bay)'}
+                    {language === 'en' ? 'Veterinary & Flight Escort (Road, Air & Sea)' : 'Bác sĩ thú y / Hộ tống (Đường bộ, Bay & Biển)'}
                   </option>
-                  <option value="Fleet Coordinator">{t('manager.staff.optRoleCoordinator', 'Điều phối viên đội xe')}</option>
-                  <option value="Transport Specialist">{t('manager.staff.optRoleSpecialist', 'Chuyên viên kiểm dịch & pháp lý')}</option>
+                  <option value="Logistics Manager">
+                    {language === 'en' ? 'Logistics Manager (Operations)' : 'Quản lý vận hành (Logistics Manager)'}
+                  </option>
                 </select>
               </div>
 

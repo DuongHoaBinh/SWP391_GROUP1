@@ -79,6 +79,7 @@ const STATUS_CONFIG: Record<string, StatusMeta> = {
   confirmed: { vi: 'Đã xác nhận chuyến', en: 'Trip Confirmed', bg: '#FAF8F4', color: '#181A17', border: '#D4C5A3' },
   ready_to_depart: { vi: 'Sẵn sàng xuất phát', en: 'Ready to Depart', bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
   in_transit: { vi: 'Đang vận chuyển', en: 'In Transit', bg: '#FAF8F4', color: '#A67C2E', border: '#C4B38E' },
+  return_pending: { vi: 'Chờ chặng về', en: 'Return Pending', bg: '#F8F0DF', color: '#966516', border: '#DFCA9A' },
   completed: { vi: 'Đã hoàn thành', en: 'Completed', bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
   delivered: { vi: 'Đã hoàn thành', en: 'Delivered', bg: '#E8F2EB', color: '#287653', border: '#B7DBC4' },
   cancelled: { vi: 'Đã hủy', en: 'Cancelled', bg: '#F0EEE8', color: '#5C6658', border: '#D8CEBE' },
@@ -528,19 +529,12 @@ export default function ManagerRequestDetailPage() {
     {
       title: t('manager.detail.step3Title', 'Hồ sơ kiểm dịch'),
       desc: t('manager.detail.step3Desc', 'Thẩm định giấy tờ'),
-      done: [
-        'planning',
-        'confirmed',
-        'ready_to_depart',
-        'in_transit',
-        'completed',
-        'delivered',
-      ].includes(statusKey),
+      done: Boolean(checklist?.isFullyCompliant),
     },
     {
       title: t('manager.detail.step4Title', 'Lập tuyến xe'),
       desc: t('manager.detail.step4Desc', 'Điều phối & Phân xe'),
-      done: ['confirmed', 'ready_to_depart', 'in_transit', 'completed', 'delivered'].includes(statusKey),
+      done: ['confirmed', 'ready_to_depart', 'in_transit', 'return_pending', 'completed', 'delivered'].includes(statusKey),
     },
     {
       title: t('manager.detail.step5Title', 'Hoàn tất bàn giao'),
@@ -859,9 +853,15 @@ export default function ManagerRequestDetailPage() {
                                 String(reg.documentType || '').toLowerCase(),
                           )
                         : null;
+                      const todayIct = new Intl.DateTimeFormat('en-CA', {
+                        timeZone: 'Asia/Ho_Chi_Minh',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                      }).format(new Date());
                       const isOverdue = Boolean(
                         deferredMatch?.submitDeadline &&
-                          String(deferredMatch.submitDeadline).slice(0, 10) < new Date().toISOString().slice(0, 10),
+                          String(deferredMatch.submitDeadline).slice(0, 10) < todayIct,
                       );
                       return (
                       <div

@@ -26,7 +26,7 @@ export function getDashboardRouteForRole(role?: string | null): string {
 const LEGACY_PATH_MAP: Array<[string, string]> = [
   ['/specialist/compliance-orders', '/manager/compliance/orders'],
   ['/specialist/documents', '/manager/compliance/documents'],
-  ['/specialist/approval', '/manager/compliance/documents'],
+  ['/specialist/approval', '/manager/compliance'],
   ['/specialist/missing', '/manager/compliance/missing'],
   ['/specialist/regulations', '/manager/compliance/regulations'],
   ['/specialist/notifications', '/manager/notifications'],
@@ -39,7 +39,7 @@ const LEGACY_PATH_MAP: Array<[string, string]> = [
   ['/coordinator/alerts', '/manager/incidents'],
   ['/coordinator/notifications', '/manager/notifications'],
   ['/coordinator/settings', '/manager/settings'],
-  ['/coordinator', '/manager/dispatch'],
+  ['/coordinator', '/manager/planning'],
 ];
 
 export function mapLegacyPortalPath(pathname: string): string | null {

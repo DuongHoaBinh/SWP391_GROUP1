@@ -12,6 +12,7 @@ import { CANNOT_FULFIL_REASONS, FeasibilityReviewDto, SubmitRefundFormDto } from
 import { addBusinessDays, computePrepaidPaymentDueAt, STAFF_REVIEWER_ROLE_NAMES_SQL } from './prepaid-policy';
 import { transitionShipment } from './order-state-machine';
 import { releaseShipmentReservations, reserveVehicles } from '../fleet/vehicle-reservation';
+import { computeDeferredSubmitDeadline } from '../documents/requirement-policy';
 import { ResultSetHeader } from 'mysql2/promise';
 
 interface ShipmentRow extends RowDataPacket {
@@ -250,7 +251,17 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
         const transportCost = Number(selectedOption?.freight?.total ?? qRow.freight_total);
         const insuranceFee = Number(qResult.insurance?.total ?? qRow.insurance_total);
-        const totalCost = transportCost + insuranceFee;
+        const originalQuoteTotal = transportCost + insuranceFee;
+        const allowDemoOverride = process.env.NODE_ENV !== 'production';
+        const parsedDemoAmount =
+          allowDemoOverride &&
+          dto.demoPaymentAmount != null &&
+          Number.isFinite(Number(dto.demoPaymentAmount)) &&
+          Math.round(Number(dto.demoPaymentAmount)) >= 1000 &&
+          Math.round(Number(dto.demoPaymentAmount)) <= 999999999999
+            ? Math.round(Number(dto.demoPaymentAmount))
+            : null;
+        const totalCost = parsedDemoAmount ?? originalQuoteTotal;
 
         const isRoundTrip = qRow.trip_type === 'round_trip' || qInput.tripType === 'round_trip' || dto.tripType === 'round_trip';
         if (isRoundTrip && !dto.acceptReturnPolicy) {
@@ -267,6 +278,11 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
         const returnPolicySnapshot = isRoundTrip ? JSON.stringify(currentReturnPolicy()) : null;
         const returnPolicyAcceptedAt = isRoundTrip ? new Date() : null;
 
+        const effectiveRequestedDate = dto.requestedDate
+          ? new Date(dto.requestedDate)
+          : new Date(qInput.departureDate || Date.now());
+        const canonicalDeferredDeadline = computeDeferredSubmitDeadline(effectiveRequestedDate, new Date());
+
         const normalizedDeferredDocs = Array.isArray(dto.deferredDocuments)
           ? Array.from(
               new Map(
@@ -281,7 +297,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
                         horseId,
                         documentTypeCode,
                         documentTypeName: d.documentTypeName ? String(d.documentTypeName).trim() : undefined,
-                        submitDeadline: d.submitDeadline ? String(d.submitDeadline).trim().slice(0, 10) : null,
+                        submitDeadline: canonicalDeferredDeadline,
                       },
                     ];
                   }),
@@ -296,6 +312,8 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
           return: qResult.return ?? null,
           tripType,
           deferredDocuments: normalizedDeferredDocs,
+          originalQuoteTotal,
+          demoPaymentAmount: parsedDemoAmount,
           customerProposedPrice:
             dto.customerProposedPrice != null && Number.isFinite(Number(dto.customerProposedPrice)) && Number(dto.customerProposedPrice) > 0
               ? Math.round(Number(dto.customerProposedPrice))
@@ -951,7 +969,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
       // Only create cash refund record when the order actually has verified payment
       if (data.refund.total > 0 && hasVerifiedPayment) {
-        const requiresDualApproval = data.refund.total >= 20_000_000 ? 1 : 0;
+        const requiresDualApproval = 0;
         await db.execute(
           `INSERT INTO shipment_refund_record (
             shipment_id, customer_id, cancellation_category, refund_mode,
@@ -1218,9 +1236,21 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       pricingSnapshot: parseJsonField(row.pricing_snapshot),
       deferredDocuments: (() => {
         const direct = parseJsonField(row.deferred_documents_json);
-        if (Array.isArray(direct)) return direct;
-        const fromSnap = parseJsonField(row.pricing_snapshot)?.deferredDocuments;
-        return Array.isArray(fromSnap) ? fromSnap : [];
+        const rawList = Array.isArray(direct)
+          ? direct
+          : Array.isArray(parseJsonField(row.pricing_snapshot)?.deferredDocuments)
+            ? parseJsonField(row.pricing_snapshot).deferredDocuments
+            : [];
+        if (rawList.length === 0) return [];
+        const depRef = row.departure_date || row.requested_date;
+        const createdRef = row.created_at || new Date();
+        const canonicalDeadline = depRef
+          ? computeDeferredSubmitDeadline(new Date(depRef), new Date(createdRef))
+          : null;
+        return rawList.map((d: any) => ({
+          ...d,
+          submitDeadline: canonicalDeadline || d?.submitDeadline || null,
+        }));
       })(),
       customerProposedPrice:
         parseJsonField(row.pricing_snapshot)?.customerProposedPrice != null
@@ -1620,7 +1650,7 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
 
     const [refRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM shipment_refund_record
-       WHERE shipment_id = ? AND cancellation_category = 'company_cannot_fulfil'
+       WHERE shipment_id = ? AND status <> 'rejected'
        ORDER BY refund_id DESC LIMIT 1`,
       [orderId],
     );
@@ -1679,19 +1709,50 @@ export class OrdersStore implements OnModuleInit, OnModuleDestroy {
       }
 
       const [existing] = await db.execute<RowDataPacket[]>(
-        `SELECT refund_id, status FROM shipment_refund_record
-         WHERE shipment_id = ? AND cancellation_category = 'company_cannot_fulfil' AND status <> 'rejected'`,
+        `SELECT refund_id, status, form_submitted_at, recipient_bank_account FROM shipment_refund_record
+         WHERE shipment_id = ? AND status <> 'rejected'
+         ORDER BY refund_id DESC LIMIT 1`,
         [orderId],
       );
-      if (existing.length > 0) {
+      if (existing.length > 0 && (existing[0].form_submitted_at || existing[0].recipient_bank_account)) {
         throw new ConflictException('Đơn hàng này đã được nộp thông tin hoàn tiền rồi');
       }
 
       const slaDays = Math.max(1, Number(process.env.REFUND_SLA_BUSINESS_DAYS || 3));
       const slaDueAt = addBusinessDays(new Date(), slaDays);
-      const requiresDualApproval = totalPaid >= 20_000_000;
+      const requiresDualApproval = false;
       const freightAmount = Number(ship.transport_cost ?? totalPaid - Number(ship.insurance_fee));
       const insuranceAmount = Number(ship.insurance_fee);
+
+      if (existing.length > 0) {
+        await db.execute(
+          `UPDATE shipment_refund_record
+           SET recipient_bank_account = ?,
+               recipient_bank_name = ?,
+               recipient_account_holder = ?,
+               customer_note = ?,
+               form_submitted_at = NOW(),
+               sla_due_at = COALESCE(sla_due_at, ?),
+               requires_dual_approval = 0
+           WHERE refund_id = ?`,
+          [
+            dto.accountNumber.trim(),
+            dto.bankName.trim(),
+            dto.accountHolder.trim().toUpperCase(),
+            dto.note?.trim() ?? null,
+            slaDueAt,
+            existing[0].refund_id,
+          ],
+        );
+        return {
+          refundId: Number(existing[0].refund_id),
+          shipmentId: orderId,
+          status: existing[0].status,
+          amount: totalPaid,
+          slaDueAt: slaDueAt.toISOString(),
+          requiresDualApproval: false,
+        };
+      }
 
       const [result] = await db.execute<ResultSetHeader>(
         `INSERT INTO shipment_refund_record (

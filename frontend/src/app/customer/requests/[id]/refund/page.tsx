@@ -44,7 +44,10 @@ function CustomerRefundPageContent() {
   const id = params?.id as string;
   const claimIdParam = searchParams?.get('claimId');
   const claimId = claimIdParam && /^\d+$/.test(claimIdParam) ? Number(claimIdParam) : null;
+  const refundIdParam = searchParams?.get('refundId');
+  const refundId = refundIdParam && /^\d+$/.test(refundIdParam) ? Number(refundIdParam) : null;
   const isClaimMode = claimId !== null;
+  const isRefundIdMode = !isClaimMode && refundId !== null;
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -65,10 +68,36 @@ function CustomerRefundPageContent() {
     setLoadError(null);
     const endpoint = isClaimMode
       ? `/insurance/claims/${claimId}/refund-form`
-      : `/orders/${id}/refund-form`;
+      : isRefundIdMode
+        ? `/orders/refunds/${refundId}/bank-info`
+        : `/orders/${id}/refund-form`;
     apiClient<any>(endpoint)
       .then((res) => {
-        setInfo(res);
+        if (isRefundIdMode && res) {
+          setInfo({
+            shipmentId: res.shipmentId,
+            status: res.status,
+            totalPaidAmount: Number(res.amount || 0),
+            freightAmount: Number(res.freightRefundAmount || 0),
+            insuranceAmount: Number(res.insuranceRefundAmount || 0),
+            slaDueAt: res.slaDueAt,
+            refundRecord: {
+              refundId: res.refundId,
+              status: res.status,
+              bankName: res.bankName,
+              accountNumber: res.accountNumber,
+              accountHolder: res.accountHolder,
+              customerNote: res.customerNote,
+              formSubmittedAt: res.formSubmittedAt,
+              slaDueAt: res.slaDueAt,
+              transferReceiptUrl: res.transferReceiptUrl,
+            },
+            canSubmit: Boolean(res.canSubmit),
+            refundMode: res.refundMode,
+          });
+        } else {
+          setInfo(res);
+        }
       })
       .catch((err) => {
         const msg =
@@ -80,7 +109,7 @@ function CustomerRefundPageContent() {
       .finally(() => {
         setLoading(false);
       });
-  }, [id, isEn, isClaimMode, claimId]);
+  }, [id, isEn, isClaimMode, claimId, isRefundIdMode, refundId]);
 
   useEffect(() => {
     loadData();
@@ -121,16 +150,26 @@ function CustomerRefundPageContent() {
       setSubmitting(true);
       const submitEndpoint = isClaimMode
         ? `/insurance/claims/${claimId}/refund-form`
-        : `/orders/${id}/refund-form`;
+        : isRefundIdMode
+          ? `/orders/refunds/${refundId}/bank-info`
+          : `/orders/${id}/refund-form`;
+      const payload = isRefundIdMode
+        ? {
+            bankName,
+            accountNumber: accountNumber.trim(),
+            accountHolder: accountHolder.trim().toUpperCase(),
+            note: note.trim() || undefined,
+          }
+        : {
+            bankName,
+            accountNumber: accountNumber.trim(),
+            accountHolder: accountHolder.trim().toUpperCase(),
+            confirmAmount: payoutAmount,
+            note: note.trim() || undefined,
+          };
       await apiClient(submitEndpoint, {
         method: 'POST',
-        body: JSON.stringify({
-          bankName,
-          accountNumber: accountNumber.trim(),
-          accountHolder: accountHolder.trim().toUpperCase(),
-          confirmAmount: payoutAmount,
-          note: note.trim() || undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       toast.success(
         isClaimMode
@@ -196,16 +235,18 @@ function CustomerRefundPageContent() {
   }
 
   const existingRefund = info.refundRecord;
-  const hasSubmittedBankForm = isClaimMode
-    ? Boolean(existingRefund?.formSubmittedAt)
-    : Boolean(existingRefund);
+  const hasSubmittedBankForm = Boolean(
+    existingRefund?.formSubmittedAt || String(existingRefund?.accountNumber || '').trim(),
+  );
   const orderStatusLower = String(info.status || '').toLowerCase();
   const claimStatusLower = String(info.claimStatus || '').toLowerCase();
   const isRefundEligible = isClaimMode
     ? ['approved', 'paid'].includes(claimStatusLower) && Boolean(existingRefund)
-    : Boolean(existingRefund) ||
-      orderStatusLower === 'refund_requested' ||
-      orderStatusLower === 'refunded';
+    : isRefundIdMode
+      ? Boolean(existingRefund) && info.refundMode === 'cash_refund' && payoutAmount > 0
+      : Boolean(existingRefund) ||
+        orderStatusLower === 'refund_requested' ||
+        orderStatusLower === 'refunded';
 
   if (!isRefundEligible) {
     return (
@@ -454,7 +495,7 @@ function CustomerRefundPageContent() {
               </div>
               <div className="flex flex-col items-center">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold mb-1 ${existingRefund.status === 'transferred' ? 'bg-[#287653] text-white' : 'bg-[#EAE4D8] text-[#5F6977]'}`}>3</div>
-                <span className="font-semibold text-[#181A17]">{isEn ? 'Admin Transfer' : 'Admin chuyển khoản'}</span>
+                <span className="font-semibold text-[#181A17]">{isEn ? 'Manager Transfer' : 'Quản lý chuyển khoản'}</span>
               </div>
               <div className="flex flex-col items-center">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold mb-1 ${existingRefund.status === 'transferred' ? 'bg-[#287653] text-white' : 'bg-[#EAE4D8] text-[#5F6977]'}`}>4</div>

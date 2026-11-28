@@ -32,10 +32,8 @@ import {
   CreateDisbursementDto,
   GrantPaymentGraceDto,
   OperationalCancelDto,
-  RescheduleSharedDto,
-  SlaFallbackDto,
+  SubmitRefundBankInfoDto,
   TransferRefundDto,
-  UpgradeCharterDto,
 } from './dto/orders-ops.dto';
 import { OrdersOpsService } from './orders-ops.service';
 import { SlaMonitorService } from './sla-monitor.service';
@@ -104,9 +102,30 @@ export class OrdersOpsController {
     return res.sendFile(info.absolutePath);
   }
 
+  @Get('refunds/:refundId/bank-info')
+  @Roles(UserRole.CUSTOMER, UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Xem thông tin biểu mẫu tài khoản ngân hàng nhận hoàn tiền theo refundId' })
+  getRefundBankInfo(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('refundId', ParseIntPipe) refundId: number,
+  ) {
+    return this.opsService.getRefundBankInfo(user, refundId);
+  }
+
+  @Post('refunds/:refundId/bank-info')
+  @Roles(UserRole.CUSTOMER)
+  @ApiOperation({ summary: 'Chủ ngựa gửi thông tin tài khoản ngân hàng nhận hoàn tiền mặt theo refundId' })
+  submitRefundBankInfo(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('refundId', ParseIntPipe) refundId: number,
+    @Body() dto: SubmitRefundBankInfoDto,
+  ) {
+    return this.opsService.submitRefundBankInfo(user, refundId, dto);
+  }
+
   @Patch('refunds/:refundId/approve')
   @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Logistics Manager / Admin phê duyệt mức hoàn tiền hoặc bảo lưu 30 ngày (Dual Approval nếu >= 20M)' })
+  @ApiOperation({ summary: 'Logistics Manager phê duyệt mức hoàn tiền hoặc bảo lưu 30 ngày (1 cấp duyệt)' })
   approveRefund(
     @CurrentUser() user: AuthenticatedUser,
     @Param('refundId', ParseIntPipe) refundId: number,
@@ -116,7 +135,7 @@ export class OrdersOpsController {
   }
 
   @Post('refunds/:refundId/transfer')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('receipt', {
       fileFilter: documentFileFilter,
@@ -135,7 +154,7 @@ export class OrdersOpsController {
     }),
   )
   @ApiConsumes('multipart/form-data', 'application/json')
-  @ApiOperation({ summary: 'Admin / Finance xác nhận đã chuyển khoản hoàn tiền thủ công (Bắt buộc SoD: transferred_by != approved_by)' })
+  @ApiOperation({ summary: 'Logistics Manager xác nhận đã chuyển khoản hoàn tiền thủ công sau khi chủ ngựa cung cấp STK' })
   transferRefund(
     @CurrentUser() user: AuthenticatedUser,
     @Param('refundId', ParseIntPipe) refundId: number,
@@ -206,28 +225,6 @@ export class OrdersOpsController {
     return this.opsService.listRefunds(user, id);
   }
 
-  @Post(':id/upgrade-charter')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Nâng cấp từ shared_stall sang dedicated_charter tại D-3 (Nhánh A void/reissue hoặc Nhánh B supplemental_invoice)' })
-  upgradeCharter(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: UpgradeCharterDto,
-  ) {
-    return this.opsService.upgradeCharter(user, id, dto);
-  }
-
-  @Post(':id/reschedule-shared')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Dời sang chuyến ghép kế tiếp miễn phí tại mốc D-3 fallback' })
-  rescheduleShared(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: RescheduleSharedDto,
-  ) {
-    return this.opsService.rescheduleShared(user, id, dto);
-  }
-
   @Post(':id/payment-grace')
   @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Manager cấp gia hạn thanh toán duy nhất 1 lần theo công thức MIN(grant+10h, T-24h)' })
@@ -237,16 +234,5 @@ export class OrdersOpsController {
     @Body() dto: GrantPaymentGraceDto,
   ) {
     return this.opsService.grantPaymentGrace(user, id, dto);
-  }
-
-  @Post(':id/sla-fallback')
-  @Roles(UserRole.LOGISTICS_MANAGER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Manager xử lý phương án dự phòng BR-F3-06 khi quá trần T-52h' })
-  handleSlaFallback(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: SlaFallbackDto,
-  ) {
-    return this.opsService.handleSlaFallback(user, id, dto);
   }
 }

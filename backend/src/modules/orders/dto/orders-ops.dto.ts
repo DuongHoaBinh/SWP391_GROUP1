@@ -80,10 +80,10 @@ export class ApproveRefundDto {
 }
 
 export class TransferRefundDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  recipientBankAccount!: string;
+  recipientBankAccount?: string;
 
   @ApiProperty()
   @IsString()
@@ -101,29 +101,26 @@ export class TransferRefundDto {
   notes?: string;
 }
 
-export class UpgradeCharterDto {
-  @ApiProperty()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  charterTransportCost!: number;
+export class SubmitRefundBankInfoDto {
+  @ApiProperty({ description: 'Tên ngân hàng thụ hưởng' })
+  @IsString()
+  @IsNotEmpty({ message: 'Vui lòng nhập tên ngân hàng' })
+  bankName!: string;
 
-  @ApiPropertyOptional()
+  @ApiProperty({ description: 'Số tài khoản ngân hàng thụ hưởng' })
+  @IsString()
+  @IsNotEmpty({ message: 'Vui lòng nhập số tài khoản ngân hàng' })
+  accountNumber!: string;
+
+  @ApiProperty({ description: 'Tên chủ tài khoản (không dấu / viết hoa)' })
+  @IsString()
+  @IsNotEmpty({ message: 'Vui lòng nhập tên chủ tài khoản' })
+  accountHolder!: string;
+
+  @ApiPropertyOptional({ description: 'Ghi chú bổ sung từ chủ ngựa' })
   @IsOptional()
   @IsString()
-  reason?: string;
-}
-
-export class RescheduleSharedDto {
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  newDepartureDate!: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  reason?: string;
+  note?: string;
 }
 
 export class GrantPaymentGraceDto {
@@ -131,22 +128,4 @@ export class GrantPaymentGraceDto {
   @IsOptional()
   @IsString()
   reason?: string;
-}
-
-export class SlaFallbackDto {
-  @ApiProperty({
-    enum: ['internal_reassignment', 'external_contractor', 'reschedule_free', 'cancel_refund'],
-  })
-  @IsEnum(['internal_reassignment', 'external_contractor', 'reschedule_free', 'cancel_refund'])
-  option!: 'internal_reassignment' | 'external_contractor' | 'reschedule_free' | 'cancel_refund';
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  newDepartureDate?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  notes?: string;
 }

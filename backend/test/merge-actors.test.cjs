@@ -74,7 +74,7 @@ test('Logistics Manager can reach former Specialist (regulations) and Coordinato
     assert.throws(() => guard.canActivate(ctxFor(docProto[name], UserRole.CUSTOMER)), /Access denied/);
   }
 
-  const submit = RoutesController.prototype.submitPlanForApproval;
-  assert.equal(guard.canActivate(ctxFor(submit, UserRole.LOGISTICS_MANAGER)), true);
-  assert.throws(() => guard.canActivate(ctxFor(submit, UserRole.DRIVER_ESCORT)), /Access denied/);
+  const buildDetail = RoutesController.prototype.buildDetailedPlan;
+  assert.equal(guard.canActivate(ctxFor(buildDetail, UserRole.LOGISTICS_MANAGER)), true);
+  assert.throws(() => guard.canActivate(ctxFor(buildDetail, UserRole.DRIVER_ESCORT)), /Access denied/);
 });

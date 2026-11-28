@@ -265,7 +265,14 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
         "SELECT COALESCE(SUM(amount), 0) AS paid_amount FROM shipment_sepay_payment WHERE shipment_id = ? AND status = 'succeeded'",
         [shipmentId],
       );
-      const paidAmount = Math.round(Number(paidRows[0]?.paid_amount || 0));
+      let paidAmount = Math.round(Number(paidRows[0]?.paid_amount || 0));
+      if (paidAmount <= 0) {
+        const [paidInvRows] = await db.execute<RowDataPacket[]>(
+          "SELECT COALESCE(SUM(amount), 0) AS inv_paid FROM shipment_invoice WHERE shipment_id = ? AND status = 'paid'",
+          [shipmentId],
+        );
+        paidAmount = Math.round(Number(paidInvRows[0]?.inv_paid || 0));
+      }
 
       const [disbRows] = await db.execute<RowDataPacket[]>(
         "SELECT COALESCE(SUM(amount), 0) AS total_disb FROM shipment_disbursement WHERE shipment_id = ? AND settled_status = 'advanced'",
@@ -387,7 +394,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
       }
 
       let refundId: number | null = null;
-      if (paidAmount > 0) {
+      if (paidAmount > 0 && calc.netRefundAmount > 0) {
         const requester = actorId ?? Number(order.approved_by || order.customer_id);
         const [refRes] = await db.execute<ResultSetHeader>(
           `INSERT INTO shipment_refund_record (
@@ -407,7 +414,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
             calc.disbursementDeduction,
             calc.netRefundAmount,
             calc.receivableExcessAmount,
-            calc.requiresDualApproval ? 1 : 0,
+            0,
             requester,
             data.reason.trim(),
           ],
@@ -542,20 +549,12 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
              WHERE refund_id = ?`,
             [approverId, notes ?? null, refundId],
           );
-        } else if (Boolean(r.requires_dual_approval)) {
-          await db.execute(
-            `UPDATE shipment_refund_record
-             SET status = 'pending_second_approval',
-                 approved_by = ?,
-                 approved_at = NOW(),
-                 notes = COALESCE(?, notes)
-             WHERE refund_id = ?`,
-            [approverId, notes ?? null, refundId],
-          );
         } else {
+          // 1 Logistics Manager duyệt là chuyển thẳng sang approved_for_transfer
           await db.execute(
             `UPDATE shipment_refund_record
              SET status = 'approved_for_transfer',
+                 requires_dual_approval = 0,
                  approved_by = ?,
                  approved_at = NOW(),
                  notes = COALESCE(?, notes)
@@ -567,14 +566,11 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
       }
 
       if (r.status === 'pending_second_approval') {
-        if (Number(r.approved_by) === approverId) {
-          throw new ForbiddenException(
-            'Vi phạm Dual-Approval (>= 20.000.000 VND): Người xác nhận lần 2 phải khác người duyệt lần 1.',
-          );
-        }
+        // Giữ tương thích ngược cho bản ghi cũ còn treo ở pending_second_approval
         await db.execute(
           `UPDATE shipment_refund_record
            SET status = 'approved_for_transfer',
+               requires_dual_approval = 0,
                second_approved_by = ?,
                second_approved_at = NOW(),
                notes = COALESCE(?, notes)
@@ -588,14 +584,66 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async submitRefundBankInfo(
+    refundId: number,
+    customerId: number,
+    dto: { bankName: string; accountNumber: string; accountHolder: string; note?: string },
+  ): Promise<RefundRecordItem> {
+    return this.tx(async (db) => {
+      const [rows] = await db.execute<RowDataPacket[]>(
+        'SELECT * FROM shipment_refund_record WHERE refund_id = ? FOR UPDATE',
+        [refundId],
+      );
+      const r = rows[0];
+      if (!r) throw new NotFoundException(`Không tìm thấy hồ sơ hoàn tiền #${refundId}`);
+      if (Number(r.customer_id) !== Number(customerId)) {
+        throw new ForbiddenException('Bạn chỉ được điền thông tin tài khoản nhận hoàn tiền cho đơn hàng của mình.');
+      }
+      if (r.refund_mode !== RefundMode.CASH_REFUND || Number(r.amount || 0) <= 0) {
+        throw new ConflictException('Hồ sơ hoàn tiền này không thuộc diện hoàn chuyển khoản ngân hàng.');
+      }
+      if (!['pending_approval', 'approved_for_transfer'].includes(String(r.status))) {
+        throw new ConflictException(`Không thể nộp thông tin tài khoản ở trạng thái "${r.status}".`);
+      }
+      if (r.form_submitted_at && String(r.recipient_bank_account || '').trim()) {
+        throw new ConflictException('Hồ sơ hoàn tiền này đã có thông tin tài khoản ngân hàng do chủ ngựa cung cấp.');
+      }
+
+      const slaDays = Math.max(1, Number(process.env.REFUND_SLA_BUSINESS_DAYS || 3));
+      const slaDueAt = new Date(Date.now() + slaDays * 24 * 60 * 60 * 1000);
+
+      await db.execute(
+        `UPDATE shipment_refund_record
+         SET recipient_bank_name = ?,
+             recipient_bank_account = ?,
+             recipient_account_holder = ?,
+             customer_note = ?,
+             form_submitted_at = NOW(),
+             sla_due_at = COALESCE(sla_due_at, ?)
+         WHERE refund_id = ?`,
+        [
+          dto.bankName.trim(),
+          dto.accountNumber.trim(),
+          dto.accountHolder.trim().toUpperCase(),
+          dto.note?.trim() ?? null,
+          slaDueAt,
+          refundId,
+        ],
+      );
+
+      return (await this.findRefundByIdWithConn(db, refundId))!;
+    });
+  }
+
   async transferRefund(
     refundId: number,
     transferrerId: number,
     data: {
-      recipientBankAccount: string;
+      recipientBankAccount?: string;
       bankTransactionRef: string;
       transferReceiptUrl: string;
       notes?: string;
+      actorRole?: string;
     },
   ): Promise<RefundRecordItem> {
     return this.tx(async (db) => {
@@ -606,24 +654,21 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
       const r = rows[0];
       if (!r) throw new NotFoundException(`Không tìm thấy hồ sơ hoàn tiền #${refundId}`);
 
-      // Explicit server-side SoD check (RBAC + transferred_by != approved_by / second_approved_by)
-      if (
-        (r.approved_by !== null && Number(r.approved_by) === transferrerId) ||
-        (r.second_approved_by !== null && Number(r.second_approved_by) === transferrerId)
-      ) {
-        throw new ForbiddenException(
-          'Vi phạm Tách nhiệm vụ (Segregation of Duties): Người thực hiện chuyển khoản (transferred_by) phải khác người phê duyệt hoàn tiền (approved_by).',
-        );
-      }
-
       if (r.status !== 'approved_for_transfer') {
         throw new ConflictException(
           `Hồ sơ hoàn tiền phải ở trạng thái "approved_for_transfer" trước khi xác nhận chuyển khoản (hiện tại: "${r.status}").`,
         );
       }
 
-      const effectiveBankAccount =
-        String(data.recipientBankAccount || '').trim() || String(r.recipient_bank_account || '').trim();
+      // Cách 1: Bắt buộc chủ ngựa đã điền form STK trước khi Manager chuyển khoản
+      const existingAccount = String(r.recipient_bank_account || '').trim();
+      if (r.refund_mode === RefundMode.CASH_REFUND && (!r.form_submitted_at || !existingAccount)) {
+        throw new ConflictException(
+          'Chủ ngựa chưa điền thông tin tài khoản ngân hàng nhận hoàn tiền. Vui lòng chờ khách hàng nộp biểu mẫu STK trước khi xác nhận chuyển khoản.',
+        );
+      }
+
+      const effectiveBankAccount = existingAccount || String(data.recipientBankAccount || '').trim();
       if (!effectiveBankAccount) {
         throw new BadRequestException('Thiếu số tài khoản ngân hàng thụ hưởng để ghi nhận chuyển khoản.');
       }
@@ -662,7 +707,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
           );
           await db.execute(
             `INSERT INTO insurance_claim_event (claim_id, from_status, to_status, actor_id, note)
-             VALUES (?, 'approved', 'paid', ?, 'Admin đã thực hiện chuyển tiền bồi thường bảo hiểm')`,
+             VALUES (?, 'approved', 'paid', ?, 'Quản lý vận hành đã thực hiện chuyển tiền bồi thường bảo hiểm')`,
             [claimId, transferrerId],
           );
         }
@@ -678,7 +723,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
             shipmentId: sid,
             to: 'refunded',
             actorId: transferrerId,
-            actorRole: 'ADMIN',
+            actorRole: data.actorRole || 'LOGISTICS_MANAGER',
             reasonCode: 'refund_transferred',
             note: `Đã hoàn tất chuyển khoản hoàn tiền ${Number(r.amount).toLocaleString('vi-VN')} VND kèm UNC ${data.bankTransactionRef}`,
           });
@@ -720,234 +765,6 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async upgradeCharter(
-    actorId: number,
-    shipmentId: number,
-    charterTransportCost: number,
-    reason?: string,
-  ): Promise<{
-    branch: 'A_void_reissue' | 'B_supplemental_invoice' | 'pre_invoice_reprice';
-    shipmentId: number;
-    customerId: number;
-    oldTotalCost: number;
-    newTotalCost: number;
-    invoice: any;
-  }> {
-    return this.tx(async (db) => {
-      const [orders] = await db.execute<RowDataPacket[]>(
-        'SELECT * FROM shipment WHERE shipment_id = ? FOR UPDATE',
-        [shipmentId],
-      );
-      const order = orders[0];
-      if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
-      if (order.booking_type === 'dedicated_charter') {
-        throw new ConflictException('Đơn hàng đã ở hình thức bao nguyên xe (dedicated_charter).');
-      }
-      if (!['approved', 'planning', 'confirmed', 'ready_to_depart'].includes(order.status)) {
-        throw new ConflictException(`Không thể nâng cấp charter ở trạng thái "${order.status}".`);
-      }
-
-      const newFreight = Math.round(Number(charterTransportCost));
-      const insuranceFee = Math.round(Number(order.insurance_fee ?? 0));
-      const oldTotalCost = Math.round(Number(order.total_cost ?? 0));
-      const parsedTransportCost = order.transport_cost != null ? Math.round(Number(order.transport_cost)) : 0;
-      const oldFreight = parsedTransportCost > 0 ? parsedTransportCost : Math.max(0, oldTotalCost - insuranceFee);
-      const newTotalCost = newFreight + insuranceFee;
-
-      if (!Number.isSafeInteger(newFreight) || newFreight <= 0 || newTotalCost > 9999999999999) {
-        throw new BadRequestException('Giá cước charter không hợp lệ.');
-      }
-      if (newFreight < oldFreight) {
-        throw new BadRequestException(
-          `Giá cước bao nguyên xe (${newFreight.toLocaleString('vi-VN')} VND) không được thấp hơn giá cước cũ (${oldFreight.toLocaleString('vi-VN')} VND).`,
-        );
-      }
-
-      await db.execute(
-        'INSERT INTO shipment_booking_revision (shipment_id, changed_by, previous_booking_type, booking_type) VALUES (?, ?, ?, ?)',
-        [shipmentId, actorId, order.booking_type, 'dedicated_charter'],
-      );
-
-      await db.execute(
-        `UPDATE shipment
-         SET booking_type = 'dedicated_charter',
-             stall_unit_price = NULL,
-             transport_cost = ?,
-             total_cost = ?,
-             updated_at = NOW()
-         WHERE shipment_id = ?`,
-        [newFreight, newTotalCost, shipmentId],
-      );
-
-      const [paidRows] = await db.execute<RowDataPacket[]>(
-        "SELECT COALESCE(SUM(amount), 0) AS paid_amount FROM shipment_sepay_payment WHERE shipment_id = ? AND status = 'succeeded'",
-        [shipmentId],
-      );
-      const hasPaidSepay = Number(paidRows[0]?.paid_amount || 0) > 0;
-
-      const [invRows] = await db.execute<RowDataPacket[]>(
-        "SELECT * FROM shipment_invoice WHERE shipment_id = ? AND COALESCE(invoice_type, 'primary') = 'primary' AND COALESCE(status, 'active') <> 'void' ORDER BY invoice_id DESC LIMIT 1 FOR UPDATE",
-        [shipmentId],
-      );
-      const currentInv = invRows[0];
-
-      if (!currentInv) {
-        return {
-          branch: 'pre_invoice_reprice',
-          shipmentId,
-          customerId: Number(order.customer_id),
-          oldTotalCost,
-          newTotalCost,
-          invoice: null,
-        };
-      }
-
-      if (!hasPaidSepay) {
-        // Branch A: void old invoice, cancel old pending SePay QR, issue new primary replacement invoice
-        await db.execute("UPDATE shipment_invoice SET status = 'void' WHERE invoice_id = ?", [currentInv.invoice_id]);
-        await db.execute(
-          "UPDATE shipment_sepay_payment SET status = 'cancelled' WHERE shipment_id = ? AND status = 'pending'",
-          [shipmentId],
-        );
-
-        const baseSnapshot = typeof currentInv.snapshot === 'string' ? JSON.parse(currentInv.snapshot) : (currentInv.snapshot || {});
-        const newSnapshot = {
-          ...baseSnapshot,
-          bookingType: 'dedicated_charter',
-          stallUnitPrice: null,
-          transportCost: newFreight,
-          insuranceFee,
-          upgradedFromInvoiceId: currentInv.invoice_id,
-          upgradeReason: reason || 'Nâng cấp từ shared_stall sang dedicated_charter (BR-F1-06)',
-        };
-        const dueAt = computePaymentDueAt(new Date(), order.departure_date || order.requested_date);
-        const [ins] = await db.execute<ResultSetHeader>(
-          `INSERT INTO shipment_invoice (
-            shipment_id, route_id, customer_id, invoice_type, status, parent_invoice_id, amount, snapshot, payment_due_at
-          ) VALUES (?, ?, ?, 'primary', 'active', ?, ?, ?, ?)`,
-          [shipmentId, currentInv.route_id, order.customer_id, currentInv.invoice_id, newTotalCost, JSON.stringify(newSnapshot), dueAt],
-        );
-        return {
-          branch: 'A_void_reissue',
-          shipmentId,
-          customerId: Number(order.customer_id),
-          oldTotalCost,
-          newTotalCost,
-          invoice: {
-            id: Number(ins.insertId),
-            invoiceType: 'primary',
-            status: 'active',
-            parentInvoiceId: Number(currentInv.invoice_id),
-            amount: newTotalCost,
-            paymentDueAt: dueAt.toISOString(),
-          },
-        };
-      }
-
-      // Branch B: keep original invoice & SePay payment untouched, issue supplemental invoice for the difference
-      const diff = newFreight - oldFreight;
-      if (diff <= 0) {
-        throw new BadRequestException('Giá charter nâng cấp sau thanh toán phải lớn hơn giá cước cũ để phát hành hóa đơn bổ sung.');
-      }
-
-      const [existingSupp] = await db.execute<RowDataPacket[]>(
-        "SELECT * FROM shipment_invoice WHERE shipment_id = ? AND invoice_type = 'supplemental' AND status <> 'void' LIMIT 1",
-        [shipmentId],
-      );
-      if (existingSupp.length > 0) {
-        throw new ConflictException('Đã có hóa đơn phụ thu chênh lệch đang hoạt động cho chuyến này.');
-      }
-
-      if (order.status === 'ready_to_depart') {
-        await db.execute("UPDATE shipment SET status = 'confirmed' WHERE shipment_id = ?", [shipmentId]);
-        await db.execute("UPDATE route SET plan_status = 'confirmed' WHERE route_id = ? AND plan_status = 'ready_to_depart'", [currentInv.route_id]);
-      }
-
-      const baseSnapshot = typeof currentInv.snapshot === 'string' ? JSON.parse(currentInv.snapshot) : (currentInv.snapshot || {});
-      const suppSnapshot = {
-        ...baseSnapshot,
-        invoiceKind: 'supplemental_charter_upgrade',
-        parentInvoiceId: currentInv.invoice_id,
-        previousTransportCost: oldFreight,
-        newTransportCost: newFreight,
-        supplementalAmount: diff,
-        reason: reason || 'Phụ thu chênh lệch nâng cấp bao nguyên xe tại D-3 (BR-F1-06)',
-      };
-      const dueAt = computePaymentDueAt(new Date(), order.departure_date || order.requested_date);
-      const [insSupp] = await db.execute<ResultSetHeader>(
-        `INSERT INTO shipment_invoice (
-          shipment_id, route_id, customer_id, invoice_type, status, parent_invoice_id, amount, snapshot, payment_due_at
-        ) VALUES (?, ?, ?, 'supplemental', 'active', ?, ?, ?, ?)`,
-        [shipmentId, currentInv.route_id, order.customer_id, currentInv.invoice_id, diff, JSON.stringify(suppSnapshot), dueAt],
-      );
-
-      return {
-        branch: 'B_supplemental_invoice',
-        shipmentId,
-        customerId: Number(order.customer_id),
-        oldTotalCost,
-        newTotalCost,
-        invoice: {
-          id: Number(insSupp.insertId),
-          invoiceType: 'supplemental',
-          status: 'active',
-          parentInvoiceId: Number(currentInv.invoice_id),
-          amount: diff,
-          paymentDueAt: dueAt.toISOString(),
-        },
-      };
-    });
-  }
-
-  async rescheduleSharedOrder(
-    shipmentId: number,
-    newDepartureDate: string,
-    reason?: string,
-    options?: { requireSharedStall?: boolean },
-  ): Promise<{ shipmentId: number; customerId: number; newDepartureDate: string }> {
-    const dep = new Date(newDepartureDate);
-    if (!Number.isFinite(dep.getTime()) || dep.getTime() <= Date.now()) {
-      throw new BadRequestException('Ngày khởi hành mới phải hợp lệ và nằm ở tương lai.');
-    }
-
-    const requireSharedStall = options?.requireSharedStall !== false;
-
-    return this.tx(async (db) => {
-      const [orders] = await db.execute<RowDataPacket[]>(
-        'SELECT shipment_id, customer_id, status, booking_type FROM shipment WHERE shipment_id = ? FOR UPDATE',
-        [shipmentId],
-      );
-      if (!orders[0]) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
-      if (requireSharedStall && orders[0].booking_type !== 'shared_stall') {
-        throw new ConflictException(
-          `Chỉ áp dụng dời lịch chuyến ghép cho đơn hình thức ghép chuồng (shared_stall). Hình thức hiện tại: "${orders[0].booking_type}".`,
-        );
-      }
-      if (['in_transit', 'return_pending', 'completed', 'cancelled', 'cancelled_operational', 'rejected'].includes(orders[0].status)) {
-        throw new ConflictException(`Không thể dời chuyến ở trạng thái "${orders[0].status}".`);
-      }
-
-      await db.execute(
-        `UPDATE shipment
-         SET departure_date = ?,
-             requested_date = ?,
-             sla_escalation_status = NULL,
-             sla_fallback_option = 'reschedule_free',
-             sla_fallback_notes = COALESCE(?, sla_fallback_notes)
-         WHERE shipment_id = ?`,
-        [dep, dep, reason ?? 'Dời sang chuyến ghép kế tiếp miễn phí', shipmentId],
-      );
-
-      await releaseShipmentReservations(db, shipmentId, 'rescheduled');
-
-      return {
-        shipmentId,
-        customerId: Number(orders[0].customer_id),
-        newDepartureDate: dep.toISOString(),
-      };
-    });
-  }
-
   async grantPaymentGrace(
     managerId: number,
     shipmentId: number,
@@ -960,7 +777,7 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
       );
       const order = orders[0];
       if (!order) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
-      if (!['confirmed', 'planning', 'ready_to_depart'].includes(order.status)) {
+      if (!['awaiting_payment', 'confirmed', 'planning', 'ready_to_depart'].includes(order.status)) {
         throw new ConflictException(`Không thể gia hạn thanh toán khi đơn hàng đang ở trạng thái "${order.status}".`);
       }
 
@@ -1009,22 +826,6 @@ export class OrdersOpsStore implements OnModuleInit, OnModuleDestroy {
         reason,
       };
     });
-  }
-
-  async recordSlaFallback(
-    shipmentId: number,
-    option: string,
-    notes?: string,
-  ): Promise<void> {
-    const [res] = await this.pool.execute<ResultSetHeader>(
-      `UPDATE shipment
-       SET sla_fallback_option = ?,
-           sla_fallback_notes = COALESCE(?, sla_fallback_notes),
-           sla_escalation_status = CONCAT('resolved:', ?)
-       WHERE shipment_id = ?`,
-      [option, notes ?? null, option, shipmentId],
-    );
-    if (!res.affectedRows) throw new NotFoundException(`Không tìm thấy đơn vận chuyển #${shipmentId}`);
   }
 
   async runSlaSweepQueries() {

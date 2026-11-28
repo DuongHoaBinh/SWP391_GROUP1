@@ -620,7 +620,8 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
     status: string,
     actualDeparture?: Date | null,
     actualArrival?: Date | null,
-  ): Promise<void> {
+    expectedStatuses?: string[],
+  ): Promise<boolean> {
     const updates: string[] = ['status = ?'];
     const params: any[] = [status];
 
@@ -633,11 +634,17 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       params.push(actualArrival);
     }
 
+    let whereSql = 'WHERE leg_id = ?';
     params.push(legId);
-    await this.pool.execute(
-      `UPDATE route_leg SET ${updates.join(', ')} WHERE leg_id = ?`,
+    if (Array.isArray(expectedStatuses) && expectedStatuses.length > 0) {
+      whereSql += ` AND status IN (${expectedStatuses.map(() => '?').join(', ')})`;
+      params.push(...expectedStatuses);
+    }
+    const [res] = await this.pool.execute<any>(
+      `UPDATE route_leg SET ${updates.join(', ')} ${whereSql}`,
       params,
     );
+    return Number(res?.affectedRows ?? 1) > 0;
   }
 
   async updateVehicleStatus(vehicleId: number, status: string): Promise<void> {
@@ -729,19 +736,30 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
       evidenceUrl?: string | null;
       flagged?: boolean;
     },
-  ): Promise<void> {
+    expectedStatuses?: string[],
+  ): Promise<boolean> {
     const timeCol = isDeparture
       ? 'actual_departure = ?, actual_arrival = COALESCE(actual_arrival, ?)'
-      : 'actual_arrival = ?';
-    const params = isDeparture
+      : status === 'customs_cleared'
+        ? 'actual_arrival = COALESCE(actual_arrival, ?)'
+        : 'actual_arrival = ?';
+    const params: any[] = isDeparture
       ? [status, actualTime, actualTime, updatedBy, notes || null, stopId]
       : [status, actualTime, updatedBy, notes || null, stopId];
-    await this.pool.execute(
+    let whereSql = 'WHERE route_stop_id = ?';
+    if (Array.isArray(expectedStatuses) && expectedStatuses.length > 0) {
+      whereSql += ` AND COALESCE(status, 'pending') IN (${expectedStatuses.map(() => '?').join(', ')})`;
+      params.push(...expectedStatuses);
+    }
+    const [res] = await this.pool.execute<any>(
       `UPDATE route_stop
        SET status = ?, ${timeCol}, updated_by = ?, notes = COALESCE(?, notes)
-       WHERE route_stop_id = ?`,
+       ${whereSql}`,
       params,
     );
+    if (Number(res?.affectedRows ?? 1) === 0) {
+      return false;
+    }
 
     if (['departed', 'arrived', 'customs_cleared', 'delivered'].includes(status)) {
       await this.pool.execute(
@@ -770,6 +788,7 @@ export class TrackingStore implements OnModuleInit, OnModuleDestroy {
         ],
       );
     }
+    return true;
   }
 
   async updateShipmentStatus(shipmentId: number, status: string): Promise<void> {
